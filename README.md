@@ -58,7 +58,7 @@ This is the maintainer's daily-use configuration. Running it identically end-to-
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (the primary path) or [Codex CLI](https://github.com/openai/codex)
 - [uv](https://docs.astral.sh/uv/) — Python package manager (3.11+)
-- A `$OV/` directory with at minimum: `daily-notes/`, `wiki/`, `reflections/`. Other tiers (`papers/`, `readwise/`, `cache/`, etc.) are optional.
+- A `$OV/` directory with at minimum: `daily-notes/`, `wiki/`, `reflections/`. Other tiers (`papers/`, `cache/`, etc.) are optional.
 
 **Optional:**
 - [Gemini CLI](https://github.com/google-gemini/gemini-cli) — second-opinion external reviewer for `/system-review` (`npm i -g @google/gemini-cli`).
@@ -144,11 +144,11 @@ Full cercle archetype map (Observer / Colorist / Arbiter / Critic / Structuralis
 Capture sources                  Local data layer ($OV/)
 (Readwise inbox,                 L4  $OV/wiki/        ─ locally certified
  voice notes,                        (trust-scored canon)
- markdown editor)                L3  $OV/papers/      ─ peer-reviewed
+ markdown editor)                L3  $OV/papers/ + $OV/preprints/ ─ peer-reviewed
                                  L2  $OV/daily-notes/ + reflections/ +
-                                     research/ + preprints/ +
-                                     agent-findings/ + wip/ + …
-                                 L1  $OV/cache/, $OV/readwise/
+                                     research/ + agent-findings/ +
+                                     wip/ + …
+                                 L1  $OV/cache/ + Readwise (cloud, via CLI)
 
                                          ^
                                          |

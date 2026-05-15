@@ -17,7 +17,7 @@ The system's narrative register draws from the impressionist atelier (master + s
 | decision journal | **commission** | `<paths.gtd>/decisions/` |
 | long-running theme | **série** | (e.g., Monet's haystacks across years) |
 | archive | **carnets** | `<paths.archive>/` |
-| Readwise inbox | **rough drawer** | `<paths.readwise>/` |
+| Readwise inbox | **rough drawer** | cloud-only; `readwise` CLI |
 | session | **sitting** | (a `/hi` invocation) |
 | session log | **bench notes** | `<paths.sessions>/*.md` |
 | promote (L2 → L4) | **exhibit** / **mount** on the cimaise | `/promote` |

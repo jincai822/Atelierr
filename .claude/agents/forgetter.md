@@ -44,7 +44,7 @@ The reactive-loop guard: every sweep is bounded in space (one directory) and tim
 | L4 | `<paths.wiki>/` and any localized shadow wikis from `harness/paths.local.toml` | **Conservative.** Only flag for TrustRank demotion or peer-review (Contradicted category). Never propose deletion of a wiki entry. The wiki is the curated canon; deletion proposals there are out of scope. |
 | L2 | `<paths.wip>/`, `<paths.research>/`, `<paths.reflections>/`, `<paths.agent_findings>/`, working dirs | **Aggressive.** All four categories apply. Drafts and research are where decay accumulates fastest; the user expects pruning here. |
 | L2 (special) | `<paths.daily_notes>/` | **Read-only for decay.** Daily notes are user-authored capture stream; never propose deletion or compaction. Only flag for cross-reference (e.g., a contradiction signal that points BACK at a wiki entry — surface as Contradicted on the wiki entry, not on the daily note). |
-| L1 | `<paths.cache>/`, `<paths.readwise>/` | **Skip.** Raw capture; their decay is a TTL problem (cache eviction policy), not Forgetter's job. If `scope_path` points here, decline with a one-line note. |
+| L1 | `<paths.cache>/` | **Skip.** Raw capture; its decay is a TTL problem (cache eviction policy), not Forgetter's job. If `scope_path` points here, decline with a one-line note. |
 
 ## The Four Decay Categories
 

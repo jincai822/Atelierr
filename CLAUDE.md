@@ -11,8 +11,9 @@ The atelier register is narrative only — when narrating to the user, reach for
 These rules apply to every turn, every agent. Violations are bugs.
 
 - Never hallucinate note content. If search returns nothing, say so.
+- **Never fabricate quantitative or factual claims.** Headcount, valuation, val/employee, paper counts, citation counts, venue claims (ICML/ICLR/NeurIPS Oral/Best Paper), publication acceptance (Nature/Science), benchmark numbers, dates, affiliations: all require a source. If not sourced, write `unverified` (in YAML) or `[unverified]` (in prose). Verdicts derived from `unverified` inputs collapse to `unknown`; do not guess to fill a band. Agent fetch results (e.g. Scout web research) are `unverified-scout` until the orchestrator hits the primary source (arXiv abstract, lab blog, primary press release); promote tier explicitly when verified.
 - Never hardcode private names, private repo URLs, employers, org names, or multi-word filename stems from `$OV/` in committed files. `scripts/privacy_check.py` enforces the filename-stem half in `/lint` and `/system-review`.
-- **Path placeholders.** Docs use `<paths.<name>>` defined in `harness/paths.toml` + `paths.local.toml`; resolve each placeholder by looking up `<name>` in the canonical table. Localized shadow wikis use `<paths.wiki_localized.<lang>>`. Renames edit the registry; `scripts/rewrite_paths.py` handles renames + templatize. Resolve to concrete vault paths in user-facing output.
+- **Path placeholders.** Docs use `<paths.<name>>` defined in `harness/paths.toml` + `paths.local.toml`; resolve via the canonical table. Localized shadow wikis use `<paths.wiki_localized.<lang>>`. Renames edit the registry; `scripts/rewrite_paths.py` handles renames + templatize. Resolve to concrete paths in user-facing output.
 
 ## Knowledge Layers
 
@@ -22,11 +23,11 @@ Five-tier model. Directory is the tier; location carries the certification level
 |---|---|---|
 | L5 | (reserved) | Universally certified |
 | L4 | `<paths.wiki>/*.md` (+ localized shadows per `paths.local.toml`) | Locally certified, schema-structured, TrustRank-scored |
-| L3 | `<paths.papers>/`, `<paths.preprints>/` + Readwise | Peer-reviewed, high-citation |
-| L2 | every L2 surface in `harness/paths.toml` (daily-notes, reflections, research, agent-findings, wip, gtd, travel, health, work, people, archive, abroad, finance) | Working: free-writes, reflections, research, drafts |
-| L1 | Readwise inbox, `<paths.cache>/`, `<paths.readwise>/` | Raw capture |
+| L3 | `<paths.papers>/`, `<paths.preprints>/` | Peer-reviewed, high-citation |
+| L2 | every L2 surface in `harness/paths.toml` (see registry for the full list) | Working: free-writes, reflections, research, drafts |
+| L1 | Readwise (cloud inbox, accessed via CLI; no local mirror), `<paths.cache>/` | Raw capture |
 
-`$OV/` is the source of truth. Daily notes are user-authored locally. `<paths.cache>/` holds ephemeral fetches; `<paths.readwise>/` mirrors Readwise. `<paths.zettelm>/` is a transient mobile-capture submodule; `/sync` digests it into L2 then clears.
+`$OV/` is the source of truth. Daily notes are user-authored locally. `<paths.cache>/` holds ephemeral fetches. Readwise inbox is a cloud-only L1 surface — accessed through the `readwise` CLI when needed, never mirrored to disk. `<paths.zettelm>/` is a transient mobile-capture submodule; `/sync` digests it into L2 then clears.
 
 ## Reading Rules
 

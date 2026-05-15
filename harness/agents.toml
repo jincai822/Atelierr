@@ -11,7 +11,7 @@
 #           (subagent_type matches the role). Uses the model declared in
 #           the role's `.claude/agents/<name>.md` frontmatter `model:` field.
 #   direct  OpenAI-compatible direct-api leg, dispatched via
-#           `python3 scripts/chat_completion.py --model <identity>`.
+#           `uv run scripts/chat_completion.py --model <identity>`.
 #   codex   Codex CLI leg, dispatched via `codex exec -m <identity>`.
 #           Reserved for the external-reviewer role today.
 #
@@ -282,6 +282,7 @@ description = "Applies structured thinking frameworks for outside-view reasoning
 codex_prompt = "Emulate the Thinker role using `.claude/agents/thinker.md` and the runtime adapter protocol."
 pattern = "orchestrator-subagent"
 used_by = [
+    "commands.decision",
     "commands.hi",
     "intents.decision",
 ]

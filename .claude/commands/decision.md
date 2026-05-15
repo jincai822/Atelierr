@@ -59,7 +59,26 @@ Based on the decision type, select the right pairing from `frameworks/cross-vali
 | Build/invest | First Principles | Wardley Mapping |
 | Binary choice | Dialectical Thinking | Second-Order Thinking |
 
-Read the framework files. Apply them specifically (not generically).
+**Dual-leg dispatch (cross-provider).** `/decision` is a multi-leg call site (`protocols/orchestrator.md` § "Currently-enabled multi-leg call sites"). Fire both Thinker legs in parallel — one message with two tool calls:
+
+- `Agent` tool, `subagent_type: thinker`, prompt: "Apply <primary framework> + <cross-validation framework> to this decision: <user's framing>. Read the framework files yourself from `frameworks/`. Return verdict + reasoning."
+- `Bash` tool — must **inline** the framework files in the prompt, because the direct leg has no filesystem access and would otherwise apply a generic model-memory version of each framework. Resolve framework display names to slugged filenames (lowercase, hyphen-separated): "First Principles" → `first-principles.md`, "Wardley Mapping" → `wardley-mapping.md`, etc. Confirm `ls frameworks/` matches before dispatch.
+  ```bash
+  PRIMARY=frameworks/<primary-slug>.md   # e.g., frameworks/first-principles.md
+  CROSS=frameworks/<cross-slug>.md
+  REPO=$(git rev-parse --show-toplevel)
+  DIRECT_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('$REPO/harness/agents.toml','rb').read().decode()).get('agents',{}).get('thinker',{}).get('voices',{}).get('direct',''))")
+  [ -n "$DIRECT_MODEL" ] || { echo "ERROR: thinker.direct not found in agents.toml" >&2; exit 1; }
+  [ -f "$REPO/$PRIMARY" ] && [ -f "$REPO/$CROSS" ] || { echo "ERROR: framework file missing (check slug mapping)" >&2; exit 1; }
+  {
+    printf 'Apply the two frameworks below to this decision: <user'\''s framing>.\nReturn verdict + reasoning.\n\n--- PRIMARY FRAMEWORK (%s) ---\n' "$PRIMARY"
+    cat "$REPO/$PRIMARY"
+    printf '\n\n--- CROSS-VALIDATION FRAMEWORK (%s) ---\n' "$CROSS"
+    cat "$REPO/$CROSS"
+  } | uv run scripts/chat_completion.py --model "$DIRECT_MODEL" --max-tokens 0 --prompt -
+  ```
+
+Wait for both before synthesizing. Surface any disagreement on framework choice or verdict before presenting to the user. If the direct leg soft-skips (exit 2 — api_env unset), note `Cross-provider check downgraded: thinker ran native-only (<reason>)` per orchestrator's operational-visibility rule, and continue with the native leg.
 
 ### Step 5: Decision Matrix (if applicable)
 

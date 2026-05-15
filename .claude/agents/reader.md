@@ -73,7 +73,7 @@ Readwise auto-transcribed podcasts have specific quirks. Apply these **before** 
    - Mark uncertain attributions as `[speaker: <name>?]` rather than asserting.
 
 3. **Flag mishearing risk.** Auto-transcription mangles proper nouns, especially company names, people, and specialized jargon. Include a standard line in your brief:
-   > ⚠️ Auto-transcript may misrender proper nouns. Verify any name before citing to wiki: phonetic spellings ("Base Forty Four" → Base44), misheard names ("Damas" → Demis Hassabis), and mistranscribed jargon are common.
+   > ⚠️ Auto-transcript may misrender proper nouns. Verify any name before citing to wiki: phonetic spellings ("Base Forty Four" → Base44), mis-segmented surnames (spaces inserted mid-name), and mistranscribed jargon are common.
 
    When you spot a likely mis-hearing in the text, note it: `[likely: Base44]` next to the transcript spelling.
 

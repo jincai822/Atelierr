@@ -85,6 +85,7 @@ Voice band vocabulary used in this file:
 | Reader | reader.md | 15 | Reading depth needs |
 | Scholar | scholar.md | 15 | Dense-text reading depth needs (matches Reader; voices differ) |
 | Scribe | scribe.md | 10 | Mechanical capture pace |
+| Midpoint-checkpoint trigger | agent-handoff.md (Escalation Protocol) | turn 10 of a 15+ turn budget | Model gets faster at synthesis; longer chains become routine; or session-log data shows drift seldom occurs by turn 10 |
 
 ### Search Strategy
 

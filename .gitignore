@@ -36,7 +36,14 @@ semantic.toml
 
 # Per-user path registry overrides (localized wikis, sandbox vaults, etc.)
 # Canonical names ship in harness/paths.toml; user overrides go here.
+# Loaded by scripts/_paths.py.
 harness/paths.local.toml
+
+# Repo-side local fetch scratch (conference scrapes, throwaway HTML pulls,
+# work-in-progress fetches the user has not promoted to the vault). Distinct
+# from the vault L1 tier `<paths.cache>/` which resolves under $OV/ and is
+# the canonical home for Readwise snapshots and review reports.
+cache/
 
 # One-off / migration scripts that hardcode private vault content
 # (TOPIC_MAPs, lab lists, wiki entry titles). The steady-state generic

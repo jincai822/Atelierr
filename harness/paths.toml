@@ -26,7 +26,6 @@ wiki            = "wiki"
 # L3 — externally certified
 papers          = "papers"
 preprints       = "preprints"
-readwise        = "readwise"
 
 # L2 — working / half-baked. The persistent surfaces.
 daily_notes     = "daily-notes"
@@ -38,16 +37,16 @@ gtd             = "gtd"
 travel          = "travel"
 health          = "health"
 work            = "work"
+career          = "career"
 people          = "people"
+talent          = "talent"
 abroad          = "abroad"
 finance         = "finance"
 personal        = "personal"
 housing         = "housing"
-education       = "education"
-planning        = "planning"
-civ             = "civ"
 archive         = "archive"
 sessions        = "sessions"
+# Note: `profile/` is repo-side gitignored config, NOT a vault tier. Do not register here.
 
 # L2 transient — mobile-capture submodule, digested then cleared by /sync.
 zettelm         = "zettelm"

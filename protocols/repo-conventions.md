@@ -72,8 +72,6 @@ The 32 threshold is hard, not "rough". A directory at 32 should be split before 
 | `daily-notes/` | year, then month (two-level grouping keeps every level under 32; filename carries full ISO date) | `daily-notes/YYYY/MM/YYYY-MM-DD.md` |
 | `reflections/` | year-month | `reflections/YYYY-MM/YYYY-MM-DD-reflection.md` |
 | `agent-findings/` | year-month | `agent-findings/YYYY-MM/<agent>-<slug>.md` |
-| `readwise/articles/` | year-month if dated, else first-letter bucket | `readwise/articles/YYYY-MM/<slug>.md` |
-| `readwise/authors/` | first-letter bucket: `A/`, `B/`, …, `0-9/`, `中/` (CJK) | `readwise/authors/<X>/<Author Name>.md` |
 | `preprints/<class>/` | venue | `preprints/unofficial-reviews/<venue><yy>/` |
 | `wiki/` (and any localized shadow wikis from `[paths.wiki_localized]`) | topic cluster (semantic) | `wiki/data-systems/<Topic Title>.md` |
 | `research/<area>/labs/` | by org type or first-letter | `research/<area>/labs/<X>/<lab>/` |

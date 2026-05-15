@@ -7,7 +7,6 @@ Read-only dashboard. Surfaces open decisions, upcoming deadlines, and data gaps 
 Discover and read markdown trackers under:
 - `<paths.finance>/*.md`
 - `<paths.travel>/*.md`
-- `<paths.planning>/*.md` (if present)
 
 Today: `date +%Y-%m-%d`. If a folder is empty, skip it.
 

@@ -12,10 +12,18 @@ from: <agent name>
 to: <agent name>
 type: research-brief | reader-brief | scout-brief | synthesis | review-check | system-review-request | challenge-set | perspective | recommendation | note-operation | meeting-notes | evolution-report | decay-report
 confidence: high | medium | low
+completion_status: complete | partial | aborted
+remaining_work: <required when partial|aborted; comma-separated list of tasks not attempted>
 gaps: <comma-separated list of what's missing>
 context_tokens: <approximate token count of payload>
 ---end-handoff---
 ```
+
+`completion_status: complete` means every task in the dispatch prompt was attempted to a returnable result. If any task was skipped, deferred, or hit a degraded fallback, status MUST be `partial` and `remaining_work` MUST enumerate the items. `aborted` means the agent stopped before finishing the first task (e.g., on `drift_check: N` from a midpoint checkpoint). `gaps` describes what was searched for but not found; `remaining_work` describes what was not attempted: they are distinct and both may apply.
+
+**Backwards compatibility.** Agents that omit `completion_status` and `remaining_work` are interpreted as `completion_status: complete` with empty `remaining_work`. This lets the contract roll out without simultaneously rewriting every agent definition. Agents updated after this contract MUST emit the fields explicitly; the orchestrator treats absent fields as `complete` only as a transition aid. Similarly, the midpoint-checkpoint and Runtime-Conflict-Surfacing protocols below are obligations on the orchestrator's interpretation: when an agent provides the relevant signal, the orchestrator honors it; agents that haven't been updated to emit the signal simply skip the path. Neither protocol blocks a fresh dispatch.
+
+The envelope above is universal — every contract below carries every envelope field. The per-contract `Required fields` lists below are **type-specific additions on top of the envelope**, not a replacement for it. Aborted briefs (`completion_status: aborted`) are never passed unchanged to the Synthesizer: the orchestrator surfaces the checkpoint or remaining-work payload to the user and decides whether to redispatch or accept the partial result.
 
 ## Contract: Researcher → Synthesizer
 
@@ -221,6 +229,7 @@ If any agent encounters:
 - **Empty search results**: Try alternative queries (synonym, other language, broader terms) before reporting gap
 - **Contradictory evidence**: Flag explicitly — don't resolve silently
 - **Token budget exceeded**: Summarize and note truncation
+- **Long chain (turn 10 of a 15+ turn budget)**: Emit a midpoint checkpoint with `{verified: [...], remaining: [...], drift_check: <one line: still on original criterion? Y/N>}`. If `drift_check: N`, set `completion_status: aborted`, return the checkpoint as the envelope payload, and stop. The orchestrator decides whether to redispatch with a tighter criterion or accept the partial result. The 10-of-15 threshold is a tracked harness assumption (see `protocols/harness-assumptions.md` § Turn Budgets).
 
 ## Revision Loop
 

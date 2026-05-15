@@ -60,7 +60,7 @@ Don't dump raw directly into working tier subdirectories (`reports/`, `research/
 
 When a domain is no longer an active phase of life (e.g., a degree program finished, a prior employer fully off-boarded with no remaining process tails, a retired hobby), `mv` the entire working-tier directory to `<paths.archive>/<domain>/`. This preserves digests (README, timeline.md) as historical snapshots while removing the implicit "active reference" status.
 
-Example: `<paths.education>/` → `<paths.archive>/education/` after PhD completion + start of full-time work. The raw + digests come along intact.
+Example: a working `education/` surface migrates to `<paths.archive>/education/` after PhD completion + start of full-time work. The raw + digests come along intact.
 
 Don't pre-archive: a domain stays in working tier as long as it has live followups, ongoing decisions, or recent file additions.
 
