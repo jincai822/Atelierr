@@ -77,7 +77,7 @@ def plan_moves(
     axis couldn't bucket (e.g., year-month axis on a non-dated filename).
 
     If include_dirs=True, also bucket immediate subdirectories (e.g.,
-    research/frontier-labs/labs/<lab>/ → labs/<letter>/<lab>/)."""
+    <dir>/<entry>/ → <dir>/<bucket>/<entry>/ under the chosen axis)."""
     moves: list[tuple[Path, Path]] = []
     unmoved: list[Path] = []
     for f in sorted(target_dir.iterdir()):

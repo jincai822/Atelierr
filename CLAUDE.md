@@ -29,6 +29,8 @@ Five-tier model. Directory is the tier; location carries the certification level
 
 `$OV/` is the source of truth. Daily notes are user-authored locally. `<paths.cache>/` holds ephemeral fetches. Readwise inbox is a cloud-only L1 surface — accessed through the `readwise` CLI when needed, never mirrored to disk. `<paths.zettelm>/` is a transient mobile-capture submodule; `/sync` digests it into L2 then clears.
 
+**Tooling layout.** A script lives wherever its content lives. Vault-agnostic tools (`semantic.py`, `todos.py`, `cues.py`, `people.py`) live in atelier `scripts/`. Domain-specific tools (hardcoded to a private note or signal set) live under `$OV/<domain>/_tools/` with their config TOMLs/YAMLs in the same dir; self-locate via `Path(__file__).resolve().parent.parent`. Script *names* that encode private content must stay under `$OV/`, never the public atelier repo.
+
 ## Reading Rules
 
 | Intent | Command |
