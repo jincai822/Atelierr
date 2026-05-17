@@ -128,6 +128,30 @@ There is no bulk migration of existing notes into the wiki layer. Older topic di
 
 The expected steady-state ratio is roughly: hundreds of L1/L2 notes for every L4 wiki entry. L4 is the slow, careful, anchored kernel. L1 and L2 are the fast surface.
 
+## Aggregation vs. Detail (orthogonal to L1-L5)
+
+L1-L5 measures certification depth, not aggregation. Within a single tier (typically L2), the user often maintains both *detail files* (one file per subject — e.g. `<paths.travel>/trips/<trip>.md`) and *aggregate trackers* (one file summarizing many subjects — e.g. `<paths.travel>/2026.md` master calendar, `<paths.travel>/Hyatt.md` FN inventory, `<paths.finance>/Perks Ledger.md`). Aggregates are hand-mirrored views over the details; nothing pushes detail edits back to the aggregates.
+
+The system handles this asymmetry at **read time**, not write time. Read commands that surface aggregate values (`/perks`, `/civ`) run `scripts/aggregate_freshness.py` as a pre-step and emit a divergence warning when any aggregate's `Last updated:` line lags the newest detail file. The convention: detail files are the SOT; aggregates may be stale; readers must cross-check the detail before quoting an aggregate value as authoritative. This is a read-time guard against antipattern #6 (shadow state) — the divergence is made visible rather than silently propagated.
+
+Write-time propagation (auto-generating aggregates from details) is deferred. It requires structured frontmatter on every detail file plus per-aggregate generators, which is heavier scaffolding than the read-time guard. The read-time guard is sufficient as long as readers respect the divergence warning.
+
+See also: Planner vs Executor (below) for the analogous asymmetry between upstream planning files and downstream execution projects.
+
+## Planner vs. Executor (orthogonal to L1-L5)
+
+A second asymmetry, also typically within L2: a *planner file* enumerates intent (a checklist of actionables, perks to redeem, trips to book), and one or more *executor files* carry out individual items in depth (a trip-prep project, a visa-application project, a booking thread). The planner is the SOT for "what's outstanding"; the executor owns the working detail and the final receipts. Without a convention, closure happens in the executor and the planner silently rots — the inverse of the aggregate-vs-detail problem, but the same shadow-state pathology (antipattern #6).
+
+The convention is to make the upstream link bidirectional at creation time and to require backfill at closure time:
+
+- **Downstream declares upstream** — every executor project's frontmatter carries `upstream: <path>#<anchor>` pointing at the row/line in the planner that spawned it. This is set when the executor file is created, not retrofitted.
+- **Closure form is a backfill receipt** — when the executor completes an item, the corresponding planner row is rewritten as `- [x] <task> → backfilled <upstream-path>#<row> @YYYY-MM-DD`. Status (done) and provenance (where the work landed) travel together.
+- **Backfill happens in the same turn/commit as the close.** Closing the executor item without touching the planner is the bug; the two edits are a single atomic transaction.
+
+This convention is forward-looking — existing planner/executor pairs are not retrofitted. It crystallized from two instances where downstream work completed but upstream planning files lagged: a `<paths.travel>/honeymoon` booking thread on 2026-05-16 and the `<paths.travel>/26-japan-visa` project on 2026-05-17.
+
+A deferred primitive — `scripts/handoff_backfill_check.py` — would scan executor files with `upstream:` frontmatter and flag closed items whose upstream row is still unchecked. Marked `[deferred]` until rule-of-three: one more instance and the script becomes worth writing.
+
 ## Per-Agent Contract
 
 | Agent | L1/L2 working layer | L4 wiki (`<paths.wiki>/`) | L3 receipts |
