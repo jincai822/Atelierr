@@ -38,6 +38,16 @@ CLI:
         --aggregates travel/2026.md travel/Hyatt.md finance/'Perks Ledger.md' \
         --json
 
+    # Or walk $OV automatically for files declaring themselves aggregates:
+    aggregate_freshness.py --discover [--stale-only]
+
+Discovery mode. With `--discover`, the script walks `$OV` looking for files
+whose YAML frontmatter contains `freshness: required` and a `subjects:` key
+pointing at a directory. It groups aggregates by their declared subjects dir
+and runs the same comparison the explicit-args path does. `--stale-only`
+filters the output to entries flagged stale (useful for session-start cues:
+silent when everything is fresh).
+
 Exit code: 0 always. Staleness is advisory; the caller decides what to do
 with the JSON. (Non-zero exit would block read commands, which is worse than
 showing stale data with a warning.)
@@ -58,7 +68,14 @@ from _paths import fmt, vault_root  # type: ignore[import-not-found]  # noqa: E4
 
 _LAST_UPDATED_RE = re.compile(r"^Last updated:\s*(\d{4}-\d{2}-\d{2})\s*$")
 _YAML_UPDATED_RE = re.compile(r"^(?:last_updated|updated):\s*(\d{4}-\d{2}-\d{2})\s*$")
+_FRESHNESS_REQ_RE = re.compile(r"^freshness:\s*required\s*$")
+_SUBJECTS_RE = re.compile(r"^subjects:\s*(.+?)\s*$")
 _HEAD_LINES = 20
+# Directories to skip when walking $OV for --discover (large/irrelevant trees).
+_DISCOVER_SKIP_DIRS = {
+    ".git", ".obsidian", "cache", "papers", "preprints", "archive", "zettelm",
+    "node_modules", ".venv", "__pycache__",
+}
 
 
 def _parse_iso(s: str) -> date | None:
@@ -108,6 +125,82 @@ def _resolve(p: str) -> Path:
     if path.is_absolute():
         return path
     return vault_root() / path
+
+
+def _read_aggregate_frontmatter(path: Path) -> dict | None:
+    """Extract `subjects:` and `freshness:` from a file's YAML frontmatter.
+
+    Returns {"subjects": <str>, "freshness": "required"} if both keys are
+    present in a leading `---`-fenced YAML block; None otherwise. Only the
+    first frontmatter block is consulted; only the keys we care about are
+    parsed (no full YAML loader needed).
+    """
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            first = fh.readline()
+            if first.rstrip() != "---":
+                return None
+            data: dict = {}
+            for _ in range(_HEAD_LINES):
+                line = fh.readline()
+                if not line:
+                    return None
+                stripped = line.rstrip()
+                if stripped == "---":
+                    break
+                if _FRESHNESS_REQ_RE.match(stripped):
+                    data["freshness"] = "required"
+                    continue
+                m = _SUBJECTS_RE.match(stripped)
+                if m:
+                    data["subjects"] = m.group(1).strip()
+            if data.get("freshness") == "required" and data.get("subjects"):
+                return data
+            return None
+    except OSError:
+        return None
+
+
+def discover(stale_only: bool = False, verbose: bool = False) -> dict:
+    """Walk $OV, find self-declared aggregates, group by subjects dir, scan.
+
+    Returns:
+        {"groups": [<scan-payload>, ...], "discovered": N, "stale_count": M}
+    Each group payload matches `scan()`'s return shape.
+    """
+    root = vault_root()
+    pairs: dict[str, list[Path]] = {}  # subjects_str -> [aggregate paths]
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Prune skip dirs in-place.
+        dirnames[:] = [d for d in dirnames if d not in _DISCOVER_SKIP_DIRS and not d.startswith(".")]
+        for fn in filenames:
+            if not fn.endswith(".md"):
+                continue
+            p = Path(dirpath) / fn
+            fm = _read_aggregate_frontmatter(p)
+            if fm is None:
+                continue
+            pairs.setdefault(fm["subjects"], []).append(p)
+
+    groups: list[dict] = []
+    stale_total = 0
+    for subj_str, aggs in sorted(pairs.items()):
+        subj_dir = _resolve(subj_str)
+        payload = scan(subj_dir, sorted(aggs), verbose=verbose)
+        stale_here = [a for a in payload["aggregates"] if a.get("stale")]
+        stale_total += len(stale_here)
+        if stale_only:
+            if not stale_here:
+                continue
+            payload = dict(payload)
+            payload["aggregates"] = stale_here
+        groups.append(payload)
+
+    return {
+        "groups": groups,
+        "discovered": sum(len(v) for v in pairs.values()),
+        "stale_count": stale_total,
+    }
 
 
 def scan(
@@ -215,6 +308,25 @@ def scan(
     }
 
 
+def format_human_discover(payload: dict, stale_only: bool) -> str:
+    groups = payload["groups"]
+    if not groups:
+        if stale_only:
+            return f"aggregate freshness: 0 stale of {payload['discovered']} discovered\n"
+        return f"aggregate freshness: 0 aggregates discovered under $OV\n"
+    lines: list[str] = []
+    header = (
+        f"aggregate freshness ({payload['stale_count']} stale of "
+        f"{payload['discovered']} discovered):"
+    )
+    lines.append(header)
+    lines.append("")
+    for g in groups:
+        lines.append(format_human(g).rstrip())
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def format_human(payload: dict) -> str:
     lines: list[str] = []
     lines.append(f"aggregate freshness: subjects={payload['subjects_dir']}")
@@ -254,14 +366,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--subjects",
-        required=True,
-        help="Directory holding detail SOT files (e.g. travel/trips).",
+        help="Directory holding detail SOT files (e.g. travel/trips). Required unless --discover.",
     )
     parser.add_argument(
         "--aggregates",
         nargs="+",
-        required=True,
-        help="One or more aggregate tracker files (paths relative to $OV or absolute).",
+        help="One or more aggregate tracker files (paths relative to $OV or absolute). Required unless --discover.",
+    )
+    parser.add_argument(
+        "--discover",
+        action="store_true",
+        help="Walk $OV for files with `freshness: required` + `subjects:` frontmatter; ignore --subjects/--aggregates.",
+    )
+    parser.add_argument(
+        "--stale-only",
+        action="store_true",
+        help="Filter --discover output to stale aggregates only (silent when all fresh).",
     )
     parser.add_argument(
         "--json",
@@ -274,6 +394,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Include warnings for files missing a Last-updated line.",
     )
     args = parser.parse_args(argv)
+
+    if args.discover:
+        payload = discover(stale_only=args.stale_only, verbose=args.verbose)
+        if args.json:
+            sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+        else:
+            sys.stdout.write(format_human_discover(payload, args.stale_only))
+        return 0
+
+    if not args.subjects or not args.aggregates:
+        parser.error("--subjects and --aggregates are required unless --discover is given")
 
     subjects_dir = _resolve(args.subjects)
     aggregates = [_resolve(a) for a in args.aggregates]

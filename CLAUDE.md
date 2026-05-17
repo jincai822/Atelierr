@@ -43,6 +43,7 @@ Five-tier model. Directory is the tier; location carries the certification level
 
 - Semantic-primary search. Content queries start with `uv run scripts/semantic.py query`, not Grep. Grep is for structural queries only.
 - Local-first reads. Read from `$OV/` via Read + Grep + semantic.py.
+- Aggregate freshness. Before quoting an aggregate tracker (any file with frontmatter `freshness: required`) as authoritative, run `uv run scripts/aggregate_freshness.py --discover --stale-only`; cross-check the subject file when an aggregate appears. Convention defined in `protocols/local-first-architecture.md` § Aggregation vs. Detail.
 
 Prioritize by validation depth, not origin. Trust: alloy (default) < wiki entry under `<paths.wiki>/` < `#solo-flight`. Legacy `#ai-reflection` tags are searchable alloy. Full taxonomy in `protocols/epistemic-hygiene.md`.
 

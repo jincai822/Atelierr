@@ -4,21 +4,20 @@ Read-only dashboard. Surfaces open decisions, upcoming deadlines, and data gaps 
 
 ## Pre-step: aggregate freshness check
 
-Run BEFORE loading any tracker. Detail files under `<paths.travel>/trips/` are the source of truth; aggregates (`<paths.travel>/2026.md`, `<paths.travel>/Hyatt.md`, `<paths.finance>/Perks Ledger.md`) are hand-mirrored views and can lag. Quoting a stale aggregate as authoritative is the bug this guard prevents.
+Run BEFORE loading any tracker. Detail files under each aggregate's declared `subjects:` dir are the source of truth; the aggregates themselves are hand-mirrored views and can lag. Quoting a stale aggregate as authoritative is the bug this guard prevents.
 
 ```bash
-uv run scripts/aggregate_freshness.py \
-  --subjects travel/trips \
-  --aggregates travel/2026.md travel/Hyatt.md finance/'Perks Ledger.md' \
-  --json
+uv run scripts/aggregate_freshness.py --discover --json
 ```
 
-If any aggregate reports `"stale": true`, prepend a **Divergence Warning** section to the output:
+Discovery walks `$OV` for files that opt in via YAML frontmatter (`subjects:` + `freshness: required`); convention documented in `protocols/local-first-architecture.md` § Aggregation vs. Detail. New aggregates surface automatically once they add the marker — no edit to this file needed.
+
+If any aggregate (across any group) reports `"stale": true`, prepend a **Divergence Warning** section to the output:
 - Name each stale aggregate and the lag in days.
 - Name the newest subject file (the likely cause).
 - Tell the user: aggregate values may be out-of-date; cross-check the subject file before acting on any item from the stale aggregate.
 
-If `subject_count == 0` or every aggregate reports `"note": ...` (no Last-updated line), skip the warning silently — the guard has no signal to act on, but the user should not see noise.
+If `discovered == 0`, no group has any `subject_count`, or every aggregate in every group reports `"note": ...` (no Last-updated line), skip the warning silently — the guard has no signal to act on, but the user should not see noise.
 
 ## Load
 

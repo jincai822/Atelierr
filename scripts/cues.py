@@ -175,11 +175,54 @@ def check_zettelm(ov: Path, today: date) -> tuple[Cue | None, str]:
     )
 
 
+def check_aggregate_freshness(ov: Path, today: date) -> tuple[Cue | None, str]:
+    """Self-declared aggregate trackers lagging their subject SOT.
+
+    Fires when `aggregate_freshness.py --discover --stale-only` reports one
+    or more stale aggregates. Soft cue: the divergence is advisory, the
+    user may still want to read the aggregate, but should know it's stale
+    before quoting it.
+    """
+    # Import lazily so cues.py doesn't take an import-time dep on the script.
+    sys.path.insert(0, str(Path(__file__).parent))
+    try:
+        from aggregate_freshness import discover  # type: ignore[import-not-found]
+    except ImportError as exc:
+        return None, f"aggregate_freshness import failed: {exc!r}"
+
+    payload = discover(stale_only=True)
+    stale = payload.get("stale_count", 0)
+    if stale == 0:
+        return None, f"discovered={payload.get('discovered', 0)} stale=0; fresh"
+
+    names = []
+    for g in payload["groups"]:
+        for a in g["aggregates"]:
+            p = a["path"].rsplit("/", 1)[-1]
+            names.append(f"{p} (-{a['days_behind']}d)")
+    listing = ", ".join(names[:3])
+    if len(names) > 3:
+        listing += f", +{len(names) - 3} more"
+    return (
+        Cue(
+            key="aggregate_freshness",
+            severity="soft",
+            command_path="protocols/local-first-architecture.md",
+            message=(
+                f"{stale} aggregates stale: {listing}. "
+                f"Cross-check subject SOT before quoting."
+            ),
+        ),
+        f"stale={stale}; soft cue",
+    )
+
+
 # Registry. To add a new cue, append a `check_*` function above and
 # register it here.
 CHECKS = [
     ("weekly", check_weekly),
     ("zettelm", check_zettelm),
+    ("aggregate_freshness", check_aggregate_freshness),
 ]
 
 

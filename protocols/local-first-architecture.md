@@ -136,6 +136,19 @@ The system handles this asymmetry at **read time**, not write time. Read command
 
 Write-time propagation (auto-generating aggregates from details) is deferred. It requires structured frontmatter on every detail file plus per-aggregate generators, which is heavier scaffolding than the read-time guard. The read-time guard is sufficient as long as readers respect the divergence warning.
 
+**Self-declaring aggregates (discovery convention).** Aggregates opt in to the guard by adding a YAML frontmatter block at the top of the file:
+
+```yaml
+---
+subjects: <path-to-subjects-dir>     # e.g. travel/trips/ (relative to $OV) or absolute
+freshness: required                  # marks the file as an aggregate to check
+---
+```
+
+With both keys present, `scripts/aggregate_freshness.py --discover` walks `$OV` (skipping `cache/`, `archive/`, `papers/`, `preprints/`, `zettelm/`, dotfiles), groups self-declared aggregates by their `subjects:` dir, and runs the same scan the explicit-args form does. `--stale-only` filters to just stale entries — silent when everything is fresh, ideal for session-start cues. The model rule in `CLAUDE.md` § Reading Rules wires this into every read of an aggregate: before quoting an aggregate as authoritative, run `--discover --stale-only` and cross-check any flagged file's subject SOT.
+
+Adoption is forward-looking: existing aggregates opt in by adding the frontmatter block. Files without the marker are silently ignored by `--discover`; the explicit `--subjects` / `--aggregates` form continues to work for ad-hoc or transitional cases.
+
 See also: Planner vs Executor (below) for the analogous asymmetry between upstream planning files and downstream execution projects.
 
 ## Planner vs. Executor (orthogonal to L1-L5)
