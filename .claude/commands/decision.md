@@ -59,7 +59,27 @@ Based on the decision type, select the right pairing from `frameworks/cross-vali
 | Build/invest | First Principles | Wardley Mapping |
 | Binary choice | Dialectical Thinking | Second-Order Thinking |
 
-**Dual-leg dispatch (cross-provider).** `/decision` is a multi-leg call site (`protocols/orchestrator.md` § "Currently-enabled multi-leg call sites"). Fire both Thinker legs in parallel — one message with two tool calls:
+**Dual-leg dispatch (cross-provider).** `/decision` is a multi-leg call site (`protocols/orchestrator.md` § "Currently-enabled multi-leg call sites"). Fire both Thinker legs in parallel — one message with two tool calls.
+
+**Before dispatch — shadow group setup (best-effort):** open a shadow-log group so the report can pair the two Thinker legs and compute cost + verdict agreement. Best-effort: if `shadow.py group-start` fails (e.g., $OV unset), the dual-leg dispatch still proceeds; the call just won't be correlated in `shadow.py report`.
+
+```bash
+NATIVE_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('thinker',{}).get('voices',{}).get('native',''))")
+DIRECT_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('thinker',{}).get('voices',{}).get('direct',''))")
+EXPECTED='[{"model":"'"$NATIVE_MODEL"'","leg":"native"},{"model":"'"$DIRECT_MODEL"'","leg":"direct"}]'
+eval "$(python3 scripts/shadow.py group-start --task decision --expected "$EXPECTED" 2>/dev/null || true)"
+trap 'unset ATELIER_SHADOW_GROUP ATELIER_TASK_TYPE' EXIT
+```
+
+After the Agent (native Thinker) returns, write its synthetic shadow-log entry (the Bash leg auto-logs via env vars):
+
+```bash
+python3 scripts/shadow.py log \
+  --group "$ATELIER_SHADOW_GROUP" \
+  --task decision --model "$NATIVE_MODEL" --leg native \
+  --prompt-file <agent-prompt-text> --response-file <agent-response>
+```
+
 
 - `Agent` tool, `subagent_type: thinker`, prompt: "Apply <primary framework> + <cross-validation framework> to this decision: <user's framing>. Read the framework files yourself from `frameworks/`. Return verdict + reasoning."
 - `Bash` tool — must **inline** the framework files in the prompt, because the direct leg has no filesystem access and would otherwise apply a generic model-memory version of each framework. Resolve framework display names to slugged filenames (lowercase, hyphen-separated): "First Principles" → `first-principles.md`, "Wardley Mapping" → `wardley-mapping.md`, etc. Confirm `ls frameworks/` matches before dispatch.

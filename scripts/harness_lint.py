@@ -1947,6 +1947,45 @@ def check_commands_intent_coverage() -> list[Finding]:
     return findings
 
 
+def check_shadow_group_start() -> list[Finding]:
+    """Known multi-leg call sites MUST invoke `shadow.py group-start` so the
+    shadow-log correlation pipeline has data to aggregate. Without the call,
+    legs land in the per-call log but cannot be correlated; the report
+    degrades to "0 groups found" silently.
+
+    Per protocols/backend-taxonomy.md § shadow_logs and the shadow-log
+    design doc, the multi-leg call sites are enumerated below. Each MUST
+    contain the substring `shadow.py group-start`. Site files that don't
+    yet exist (the design names them but the user has not yet instrumented
+    them) emit INFO; existing files without the invocation emit ERROR.
+    """
+    sites = (
+        ".claude/commands/system-review.md",
+        ".claude/commands/decision.md",
+        "scripts/review.sh",
+    )
+    findings: list[Finding] = []
+    for rel in sites:
+        path = ROOT / rel
+        if not path.exists():
+            findings.append(
+                Finding("INFO", "shadow-site-missing", rel,
+                        f"multi-leg call site {rel} not found; skipping group-start check")
+            )
+            continue
+        text = _read(path)
+        # Flexible match: shadow.py followed by group-start within the same
+        # line region (quotes / variable interpolation between is fine).
+        if not re.search(r"shadow\.py[\"' \\$\w/]*\s+group-start", text):
+            findings.append(
+                Finding("ERROR", "shadow-group-start-missing", rel,
+                        f"{rel} dispatches multi-leg but does not invoke `shadow.py group-start`; "
+                        "shadow-log report will silently degrade. Add a group-start "
+                        "invocation at flow entry (see protocols/shadow-log.md).")
+            )
+    return findings
+
+
 def run_lints() -> list[Finding]:
     findings: list[Finding] = []
     findings.extend(check_root_files())
@@ -1979,6 +2018,7 @@ def run_lints() -> list[Finding]:
     findings.extend(check_claude_skills(intents))
     findings.extend(check_agent_pattern_and_used_by(intents, commands))
     findings.extend(check_doc_indirection_depth())
+    findings.extend(check_shadow_group_start())
     findings.sort(key=lambda f: (SEVERITY_ORDER.get(f.severity, 99), f.code, f.where, f.message))
     return findings
 

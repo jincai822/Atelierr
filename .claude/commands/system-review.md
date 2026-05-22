@@ -48,6 +48,25 @@ The mechanical script in 1b only matches filename stems under `$OV/` and wikilin
 
 **Run only after 1b returns `hit_count: 0`** (or soft-skips). If 1b aborted with hits, do not dispatch 1c — fix 1b first.
 
+**Before dispatch — shadow group setup (best-effort):** open a correlation group so `shadow.py report` can pair the two privacy-reviewer legs and compute cost + verdict agreement. Best-effort: failure here (missing $OV, script absent) does not block the dispatch; the call just won't be correlated.
+
+```bash
+NATIVE_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('privacy-reviewer',{}).get('voices',{}).get('native',''))")
+DIRECT_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('privacy-reviewer',{}).get('voices',{}).get('direct',''))")
+EXPECTED='[{"model":"'"$NATIVE_MODEL"'","leg":"native"},{"model":"'"$DIRECT_MODEL"'","leg":"direct"}]'
+eval "$(python3 scripts/shadow.py group-start --task privacy-review --expected "$EXPECTED" 2>/dev/null || true)"
+trap 'unset ATELIER_SHADOW_GROUP ATELIER_TASK_TYPE' EXIT
+```
+
+After the Agent (native privacy-reviewer) returns its verdict, write its synthetic entry (the Bash leg auto-logs via inherited env):
+
+```bash
+python3 scripts/shadow.py log \
+  --group "$ATELIER_SHADOW_GROUP" \
+  --task privacy-review --model "$NATIVE_MODEL" --leg native \
+  --prompt-file <agent-prompt-text> --response-file <agent-verdict>
+```
+
 Dispatch **both legs in parallel — single message, one `Agent` tool call AND one `Bash` tool call**:
 
 **Leg A — Anthropic side (`Agent` tool, `subagent_type: privacy-reviewer`):**

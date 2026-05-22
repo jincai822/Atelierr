@@ -59,6 +59,22 @@ The log dir is machine-local (parallel to ~/.cache/atelier/lance/) so it
 does not sync into a Drive-mounted vault. Pass --no-log to skip the log
 for sensitive prompts; --log-dir overrides the default location.
 
+Shadow-group correlation (optional). When `--shadow-group <uuid>` is passed
+or env `ATELIER_SHADOW_GROUP` is set, the log event carries the group_id;
+`--task-type <name>` / `ATELIER_TASK_TYPE` likewise carries the task class
+(e.g., `system-review`, `decision`, `privacy-review`). Env vars take
+precedence ONLY when the flag is absent; explicit --flag overrides env.
+Every shadow-correlated event ALSO appends a ≤500B correlation skeleton
+to `$OV/_meta/shadow_logs/<YYYY-MM-DD>.jsonl` (machine-local stays the
+source-of-record for full prompts/responses; $OV gets the bones for
+cross-machine + cross-leg report aggregation). `task_dispatch_kind` in
+the event is always `direct` for chat_completion.py calls; native-leg
+synthetic entries (written by `scripts/shadow.py log`) carry `native`.
+Cost is NOT computed at write time; `scripts/shadow.py report` derives
+cost retroactively from the latest `harness/model_costs.toml` so a price
+refresh applies to historical logs. The $OV mirror is best-effort and
+silently skipped when $OV is unset or unwritable.
+
 Auth is `Authorization: Bearer $<api_env>`. Providers that use a different
 header scheme need their own helper (or a future --auth-header flag).
 
@@ -92,6 +108,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_TOML = REPO_ROOT / "harness" / "models.toml"
 BINDINGS_TOML = REPO_ROOT / "profile" / "models.toml"
 DEFAULT_LOG_DIR = Path.home() / ".cache" / "atelier" / "llm_calls"
+# Correlation-skeleton fields written to the $OV mirror. Keep this list
+# minimal — full prompts/responses stay machine-local; the mirror is for
+# cross-leg report aggregation and cross-machine survival.
+_SKELETON_FIELDS = (
+    "timestamp", "shadow_group_id", "task_type", "task_dispatch_kind",
+    "model", "api_model", "usage", "latency_s", "finish_reason",
+    "status", "error_kind",
+)
 
 
 def _load_model(name: str) -> dict | None:
@@ -282,6 +306,37 @@ def _log_call(log_dir: Path, event: dict) -> None:
         pass
 
 
+def _mirror_shadow_skeleton(event: dict) -> None:
+    """Append the correlation skeleton to $OV/_meta/shadow_logs/<date>.jsonl.
+
+    Only fires when `event["shadow_group_id"]` is set. Best-effort: $OV
+    missing or unwritable → silently skipped (machine-local log already won).
+    The skeleton omits full prompt/response text; it carries the fields
+    needed for cross-leg aggregation in `scripts/shadow.py report` plus a
+    response preview (first 200 chars + SHA-256) for quick inspection.
+    """
+    if not event.get("shadow_group_id"):
+        return
+    ov = os.environ.get("OV")
+    if not ov:
+        return
+    try:
+        skeleton: dict[str, object] = {k: event.get(k) for k in _SKELETON_FIELDS}
+        # Attach response preview when present (success path).
+        resp = event.get("response_content")
+        if isinstance(resp, str):
+            import hashlib
+            skeleton["response_first_200"] = resp[:200]
+            skeleton["response_sha256"] = hashlib.sha256(resp.encode("utf-8")).hexdigest()
+        mirror_dir = Path(ov) / "_meta" / "shadow_logs"
+        mirror_dir.mkdir(parents=True, exist_ok=True)
+        mirror_file = mirror_dir / f"{datetime.now().strftime('%Y-%m-%d')}.jsonl"
+        with mirror_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(skeleton, ensure_ascii=False) + "\n")
+    except (OSError, ValueError, TypeError):
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="scripts/chat_completion.py",
@@ -393,6 +448,27 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Override the invocation log directory.",
     )
+    ap.add_argument(
+        "--shadow-group",
+        default=None,
+        help=(
+            "UUID grouping this call with other legs of the same shadow "
+            "dispatch (multi-provider verification). When set, the log event "
+            "carries the group_id and a correlation skeleton is mirrored to "
+            "`$OV/_meta/shadow_logs/<date>.jsonl`. Falls back to env "
+            "ATELIER_SHADOW_GROUP when omitted. Aggregated by `scripts/shadow.py report`."
+        ),
+    )
+    ap.add_argument(
+        "--task-type",
+        default=None,
+        help=(
+            "Task class for shadow correlation (e.g., `system-review`, "
+            "`decision`, `privacy-review`). Falls back to env ATELIER_TASK_TYPE "
+            "when omitted. Used by `scripts/shadow.py report` for verdict-token "
+            "regex selection (see `harness/shadow_tasks.toml`)."
+        ),
+    )
     args = ap.parse_args(argv)
 
     model_entry = _load_model(args.model) if args.model else None
@@ -493,8 +569,13 @@ def main(argv: list[str] | None = None) -> int:
             return 4
 
     log_dir = Path(args.log_dir) if args.log_dir else DEFAULT_LOG_DIR
+    shadow_group = args.shadow_group or os.environ.get("ATELIER_SHADOW_GROUP")
+    task_type = args.task_type or os.environ.get("ATELIER_TASK_TYPE")
     log_event: dict = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "shadow_group_id": shadow_group,
+        "task_type": task_type,
+        "task_dispatch_kind": "direct",
         "model": args.model,
         "api_model": api_model,
         "endpoint": endpoint,
@@ -508,6 +589,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.log:
             log_event["latency_s"] = round(time.monotonic() - started_at, 3)
             _log_call(log_dir, log_event)
+            _mirror_shadow_skeleton(log_event)
 
     try:
         resp = _post_with_retry(

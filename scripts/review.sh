@@ -64,6 +64,19 @@ if [ -z "${DIRECT_MODEL:-}" ] || [ -z "${CODEX_MODEL:-}" ]; then
   exit 2
 fi
 
+# Shadow-log correlation: open a group so the report can pair the codex
+# and direct legs as one verification dispatch. The direct leg auto-logs
+# via env vars (ATELIER_SHADOW_GROUP / ATELIER_TASK_TYPE); the codex leg
+# writes to $OV/cache/review-$TS-codex.md and is ingested at report time.
+# See protocols/shadow-log.md for the full mechanism. Best-effort: any
+# failure here (script missing, $OV not configured) is silently skipped.
+if [ -f "$REPO_ROOT/scripts/shadow.py" ]; then
+  EXPECTED='[{"model":"'"$DIRECT_MODEL"'","leg":"direct"},{"model":"'"$CODEX_MODEL"'","leg":"codex"}]'
+  eval "$(python3 "$REPO_ROOT/scripts/shadow.py" group-start \
+    --task external-review --expected "$EXPECTED" 2>/dev/null || true)"
+  trap 'unset ATELIER_SHADOW_GROUP ATELIER_TASK_TYPE' EXIT
+fi
+
 # For the codex leg we also need the codex-side model id and reasoning effort
 # (e.g., openai/gpt-5.5, "high"), which live in profile/models.toml under
 # [models.$CODEX_MODEL]. Schema declarations in harness/models.toml are
