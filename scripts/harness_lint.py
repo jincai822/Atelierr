@@ -1879,6 +1879,58 @@ def check_doc_indirection_depth() -> list[Finding]:
     return findings
 
 
+def check_commands_intent_coverage() -> list[Finding]:
+    """Every commands.toml entry must either appear in hi.md's sub-mode
+    procedures map (reachable via /hi <natural language>), be a routing
+    hub itself (hi), or declare `direct_only = true`. Aliases delegate
+    to the target's intent surface and are exempt.
+
+    Reachability is established by the command's source path appearing in
+    the sub-mode procedures map block; this is what already wires intent
+    mode → procedure file in hi.md.
+    """
+    findings: list[Finding] = []
+    data, err = _load_toml(ROOT / "harness" / "commands.toml")
+    if err:
+        return [err]
+    assert data is not None
+    command_map = data.get("commands", {}) or {}
+
+    hi_path = ROOT / ".claude" / "commands" / "hi.md"
+    if not hi_path.exists():
+        return findings
+    text = _read(hi_path)
+    block_re = re.compile(
+        r"<!--\s*sub-mode-procedures-map\s*-->(.*?)<!--\s*/sub-mode-procedures-map\s*-->",
+        re.DOTALL,
+    )
+    block_match = block_re.search(text)
+    procedure_block = block_match.group(1) if block_match else ""
+
+    for name, entry in sorted(command_map.items()):
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("status") == "alias":
+            continue
+        if entry.get("direct_only") is True:
+            continue
+        # hi is the routing hub, not a routable mode itself.
+        if name == "hi":
+            continue
+        source = str(entry.get("source", ""))
+        if source and source in procedure_block:
+            continue
+        findings.append(
+            Finding(
+                "WARN",
+                "commands-routing-undeclared",
+                "harness/commands.toml",
+                f"command `{name}` has no hi.md routing and no `direct_only = true`",
+            )
+        )
+    return findings
+
+
 def run_lints() -> list[Finding]:
     findings: list[Finding] = []
     findings.extend(check_root_files())
@@ -1897,6 +1949,7 @@ def run_lints() -> list[Finding]:
     findings.extend(check_path_registry_drift())
     intents, intent_findings = load_intents()
     findings.extend(intent_findings)
+    findings.extend(check_commands_intent_coverage())
     # Resolve intent agent references against both registries:
     #   - `agents` is from load_claude_agents() (.claude/agents/*.md filesystem
     #     walk); canonical for Claude Code subagent dispatch.

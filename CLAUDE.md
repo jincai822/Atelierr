@@ -82,21 +82,32 @@ All files include `Last built:` timestamp. Warn if >7 days stale. If missing: "R
 
 ## Available Commands
 
+Reflection / planning flows are reachable via `/hi <natural-language>` (intent router) or directly. Canonical registry: `harness/commands.toml`.
+
 | Command | Purpose |
 |---------|---------|
 | `/hi` | Universal entry point with intent router |
+| `/weekly` | Structured weekly review over the past seven effective days |
+| `/review` | Goal review (quarterly full, monthly light) |
+| `/decision` | Structured decision journal with framework cross-validation |
+| `/energy-audit` | Physical / mental / emotional / social energy assessment |
+| `/explore` | Open-ended surfacing of forgotten connections |
 | `/curate` | Goal-aware triage of Readwise inbox |
 | `/introspect` | Build self-model from notes |
-| `/lint` | Structural + corpus-level checks on `<paths.wiki>/` |
+| `/sync` | Digest the mobile-capture submodule into L2; enrich with backlinks; clear zettelm |
 | `/promote` | Create L4 wiki entry from L2 sources |
+| `/lint` | Structural + corpus-level checks on `<paths.wiki>/` |
+| `/system-review` | Multi-reviewer audit of system-evolution changes |
 | `/prm` | Audit relationship health and support system robustness |
 | `/civ` | Civ-style life-management dashboard |
 | `/dine` | Restaurant recs (A); workplace catering tracking (B); meal logging with receipt parse (C) |
-| `/sync` | Digest the mobile-capture submodule into L2; enrich with backlinks; clear zettelm |
+| `/perks` | Read-only perks and trip status dashboard |
+
+`/schedule` is a Claude Code bundled skill (not an atelier command); it manages remote cron routines — contract in `protocols/remote-routines.md`.
 
 ## Agent Teams
 
-Agent definitions: `.claude/agents/`; voices/metadata: `harness/agents.toml`; models: `harness/models.toml`. Team (13 active): Researcher, Synthesizer, Reviewer, Challenger, Thinker, Evolver, Curator, Scout, Reader, Scholar, Privacy-Reviewer, Forgetter, Scribe. Dormant (defined, dispatched only on explicit intent match — not in default rotation): Meeting, Librarian. Dispatch routing: `protocols/orchestrator.md`.
+Agent definitions: `.claude/agents/`; voices/metadata: `harness/agents.toml`; models: `harness/models.toml`. Team (13 active): Researcher, Synthesizer, Reviewer, Challenger, Thinker, Evolver, Curator, Scout, Reader, Scholar, Privacy-Reviewer, Forgetter, Scribe. Dormant (defined, dispatched only on explicit intent match — not in default rotation): Meeting, Librarian. Plus `external-reviewer` (script-driven via `scripts/review.sh`, no native leg — only dispatched by `/system-review`). Dispatch routing: `protocols/orchestrator.md`.
 
 ## Runtime Portability
 

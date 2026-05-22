@@ -11,6 +11,14 @@
 # alias's `source` points to a short shim file under `.claude/commands/` so
 # that `scripts/atelier.py source <old>` and `prompt <old>` keep working as
 # muscle-memory grace; runtimes should resolve the alias and run the target.
+#
+# Routing surface: most commands are reachable via `/hi <natural-language>`
+# through `harness/intents.toml`. Commands that are intentionally direct-only
+# (no /hi routing) declare `direct_only = true`. These are typically:
+#   - dashboards (read-only, on-demand)
+#   - destructive / audit operations (need explicit user trigger)
+# `scripts/harness_lint.py` checks that every entry here either has an
+# intents.toml row OR declares `direct_only = true`.
 
 [commands.hi]
 source = ".claude/commands/hi.md"
@@ -66,6 +74,7 @@ codex_prompt = "Run the /explore workflow using `.claude/commands/explore.md` an
 source = ".claude/commands/prm.md"
 category = "session"
 status = "portable-adapted"
+direct_only = true
 description = "Personal relationship management audit grounded in local relationship notes."
 codex_prompt = "Run the /prm workflow using `.claude/commands/prm.md` and the runtime adapter protocol."
 
@@ -109,6 +118,7 @@ codex_prompt = "Run the /lint workflow using `.claude/commands/lint.md` and the 
 source = ".claude/commands/system-review.md"
 category = "ops"
 status = "portable-adapted"
+direct_only = true
 description = "Review system-evolution changes with internal and external reviewers."
 codex_prompt = "Run the /system-review workflow using `.claude/commands/system-review.md` and the runtime adapter protocol."
 
@@ -116,6 +126,7 @@ codex_prompt = "Run the /system-review workflow using `.claude/commands/system-r
 source = ".claude/commands/civ.md"
 category = "dashboard"
 status = "portable-adapted"
+direct_only = true
 description = "Read-only life dashboard over resources, civilizations, and terminal values."
 codex_prompt = "Run the /civ workflow using `.claude/commands/civ.md` and the runtime adapter protocol."
 
@@ -123,6 +134,7 @@ codex_prompt = "Run the /civ workflow using `.claude/commands/civ.md` and the ru
 source = ".claude/commands/dine.md"
 category = "dashboard"
 status = "portable-adapted"
+direct_only = true
 description = "Restaurant recommendation flow using local context and credit-burn signals."
 codex_prompt = "Run the /dine workflow using `.claude/commands/dine.md` and the runtime adapter protocol."
 
@@ -130,6 +142,7 @@ codex_prompt = "Run the /dine workflow using `.claude/commands/dine.md` and the 
 source = ".claude/commands/perks.md"
 category = "dashboard"
 status = "portable-adapted"
+direct_only = true
 description = "Read-only perks and trip status dashboard over local trackers."
 codex_prompt = "Run the /perks workflow using `.claude/commands/perks.md` and the runtime adapter protocol."
 

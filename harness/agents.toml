@@ -148,6 +148,9 @@ status = "portable-adapted"
 description = "Recommends readings, resources, and thinkers relevant to the painter's interests and goals. Le cercle archetype: The Cataloguer."
 codex_prompt = "Emulate the Librarian role using `.claude/agents/librarian.md` and the runtime adapter protocol."
 pattern = "orchestrator-subagent"
+# Dispatched from `.claude/commands/hi.md` (Deep Dive + Recommend Resources
+# sub-flows); no direct intent route. `used_by` is computed from command-
+# file dispatch-context mentions by `harness_lint --fix-used-by`.
 used_by = [
     "commands.hi",
 ]

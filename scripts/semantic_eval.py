@@ -35,7 +35,7 @@ import sys
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
@@ -300,14 +300,11 @@ def evaluate(
     top_k_retrieve: int = 50,
 ) -> EvalRun:
     from semantic_backends import LanceStore, Retriever, TierRecencyReranker, make_embedder
-    from semantic import _lance_root_for, _active_embedder_key  # type: ignore
+    from semantic import _resolve_lance_dir  # type: ignore
 
-    embedder_key = _active_embedder_key()
-    lance_dir = _lance_root_for(embedder_key)
-    if not lance_dir.exists() and embedder_key == "bge-m3":
-        legacy = Path.home() / ".cache" / "reflectl" / "lance"
-        if legacy.exists():
-            lance_dir = legacy
+    # _resolve_lance_dir already encapsulates the per-embedder path + legacy
+    # ~/.cache/reflectl/ fallback (bge-m3 only); don't reimplement here.
+    lance_dir = _resolve_lance_dir()
 
     embedder = make_embedder()
     store = LanceStore(
@@ -318,12 +315,7 @@ def evaluate(
 
     reranker = None
     if rerank:
-        try:
-            from semantic_backends import _load_trust_scores  # type: ignore
-            trust = {}
-        except Exception:
-            trust = {}
-        # Use trust loader from semantic.py
+        trust: Dict[str, float] = {}
         try:
             from semantic import _load_trust_scores as _lt
             trust = _lt()
