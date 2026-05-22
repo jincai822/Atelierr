@@ -112,7 +112,9 @@ The trust engine and the wiki schema only see the `<paths.wiki>/` subtree. Every
 
 ## Source of Truth
 
-`$OV/` is the canonical copy of the user's knowledge layer. Persistence has three concerns, each handled by a different mechanism:
+`$OV/` is the canonical copy of the user's knowledge layer **for L2-L4 content that has been durably written and confirmed present on disk**. Two declared carve-outs apply (Readwise as L1 SOT; in-flight routine outputs as provisional SOT in the claude.ai session log). Full SOT scope, carve-out rationale, and recovery paths: `backend-taxonomy.md` § SOT Scope.
+
+Persistence has three concerns, each handled by a different mechanism:
 
 - **Device sync**: handled by whatever filesystem $OV lives on (Google Drive, iCloud, plain folder). Outside the system's concern.
 - **Version control**: $OV may be a git repo with an optional remote (typical: a private GitHub repo); see `protocols/repo-conventions.md` for the on-disk conventions that make `$OV` render correctly through GitHub. The system does NOT auto-commit or auto-push; commits happen via user-driven git operations or via `/sync` for the zettelm submodule.
@@ -185,5 +187,6 @@ A deferred primitive — `scripts/handoff_backfill_check.py` — would scan exec
 
 - Tag taxonomy and validation-depth principle: `epistemic-hygiene.md`
 - Wiki entry format and trust propagation rule: `wiki-schema.md`
-- Trust engine implementation (Phase B): `scripts/trust.py` (deferred)
-- Lint integration (Phase D): `.claude/commands/lint.md` (deferred)
+- Trust engine implementation: `scripts/trust.py`
+- Lint integration: `.claude/commands/lint.md`
+- Backend taxonomy and SOT carve-outs: `backend-taxonomy.md`

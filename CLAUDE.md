@@ -53,7 +53,7 @@ Prioritize by validation depth, not origin. Trust: alloy (default) < wiki entry 
 
 - No em dashes in written output. Use colons, semicolons, parentheses, or restructure.
 - No H1 headings inside markdown files. The filename is the title; the body opens with metadata or `##`. Filenames are space-separated title-case.
-- Daily notes are user-authored. System reads, does not modify. **Exception**: user-dictated raw content → dispatch `scribe` (verbatim cheap-tier; spec in `.claude/agents/scribe.md`).
+- Daily notes are user-authored. The system reads them; it does not write to them (Curator dispatches targeting daily-note paths are refused). Exception: user-dictated raw content is recorded verbatim by the Scribe agent (`daily_note` operation), the only path by which the system writes a daily note. Full contract: `protocols/local-first-architecture.md` § Source of Truth.
 - Cite sources. L2 alloy (daily notes, reflections, wip) uses GitHub-style `[Display](<relative-path>)` (angle brackets handle spaces); display text MUST equal the linked file's title. Wiki under `<paths.wiki>/` keeps Obsidian `[[Title]]` / `[[Title#^cn]]` for the trust engine. Never claim the user wrote something without a source.
 - Match the user's language. Chinese for Chinese-language topics; English otherwise. Reading-intensive output in Chinese.
 - `$OV` is the canonical persistence store, not auto-memory. Write to `profile/`: user facts (`identity.md`), goals (`directions.md`), private policy (`profile/<topic>.md`). Validated knowledge → `<paths.wiki>/`; session insights → `<paths.reflections>/`; project context → `profile/directions.md` or daily notes. `<paths.personal>/` is a private-life parent: raw assets under `<paths.personal>/raw/` (photos, events) plus aggregated sub-domains (`<paths.housing>`, `<paths.auto>`, `<paths.abroad>`, `<paths.secure>`); no profile-style config. Auto-memory is fallback only, for items that fit no $OV tier. On recall: $OV first via `scripts/semantic.py query` + Grep; auto-memory only when $OV returns nothing.
@@ -63,6 +63,8 @@ Session reflections go to `<paths.reflections>/YYYY-MM-DD-*.md` (local files). I
 Late-sleep rule: before 03:00 local, "today" = previous calendar day. Read both effective and calendar date notes when they differ.
 
 ## Profile
+
+`profile/` is gitignored per-user config. The contributor decides where it physically lives: a local subdirectory inside the atelier checkout, or a symlink to their vault (typical: `ln -s "$OV"/profile profile`). The atelier reads it as a top-level `profile/` directory either way; it is intentionally NOT in `harness/paths.toml` because the storage location is per-user, not part of the public registry.
 
 - `profile/identity.md` — self-model, intellectual taste, active life areas. Read at every session start.
 - `profile/directions.md` — era context, goals (#capacity, #learning, #identity, #energy). Read for goal conversations.

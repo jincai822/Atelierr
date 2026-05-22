@@ -95,6 +95,19 @@ Voice band vocabulary used in this file:
 | Grep for structural queries only | CLAUDE.md | Always | semantic.py covers structural queries too |
 | Retry with synonyms on empty results | error-handling.md | Manual retry | semantic.py handles synonyms natively |
 
+### Cloud Backend Assumptions
+
+These track behavioral assumptions about external services the atelier depends on. Cloud APIs are the highest-churn dependency category; backend taxonomy in `protocols/backend-taxonomy.md`.
+
+| Assumption | Backend | Where it bites | Re-test When |
+|---|---|---|---|
+| Drive MCP `create_file` writes within minutes; absence after one cron cycle = silent failure | Google Drive MCP | `remote-routines.md` § Policy, Debugging row | Anthropic changes MCP latency SLA; user observes routine output gap |
+| Drive sync (local client) catches up within minutes of cloud write | Google Drive (substrate) | `scripts/cues.py check_routine_outputs` may report "no new files" while file exists in cloud | Drive desktop client changes sync cadence; user reports phantom missing files |
+| Readwise CLI is callable and authenticated on every session | Readwise | `/curate` blocks if not; routes through standard Level-2 degradation | Readwise changes CLI auth; user rotates token |
+| claude.ai cron fires within tolerance of declared cron expression | claude.ai routines | Output staleness; cue never fires for routine that silently stopped running | Anthropic changes scheduling SLA; user observes missing cron fires |
+| Google Drive MCP API surface (`create_file`, `get_file_metadata`, etc.) stays stable | Google Drive MCP | All routine prompts that call these tools; ingestion flows | Anthropic deprecates or renames MCP tools |
+| Gmail MCP draft creation does not auto-send | Gmail MCP | Privacy: a routine creating a draft trusts that the user reviews before sending | MCP changes default behavior |
+
 ### Known Runtime Caps
 
 | Assumption | Where it bites | Re-test When |

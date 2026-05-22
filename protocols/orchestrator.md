@@ -90,7 +90,7 @@ All note writes are local file writes under `$OV/`. There are two writing paths,
 
 The orchestrator must not transcribe raw user content itself; that burns deep-cognition tokens on mechanical I/O and is the failure mode the Scribe role exists to prevent.
 
-Daily notes (under `<paths.daily_notes>/`) are user-authored. The system reads them by default and does not modify them. **Exception (cloud-native capture):** when the user dictates raw daily-note content through chat, dispatch the Scribe with `operation: daily_note` to record it verbatim. Curator dispatches targeting daily-note paths are still refused; only the Scribe writes daily notes, and only when the user is dictating.
+Daily notes are user-authored; the system reads, does not write. Curator dispatches targeting daily-note paths are refused. Exception: dispatch the Scribe with `operation: daily_note` for user-dictated daily-note content. Full rule: `protocols/local-first-architecture.md` § Source of Truth.
 
 ## Voice Dispatch
 

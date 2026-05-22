@@ -27,8 +27,11 @@ cron = "<cron expr UTC + local note>"
 output_dir = "<relative path under $OV>"
 file_pattern = "<glob>"              # e.g. "*.md", "*-weekly.md"
 label = "<short human label>"
-drive_write_enforced = true          # see policy below
+drive_write_enforced = true          # see Policy below — set true when Drive write is wired
+# needs_drive_write_update = true    # alternative: ack migration debt (legacy routine, Drive write not yet wired). Migration debt; clear within a sprint by adding Drive write to the prompt and flipping to drive_write_enforced = true.
 ```
+
+Exactly one of `drive_write_enforced` or `needs_drive_write_update` MUST be `true` for the policy cue to stay silent. The two flags are mutually exclusive in intent: the first declares compliance, the second declares migration debt being tracked.
 
 `scripts/cues.py check_routine_outputs` reads this generically. It does NOT know what any specific routine does; it only walks the declared `output_dir` looking for files matching `file_pattern` that are newer (by filename sort) than the corresponding ack in `routine_acks.json`.
 
@@ -45,6 +48,8 @@ User-private state at `$OV/_meta/routine_acks.json`:
 
 After the user reads a routine output, they update the corresponding entry. The cue stops firing once `latest_acked_filename >= latest_file_in_dir.name`.
 
+**First run.** The file need not exist initially. `scripts/cues.py` defaults a missing `routine_acks.json` to `{}` and treats every routine as unacked (the cue will list every existing output until the user reads them). When the user acks their first routine, create `$OV/_meta/routine_acks.json` with `{"<output_dir>": "<filename>"}`. Subsequent acks add or update entries.
+
 ## Policy: all routines persist to $OV
 
 Every cron-style remote routine MUST write its canonical output to a declared path inside $OV. Cloud-only delivery (Gmail draft, email, ephemeral session output) is allowed as a **secondary** channel for notification, but the SOT lives in $OV.
@@ -55,6 +60,8 @@ Rationale:
 - **Auditability**: a per-run markdown file is grep-able, linkable from notes, and survives the routine being deleted.
 
 Routine prompts implement this by calling Google Drive MCP `create_file` with a path under `$OV/<declared output_dir>/`. If the create_file fails, the prompt MUST print the full content as routine return value so the user can paste manually.
+
+**Conflict-resolution rule (multi-channel routines).** When a routine uses more than one output channel (any combination of Drive, email, Calendar, or future MCP backends), the Drive file is the canonical output. Every secondary channel MUST point at the Drive file (`see $OV/<path>/<file>.md`) and cap its own content at 5 lines of summary. The user reads one source of truth, not parallel summaries.
 
 **Enforcement.** `scripts/cues.py check_routine_policy` reads `$OV/_meta/routine_watch.toml` and fires a soft cue listing routines that declare neither `drive_write_enforced = true` (Drive write wired) nor `needs_drive_write_update = true` (migration debt acknowledged). The cue surfaces non-compliance at session start; resolve by editing the routine prompt to add Drive write and flipping the flag, or by acknowledging the legacy state explicitly.
 
@@ -106,13 +113,27 @@ The single touchpoint is `check_routine_outputs` reading `$OV/_meta/routine_watc
 
 ## Migration: legacy email-only routines
 
-If a routine was created before the 2026-05-22 policy and only delivers via email/Gmail draft:
+If a routine pre-dates this policy (only delivers via email/Gmail draft, no Drive write step):
 
 1. Edit its prompt (via `/schedule update` or the UI) to add a Drive write step before the email step.
 2. Add `Google-Drive` to its MCP connections.
 3. Add an entry in `$OV/_meta/routine_watch.toml` with `drive_write_enforced = true`.
 
 The policy is "all NEW routines and all UPDATED routines"; existing routines should be migrated when convenient, not all at once.
+
+## Retiring a routine
+
+When a routine is no longer wanted:
+
+1. Disable or delete the cron in claude.ai (`/schedule` or the routines UI).
+2. Remove its `[[routine]]` block from `$OV/_meta/routine_watch.toml`. The cue stops firing.
+3. Decide what to do with the existing output files in `$OV/<output_dir>/`:
+   - Keep as historical archive: no action.
+   - Move to `<paths.archive>/routines/<name>/`: preserves provenance, removes from active surface.
+   - Delete: only if the outputs are truly disposable.
+4. Drop the matching entry from `$OV/_meta/routine_acks.json` if present.
+
+The output directory itself is left in place (rmdir manually if empty and unwanted).
 
 ## Debugging
 

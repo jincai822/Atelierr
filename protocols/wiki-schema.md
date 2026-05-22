@@ -4,9 +4,9 @@ The structural format for a note that lives under `<paths.wiki>/`. Location is t
 
 ## Why Location, Not Tag
 
-Earlier drafts of this design used a `#compiled-truth` tag to mark notes that followed the schema. The tag is dropped. `$OV/` is a real markdown vault with hundreds of pre-existing notes; carving out a structural sub-tier by tag inside that vault would conflict with the user's existing tagging conventions and force the trust engine to filter every note in the vault. A dedicated subdirectory is cleaner: `<paths.wiki>/` is the trust-engine-visible region; everything else in `$OV/` is alloy. The trust engine walks one directory; the user has free use of every other tag.
+`$OV/` is a real markdown vault with hundreds of pre-existing notes. A dedicated subdirectory is the cleanest structural sub-tier: `<paths.wiki>/` is the trust-engine-visible region; everything else in `$OV/` is alloy. The trust engine walks one directory; the user has free use of every tag.
 
-The `#solo-flight` tag survives this rename — it lives orthogonally to the schema and marks unstructured pure-human capture, which is location-independent (see `epistemic-hygiene.md`).
+The `#solo-flight` tag lives orthogonally to the schema and marks unstructured pure-human capture, which is location-independent (see `epistemic-hygiene.md`).
 
 ## Session-Visible Markers
 
@@ -129,7 +129,7 @@ Anchor types and id formats:
 
 **URL escaping rule.** Marker fields are pipe-separated, so URLs (in `url` and `gist` anchors and in `ref:` fields) must not contain literal pipe characters. If a URL contains `|`, encode it as `%7C` before storing it in the marker. The parser will not try to be clever about pipe placement; it splits on the first occurrence of ` | ` (space-pipe-space) per line, then on `:` for each field's key. Multi-line values are not supported; each marker is exactly one line.
 
-`weight` is optional and defaults to `1.0`. For papers, weight may be set to `s2.influentialCitationCount`-derived values or OpenAlex FWCI when the user wants to bias trust toward higher-quality anchors. v1 trust engine treats all weights as `1.0` unless explicitly set; weighted seeding is a Phase B optional feature.
+`weight` is optional and defaults to `1.0`. For papers, weight may be set to `s2.influentialCitationCount`-derived values or OpenAlex FWCI when the user wants to bias trust toward higher-quality anchors. The trust engine treats all weights as `1.0` unless explicitly set.
 
 ### Anchor Evidence Resolution
 
@@ -204,7 +204,7 @@ The `Revision Log` section at the bottom of the note records the change in human
 
 `scripts/trust.py` filters markers by `invalid_at` when computing current trust: a marker with `invalid_at <= today` is excluded from the graph. The original record is preserved on disk forever. This is the Graphiti-style append-only-but-mutable contract.
 
-The temporal decay function (β = 0.9 per month from Temporal PageRank, Rozenshtein & Gionis 2016) is **deferred to v2**. v1 treats all valid markers as equal weight regardless of age.
+The trust engine treats all valid markers as equal weight regardless of age. Temporal decay (β = 0.9 per month from Temporal PageRank, Rozenshtein & Gionis 2016) is tracked under § Open v2 Items.
 
 ## The Trust Propagation Rule
 
@@ -245,15 +245,15 @@ For v1:
 N.score = mean(Ci.score for Ci in N.claims)
 ```
 
-Mean across claims, simple. v2 may explore weighted aggregation (e.g., by claim length, by anchor count, by claim age) but v1 is mean.
+Mean across claims. Weighted aggregation (by claim length, anchor count, or claim age) is tracked under § Open v2 Items.
 
 The note-level score is a derived view shown in the trust report and used for ranking in search results. Internal `@cite` references that point at a whole note (no `#^cn` suffix) read this aggregate as the upstream signal. Internal `@cite` references that point at a specific claim (`[[Note Title#^c2]]`) read the claim-level score directly.
 
 ## Structural Integrity Check
 
-A note **passes structural integrity** if all of the following hold. `scripts/trust.py` (Phase B) enforces a minimum subset of these; the full check is the responsibility of `/lint` Phase 1 (Phase D).
+A note **passes structural integrity** if all of the following hold. `scripts/trust.py` enforces a minimum subset of these; the full check is the responsibility of `/lint`.
 
-**Required (enforced by trust.py from Phase B onward):**
+**Required (enforced by `scripts/trust.py`):**
 
 1. The note's file path is under `<paths.wiki>/`.
 2. The note has a `## Claims` section.
@@ -270,7 +270,7 @@ A note **passes structural integrity** if all of the following hold. `scripts/tr
 
 11. At least one claim in the note has a `@pass: reviewer | status: verified` marker.
 
-**Recommended (enforced by `/lint` Phase 1, Phase D):**
+**Recommended (enforced by `/lint` Phase 1):**
 
 12. The `## Summary` section exists and is non-empty.
 13. The `## Revision Log` section exists.
@@ -311,5 +311,5 @@ Edit the English source first, then regenerate the CN shadow in the same working
 
 - Tag taxonomy and the validation-depth principle: `epistemic-hygiene.md`
 - Where wiki entries live: `local-first-architecture.md`
-- Trust engine implementation (Phase B): `scripts/trust.py` (deferred)
-- Lint integration (Phase D): `.claude/commands/lint.md` (deferred)
+- Trust engine implementation: `scripts/trust.py`
+- Lint integration: `.claude/commands/lint.md`

@@ -83,7 +83,7 @@ The 32 threshold is hard, not "rough". A directory at 32 should be split before 
 File moves break standard markdown links `[X](path.md)` and image embeds `![](path)`. The relink contract makes reorganization non-destructive:
 
 ```
-1. Move files via any tool         (cluster_wiki.py / fission.py / manual mv)
+1. Move files via any tool         (scripts/fission.py / manual mv / one-off scripts)
 2. uv run scripts/relink.py --apply   ← auto-fixes broken refs
 3. Commit
 ```
@@ -94,7 +94,7 @@ The wikilink converter (`scripts/wikilink_to_md.py`) handles `[[...]]` → stand
 
 ### Tier-specific semantic restructures
 
-`scripts/cluster_wiki.py` is the pattern for one-off semantic reorgs of a single tier: hardcode a `{filename: bucket}` map, move files into bucket subdirs, then run relink. Reusable per-tier — copy + adjust the `TOPIC_MAP`.
+For one-off semantic reorgs of a single tier, copy `scripts/fission.py` as a starting point and adjust the bucket map. One-off scripts that hardcode private vault content (TOPIC_MAPs, lab lists, wiki entry titles) live in `scripts/oneoff/` (gitignored) and cannot be referenced from committed protocols. The generic reusable tools stay at `scripts/fission.py` and `scripts/relink.py`.
 
 ### Cascading splits
 
@@ -130,10 +130,17 @@ These rules apply to agent edits on the user's behalf. Direct user edits to thei
 
 Reviewer-side detection of violations: `protocols/antipatterns.md` § 8 (Scope creep past the stated criterion).
 
-## Lint enforcement (planned)
+## Lint enforcement
 
-`scripts/repo_lint.py` (TBD) will check:
-- folders exceeding 30 .md files
-- images outside `images/` subdirs (under tracked tiers)
-- non-semantic image names (timestamps, hashes, "Pasted image…")
-- non-ISO date strings in new markdown
+Atelier-side lint runs via `uv run scripts/harness_lint.py` (registered names, path-literal templating, doc-indirection cycles, etc.) and `uv run scripts/privacy_check.py` (filename-stem + wikilink leakage). Both fire in `/lint` and `/system-review`.
+
+Vault-side lint for the conventions in this doc (folder fission, image placement, image naming, ISO date strings) is currently manual. A consolidated `scripts/vault_lint.py` is deferred until two distinct conventions need automated enforcement at once; until then, the fission rule is enforced by `scripts/aggregate_freshness.py` only for self-declaring aggregates, and image / date conventions are honored by hand.
+
+## $OV git push policy
+
+`$OV` is typically a git repo with an optional private remote (private GitHub repo). The atelier does not auto-commit or auto-push; both are user-driven. Conventions:
+
+- **Push cadence**: at the user's discretion. Reasonable triggers include after `/sync` (which produces a parent commit absorbing zettelm digests), after a `/promote` that lands a new wiki entry, or at end-of-session if anything material changed.
+- **Scope**: whatever the vault's `.gitignore` permits. `cache/` (L1 ephemera) and `assets/` (auto-paste hash-named imports) are typically excluded. `_meta/` (routine config, drive aliases) is typically pushed because it holds load-bearing user-private config; users with sensitive content in `_meta/<backend>.toml` may prefer to gitignore it and re-derive per device. The atelier does not dictate the vault's gitignore.
+- **Threat model**: the private remote is one credential away from disclosing the entire knowledge base. Treat it like a password vault. On suspected compromise: rotate the GitHub token, audit recent pushes, and consider a fresh repo with selectively replayed history (the rewrite path is destructive; document the recipe before needing it).
+- **Staleness**: no atelier cue surfaces "remote is N commits behind." Users who want that signal wire it as a local cron or shell prompt indicator. Acceptable trade-off because the local $OV is the authoritative copy and Drive sync provides the device-level redundancy.
