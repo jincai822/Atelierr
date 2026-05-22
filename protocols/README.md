@@ -41,6 +41,7 @@ pattern-library.md (Moments, trade routes, recurring patterns)
 
 epistemic-hygiene.md (validation-depth taxonomy) → wiki-schema.md (L4 format)
 local-first-architecture.md (five-tier vault model)
+remote-routines.md (cron-style remote agents + cue layer; $OV/_meta/ contract)
 
 session-log.md (process recording) → meta-reflection.md (system health)
 harness-assumptions.md (model-era assumption registry)

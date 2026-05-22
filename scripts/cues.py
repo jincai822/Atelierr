@@ -175,6 +175,51 @@ def check_zettelm(ov: Path, today: date) -> tuple[Cue | None, str]:
     )
 
 
+def check_recurring(ov: Path, today: date) -> tuple[Cue | None, str]:
+    """Recurring obligations cue.
+
+    Fires when one or more recurring items in $OV/gtd/recurring.md are overdue
+    (today > last-done + every) or due-soon (within 7 days). Soft cue: advisory,
+    surfaces the count and the most-overdue slug for context.
+    """
+    sys.path.insert(0, str(Path(__file__).parent))
+    try:
+        from recurring import parse_file  # type: ignore[import-not-found]
+    except ImportError as exc:
+        return None, f"recurring import failed: {exc!r}"
+
+    items = parse_file()
+    if not items:
+        return None, "no recurring items defined"
+
+    overdue = [i for i in items if i.status(today) == "overdue"]
+    due_soon = [i for i in items if i.status(today) == "due-soon"]
+    if not overdue and not due_soon:
+        return None, f"all {len(items)} recurring items satisfied"
+
+    parts = []
+    if overdue:
+        overdue.sort(key=lambda i: i.days_until_due(today))
+        top = overdue[0]
+        days = -top.days_until_due(today)
+        parts.append(f"{len(overdue)} overdue (worst: {top.slug} -{days}d)")
+    if due_soon:
+        parts.append(f"{len(due_soon)} due ≤7d")
+    listing = "; ".join(parts)
+    return (
+        Cue(
+            key="recurring",
+            severity="soft",
+            command_path="scripts/recurring.py",
+            message=(
+                f"Recurring obligations: {listing}. "
+                f"`uv run scripts/recurring.py list` to see."
+            ),
+        ),
+        f"overdue={len(overdue)} due_soon={len(due_soon)}; soft cue",
+    )
+
+
 def check_aggregate_freshness(ov: Path, today: date) -> tuple[Cue | None, str]:
     """Self-declared aggregate trackers lagging their subject SOT.
 
@@ -217,12 +262,98 @@ def check_aggregate_freshness(ov: Path, today: date) -> tuple[Cue | None, str]:
     )
 
 
+def check_routine_outputs(ov: Path, today: date) -> tuple[Cue | None, str]:
+    """Unreviewed outputs from remote cron routines.
+
+    Vault-agnostic mechanism: reads `$OV/_meta/routine_watch.toml` to learn
+    which output directories belong to which routine. Each routine entry
+    declares its `output_dir`, `file_pattern`, and human `label`. User policy
+    lives in the TOML; this function is the engine.
+
+    Ack mechanism: `$OV/_meta/routine_acks.json` stores `{output_dir: last_acked_filename}`.
+    Cue fires when a directory's latest file (sorted by filename) > acked filename.
+    User mutes by updating that JSON after reading a report.
+    """
+    import json
+    import tomllib
+
+    config_path = ov / "_meta" / "routine_watch.toml"
+    if not config_path.is_file():
+        return None, "_meta/routine_watch.toml missing; skip"
+
+    try:
+        config = tomllib.loads(config_path.read_text())
+    except (tomllib.TOMLDecodeError, OSError) as exc:
+        return None, f"routine_watch.toml parse failed: {exc!r}"
+
+    routines = config.get("routine", [])
+    if not routines:
+        return None, "no routines declared in routine_watch.toml"
+
+    ack_path = ov / "_meta" / "routine_acks.json"
+    acks: dict[str, str] = {}
+    if ack_path.is_file():
+        try:
+            acks = json.loads(ack_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            acks = {}
+
+    new_findings: list[str] = []
+    debug_parts: list[str] = []
+    for r in routines:
+        output_dir = r.get("output_dir")
+        pattern = r.get("file_pattern", "*")
+        label = r.get("label", r.get("name", "?"))
+        if not output_dir:
+            debug_parts.append(f"{label}: missing output_dir")
+            continue
+        d = ov / output_dir
+        if not d.is_dir():
+            debug_parts.append(f"{label}: dir missing")
+            continue
+        files = sorted(d.glob(pattern), key=lambda p: p.name)
+        if not files:
+            debug_parts.append(f"{label}: no files yet")
+            continue
+        latest = files[-1]
+        last_ack = acks.get(output_dir, "")
+        if latest.name > last_ack:
+            new_findings.append(f"{label} ({latest.name})")
+            debug_parts.append(f"{label}: new={latest.name} > ack={last_ack or '∅'}")
+        else:
+            debug_parts.append(f"{label}: acked")
+
+    debug = "; ".join(debug_parts)
+    if not new_findings:
+        return None, debug
+
+    listing = "; ".join(new_findings[:3])
+    if len(new_findings) > 3:
+        listing += f", +{len(new_findings) - 3} more"
+
+    return (
+        Cue(
+            key="routine_outputs",
+            severity="soft",
+            command_path="_meta/routine_acks.json",
+            message=(
+                f"Remote cron routines 有新 output 待 review: {listing}. "
+                f"读完后 update `_meta/routine_acks.json` "
+                f"({{<output_dir>: <latest filename>}}) 来 mute."
+            ),
+        ),
+        f"new={len(new_findings)}; {debug}",
+    )
+
+
 # Registry. To add a new cue, append a `check_*` function above and
 # register it here.
 CHECKS = [
     ("weekly", check_weekly),
     ("zettelm", check_zettelm),
+    ("recurring", check_recurring),
     ("aggregate_freshness", check_aggregate_freshness),
+    ("routine_outputs", check_routine_outputs),
 ]
 
 

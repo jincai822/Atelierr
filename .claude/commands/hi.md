@@ -82,7 +82,7 @@ Session-start cues (overdue weekly, pending zettelm captures, etc.) are surfaced
 
 If a cue is present in the session reminder, the orchestrator MAY offer to route the user into the matching command (`/weekly`, `/sync`, etc.) before falling through to the Step 1 menu. Otherwise, proceed straight to Step 1.
 
-Active cues: `weekly` (overdue weekly review), `zettelm` (mobile-capture inbox pending digest), `aggregate_freshness` (self-declared aggregates lagging their subject SOT — surfaces as "N aggregates stale: ..."). The aggregate-freshness cue is informational, not a routing prompt: when it fires, just carry the list into context so any later read of the named aggregate is cross-checked against `protocols/local-first-architecture.md` § Aggregation vs. Detail.
+Active cues: `weekly` (overdue weekly review), `zettelm` (mobile-capture inbox pending digest), `aggregate_freshness` (self-declared aggregates lagging their subject SOT — surfaces as "N aggregates stale: ..."), `routine_outputs` (unreviewed cron-routine reports in `$OV/_meta/routine_watch.toml`-declared dirs — surfaces as "Remote cron routines 有新 output 待 review: ..."; see `protocols/remote-routines.md`). The aggregate-freshness and routine_outputs cues are informational, not routing prompts: when they fire, just carry the list into context so any later read of a flagged file (aggregate or routine output) gets cross-checked / acknowledged.
 
 To **add** a new cue, append a `check_<name>(ov, today)` function in `scripts/cues.py` and register it in `CHECKS`. No edit to this file is needed; the hook picks it up automatically next session. To **debug** locally: `uv run scripts/cues.py --verbose` (per-check reasoning on stderr) or `uv run scripts/cues.py --hook` (dry-run the hook output).
 

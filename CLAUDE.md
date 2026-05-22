@@ -31,6 +31,8 @@ Five-tier model. Directory is the tier; location carries the certification level
 
 **Tooling layout.** A script lives wherever its content lives. Vault-agnostic tools (`semantic.py`, `todos.py`, `cues.py`, `people.py`) live in atelier `scripts/`. Domain-specific tools (hardcoded to a private note or signal set) live under `$OV/<domain>/_tools/` with their config TOMLs/YAMLs in the same dir; self-locate via `Path(__file__).resolve().parent.parent`. Script *names* that encode private content must stay under `$OV/`, never the public atelier repo.
 
+**Remote-routine layer.** Cron-style remote agents (managed via `/schedule`) execute in claude.ai cloud and write back to $OV via Google Drive MCP. Policy: every routine MUST persist its canonical output to a declared path in $OV (cloud-only delivery is allowed only as secondary notification). The atelier mechanism (`scripts/cues.py check_routine_outputs`) is vault-agnostic — it reads user-private policy from `$OV/_meta/routine_watch.toml` (routine names + output dirs) and ack state from `$OV/_meta/routine_acks.json`. Atelier never names a specific routine, path, or domain. Full contract: `protocols/remote-routines.md`.
+
 ## Reading Rules
 
 | Intent | Command |
