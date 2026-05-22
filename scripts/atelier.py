@@ -29,6 +29,7 @@ COMMANDS_PATH = ROOT / "harness" / "commands.toml"
 AGENTS_PATH = ROOT / "harness" / "agents.toml"
 MODELS_PATH = ROOT / "harness" / "models.toml"
 CAPABILITIES_PATH = ROOT / "harness" / "capabilities.toml"
+INTENTS_PATH = ROOT / "harness" / "intents.toml"
 
 
 def load_commands() -> dict[str, dict[str, Any]]:
@@ -43,6 +44,55 @@ def load_agents() -> dict[str, dict[str, Any]]:
     if not isinstance(agents, dict):
         raise SystemExit("atelier: harness/agents.toml has no [agents] table")
     return agents
+
+
+def load_intents() -> dict[str, dict[str, Any]]:
+    intents = load_table(INTENTS_PATH, "intents")
+    if not isinstance(intents, dict):
+        raise SystemExit("atelier: harness/intents.toml has no [intents] table")
+    return intents
+
+
+def match_intents(text: str, intents: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Match user text against intents.toml patterns.
+
+    Substring match, case-insensitive. Returns matched intents sorted by
+    descending priority. The fallback intent (empty patterns, priority 0) is
+    included in results ONLY when no other intent matched, mirroring the
+    "no specific intent matched" branch in hi.md.
+    """
+    text_lc = text.lower()
+    matched: list[dict[str, Any]] = []
+    fallback: dict[str, Any] | None = None
+    for name, row in intents.items():
+        if not isinstance(row, dict):
+            continue
+        patterns = row.get("patterns") or []
+        priority = int(row.get("priority", 0))
+        entry = {
+            "name": name,
+            "mode": str(row.get("mode", "")),
+            "agents": list(row.get("agents") or []),
+            "profile_reads": list(row.get("profile_reads") or []),
+            "priority": priority,
+            "pattern": str(row.get("pattern", "")),
+            "parallel": bool(row.get("parallel", False)),
+            "expected_subagent_count": int(row.get("expected_subagent_count", 0)),
+        }
+        if not patterns:
+            fallback = entry
+            continue
+        if not isinstance(patterns, list):
+            continue
+        hit = next((p for p in patterns if isinstance(p, str) and p.lower() in text_lc), None)
+        if hit:
+            entry["matched_pattern"] = hit
+            matched.append(entry)
+    matched.sort(key=lambda e: -int(e["priority"]))
+    if not matched and fallback is not None:
+        fallback["matched_pattern"] = "<fallback: no patterns matched>"
+        matched.append(fallback)
+    return matched
 
 
 def load_table(path: Path, table: str) -> dict[str, Any]:
@@ -292,6 +342,87 @@ def cmd_run(args: argparse.Namespace) -> int:
         ) from None
 
 
+def cmd_intent(args: argparse.Namespace) -> int:
+    """Match user text against the intent router (Codex parity for /hi).
+
+    Mirrors the substring + priority matcher hi.md describes. Returns the
+    winning intent + its dispatch shape (mode, agents, parallel). When
+    multiple non-fallback intents match (ambiguity), all winners are listed
+    and the caller (Codex orchestrator) should ask for clarification.
+    """
+    text = " ".join(args.text).strip()
+    if not text:
+        raise SystemExit("atelier: intent requires a text argument. Example: intent 'review my goals'")
+    intents = load_intents()
+    matches = match_intents(text, intents)
+
+    if not matches:
+        # Shouldn't happen since fallback is included on empty, but defend.
+        payload: dict[str, Any] = {"input": text, "matched": [], "ambiguous": False, "fallback": True}
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"input: {text}\n(no intent matched and no fallback declared)")
+        return 0
+
+    is_fallback = matches[0].get("matched_pattern", "").startswith("<fallback")
+    top_priority = int(matches[0]["priority"])
+    top_matches = [m for m in matches if int(m["priority"]) == top_priority and not m.get("matched_pattern", "").startswith("<fallback")]
+    ambiguous = len(top_matches) > 1
+
+    payload = {
+        "input": text,
+        "winner": matches[0]["name"],
+        "mode": matches[0]["mode"],
+        "agents": matches[0]["agents"],
+        "parallel": matches[0]["parallel"],
+        "profile_reads": matches[0]["profile_reads"],
+        "matched_pattern": matches[0].get("matched_pattern", ""),
+        "priority": top_priority,
+        "ambiguous": ambiguous,
+        "fallback": is_fallback,
+        "all_matches": [
+            {
+                "name": m["name"],
+                "mode": m["mode"],
+                "priority": int(m["priority"]),
+                "matched_pattern": m.get("matched_pattern", ""),
+                "agents": m["agents"],
+                "parallel": m["parallel"],
+            }
+            for m in matches
+        ],
+    }
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print(f"input:    {text}")
+    print(f"winner:   intents.{payload['winner']}  (priority {top_priority}, mode {payload['mode']})")
+    if payload["matched_pattern"]:
+        print(f"matched:  {payload['matched_pattern']}")
+    if payload["agents"]:
+        agent_list = ", ".join(payload["agents"])
+        para = " (parallel)" if payload["parallel"] else " (sequential)"
+        print(f"agents:   {agent_list}{para}")
+    else:
+        print("agents:   (none — script-driven or solo orchestrator)")
+    if payload["profile_reads"]:
+        print(f"profile:  {', '.join(payload['profile_reads'])}")
+    if is_fallback:
+        print()
+        print("note: no specific patterns matched; defaulted to fallback reflection.")
+        print("      consider asking the user for confirmation before dispatching.")
+    if ambiguous:
+        print()
+        print(f"AMBIGUOUS: {len(top_matches)} intents at priority {top_priority} match this input:")
+        for m in top_matches:
+            print(f"  - intents.{m['name']}  (pattern: {m.get('matched_pattern', '')}, mode: {m['mode']})")
+        print("ask the user which intent they meant before dispatching.")
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     commands = load_commands()
     agents = load_agents()
@@ -405,6 +536,9 @@ def build_parser() -> argparse.ArgumentParser:
               python3 scripts/atelier.py status
               python3 scripts/atelier.py commands
               python3 scripts/atelier.py commands --category session --json
+              python3 scripts/atelier.py intent "review my goals"
+              python3 scripts/atelier.py intent "https://arxiv.org/abs/2501.12345"
+              python3 scripts/atelier.py intent "5/4 早上去了 X" --json
               python3 scripts/atelier.py prompt hi -- "I had a tough day"
               python3 scripts/atelier.py run hi "I had a tough day"
               python3 scripts/atelier.py run lint --exec
@@ -437,6 +571,19 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="Summarize the portable harness registries.")
     status.add_argument("--json", action="store_true", help="Emit JSON.")
     status.set_defaults(func=cmd_status)
+
+    intent = sub.add_parser(
+        "intent",
+        help="Match text against the /hi intent router and report the winning intent + dispatch shape.",
+        description=(
+            "Codex-side parity for `/hi <text>`. Reads harness/intents.toml, runs the "
+            "same substring+priority matcher hi.md describes, and reports the matched "
+            "intent (or AMBIGUOUS when multiple priority-tied intents match)."
+        ),
+    )
+    intent.add_argument("text", nargs="+", help="User text to match against intent patterns.")
+    intent.add_argument("--json", action="store_true", help="Emit JSON.")
+    intent.set_defaults(func=cmd_intent)
 
     prompt = sub.add_parser("prompt", help="Print a Codex-ready prompt for a command.")
     prompt.add_argument("command", help="Command name, without leading slash.")

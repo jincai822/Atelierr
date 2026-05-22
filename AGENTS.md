@@ -69,10 +69,32 @@ High-frequency operations. Lift these directly instead of re-deriving from `prot
 | Harness state / lint | `python3 scripts/harness_lint.py --json` |
 | Source spec for a command | `python3 scripts/atelier.py source <name>` |
 | Run a workflow | `python3 scripts/atelier.py run <name>` |
+| Route user text to an intent | `python3 scripts/atelier.py intent "<text>" --json` |
 
 For project slash commands such as `/hi`, `/review`, `/weekly`, and
 `/lint`, read the corresponding `.claude/commands/<name>.md` file and run the
 workflow under this adaptation table. (`/reflect` is an alias for `/hi`.)
+
+### Codex `/hi` parity
+
+Codex has no native slash command surface. To replicate `/hi <text>`:
+
+```bash
+# 1. Match the user's text against the intent router (same logic as hi.md).
+python3 scripts/atelier.py intent "<text>" --json
+
+# 2. Inspect the JSON. Three branches:
+#    - winner is high-confidence → run the workflow directly:
+#        python3 scripts/atelier.py run <mode-or-command> "<text>"
+#    - "fallback": true AND input has action signal (URL, imperative, date prefix)
+#      → ask the user which intent they meant (numbered prompt; Codex has no AskUserQuestion)
+#    - "ambiguous": true (two intents at the same priority match)
+#      → same: ask which one.
+# 3. When the matched intent's `parallel = true`, dispatch sub-agents (or
+#    parallel shell calls / batched tool uses) in one batch, not sequentially.
+```
+
+The matcher is canonical: it reads the same `harness/intents.toml` Claude Code uses, so Claude and Codex agree on routing without divergent logic.
 
 To discover command specs from Codex:
 

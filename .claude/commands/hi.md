@@ -26,6 +26,37 @@ When the user explicitly invoked the reflection mode (e.g., chose Reflect from t
 
 Semantic match. Some intents fire on user input shape rather than literal phrase — e.g., a date-prefixed factual narrative without analytical question (`/hi 5/4 早上去了 X, 中午吃了 Y`) routes to `intents.capture` even though no literal pattern matches. When the orchestrator decides on shape rather than phrase, the announcement still uses the matched intent name; the matching logic is documented in the per-intent sub-mode section below.
 
+### Clarify before dispatching when intent is uncertain
+
+Substring matching can produce **low-confidence wins** that the user did not intend. Before dispatching, judge confidence:
+
+| Signal | Confidence | Action |
+|---|---|---|
+| A high-priority intent matched on a multi-word phrase that clearly states the goal (`"weekly review"`, `"should I take this job"`, `"记一下"`) | high | Dispatch immediately. Routing announcement is enough. |
+| The only match comes from a short generic substring inside a longer message whose primary intent looks different (e.g., `"should I"` matched in `"I'm not sure what I should I focus on this week"` falsely routing to decision) | low | Use `AskUserQuestion` with the matched intent + one or two plausible alternates + Reflect as the safe default. Phrase: `"I read this as <intent.A>. Did you mean <intent.A>, <intent.B>, or just reflect?"` |
+| Fallback case (no patterns matched, defaulted to `intents.reflection`) AND the input has an action signal (URL, imperative verb, date-prefixed narrative) | low | Use `AskUserQuestion` with the most likely 2-3 intents the input hints at, plus Reflect. |
+| Fallback case AND the input reads as open prose / question / mood | high | Dispatch reflection. That's the design. |
+
+The bar: **never silently route to a sub-mode that opens a file, calls an external API, or starts a multi-agent chain when the user's input could have meant something materially different.** Capture (single Scribe write), Read (Reader+Researcher), Decision (Researcher+Thinker), and the big chains (Sync, Weekly, Review, Promote) all qualify. Reflection-as-default does NOT qualify; it's the safe degradation.
+
+The Codex orchestrator runs the same logic via `python3 scripts/atelier.py intent "<text>" --json` and inspects `fallback` + the heuristic above. The Codex side then offers the choice in-line as a numbered prompt rather than `AskUserQuestion` (Codex has no equivalent UI).
+
+### Parallel-dispatch guarantee
+
+When `harness/intents.toml` declares `parallel = true` for a matched intent, the orchestrator MUST dispatch the listed agents in a **single message containing multiple tool calls** (Claude Code) or **a single batch invocation** (Codex). Sequential dispatch (one agent per turn) for a parallel-marked intent is a latency regression and a contract violation.
+
+This applies to:
+- `intents.reading` (Reader + Researcher)
+- `intents.talk` (Reader + Researcher)
+- `intents.decision` (Researcher + Thinker)
+- `intents.introspect` (Reviewer + Challenger quality-gate pair)
+- `intents.reflection` (Researcher + Challenger + Scout + Synthesizer + Reviewer)
+- Any inline parallel step within a sub-mode procedure (e.g., Multi-Lens Read's Phase 1 fan-out; Deep Dive's 4-agent fan-out; Reviewer + Challenger write-back gate)
+
+The same rule applies inside sub-mode procedures whenever the procedure says "in parallel" or "fire X and Y in parallel": single message, multiple Agent / Bash tool calls, never one-per-turn. The `parallel` field in `intents.toml` is informational at the registry level; this section makes the contract operational at dispatch time.
+
+Verification: in the routing announcement, suffix `(parallel)` after the agent list when the matched intent's `parallel = true`. The user can see the contract and call it out if the orchestrator turns into sequential dispatches anyway.
+
 ### Sub-mode procedures
 
 <!-- sub-mode-procedures-map -->
