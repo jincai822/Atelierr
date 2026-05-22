@@ -10,7 +10,9 @@ Concrete implementations live in this file alongside the protocols.
 Swapping a component (new model, new DB, new ranker) means writing a new
 class that satisfies the Protocol, not touching the CLI or other components.
 
-Day-one stack: BGE_M3_Embedder + LanceStore + no reranker.
+Current stack: BGE-M3 dense + (BM25 sparse fused via RRF) + cross-encoder
+rerank (BGE-reranker-v2-m3) + tier/recency/trust adjustments. Each layer
+is a Protocol implementation and can be swapped independently.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, Sequence, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -145,20 +147,26 @@ class Reranker(Protocol):
 # Concrete: TierRecencyReranker
 # ---------------------------------------------------------------------------
 
-# Tier boosts: higher tiers get a relevance bonus
+# Tier boosts: a gentle preference for higher-certified tiers when a tie or
+# near-tie occurs after cosine retrieval. Earlier versions used 1.20/0.70
+# multipliers which crushed L2 results (most of the vault) on link-graph
+# eval queries; the magnitudes here are calibrated so the boost acts as a
+# tie-breaker, not a dominant ranking signal.
 TIER_BOOST = {
-    "L4": 1.20,   # wiki: certified knowledge
-    "L3": 1.10,   # papers/readwise: externally certified
+    "L4": 1.08,   # wiki: certified knowledge
+    "L3": 1.04,   # papers / readwise: externally certified
     "L2": 1.00,   # working notes: baseline
-    "L1": 0.70,   # raw capture/cache: low signal
+    "L1": 0.92,   # raw capture / cache: low signal but still searchable
 }
 
 # Recency half-life in days, by tier. None = no decay (knowledge is durable).
+# L2 used to decay on a 90-day half-life which severely demoted older but
+# still-valid notes (reflections, research) — disabled by default.
 TIER_HALF_LIFE = {
-    "L4": None,    # wiki entries don't stale
-    "L3": None,    # papers don't stale
-    "L2": 90,      # working notes: 90-day half-life
-    "L1": 30,      # raw capture: 30-day half-life
+    "L4": None,
+    "L3": None,
+    "L2": None,    # working notes do not decay; user controls staleness via /forget
+    "L1": 180,     # raw capture decays slowly
 }
 
 
@@ -276,7 +284,6 @@ def chunk_markdown(text: str) -> List[str]:
     if len(text) <= CHUNK_TARGET:
         return [text]
 
-    # Split at headings, keeping the heading with its section
     splits: List[str] = []
     last = 0
     for m in _HEADING_RE.finditer(text):
@@ -286,7 +293,6 @@ def chunk_markdown(text: str) -> List[str]:
     if last < len(text):
         splits.append(text[last:])
 
-    # Merge small consecutive sections to approach CHUNK_TARGET
     merged: List[str] = []
     buf = ""
     for section in splits:
@@ -296,20 +302,19 @@ def chunk_markdown(text: str) -> List[str]:
         else:
             buf += section
     if buf:
-        if merged and len(buf) < CHUNK_MIN:
-            merged[-1] += buf
-        else:
-            merged.append(buf)
+        merged.append(buf)
 
-    # Hard-cap: split any oversized chunks on paragraph boundaries
-    chunks: List[str] = []
+    if len(merged) >= 2 and len(merged[-1]) < CHUNK_MIN:
+        merged[-2] = merged[-2] + merged[-1]
+        merged.pop()
+
+    capped: List[str] = []
     for chunk in merged:
         if len(chunk) > CHUNK_MAX:
-            chunks.extend(_split_long(chunk, CHUNK_MAX))
+            capped.extend(_split_long(chunk, CHUNK_MAX))
         else:
-            chunks.append(chunk)
-
-    return chunks
+            capped.append(chunk)
+    return capped
 
 
 # ---------------------------------------------------------------------------
@@ -509,9 +514,17 @@ class Retriever:
         top_k: int = 10,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
-        """Embed query, search store, optionally rerank."""
-        vector = self.embedder.encode([text])[0]
-        results = self.store.search(vector, top_k=top_k * 3 if self.reranker else top_k, filters=filters)
+        """Embed query, search store, optionally rerank.
+
+        Embedders that expose `encode_query` (e.g. instruction-tuned Qwen3)
+        get the query-side prompt; symmetric encoders fall through to
+        `encode` which is what the corpus side used at index time.
+        """
+        encode_query = getattr(self.embedder, "encode_query", None)
+        encoder = encode_query if callable(encode_query) else self.embedder.encode
+        vector = encoder([text])[0]
+        candidate_k = top_k * 4 if self.reranker else top_k
+        results = self.store.search(vector, top_k=candidate_k, filters=filters)
 
         if self.reranker:
             results = self.reranker.rerank(text, results, top_k=top_k)
@@ -520,6 +533,291 @@ class Retriever:
 
     def stats(self) -> IndexStats:
         return self.store.stats()
+
+
+# ---------------------------------------------------------------------------
+# Hybrid retrieval: BM25 (sparse) fused with dense via Reciprocal Rank Fusion
+# ---------------------------------------------------------------------------
+
+# BM25 over indexed chunk_text. The sparse index is built lazily once per
+# process from the LanceStore contents (so it stays consistent with the dense
+# index without a separate persisted file). RRF combines the two ranked
+# lists; it's parameter-light and robust to score scale differences.
+
+RRF_K = 60  # Reciprocal Rank Fusion constant; 60 is the standard default.
+
+
+class _BM25Index:
+    """Lightweight BM25Okapi index built from a Store's stored chunks.
+
+    Tokenization is intentionally simple (regex word/CJK split, lowercased).
+    The goal is not search-engine-grade BM25 but a complementary signal to
+    the dense embedder for keyword-heavy and named-entity queries that the
+    embedder sometimes ranks below paraphrastic neighbors.
+    """
+
+    _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[一-鿿]+")
+
+    def __init__(self) -> None:
+        self._bm25 = None
+        self._meta: List[Dict[str, Any]] = []
+        self._built = False
+
+    @classmethod
+    def _tokenize(cls, text: str) -> List[str]:
+        """Tokenize a string into BM25 tokens.
+
+        For Latin words / numbers: lowercased word forms.
+        For CJK runs: emit overlapping bigrams plus each character. Bigrams
+        capture short-phrase semantics ("强化 → 强化学/化学习" for "强化学习")
+        while unigrams keep recall for one-char terms. This is a lightweight
+        substitute for a full Chinese segmenter (jieba) which would add an
+        extra dependency.
+        """
+        out: List[str] = []
+        for tok in cls._TOKEN_RE.findall(text or ""):
+            if "一" <= tok[0] <= "鿿":
+                if len(tok) == 1:
+                    out.append(tok)
+                else:
+                    for i in range(len(tok)):
+                        out.append(tok[i])
+                        if i + 1 < len(tok):
+                            out.append(tok[i:i+2])
+            else:
+                out.append(tok.lower())
+        return out
+
+    def build(self, store: "LanceStore") -> None:
+        from rank_bm25 import BM25Okapi
+        df = store._table.to_pandas()  # noqa: SLF001 (BM25 needs full corpus)
+        corpus_tokens: List[List[str]] = []
+        meta: List[Dict[str, Any]] = []
+        for _, row in df.iterrows():
+            tokens = self._tokenize(row.get("chunk_text", ""))
+            if not tokens:
+                continue
+            corpus_tokens.append(tokens)
+            meta.append({
+                "path": row.get("path", ""),
+                "chunk_id": int(row.get("chunk_id", 0)),
+                "chunk_text": row.get("chunk_text", ""),
+                "tier": row.get("tier", ""),
+                "mtime": float(row.get("mtime", 0.0)),
+            })
+        self._bm25 = BM25Okapi(corpus_tokens)
+        self._meta = meta
+        self._built = True
+
+    def search(self, query: str, top_k: int = 50) -> List[SearchResult]:
+        if not self._built or self._bm25 is None:
+            return []
+        tokens = self._tokenize(query)
+        if not tokens:
+            return []
+        scores = self._bm25.get_scores(tokens)
+        # Partial top-k via argpartition
+        n = min(top_k, len(scores))
+        if n == 0:
+            return []
+        idx = np.argpartition(-scores, n - 1)[:n]
+        idx = idx[np.argsort(-scores[idx])]
+        results: List[SearchResult] = []
+        for i in idx:
+            s = float(scores[i])
+            if s <= 0:
+                continue
+            m = self._meta[i]
+            results.append(SearchResult(
+                path=m["path"],
+                score=s,
+                chunk_id=m["chunk_id"],
+                chunk_text=m["chunk_text"],
+                tier=m["tier"],
+                mtime=m["mtime"],
+                source="local",
+            ))
+        return results
+
+
+_BM25_SINGLETON: Optional[_BM25Index] = None
+
+
+def _get_bm25(store: "LanceStore") -> _BM25Index:
+    global _BM25_SINGLETON
+    if _BM25_SINGLETON is None:
+        idx = _BM25Index()
+        idx.build(store)
+        _BM25_SINGLETON = idx
+    return _BM25_SINGLETON
+
+
+def _rrf_fuse(
+    dense: List[SearchResult],
+    sparse: List[SearchResult],
+    *,
+    k: int = RRF_K,
+) -> List[SearchResult]:
+    """Reciprocal Rank Fusion over two ranked lists keyed by document id.
+
+    fused_score(d) = sum over each list L containing d of 1/(k + rank_L(d))
+    """
+    fused: Dict[Tuple[str, int], float] = {}
+    keep: Dict[Tuple[str, int], SearchResult] = {}
+    for rank, r in enumerate(dense):
+        key = (r.path, r.chunk_id)
+        fused[key] = fused.get(key, 0.0) + 1.0 / (k + rank + 1)
+        keep[key] = r
+    for rank, r in enumerate(sparse):
+        key = (r.path, r.chunk_id)
+        fused[key] = fused.get(key, 0.0) + 1.0 / (k + rank + 1)
+        keep.setdefault(key, r)
+    ordered = sorted(fused.items(), key=lambda kv: -kv[1])
+    out: List[SearchResult] = []
+    for key, score in ordered:
+        r = keep[key]
+        out.append(SearchResult(
+            path=r.path,
+            score=round(score, 6),
+            chunk_id=r.chunk_id,
+            chunk_text=r.chunk_text,
+            tier=r.tier,
+            mtime=r.mtime,
+            source=r.source,
+        ))
+    return out
+
+
+class HybridRetriever:
+    """
+    Wraps a dense Retriever and fuses results with BM25 via RRF.
+
+    The dense retriever's reranker (if any) is bypassed for the candidate
+    pool: we want unranked dense top-N, fuse with sparse top-N, then let
+    the dense retriever's reranker (or a downstream cross-encoder) reorder
+    the fused list.
+    """
+
+    def __init__(
+        self,
+        base: Retriever,
+        *,
+        candidate_k: int = 50,
+        rrf_k: int = RRF_K,
+    ) -> None:
+        self._base = base
+        self._candidate_k = candidate_k
+        self._rrf_k = rrf_k
+
+    @property
+    def store(self) -> Any:
+        return self._base.store
+
+    @property
+    def embedder(self) -> Any:
+        return self._base.embedder
+
+    def query(
+        self,
+        text: str,
+        top_k: int = 10,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> List[SearchResult]:
+        # Dense candidates (skip the base reranker; we'll rerank after fusion)
+        encode_query = getattr(self._base.embedder, "encode_query", None)
+        encoder = encode_query if callable(encode_query) else self._base.embedder.encode
+        vector = encoder([text])[0]
+        dense = self._base.store.search(vector, top_k=self._candidate_k, filters=filters)
+        # Sparse candidates (BM25 doesn't support `filters` yet — applies to whole corpus)
+        sparse = _get_bm25(self._base.store).search(text, top_k=self._candidate_k)
+        # Filter sparse hits through the same filter set if filters are present
+        if filters:
+            sparse = [r for r in sparse if _passes_filters(r, filters)]
+        fused = _rrf_fuse(dense, sparse, k=self._rrf_k)
+        if self._base.reranker:
+            fused = self._base.reranker.rerank(text, fused, top_k=top_k)
+        return fused[:top_k]
+
+    def stats(self) -> IndexStats:
+        return self._base.stats()
+
+
+def _passes_filters(r: SearchResult, filters: Dict[str, Any]) -> bool:
+    if "path_prefix" in filters:
+        prefix = filters["path_prefix"]
+        prefixes = prefix if isinstance(prefix, list) else [prefix]
+        if not any(r.path.startswith(p) for p in prefixes):
+            return False
+    if "tier" in filters and r.tier != filters["tier"]:
+        return False
+    if "mtime_after" in filters and r.mtime < filters["mtime_after"]:
+        return False
+    if "mtime_before" in filters and r.mtime > filters["mtime_before"]:
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Cross-encoder reranker (BGE-reranker-v2-m3)
+# ---------------------------------------------------------------------------
+
+class CrossEncoderReranker:
+    """
+    Reranks candidates by scoring each (query, chunk_text) pair with a
+    cross-encoder. Cross-encoders are slower than bi-encoder retrieval but
+    consistently lift nDCG / MRR when applied to a top-N candidate set.
+
+    Default model: BAAI/bge-reranker-v2-m3 (~568M params, multilingual,
+    MPS-friendly). Loaded lazily and cached at module scope so repeated
+    queries in the same process don't re-pay model load cost.
+    """
+
+    MODEL_ID = "BAAI/bge-reranker-v2-m3"
+
+    _cached_model: Optional[Any] = None
+    _cached_device: Optional[str] = None
+
+    def __init__(self, model_id: Optional[str] = None, device: Optional[str] = None) -> None:
+        from config import resolve_device
+        self._model_id = model_id or self.MODEL_ID
+        self._device = device or resolve_device("auto")
+        self._max_length = 1024
+
+    def _model(self) -> Any:
+        if CrossEncoderReranker._cached_model is not None and \
+                CrossEncoderReranker._cached_device == self._device:
+            return CrossEncoderReranker._cached_model
+        from sentence_transformers import CrossEncoder
+        model = CrossEncoder(self._model_id, max_length=self._max_length, device=self._device)
+        CrossEncoderReranker._cached_model = model
+        CrossEncoderReranker._cached_device = self._device
+        return model
+
+    def rerank(
+        self,
+        query: str,
+        candidates: List[SearchResult],
+        top_k: int = 10,
+    ) -> List[SearchResult]:
+        if not candidates:
+            return candidates
+        model = self._model()
+        pairs = [(query, c.chunk_text or c.path) for c in candidates]
+        scores = model.predict(pairs, show_progress_bar=False)
+        scored = list(zip(candidates, scores))
+        scored.sort(key=lambda x: -float(x[1]))
+        out: List[SearchResult] = []
+        for c, s in scored[:top_k]:
+            out.append(SearchResult(
+                path=c.path,
+                score=float(s),
+                chunk_id=c.chunk_id,
+                chunk_text=c.chunk_text,
+                tier=c.tier,
+                mtime=c.mtime,
+                source=c.source,
+            ))
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -566,6 +864,95 @@ class BGEM3Embedder:
 
     def model_name(self) -> str:
         return self.MODEL_ID
+
+
+class Qwen3Embedder:
+    """
+    Embedder backed by Qwen3-Embedding via sentence-transformers.
+
+    Qwen3-Embedding is instruction-tuned: query-side inputs are prefixed with
+    a task description ("Instruct: Given a web search query, retrieve relevant
+    passages that answer the query\\nQuery:"), document-side inputs are bare.
+    Sentence-Transformers exposes this via `prompts={query, document}`;
+    `encode_query` applies the query prompt, `encode` (used at indexing time)
+    treats input as documents.
+
+    Variants:
+        Qwen/Qwen3-Embedding-0.6B  (1024 dim)
+        Qwen/Qwen3-Embedding-4B    (2560 dim)
+        Qwen/Qwen3-Embedding-8B    (4096 dim)
+    """
+
+    _DIM = {
+        "Qwen/Qwen3-Embedding-0.6B": 1024,
+        "Qwen/Qwen3-Embedding-4B": 2560,
+        "Qwen/Qwen3-Embedding-8B": 4096,
+    }
+
+    def __init__(
+        self,
+        model_id: str = "Qwen/Qwen3-Embedding-0.6B",
+        device: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        batch_size: Optional[int] = None,
+    ) -> None:
+        from sentence_transformers import SentenceTransformer
+        from config import load, resolve_device
+
+        cfg = load()
+        resolved_device = device or resolve_device(cfg["device"])
+        self._model_id = model_id
+        self._dimension = self._DIM.get(model_id, 1024)
+        self._max_tokens = max_tokens or cfg["max_tokens"]
+        self._batch_size = batch_size or cfg["encode_batch_size"]
+        self._device = resolved_device
+        self._model = SentenceTransformer(model_id, device=resolved_device)
+        self._model.max_seq_length = self._max_tokens
+
+    def encode(self, texts: List[str]) -> NDArray[np.float32]:
+        embeddings = self._model.encode(
+            texts,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+            batch_size=self._batch_size,
+            prompt_name="document",
+        )
+        return np.asarray(embeddings, dtype=np.float32)
+
+    def encode_query(self, texts: List[str]) -> NDArray[np.float32]:
+        embeddings = self._model.encode(
+            texts,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+            batch_size=self._batch_size,
+            prompt_name="query",
+        )
+        return np.asarray(embeddings, dtype=np.float32)
+
+    def dimension(self) -> int:
+        return self._dimension
+
+    def model_name(self) -> str:
+        return self._model_id
+
+
+def make_embedder(name: Optional[str] = None):
+    """Factory: pick an Embedder by short name or env var.
+
+    Resolves in priority order: explicit `name`, SEMANTIC_EMBEDDER env var,
+    default 'bge-m3'.
+    """
+    import os
+    sel = (name or os.environ.get("SEMANTIC_EMBEDDER") or "bge-m3").lower()
+    if sel in ("bge-m3", "bgem3", ""):
+        return BGEM3Embedder()
+    if sel in ("qwen3-0.6b", "qwen3", "qwen-0.6b"):
+        return Qwen3Embedder("Qwen/Qwen3-Embedding-0.6B")
+    if sel in ("qwen3-4b", "qwen-4b"):
+        return Qwen3Embedder("Qwen/Qwen3-Embedding-4B")
+    if sel in ("qwen3-8b", "qwen-8b"):
+        return Qwen3Embedder("Qwen/Qwen3-Embedding-8B")
+    raise ValueError(f"unknown embedder: {sel}")
 
 
 # ---------------------------------------------------------------------------

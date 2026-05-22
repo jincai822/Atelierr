@@ -45,24 +45,53 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from _paths import vault_root  # type: ignore[import-not-found]  # noqa: E402
 
 # Lance index is machine-local (rebuild is ~7s on MPS, not worth syncing binaries).
-_LANCE_NEW = Path.home() / ".cache" / "atelier" / "lance"
+# Per-embedder subdirs keep indices from different models isolated by dimension
+# and vocabulary; the default (bge-m3) keeps the legacy path for backwards-
+# compat with installs that already have a built index.
+_EMBEDDER_SUBDIR = {
+    "bge-m3": "lance",
+    "qwen3-0.6b": "lance-qwen3-0.6b",
+    "qwen3-4b": "lance-qwen3-4b",
+    "qwen3-8b": "lance-qwen3-8b",
+}
+
+# Mirror of make_embedder()'s alias map in semantic_backends.py. Keep these
+# two tables in sync: if make_embedder accepts a short alias, this map must
+# normalize it to the canonical key used in _EMBEDDER_SUBDIR or the lance
+# dir will mismatch the embedding model and reads will return garbage.
+_EMBEDDER_ALIAS = {
+    "bgem3": "bge-m3",
+    "": "bge-m3",
+    "qwen3": "qwen3-0.6b",
+    "qwen-0.6b": "qwen3-0.6b",
+    "qwen-4b": "qwen3-4b",
+    "qwen-8b": "qwen3-8b",
+}
+
+
+def _active_embedder_key() -> str:
+    import os
+    raw = (os.environ.get("SEMANTIC_EMBEDDER") or "bge-m3").lower()
+    return _EMBEDDER_ALIAS.get(raw, raw)
+
+
+def _lance_root_for(key: str) -> Path:
+    return Path.home() / ".cache" / "atelier" / _EMBEDDER_SUBDIR.get(key, "lance")
+
+
+_LANCE_NEW = _lance_root_for(_active_embedder_key())
 # Reads fall back to the pre-rename location so existing installs keep
 # semantic search without a forced rebuild. Writes always go to _LANCE_NEW.
 _LANCE_OLD = Path.home() / ".cache" / "reflectl" / "lance"
 
 
 def _resolve_lance_dir(prefer_new: bool = False) -> Path:
-    """Resolve the active lance index directory.
-
-    Reads prefer ~/.cache/atelier/lance/ and fall back to the legacy
-    ~/.cache/reflectl/lance/ if present. Writes (prefer_new=True) always
-    return the new path so a rebuild migrates the user.
-    """
+    """Resolve the active lance index directory for the active embedder."""
     if prefer_new:
         return _LANCE_NEW
     if _LANCE_NEW.exists():
         return _LANCE_NEW
-    if _LANCE_OLD.exists():
+    if _active_embedder_key() == "bge-m3" and _LANCE_OLD.exists():
         return _LANCE_OLD
     return _LANCE_NEW
 
@@ -243,13 +272,16 @@ def _load_trust_scores() -> dict:
         return {}
 
 
-def _build_retriever(with_reranker: bool = True):
-    """Lazy-import and construct the Retriever with day-one backends."""
-    from semantic_backends import BGEM3Embedder, LanceStore, Retriever, TierRecencyReranker
+def _build_retriever(with_reranker: bool = True, hybrid: bool = False):
+    """Lazy-import and construct the Retriever with the configured backends.
 
-    warn("loading BGE-M3 model...")
-    embedder = BGEM3Embedder()
-    warn(f"model loaded (device: {embedder._device}, dim: {embedder.dimension()}, max_tokens: {embedder._max_tokens})")
+    `hybrid=True` wraps the dense Retriever in a HybridRetriever that fuses
+    BM25 (sparse) results with dense cosine via Reciprocal Rank Fusion.
+    """
+    from semantic_backends import LanceStore, Retriever, TierRecencyReranker, make_embedder
+
+    embedder = make_embedder()
+    warn(f"embedder: {embedder.model_name()} (device: {embedder._device}, dim: {embedder.dimension()}, max_tokens: {embedder._max_tokens})")
 
     store = LanceStore(
         db_path=str(LANCE_DIR),
@@ -264,7 +296,12 @@ def _build_retriever(with_reranker: bool = True):
             warn(f"loaded trust scores for {len(trust)} wiki entries")
         reranker = TierRecencyReranker(trust_scores=trust)
 
-    return Retriever(embedder=embedder, store=store, reranker=reranker)
+    retriever = Retriever(embedder=embedder, store=store, reranker=reranker)
+    if hybrid:
+        from semantic_backends import HybridRetriever
+        warn("hybrid: BM25 + dense (RRF)")
+        retriever = HybridRetriever(base=retriever)
+    return retriever
 
 
 def real_query(args: argparse.Namespace) -> int:
@@ -278,7 +315,18 @@ def real_query(args: argparse.Namespace) -> int:
     default_path = str(vault_root())
 
     sources = set(args.sources.split(","))
-    retriever = _build_retriever()
+    retriever = _build_retriever(hybrid=getattr(args, "hybrid", False))
+
+    # Optional cross-encoder rerank over the merged top-N candidate set.
+    cross_encoder = None
+    if getattr(args, "rerank", "auto") == "ce" or getattr(args, "rerank", "auto") == "auto":
+        # In `auto` mode the cross-encoder is opt-in via env to avoid a model
+        # download on first use; explicit `ce` always loads it.
+        import os
+        if args.rerank == "ce" or os.environ.get("SEMANTIC_RERANK_CE") == "1":
+            from semantic_backends import CrossEncoderReranker
+            warn("cross-encoder rerank: BAAI/bge-reranker-v2-m3")
+            cross_encoder = CrossEncoderReranker()
 
     # Build filters from CLI args
     filters = {}
@@ -296,9 +344,14 @@ def real_query(args: argparse.Namespace) -> int:
     t0 = time.time()
     results = []
 
-    # Local search
+    # Local search. When the cross-encoder is enabled we pull a wider
+    # candidate pool from the dense+hybrid layer so the cross-encoder has
+    # enough material to reorder meaningfully.
     if "local" in sources:
-        local_results = retriever.query(args.query, top_k=args.top, filters=filters or None)
+        candidate_k = max(args.top, 30) if cross_encoder else args.top
+        local_results = retriever.query(args.query, top_k=candidate_k, filters=filters or None)
+        if cross_encoder:
+            local_results = cross_encoder.rerank(args.query, local_results, top_k=args.top)
         results.extend(local_results)
         warn(f"local: {len(local_results)} results")
 
@@ -333,7 +386,10 @@ def real_query(args: argparse.Namespace) -> int:
 
 
 def real_index(args: argparse.Namespace) -> int:
+    from semantic_backends import Retriever
     retriever = _build_retriever(with_reranker=False)
+    # cmd_index never goes through the hybrid wrapper; narrow for index_* calls.
+    assert isinstance(retriever, Retriever), "indexing requires base Retriever"
 
     if args.rebuild:
         warn("--rebuild: clearing existing index...")
@@ -448,6 +504,20 @@ def build_parser() -> argparse.ArgumentParser:
         default="local,readwise",
         help="Comma-separated search sources. Options: local, readwise. "
         "Default: local,readwise (federated).",
+    )
+    q.add_argument(
+        "--hybrid",
+        action="store_true",
+        help="Enable BM25+dense hybrid retrieval (RRF fusion). Slightly slower; "
+        "consistently improves recall on keyword-heavy queries.",
+    )
+    q.add_argument(
+        "--rerank",
+        choices=["off", "auto", "ce"],
+        default="auto",
+        help="Reranker mode. 'ce' = BGE-reranker-v2-m3 cross-encoder (best "
+        "quality, ~500ms extra per query on MPS). 'auto' = ce when "
+        "SEMANTIC_RERANK_CE=1 else off. 'off' = tier/recency only.",
     )
     q.set_defaults(func=cmd_query)
 

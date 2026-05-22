@@ -8,7 +8,7 @@ Teaching doc for the `semantic.py` CLI. Agents and command files call this scrip
 
 **Stub mode** (lexical fallback): active when `~/.cache/atelier/lance/` does not exist. Uses lexical token matching (substring `count`) over the Markdown corpus under `$OV/`. Prints a warning to stderr on every invocation so callers never mistake "empty result" for "no conceptual neighbor exists."
 
-**Real mode** (embedding-backed): active when `~/.cache/atelier/lance/` exists (sentinel). Day-one stack: BGE-M3 (1024-dim, multilingual, 8K-token context) + LanceDB (embedded columnar store, cosine distance). Documents are chunked at markdown heading boundaries (~2K chars per chunk). Index is machine-local; rebuild with `uv run scripts/semantic.py index` on each machine (~7s on MPS). No caller code changes across the swap.
+**Real mode** (embedding-backed): active when `~/.cache/atelier/lance/` exists (sentinel). Current stack: dense embedder (BGE-M3 default, Qwen3-Embedding-0.6B / 4B / 8B opt-in via `SEMANTIC_EMBEDDER`) + LanceDB (embedded columnar store, cosine distance) + BM25 sparse retrieval fused via Reciprocal Rank Fusion + optional BGE-reranker-v2-m3 cross-encoder rerank. Documents are chunked at markdown heading boundaries (~2K chars per chunk). Index is machine-local per embedder (`~/.cache/atelier/lance/`, `~/.cache/atelier/lance-qwen3-0.6b/`, ...); rebuild with `uv run scripts/semantic.py index` (~10 min on MPS for 5K-file vault with BGE-M3 / Qwen3-0.6B, ~60 min for Qwen3-4B). No caller code changes across the swap.
 
 ## CLI
 
@@ -119,8 +119,30 @@ scripts/semantic.py query "contradiction" --top 5 | \
 
 ```bash
 uv sync                                    # install deps (venv at ~/.cache/atelier/.venv)
-uv run python scripts/semantic.py index    # build index (~4K files, takes a few minutes)
+uv run python scripts/semantic.py index    # build index (~5K files, ~10 min on MPS)
 uv run python scripts/semantic.py query "curiosity vectors"  # search
+```
+
+## Quality stack
+
+`semantic.py` exposes three orthogonal quality knobs on top of the dense retrieval base. They can be combined; the eval harness (`scripts/semantic_eval.py`) measures Recall@5/10, MRR@10, nDCG@10 against a link-graph-derived gold set.
+
+| Layer | Flag / env | When it helps | Cost |
+|---|---|---|---|
+| Dense embedder | `SEMANTIC_EMBEDDER=bge-m3` (default), `qwen3-0.6b`, `qwen3-4b`, `qwen3-8b` | Qwen3 narrowly beats BGE-M3 on multilingual link-graph queries; 0.6B is the sweet spot | Each variant gets its own lance dir; rebuild needed when switching |
+| BM25 hybrid | `--hybrid` (CLI) | Named-entity / partial-title queries that the dense vector under-ranks | Adds ~5-10s/query for first-call BM25 build; negligible thereafter |
+| Cross-encoder rerank | `--rerank ce` or env `SEMANTIC_RERANK_CE=1` | Biggest single nDCG lift across stacks; biggest cost too | ~5-10s/query on MPS; first call downloads ~568M-param model |
+| Tier+recency rerank | on by default in `_build_retriever` | UX heuristic: prefers wiki and fresh notes. Hurts pure retrieval metrics by ~3-5pt nDCG when the gold set spans older L2/L3 content | Free |
+
+The eval harness lives at `scripts/semantic_eval.py`:
+
+```bash
+uv run scripts/semantic_eval.py build                  # rebuild gold set from vault wikilinks/md-links
+uv run scripts/semantic_eval.py run                    # current default stack
+uv run scripts/semantic_eval.py run --hybrid           # +BM25 RRF
+uv run scripts/semantic_eval.py run --cross-encoder    # +BGE-reranker-v2-m3
+uv run scripts/semantic_eval.py run --no-rerank        # disable TierRecency
+SEMANTIC_EMBEDDER=qwen3-0.6b uv run scripts/semantic_eval.py run --hybrid --cross-encoder
 ```
 
 ## References
