@@ -56,6 +56,8 @@ Rationale:
 
 Routine prompts implement this by calling Google Drive MCP `create_file` with a path under `$OV/<declared output_dir>/`. If the create_file fails, the prompt MUST print the full content as routine return value so the user can paste manually.
 
+**Enforcement.** `scripts/cues.py check_routine_policy` reads `$OV/_meta/routine_watch.toml` and fires a soft cue listing routines that declare neither `drive_write_enforced = true` (Drive write wired) nor `needs_drive_write_update = true` (migration debt acknowledged). The cue surfaces non-compliance at session start; resolve by editing the routine prompt to add Drive write and flipping the flag, or by acknowledging the legacy state explicitly.
+
 ## How the cue fires
 
 ```

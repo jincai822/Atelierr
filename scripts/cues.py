@@ -27,6 +27,13 @@ Output formats:
     --json             JSON array of objects (for hook consumption)
     --verbose          add a `# debug: ...` line per check explaining the decision
 
+Snooze:
+    cues.py snooze <key> [--days N]    suppress a cue until N days from today
+
+Snooze state lives at `$OV/_meta/cue_snooze.json`. Useful for soft cues
+where the user has reviewed the state and accepted the lag (e.g.,
+aggregate_freshness when the underlying aggregate update is queued).
+
 Exits 0 always. Failing to find the vault still exits 0 with no output
 so an unconfigured environment never blocks `/hi`.
 """
@@ -40,6 +47,7 @@ import sys
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
+from typing import Literal
 
 # Allow running as `uv run scripts/cues.py` from atelier root.
 sys.path.insert(0, str(Path(__file__).parent))
@@ -179,8 +187,10 @@ def check_recurring(ov: Path, today: date) -> tuple[Cue | None, str]:
     """Recurring obligations cue.
 
     Fires when one or more recurring items in $OV/gtd/recurring.md are overdue
-    (today > last-done + every) or due-soon (within 7 days). Soft cue: advisory,
-    surfaces the count and the most-overdue slug for context.
+    (today > last-done + every) or due-soon (within 7 days). Severity escalates
+    to `hard` when any item is overdue by more than 30 days — a 100-day-overdue
+    health/maintenance task should not register softer than a 7-day-old
+    zettelm capture.
     """
     sys.path.insert(0, str(Path(__file__).parent))
     try:
@@ -198,25 +208,28 @@ def check_recurring(ov: Path, today: date) -> tuple[Cue | None, str]:
         return None, f"all {len(items)} recurring items satisfied"
 
     parts = []
+    worst_days = 0
     if overdue:
         overdue.sort(key=lambda i: i.days_until_due(today))
         top = overdue[0]
-        days = -top.days_until_due(today)
-        parts.append(f"{len(overdue)} overdue (worst: {top.slug} -{days}d)")
+        worst_days = -top.days_until_due(today)
+        parts.append(f"{len(overdue)} overdue (worst: {top.slug} -{worst_days}d)")
     if due_soon:
         parts.append(f"{len(due_soon)} due ≤7d")
     listing = "; ".join(parts)
+    severity: Literal["hard", "soft"] = "hard" if worst_days > 30 else "soft"
+    mute_hint = "Run `uv run scripts/recurring.py done <slug>` when complete."
     return (
         Cue(
             key="recurring",
-            severity="soft",
+            severity=severity,
             command_path="scripts/recurring.py",
             message=(
                 f"Recurring obligations: {listing}. "
-                f"`uv run scripts/recurring.py list` to see."
+                f"`uv run scripts/recurring.py list` to see. {mute_hint}"
             ),
         ),
-        f"overdue={len(overdue)} due_soon={len(due_soon)}; soft cue",
+        f"overdue={len(overdue)} due_soon={len(due_soon)} worst={worst_days}d; {severity} cue",
     )
 
 
@@ -346,6 +359,58 @@ def check_routine_outputs(ov: Path, today: date) -> tuple[Cue | None, str]:
     )
 
 
+def check_routine_policy(ov: Path, today: date) -> tuple[Cue | None, str]:
+    """Policy compliance for remote-routine $OV-persistence.
+
+    Per `protocols/remote-routines.md` § Policy, every routine MUST persist
+    canonical output to $OV. Each routine entry in
+    `$OV/_meta/routine_watch.toml` should declare either:
+      - `drive_write_enforced = true`  (compliant), OR
+      - `needs_drive_write_update = true`  (acknowledged migration debt)
+    A routine missing both flags violates the policy without acknowledgment.
+    Surfaces the count of non-compliant routines as a soft cue.
+    """
+    import tomllib
+
+    config_path = ov / "_meta" / "routine_watch.toml"
+    if not config_path.is_file():
+        return None, "no routine_watch.toml; skip"
+    try:
+        config = tomllib.loads(config_path.read_text())
+    except (tomllib.TOMLDecodeError, OSError) as exc:
+        return None, f"toml parse failed: {exc!r}"
+    routines = config.get("routine", [])
+    if not routines:
+        return None, "no routines declared"
+    violators: list[str] = []
+    for r in routines:
+        if r.get("drive_write_enforced") is True:
+            continue
+        if r.get("needs_drive_write_update") is True:
+            continue
+        violators.append(str(r.get("name", "?")))
+    if not violators:
+        return None, f"all {len(routines)} routines compliant"
+    listing = ", ".join(violators[:3])
+    if len(violators) > 3:
+        listing += f", +{len(violators) - 3} more"
+    return (
+        Cue(
+            key="routine_policy",
+            severity="soft",
+            command_path="protocols/remote-routines.md",
+            message=(
+                f"{len(violators)} routine(s) without policy ack "
+                f"(neither `drive_write_enforced` nor `needs_drive_write_update` set): "
+                f"{listing}. Per `protocols/remote-routines.md` § Policy: every "
+                f"routine MUST persist to $OV. Set the appropriate flag in "
+                f"`$OV/_meta/routine_watch.toml`."
+            ),
+        ),
+        f"violators={len(violators)}/{len(routines)}; soft cue",
+    )
+
+
 # Registry. To add a new cue, append a `check_*` function above and
 # register it here.
 CHECKS = [
@@ -354,7 +419,44 @@ CHECKS = [
     ("recurring", check_recurring),
     ("aggregate_freshness", check_aggregate_freshness),
     ("routine_outputs", check_routine_outputs),
+    ("routine_policy", check_routine_policy),
 ]
+
+
+# --- snooze: per-key, per-day suppression ---------------------------------
+
+
+def _snooze_path(ov: Path) -> Path:
+    return ov / "_meta" / "cue_snooze.json"
+
+
+def _load_snoozes(ov: Path) -> dict[str, str]:
+    p = _snooze_path(ov)
+    if not p.is_file():
+        return {}
+    try:
+        data = json.loads(p.read_text())
+        return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _is_snoozed(snoozes: dict[str, str], key: str, today: date) -> bool:
+    val = snoozes.get(key)
+    if not val:
+        return False
+    try:
+        return date.fromisoformat(val) >= today
+    except ValueError:
+        return False
+
+
+def snooze_cue(ov: Path, key: str, until: date) -> None:
+    p = _snooze_path(ov)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    snoozes = _load_snoozes(ov)
+    snoozes[key] = until.isoformat()
+    p.write_text(json.dumps(snoozes, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
 
 
 # --- main -----------------------------------------------------------------
@@ -387,12 +489,44 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Run only the named cue (debug aid).",
     )
+    # Snooze subcommand: `cues.py snooze <key> [--days N]` writes a
+    # per-key snooze entry to $OV/_meta/cue_snooze.json. The next session
+    # skips fired cues whose key matches until the snooze expires.
+    if argv is None:
+        argv_list = sys.argv[1:]
+    else:
+        argv_list = list(argv)
+    if argv_list and argv_list[0] == "snooze":
+        if not os.environ.get("OV"):
+            print("ERROR: $OV not set; cannot snooze.", file=sys.stderr)
+            return 2
+        if len(argv_list) < 2:
+            print("ERROR: snooze requires <key> argument", file=sys.stderr)
+            return 2
+        key = argv_list[1]
+        if key not in {name for name, _ in CHECKS}:
+            print(f"ERROR: unknown cue `{key}`; valid: {sorted({n for n,_ in CHECKS})}", file=sys.stderr)
+            return 2
+        days = 1
+        if "--days" in argv_list:
+            try:
+                days = int(argv_list[argv_list.index("--days") + 1])
+            except (ValueError, IndexError):
+                print("ERROR: --days requires an integer", file=sys.stderr)
+                return 2
+        ov = vault_root()
+        until = date.today().fromordinal(date.today().toordinal() + days)
+        snooze_cue(ov, key, until)
+        print(f"snoozed `{key}` until {until.isoformat()}")
+        return 0
+
     args = parser.parse_args(argv)
 
     if not os.environ.get("OV"):
         return 0
     ov = vault_root()
     today = date.today()
+    snoozes = _load_snoozes(ov)
 
     fired: list[Cue] = []
     for name, fn in CHECKS:
@@ -403,6 +537,10 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # never let a cue check break /hi
             if args.verbose:
                 print(f"# debug: {name} raised {exc!r}", file=sys.stderr)
+            continue
+        if cue and _is_snoozed(snoozes, name, today):
+            if args.verbose:
+                print(f"# debug: {name} SNOOZED until {snoozes[name]}", file=sys.stderr)
             continue
         if args.verbose:
             tag = "FIRED" if cue else "silent"

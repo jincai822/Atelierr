@@ -112,7 +112,13 @@ The trust engine and the wiki schema only see the `<paths.wiki>/` subtree. Every
 
 ## Source of Truth
 
-`$OV/` is the only copy of the user's knowledge layer. There is no remote mirror, no two-way sync, no idempotency ledger. The filesystem may sync devices (Google Drive, iCloud, etc.); that is outside the system's concern.
+`$OV/` is the canonical copy of the user's knowledge layer. Persistence has three concerns, each handled by a different mechanism:
+
+- **Device sync**: handled by whatever filesystem $OV lives on (Google Drive, iCloud, plain folder). Outside the system's concern.
+- **Version control**: $OV may be a git repo with an optional remote (typical: a private GitHub repo); see `protocols/repo-conventions.md` for the on-disk conventions that make `$OV` render correctly through GitHub. The system does NOT auto-commit or auto-push; commits happen via user-driven git operations or via `/sync` for the zettelm submodule.
+- **Mobile-capture submodule (`zettelm`)**: a git submodule with its own remote, pushed by `/sync` after each digest. See `.claude/commands/sync.md` § "Stage and commit zettelm deletions" for the push flow. The remote URL is user-private (lives in the submodule's `.git/config`).
+
+There is no two-way sync between $OV and any other layer, and no idempotency ledger. The system reads/writes $OV directly; whatever the user has configured for backup happens transparently underneath.
 
 Daily notes (under `<paths.daily_notes>/`) are user-authored. By default the system reads them; it does not write to them. Curator dispatches that target a daily-note path are refused. **Exception (cloud-native capture):** when the user dictates raw daily-note content through chat, the Scribe agent (`daily_note` operation) records it verbatim. This is the only path by which the system writes to a daily note; the orchestrator does not transcribe directly.
 

@@ -8,3 +8,7 @@
 #
 # Example:
 #   Sample Wiki Entry Title
+
+# Scribe operation name (used in capture-fast-path table); not a private
+# filename stem despite the regex collision with `<paths.people>/Person Stub.md`.
+people stub

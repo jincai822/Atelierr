@@ -1070,26 +1070,42 @@ def check_path_registry_drift() -> list[Finding]:
     placeholder_pat = re.compile(r"<paths\.([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)?)>")
     roots = [
         ROOT / "CLAUDE.md",
+        ROOT / "AGENTS.md",
+        ROOT / "README.md",
         ROOT / "protocols",
         ROOT / ".claude",
         ROOT / "harness",
+        ROOT / "scripts",
+        ROOT / "sources",
     ]
-    # Scan both `.md` (docs read by the model) and `.toml` (description
-    # / comment fields that show up in `commands.toml`, `intents.toml`,
-    # etc.). A stale `$OV/<seg>/` literal in a TOML description is the
-    # same drift class as in a markdown doc.
+    # Scan `.md` (docs read by the model), `.toml` (description / comment
+    # fields in commands.toml, intents.toml, etc.), AND `.py` (script
+    # docstrings + comments). A stale `$OV/<seg>/` literal anywhere is the
+    # same drift class — silent rename-breakage when the registry moves.
     scan_files: list[Path] = []
     for root in roots:
-        if root.is_file() and root.suffix in (".md", ".toml"):
+        if root.is_file() and root.suffix in (".md", ".toml", ".py"):
             scan_files.append(root)
         elif root.is_dir():
             scan_files.extend(sorted(root.rglob("*.md")))
             scan_files.extend(sorted(root.rglob("*.toml")))
+            scan_files.extend(sorted(root.rglob("*.py")))
+    py_comment_re = re.compile(r"^\s*#")
     for path in scan_files:
         try:
-            text = path.read_text(encoding="utf-8")
+            raw = path.read_text(encoding="utf-8")
         except OSError:
             continue
+        # For .py files, strip pure-comment lines so explanatory text like
+        # `# accidentally rewrite $OV/wipfoo/` does not register as drift.
+        # Inline trailing comments are kept; mid-line `#` is rare and the
+        # cost of one false positive there is low.
+        if path.suffix == ".py":
+            text = "\n".join(
+                line for line in raw.splitlines() if not py_comment_re.match(line)
+            )
+        else:
+            text = raw
         unknown_literals: dict[str, int] = {}
         for m in literal_pat.finditer(text):
             seg = m.group(1)

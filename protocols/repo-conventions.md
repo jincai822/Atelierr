@@ -1,6 +1,6 @@
 ## Purpose
 
-GitHub-canonical conventions for the `Zettel` repo (the synced `$OV` markdown layer). These rules optimize for: clean GitHub UI rendering, efficient agent navigation, sustainable folder browsing, and a plain-markdown vault that stays ecosystem-agnostic (no editor-specific carry-over).
+GitHub-canonical conventions for `$OV` — the user's markdown vault. The typical setup is a git repo with a private remote, but these rules apply equally when $OV is a plain folder synced via Google Drive / iCloud (the conventions still make GitHub-style rendering work when the user views via web). They optimize for: clean GitHub UI rendering, efficient agent navigation, sustainable folder browsing, and a plain-markdown vault that stays ecosystem-agnostic (no editor-specific carry-over).
 
 Companion: `protocols/semantic-vocabulary.md` (backlink and tag conventions).
 
