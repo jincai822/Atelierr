@@ -21,6 +21,16 @@ You verify by opening any of today's daily notes and seeing names / places / res
 
 ## Flow
 
+### 0. Pull the submodule (orchestrator, mandatory first step)
+
+The zettelm submodule has its own remote; mobile captures are pushed there from the phone. The local working copy can be arbitrarily stale. Always pull before scanning so the digest operates on the full inbox, not a stale snapshot.
+
+```bash
+Bash: git -C "<paths.zettelm>" pull origin main
+```
+
+If the pull fails (network down, auth expired, no remote configured), warn the user and ask whether to proceed with local-only content or abort. Do not silently scan stale local state.
+
 ### 1. Scan and classify (orchestrator)
 
 ```bash
