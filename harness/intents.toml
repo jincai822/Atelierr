@@ -42,6 +42,12 @@
 # current-model assumptions (model ids, token budgets, specific tool names).
 # `pattern` is annotation only — see `protocols/orchestrator.md` § Pattern
 # field contract for the no-branching rule and the closed 5-value enum.
+#
+# Coverage feedback loop: unclassified `/hi` inputs are logged for batch
+# review. Phrases recurring above the threshold are candidate triggers for
+# rows here. Contract, schema, threshold, and report workflow live in
+# `protocols/intent-coverage.md` (single source of truth — do not restate
+# path / threshold here).
 
 # Capture also matches on input shape, not only literal phrases: a date-prefixed
 # factual narrative without analytical question (e.g., `5/4 早上去了 X, 中午
@@ -302,6 +308,11 @@ parallel = false
 # Curate Readwise inbox against active goals. Procedure:
 # .claude/commands/curate.md. Dispatches a general-purpose ad-hoc agent
 # (not a named cercle role), so `agents = []`; pattern is solo.
+#
+# Priority 23: above explore (22) so Readwise-specific patterns ("recent
+# saves", "my saves") win over explore's generic "what's interesting" when
+# both could substring-match. All curate patterns are inbox/readwise-scoped,
+# so false positives against explore are structurally unlikely.
 [intents.curate]
 patterns = [
     "triage inbox",
@@ -310,11 +321,16 @@ patterns = [
     "curate readwise",
     "readwise triage",
     "score my inbox",
+    "recent saves",
+    "my saves",
+    "browse saves",
+    "browse inbox",
+    "readwise saves",
 ]
 mode = "curate-inbox"
 agents = []
 profile_reads = ["identity.md", "directions.md"]
-priority = 15
+priority = 23
 pattern = "solo"
 expected_subagent_count = 1
 parallel = false

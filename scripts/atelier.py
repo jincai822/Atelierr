@@ -17,10 +17,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import textwrap
 import tomllib
+import unicodedata
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +33,12 @@ AGENTS_PATH = ROOT / "harness" / "agents.toml"
 MODELS_PATH = ROOT / "harness" / "models.toml"
 CAPABILITIES_PATH = ROOT / "harness" / "capabilities.toml"
 INTENTS_PATH = ROOT / "harness" / "intents.toml"
+
+INTENT_MISS_FALLBACK_DIR = Path.home() / ".cache" / "atelier" / "intent_misses"
+INTENT_MISS_KINDS = ("fallback", "ambiguous", "low_confidence")
+INTENT_MISS_RUNTIMES = ("claude-code", "codex")
+INTENT_MISS_DISTINCT_DAYS_THRESHOLD = 3
+INTENT_MISS_KINDS_COL_WIDTH = len(",".join(sorted(INTENT_MISS_KINDS)))
 
 
 def load_commands() -> dict[str, dict[str, Any]]:
@@ -423,6 +432,324 @@ def cmd_intent(args: argparse.Namespace) -> int:
     return 0
 
 
+def resolve_intent_miss_dir() -> Path:
+    """Where intent-miss JSONL files live.
+
+    Prefers `$OV/_meta/intent_misses/` when `$OV` is set (the durable Atelier
+    location alongside `shadow_logs/`). Falls back to
+    `~/.cache/atelier/intent_misses/` otherwise so tests / CI / fresh checkouts
+    without `$OV` can still exercise the round trip.
+    """
+    ov = os.environ.get("OV")
+    if ov:
+        return Path(ov) / "_meta" / "intent_misses"
+    return INTENT_MISS_FALLBACK_DIR
+
+
+def write_intent_miss(payload: dict[str, Any]) -> Path | None:
+    """Append one JSONL line to today's intent-miss log.
+
+    Returns the file path on success, or None on OSError. Never raises:
+    miss logging is best-effort and must not block a live `/hi` flow.
+    """
+    miss_dir = resolve_intent_miss_dir()
+    try:
+        miss_dir.mkdir(parents=True, exist_ok=True)
+        log_file = miss_dir / f"{date.today().isoformat()}.jsonl"
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        return log_file
+    except OSError:
+        return None
+
+
+def cmd_intent_log(args: argparse.Namespace) -> int:
+    """Record an unclassified `/hi` invocation for batch coverage review.
+
+    Called by the orchestrator after deciding routing. Three trigger cases
+    (see `.claude/commands/hi.md` → "Miss Logging"):
+      - fallback: `intents.reflection` won by default; nothing else matched.
+      - ambiguous: 2+ non-fallback intents tied at the top priority.
+      - low_confidence: a generic substring matched inside a longer message
+        whose primary intent looked different; orchestrator used
+        `AskUserQuestion` to confirm.
+    """
+    raw = args.input.strip()
+    if not raw:
+        sys.stderr.write("atelier: intent-log skipped (empty --input)\n")
+        return 0
+    try:
+        priority_val: int | None = (
+            int(args.initial_priority) if args.initial_priority is not None else None
+        )
+    except (TypeError, ValueError):
+        sys.stderr.write(
+            f"atelier: intent-log dropping --initial-priority (not an int: {args.initial_priority!r})\n"
+        )
+        priority_val = None
+    payload: dict[str, Any] = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "runtime": args.runtime,
+        "raw_input": raw,
+        "match_kind": args.match_kind,
+        "initial_match": {
+            "name": args.initial_name or None,
+            "priority": priority_val,
+            "matched_pattern": args.initial_pattern or None,
+        },
+    }
+    if args.candidates:
+        try:
+            payload["ambiguity_candidates"] = json.loads(args.candidates)
+        except json.JSONDecodeError as e:
+            sys.stderr.write(
+                f"atelier: intent-log dropping malformed --candidates (preserved as raw string): {e}\n"
+            )
+            payload["ambiguity_candidates_raw"] = args.candidates
+    if args.clarified_to:
+        payload["clarified_to"] = args.clarified_to
+    if args.final_dispatch:
+        payload["final_dispatch"] = args.final_dispatch
+    if args.notes:
+        payload["notes"] = args.notes
+
+    path = write_intent_miss(payload)
+    if path is None:
+        sys.stderr.write("atelier: intent-log write failed; skipped (best-effort, never blocks /hi)\n")
+        return 0
+    if not args.quiet:
+        print(f"intent-log: {path}")
+    return 0
+
+
+def cmd_intent_hook(args: argparse.Namespace) -> int:
+    """`UserPromptSubmit` hook entry — out-of-band intent-miss capture.
+
+    Reads the hook's stdin JSON (Claude Code hook contract — `prompt`,
+    `session_id`, `transcript_path`, etc), detects `/hi <text>` invocations,
+    runs the same deterministic matcher the orchestrator does, and auto-logs
+    the fallback / ambiguous branches without the orchestrator ever calling
+    a Bash tool. Silent on success (no stdout) so the hook output never feeds
+    back into the orchestrator's context.
+
+    Cases the hook CANNOT classify (intentional carve-out — the orchestrator
+    retains the in-band `intent-log` path for these):
+      - `low_confidence`: heuristic over message shape; LLM judgment lives
+        in `.claude/commands/hi.md` § Clarify before dispatching.
+      - Post-clarification enrichment (`clarified_to`, `final_dispatch`):
+        only known after `AskUserQuestion` resolves.
+
+    Best-effort throughout: every failure path returns 0 silently. A broken
+    hook must never block a live `/hi` invocation.
+    """
+    try:
+        data = json.loads(sys.stdin.read())
+    except (json.JSONDecodeError, OSError, ValueError):
+        return 0
+    if not isinstance(data, dict):
+        return 0
+    prompt = str(data.get("prompt", ""))
+    if not prompt.startswith("/hi "):
+        return 0
+    user_text = prompt[len("/hi "):].strip()
+    if not user_text:
+        return 0  # bare `/hi` opens the menu; nothing to classify
+    try:
+        intents = load_intents()
+        matches = match_intents(user_text, intents)
+    except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError):
+        return 0
+    if not matches:
+        return 0
+    is_fallback = matches[0].get("matched_pattern", "").startswith("<fallback")
+    top_priority = int(matches[0]["priority"])
+    top_matches = [
+        m for m in matches
+        if int(m["priority"]) == top_priority
+        and not m.get("matched_pattern", "").startswith("<fallback")
+    ]
+    is_ambiguous = len(top_matches) > 1
+    if not (is_fallback or is_ambiguous):
+        return 0
+    payload: dict[str, Any] = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "runtime": args.runtime,
+        "raw_input": user_text,
+        "match_kind": "fallback" if is_fallback else "ambiguous",
+        "initial_match": {
+            "name": matches[0]["name"],
+            "priority": top_priority,
+            "matched_pattern": matches[0].get("matched_pattern", ""),
+        },
+        "logged_by": "user_prompt_submit_hook",
+    }
+    if is_ambiguous:
+        payload["ambiguity_candidates"] = [
+            {
+                "name": m["name"],
+                "priority": int(m["priority"]),
+                "matched_pattern": m.get("matched_pattern", ""),
+            }
+            for m in top_matches
+        ]
+    if data.get("session_id"):
+        payload["session_id"] = str(data["session_id"])
+    write_intent_miss(payload)
+    return 0
+
+
+def _normalize_phrase(raw: Any) -> str:
+    """Normalize a raw_input string for recurrence aggregation.
+
+    NFKC unifies width / form differences (full-width vs half-width CJK
+    punctuation, ligatures); collapsing whitespace + casefold makes
+    `"improve  the repo"` and `"Improve The Repo"` aggregate together.
+    Trailing length cap matches the original ≤200-char clamp. Punctuation
+    is NOT stripped — `url.com` and `Yes.` should not collide.
+    """
+    s = unicodedata.normalize("NFKC", str(raw))
+    return " ".join(s.split()).casefold()[:200]
+
+
+def cmd_intent_misses(args: argparse.Namespace) -> int:
+    """Aggregate the intent-miss log for batch coverage review.
+
+    Use to spot phrases that recur often enough to become trigger candidates
+    for an existing or new intent. Signal: same phrase logged on
+    INTENT_MISS_DISTINCT_DAYS_THRESHOLD+ distinct file-dates → strong
+    candidate for a `harness/intents.toml` pattern addition.
+    """
+    try:
+        since = date.fromisoformat(args.since) if args.since else None
+    except ValueError:
+        raise SystemExit(
+            f"atelier: --since must be YYYY-MM-DD (got {args.since!r})"
+        ) from None
+    miss_dir = resolve_intent_miss_dir()
+    if not miss_dir.is_dir():
+        if args.json:
+            print(json.dumps({"events": [], "since": args.since, "miss_dir": str(miss_dir)}))
+        else:
+            print(f"intent-misses: no log directory at {miss_dir}")
+            print("Nothing logged yet. Directory is created on first miss.")
+        return 0
+
+    # Pair every event with the date of the file it came from. file_date is
+    # the consumer-side ground truth for the "distinct days" coverage signal
+    # AND for --since filtering — keeps both axes consistent, defending the
+    # signal against TZ slips between writer wall-clock and event timestamps.
+    events: list[tuple[date, dict[str, Any]]] = []
+    for p in sorted(miss_dir.glob("*.jsonl")):
+        try:
+            file_date = date.fromisoformat(p.stem)
+        except ValueError:
+            continue
+        if since and file_date < since:
+            continue
+        try:
+            for line in p.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(ev, dict):
+                    events.append((file_date, ev))
+        except OSError:
+            continue
+
+    if args.match_kind:
+        events = [(d, e) for (d, e) in events if e.get("match_kind") == args.match_kind]
+    if args.runtime:
+        events = [(d, e) for (d, e) in events if e.get("runtime") == args.runtime]
+
+    kind_counts: dict[str, int] = {}
+    phrase_stats: dict[str, dict[str, Any]] = {}
+    empty_phrase_count = 0
+    for file_date, ev in events:
+        kind = str(ev.get("match_kind", "(unknown)"))
+        kind_counts[kind] = kind_counts.get(kind, 0) + 1
+        phrase = _normalize_phrase(ev.get("raw_input", ""))
+        if not phrase:
+            empty_phrase_count += 1
+            continue
+        entry = phrase_stats.setdefault(
+            phrase,
+            {"count": 0, "first_seen": None, "last_seen": None, "kinds": set(), "days": set()},
+        )
+        entry["count"] += 1
+        entry["kinds"].add(kind)
+        entry["days"].add(file_date.isoformat())
+        ts = ev.get("timestamp")
+        if isinstance(ts, str):
+            if entry["first_seen"] is None or ts < entry["first_seen"]:
+                entry["first_seen"] = ts
+            if entry["last_seen"] is None or ts > entry["last_seen"]:
+                entry["last_seen"] = ts
+
+    if args.json:
+        payload = {
+            "since": args.since,
+            "miss_dir": str(miss_dir),
+            "total_events": len(events),
+            "by_kind": kind_counts,
+            "events_with_empty_phrase": empty_phrase_count,
+            "phrases": [
+                {
+                    "phrase": phrase,
+                    "count": pc["count"],
+                    "distinct_days": len(pc["days"]),
+                    "first_seen": pc["first_seen"],
+                    "last_seen": pc["last_seen"],
+                    "kinds": sorted(pc["kinds"]),
+                }
+                for phrase, pc in sorted(
+                    phrase_stats.items(), key=lambda kv: (-kv[1]["count"], kv[0])
+                )
+            ],
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 0
+
+    print(f"Intent miss log: {miss_dir}")
+    print(f"Total events: {len(events)}" + (f"  (since {args.since})" if args.since else ""))
+    print()
+    print("By match kind:")
+    if not kind_counts:
+        print("  (none)")
+    for k in sorted(kind_counts.keys()):
+        print(f"  {k}: {kind_counts[k]}")
+    print()
+    if not phrase_stats:
+        print("No phrases logged.")
+        return 0
+    sorted_phrases = sorted(phrase_stats.items(), key=lambda kv: (-kv[1]["count"], kv[0]))
+    if empty_phrase_count:
+        print(f"({empty_phrase_count} event(s) had empty raw_input — counted in by-kind totals, omitted from the phrase table below.)")
+    print(f"Top phrases (showing up to {args.top}):")
+    col_w = INTENT_MISS_KINDS_COL_WIDTH
+    print(f"  count  days  {'kinds'.ljust(col_w)}  phrase")
+    for phrase, pc in sorted_phrases[: args.top]:
+        kinds_str = ",".join(sorted(pc["kinds"])).ljust(col_w)
+        days_str = f"{len(pc['days']):>4}"
+        count_str = f"{pc['count']:>5}"
+        print(f"  {count_str}  {days_str}  {kinds_str}  {phrase}")
+    repeaters = [
+        (phrase, pc) for phrase, pc in sorted_phrases
+        if len(pc["days"]) >= INTENT_MISS_DISTINCT_DAYS_THRESHOLD
+    ]
+    if repeaters:
+        print()
+        print(
+            f"Coverage signal: {len(repeaters)} phrase(s) recurred across "
+            f"{INTENT_MISS_DISTINCT_DAYS_THRESHOLD}+ distinct days."
+        )
+        print("Consider adding a trigger to harness/intents.toml for these.")
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     commands = load_commands()
     agents = load_agents()
@@ -539,6 +866,11 @@ def build_parser() -> argparse.ArgumentParser:
               python3 scripts/atelier.py intent "review my goals"
               python3 scripts/atelier.py intent "https://arxiv.org/abs/2501.12345"
               python3 scripts/atelier.py intent "5/4 早上去了 X" --json
+              python3 scripts/atelier.py intent-log --input "improve the repo" \\
+                --match-kind fallback --runtime claude-code \\
+                --initial-name reflection --initial-priority 0 \\
+                --initial-pattern "<fallback>" --final-dispatch "engineering-task"
+              python3 scripts/atelier.py intent-misses --since 2026-05-01
               python3 scripts/atelier.py prompt hi -- "I had a tough day"
               python3 scripts/atelier.py run hi "I had a tough day"
               python3 scripts/atelier.py run lint --exec
@@ -584,6 +916,88 @@ def build_parser() -> argparse.ArgumentParser:
     intent.add_argument("text", nargs="+", help="User text to match against intent patterns.")
     intent.add_argument("--json", action="store_true", help="Emit JSON.")
     intent.set_defaults(func=cmd_intent)
+
+    intent_log = sub.add_parser(
+        "intent-log",
+        help="Record an unclassified /hi invocation for batch coverage review.",
+        description=(
+            "Append one JSONL line to $OV/_meta/intent_misses/YYYY-MM-DD.jsonl "
+            "(falls back to ~/.cache/atelier/intent_misses/ when $OV is unset). "
+            "Call from the orchestrator after a /hi invocation that fell back, "
+            "was ambiguous, or was clarified due to low confidence. "
+            "See protocols/intent-coverage.md."
+        ),
+    )
+    intent_log.add_argument("--input", required=True, help="Raw /hi <text> the user typed.")
+    intent_log.add_argument(
+        "--match-kind", required=True, choices=INTENT_MISS_KINDS,
+        help="Why this counted as a miss.",
+    )
+    intent_log.add_argument(
+        "--runtime", default="claude-code", choices=INTENT_MISS_RUNTIMES,
+        help="Which orchestrator runtime logged the miss.",
+    )
+    intent_log.add_argument("--initial-name", default=None, help="Name of the initial matched intent (e.g., 'reflection' for fallback).")
+    intent_log.add_argument("--initial-priority", default=None, help="Priority of the initial match.")
+    intent_log.add_argument("--initial-pattern", default=None, help="Pattern that matched (or '<fallback>' for the fallback case).")
+    intent_log.add_argument(
+        "--candidates", default=None,
+        help=(
+            "For ambiguous: JSON array of {name, priority, matched_pattern}. "
+            "Key name matches `intent --json` output verbatim — pass the matcher's "
+            "objects straight through without renaming."
+        ),
+    )
+    intent_log.add_argument("--clarified-to", default=None, help="Intent name the user picked from the clarification menu.")
+    intent_log.add_argument("--final-dispatch", default=None, help="What was actually dispatched (intent name, or free-text label like 'engineering-task').")
+    intent_log.add_argument("--notes", default=None, help="Free-text orchestrator note about why this was a miss.")
+    intent_log.add_argument("--quiet", action="store_true", help="Don't print the appended path on success.")
+    intent_log.set_defaults(func=cmd_intent_log)
+
+    intent_misses = sub.add_parser(
+        "intent-misses",
+        help="Aggregate the intent-miss log for batch coverage review.",
+        description=(
+            "Print counts by match_kind and the top distinct phrases from the "
+            "intent-miss log. Phrases recurring across 3+ distinct days are "
+            "flagged as candidate triggers for harness/intents.toml."
+        ),
+    )
+    intent_misses.add_argument(
+        "--since",
+        help=(
+            "YYYY-MM-DD; only include events from this date forward. "
+            "Filter applies at FILE-DATE granularity (the log file's filename "
+            "date), not at event-timestamp granularity — a TZ-skewed event "
+            "near midnight is grouped with its file's date."
+        ),
+    )
+    intent_misses.add_argument(
+        "--match-kind", choices=INTENT_MISS_KINDS,
+        help="Filter to one match_kind (vocabulary matches intent-log --match-kind).",
+    )
+    intent_misses.add_argument("--runtime", choices=INTENT_MISS_RUNTIMES, help="Filter to one runtime.")
+    intent_misses.add_argument("--top", type=int, default=20, help="Top-N distinct phrases to display (default 20).")
+    intent_misses.add_argument("--json", action="store_true", help="Emit JSON.")
+    intent_misses.set_defaults(func=cmd_intent_misses)
+
+    intent_hook = sub.add_parser(
+        "intent-hook",
+        help="UserPromptSubmit hook entry — out-of-band intent-miss capture (silent).",
+        description=(
+            "Wire as a Claude Code UserPromptSubmit hook command. Reads the "
+            "hook's stdin JSON, detects /hi <text>, runs the deterministic "
+            "matcher, and auto-logs fallback/ambiguous to "
+            "$OV/_meta/intent_misses/YYYY-MM-DD.jsonl. Silent on success — no "
+            "stdout — so the orchestrator's context stays clean. "
+            "Best-effort: every failure returns 0."
+        ),
+    )
+    intent_hook.add_argument(
+        "--runtime", default="claude-code", choices=INTENT_MISS_RUNTIMES,
+        help="Which orchestrator runtime is firing this hook.",
+    )
+    intent_hook.set_defaults(func=cmd_intent_hook)
 
     prompt = sub.add_parser("prompt", help="Print a Codex-ready prompt for a command.")
     prompt.add_argument("command", help="Command name, without leading slash.")
