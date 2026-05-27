@@ -35,6 +35,20 @@ alias_of = "hi"
 description = "Alias of /hi."
 codex_prompt = "Run the /hi workflow using `.claude/commands/hi.md` and the runtime adapter protocol."
 
+[commands.daily-reflection]
+source = ".claude/commands/daily-reflection.md"
+category = "session"
+status = "portable-adapted"
+description = "Daily reflection procedure — coaching flow grounded in profile, recent notes, and open TODOs. Routed via /hi or invoked directly."
+codex_prompt = "Run the /daily-reflection workflow using `.claude/commands/daily-reflection.md` and the runtime adapter protocol."
+
+[commands.read]
+source = ".claude/commands/read.md"
+category = "session"
+status = "portable-adapted"
+description = "Read & Discuss procedure — owns the three Read flows (Read & Discuss, Focused Read, Multi-Lens Read) and the Reader/Scholar selection, Readwise prefetch, and source-backup sub-procedures."
+codex_prompt = "Run the /read workflow using `.claude/commands/read.md` and the runtime adapter protocol."
+
 [commands.weekly]
 source = ".claude/commands/weekly.md"
 category = "session"
