@@ -1781,7 +1781,7 @@ def _format_used_by_block(refs: list[str]) -> str:
     return "\n".join(lines)
 
 
-MAX_DOC_INDIRECTION_DEPTH = 3
+MAX_DOC_INDIRECTION_DEPTH = 4
 DOC_LINT_ROOTS = (".claude/", "protocols/", "harness/", "scripts/")
 DOC_LINT_TOPS = ("AGENTS.md", "CLAUDE.md", "README.md")
 
@@ -1958,6 +1958,14 @@ def check_shadow_group_start() -> list[Finding]:
     contain the substring `shadow.py group-start`. Site files that don't
     yet exist (the design names them but the user has not yet instrumented
     them) emit INFO; existing files without the invocation emit ERROR.
+
+    TODO(shadow-log F1'/F4): cross-validate expected_dispatches against
+    voices.<leg> in harness/agents.toml AND optional subagent_type per
+    multi-leg call site. Today the orchestrator builds EXPECTED from a
+    voices.native read but nothing enforces that the model identity it
+    emits equals the model identity the PostToolUse hook resolves at log
+    time. A drift between the two silently empties native legs in the
+    report. Follow-up after Phase 2 ships.
     """
     sites = (
         ".claude/commands/system-review.md",

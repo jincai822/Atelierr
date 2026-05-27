@@ -61,25 +61,18 @@ Based on the decision type, select the right pairing from `frameworks/cross-vali
 
 **Dual-leg dispatch (cross-provider).** `/decision` is a multi-leg call site (`protocols/orchestrator.md` § "Currently-enabled multi-leg call sites"). Fire both Thinker legs in parallel — one message with two tool calls.
 
-**Before dispatch — shadow group setup (best-effort):** open a shadow-log group so the report can pair the two Thinker legs and compute cost + verdict agreement. Best-effort: if `shadow.py group-start` fails (e.g., $OV unset), the dual-leg dispatch still proceeds; the call just won't be correlated in `shadow.py report`.
+**Before dispatch — shadow group setup (best-effort):** Run a single Bash call to create the witness file. Parse the UUID from the output line `export ATELIER_SHADOW_GROUP="<uuid>"` and **remember it** for the direct-API leg and for cleanup. Best-effort: if the call fails, proceed without correlation.
 
 ```bash
 NATIVE_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('thinker',{}).get('voices',{}).get('native',''))")
 DIRECT_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('thinker',{}).get('voices',{}).get('direct',''))")
-EXPECTED='[{"model":"'"$NATIVE_MODEL"'","leg":"native"},{"model":"'"$DIRECT_MODEL"'","leg":"direct"}]'
-eval "$(python3 scripts/shadow.py group-start --task decision --expected "$EXPECTED" 2>/dev/null || true)"
-trap 'unset ATELIER_SHADOW_GROUP ATELIER_TASK_TYPE' EXIT
+EXPECTED='[{"model":"'"$NATIVE_MODEL"'","leg":"native","subagent_type":"thinker"},{"model":"'"$DIRECT_MODEL"'","leg":"direct"}]'
+python3 scripts/shadow.py group-start --task decision --expected "$EXPECTED"
 ```
 
-After the Agent (native Thinker) returns, write its synthetic shadow-log entry (the Bash leg auto-logs via env vars):
+**Do NOT use `eval` + `trap EXIT` here.** Claude Code runs each Bash call in an isolated subprocess; an EXIT trap would destroy the witness immediately when the Bash call returns, before the Agent dispatch fires. The witness file must stay open on disk until explicit `group-close` after both legs complete.
 
-```bash
-python3 scripts/shadow.py log \
-  --group "$ATELIER_SHADOW_GROUP" \
-  --task decision --model "$NATIVE_MODEL" --leg native \
-  --prompt-file <agent-prompt-text> --response-file <agent-response>
-```
-
+**Native-leg logging is in-band.** After the Agent returns, log its response via `shadow.py log` with `--prompt-text` and `--response-text`. PostToolUse hooks do not fire for Agent tool calls in Claude Code, so the orchestrator must log native legs explicitly.
 
 - `Agent` tool, `subagent_type: thinker`, prompt: "Apply <primary framework> + <cross-validation framework> to this decision: <user's framing>. Read the framework files yourself from `frameworks/`. Return verdict + reasoning."
 - `Bash` tool — must **inline** the framework files in the prompt, because the direct leg has no filesystem access and would otherwise apply a generic model-memory version of each framework. Resolve framework display names to slugged filenames (lowercase, hyphen-separated): "First Principles" → `first-principles.md`, "Wardley Mapping" → `wardley-mapping.md`, etc. Confirm `ls frameworks/` matches before dispatch.
@@ -95,8 +88,23 @@ python3 scripts/shadow.py log \
     cat "$REPO/$PRIMARY"
     printf '\n\n--- CROSS-VALIDATION FRAMEWORK (%s) ---\n' "$CROSS"
     cat "$REPO/$CROSS"
-  } | uv run scripts/chat_completion.py --model "$DIRECT_MODEL" --max-tokens 0 --prompt -
+  } | uv run scripts/chat_completion.py --model "$DIRECT_MODEL" --max-tokens 0 --shadow-group "<SHADOW_UUID>" --task-type decision --prompt -
   ```
+
+Replace `<SHADOW_UUID>` with the UUID captured from `group-start` output. If group-start failed or was skipped, omit `--shadow-group` and `--task-type`.
+
+**After both legs return — log native leg and close the shadow group (best-effort):**
+
+```bash
+NATIVE_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('thinker',{}).get('voices',{}).get('native',''))")
+python3 scripts/shadow.py log \
+  --group "<SHADOW_UUID>" --task decision --model "$NATIVE_MODEL" --leg native \
+  --prompt-text "<agent prompt summary>" \
+  --response-text "<full agent response text>"
+python3 scripts/shadow.py group-close --group "<SHADOW_UUID>" --mark-closed
+```
+
+Replace `<agent prompt summary>` with a short summary of the dispatch prompt, and `<full agent response text>` with the Agent's actual response. If group-start was skipped, skip this step too.
 
 Wait for both before synthesizing. Surface any disagreement on framework choice or verdict before presenting to the user. If the direct leg soft-skips (exit 2 — api_env unset), note `Cross-provider check downgraded: thinker ran native-only (<reason>)` per orchestrator's operational-visibility rule, and continue with the native leg.
 

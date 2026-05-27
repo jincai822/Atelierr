@@ -7,34 +7,55 @@ Companion to `scripts/chat_completion.py`. Mechanism:
   - A multi-leg call site (e.g., /system-review Step 1c, /decision,
     scripts/review.sh) opens a shadow group via `shadow.py group-start`,
     which writes a witness file under `~/.cache/atelier/shadow_groups/`
-    and emits a UUID + env-export line to stdout.
+    and emits a UUID + env-export line to stdout. The site MUST also
+    register an EXIT trap that calls `shadow.py group-close` so the
+    witness is removed before the 30-min recency window expires —
+    otherwise the PostToolUse hook can mis-correlate later, unrelated
+    Agent dispatches into the still-open group.
   - Direct-API legs auto-log via chat_completion.py reading env vars
     (ATELIER_SHADOW_GROUP, ATELIER_TASK_TYPE).
-  - Native legs (Claude Code Agent tool) log via `shadow.py log`, which
-    writes a synthetic JSONL entry with char_approx token estimates
-    (Agent tool doesn't surface usage to parents).
+  - Native legs (Claude Code Agent tool) are auto-captured by the
+    PostToolUse(Agent) hook running `shadow.py log-from-hook`. The
+    hook scans witness files, resolves the agent's subagent_type to
+    its `voices.native` model identity via `harness/agents.toml`, and
+    matches against the witness's `expected_dispatches`. Manual
+    `shadow.py log --leg native` remains available for ad-hoc replay /
+    fallback when the hook can't be wired (e.g., test fixtures).
+  - Codex legs are still logged in-band via `shadow.py log --leg codex`
+    (no PostToolUse(Bash) hook today).
   - `shadow.py report` aggregates all logs, deduplicates, groups by UUID,
     extracts verdict tokens per task type, computes cost retroactively
     from the current `harness/model_costs.toml`, and emits per-task-type
     cost / latency / verdict-agreement comparisons.
 
 Subcommands:
-    group-start --task <name> --expected '[{"model":"X","leg":"Y"}, ...]'
+    group-start --task <name> --expected '[{"model":"X","leg":"Y","subagent_type":"Z"}, ...]'
         Open a shadow group; print UUID and shell-eval-able env exports.
+        Optional `subagent_type` in each expected_dispatches entry
+        disambiguates when multiple agents share a native model identity.
+
+    group-close --group <uuid> [--mark-closed]
+        Close a witness — delete by default, or write `closed_at` field
+        with --mark-closed. Call from the multi-leg site's EXIT trap.
 
     log --group <uuid> --task <name> --model <id> --leg <native|direct|codex>
         --prompt-file <path> --response-file <path> [--prompt-stdin]
         [--response-stdin]
-        Append a synthetic native/codex leg entry to the same JSONL files
-        chat_completion.py writes to. Char_approx usage estimate; report
-        flags it.
+        Append a synthetic native/codex leg entry. For native legs the
+        PostToolUse hook is the primary path; this stays for codex legs
+        and ad-hoc replay.
+
+    log-from-hook
+        PostToolUse(Agent) hook entry — auto-log native legs. Wire as a
+        Claude Code PostToolUse hook with matcher 'Agent'. Silent.
 
     report [--since YYYY-MM-DD] [--task-type X] [--accept-stale-costs] [--json]
         Aggregate logs and emit cost/verdict-agreement comparison.
 
-See `protocols/backend-taxonomy.md` for the SOT/role/failure-mode contract
-and `protocols/orchestrator.md` § Voice Dispatch for when multi-leg call
-sites use this. Stdlib-only by design.
+See `protocols/backend-taxonomy.md` for the SOT/role/failure-mode contract,
+`protocols/orchestrator.md` § Voice Dispatch for when multi-leg call sites
+use this, and `protocols/shadow-log.md` § Mechanism for the hook flow.
+Stdlib-only by design.
 """
 
 from __future__ import annotations
@@ -47,7 +68,7 @@ import re
 import sys
 import tomllib
 import uuid
-from datetime import datetime, date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -97,21 +118,156 @@ def cmd_group_start(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------- gc (session-end cleanup) ----------
+
+
+DEFAULT_LLM_CALLS_RETENTION_DAYS = 90
+# Single source of truth — `WITNESS_OPEN_WINDOW` (used by the hook's open-witness
+# scan) is derived from this constant below, so changing one updates both.
+DEFAULT_WITNESS_STALENESS_MINUTES = 30
+
+
+def cmd_gc(args: argparse.Namespace) -> int:
+    """Garbage-collect stale shadow telemetry. Designed for the `SessionEnd`
+    hook in `.claude/settings.json` but also runnable manually.
+
+    Two cleanup passes:
+
+      1. **Orphaned witnesses** (`~/.cache/atelier/shadow_groups/*.json`):
+         delete files older than `--witness-min` minutes (default 30, matching
+         the PostToolUse hook's recency window). Defends against witnesses
+         left behind when an EXIT trap was bypassed (session crash, manual
+         kill, or `/peer-review` reverted before its `group-close` call).
+
+      2. **Aged primary log** (`~/.cache/atelier/llm_calls/*.jsonl`): delete
+         files older than `--retention-days` days (default 90). The `$OV`
+         mirror skeleton (`$OV/_meta/shadow_logs/`) is NOT touched — that's
+         the durable record; only the local full-payload cache is rotated.
+
+    Silent best-effort: every failure path returns 0. Prints a one-line
+    summary to stderr (visible in `claude --debug`; muted by default).
+    """
+    # Negative thresholds are nonsensical AND dangerous. A `--retention-days -1`
+    # cutoff = now - (-1d) = tomorrow, so every file qualifies as "stale". A
+    # naive clamp to 0 makes it worse (cutoff = now → everything stale). The
+    # only safe response is to refuse to act: print to stderr and exit
+    # without touching the filesystem.
+    if args.retention_days < 0 or args.witness_min < 0:
+        sys.stderr.write(
+            f"shadow.py gc: refusing to run with negative threshold "
+            f"(witness-min={args.witness_min}, retention-days={args.retention_days}); "
+            f"thresholds must be ≥ 0. No files deleted.\n"
+        )
+        return 0
+    witness_min = args.witness_min
+    retention_days = args.retention_days
+    # Defend against retention_days == 0 OR witness_min == 0 — both would
+    # produce a cutoff equal to "now", making every file appear stale and
+    # wiping the cache. The SessionEnd hook fires `gc` with default args,
+    # so a config typo like `--retention-days 0` would wipe everything.
+    if retention_days == 0 or witness_min == 0:
+        sys.stderr.write(
+            f"shadow.py gc: refusing to run with zero threshold "
+            f"(witness-min={witness_min}, retention-days={retention_days}); "
+            f"thresholds must be strictly positive. No files deleted.\n"
+        )
+        return 0
+    cutoff_witness = datetime.now() - timedelta(minutes=witness_min)
+    witnesses_removed = 0
+    if DEFAULT_WITNESS_DIR.is_dir():
+        for p in DEFAULT_WITNESS_DIR.glob("*.json"):
+            try:
+                # Two delete predicates: (a) mtime older than the witness
+                # window — catches orphans from crashed sessions; (b) the
+                # witness has a `closed_at` marker — catches `--mark-closed`
+                # witnesses whose mtime was refreshed by the close write
+                # and would otherwise leak forever on disk.
+                if datetime.fromtimestamp(p.stat().st_mtime) < cutoff_witness:
+                    p.unlink()
+                    witnesses_removed += 1
+                    continue
+                try:
+                    data = json.loads(p.read_text(encoding="utf-8"))
+                    if isinstance(data, dict) and data.get("closed_at"):
+                        p.unlink()
+                        witnesses_removed += 1
+                except (OSError, json.JSONDecodeError):
+                    pass
+            except OSError:
+                continue
+    cutoff_log = datetime.now() - timedelta(days=retention_days)
+    logs_removed = 0
+    if DEFAULT_LOG_DIR.is_dir():
+        for p in DEFAULT_LOG_DIR.glob("*.jsonl"):
+            try:
+                if datetime.fromtimestamp(p.stat().st_mtime) < cutoff_log:
+                    p.unlink()
+                    logs_removed += 1
+            except OSError:
+                continue
+    if witnesses_removed or logs_removed:
+        sys.stderr.write(
+            f"shadow.py gc: removed {witnesses_removed} orphaned witness(es), "
+            f"{logs_removed} aged log file(s)\n"
+        )
+    return 0
+
+
+# ---------- group-close (witness lifecycle) ----------
+
+
+def cmd_group_close(args: argparse.Namespace) -> int:
+    """Close a shadow group's witness file.
+
+    Multi-leg call sites MUST invoke this from their EXIT trap so the
+    PostToolUse hook does not mis-correlate later, unrelated Agent dispatches
+    into a still-open witness within the 30-min recency window. Two equivalent
+    completion modes: write `closed_at` (preserved for forensics) OR delete
+    the witness file (cleanest; reclaims disk). Default is to delete; pass
+    `--mark-closed` to write the field instead.
+
+    Silent best-effort — exit 0 on any failure. Missing witness, permissions
+    error, malformed JSON: all degrade silently so an orphaned group_id in
+    the env never breaks the EXIT trap.
+    """
+    group_id = args.group.strip() if args.group else ""
+    if not group_id:
+        return 0
+    path = DEFAULT_WITNESS_DIR / f"{group_id}.json"
+    if not path.exists():
+        return 0
+    try:
+        if args.mark_closed:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                data["closed_at"] = datetime.now().isoformat(timespec="seconds")
+                path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        else:
+            path.unlink()
+    except (OSError, json.JSONDecodeError):
+        return 0
+    return 0
+
+
 # ---------- log (native / codex synthetic shim) ----------
 
 
-def _read_payload(path: str | None, stdin_flag: bool, field: str) -> str:
+def _read_payload(path: str | None, stdin_flag: bool, text: str | None, field: str) -> str:
+    if text is not None:
+        return text
     if stdin_flag:
         return sys.stdin.read()
     if path:
         return Path(path).read_text(encoding="utf-8")
-    sys.stderr.write(f"shadow: provide --{field}-file or --{field}-stdin\n")
+    sys.stderr.write(f"shadow: provide --{field}-text, --{field}-file, or --{field}-stdin\n")
     raise SystemExit(2)
 
 
 def cmd_log(args: argparse.Namespace) -> int:
-    prompt = _read_payload(args.prompt_file, args.prompt_stdin, "prompt")
-    response = _read_payload(args.response_file, args.response_stdin, "response")
+    prompt = _read_payload(args.prompt_file, args.prompt_stdin,
+                           getattr(args, "prompt_text", None), "prompt")
+    response = _read_payload(args.response_file, args.response_stdin,
+                             getattr(args, "response_text", None), "response")
     # Char approx: every 4 chars ≈ 1 token. Honest fallback; report annotates.
     input_tokens_approx = max(1, len(prompt) // 4)
     output_tokens_approx = max(1, len(response) // 4)
@@ -138,6 +294,7 @@ def cmd_log(args: argparse.Namespace) -> int:
         },
         "cost_estimate_method": "char_approx",
         "latency_s": None,
+        "logged_by": "orchestrator_in_band",
     }
     log_dir = Path(args.log_dir) if args.log_dir else DEFAULT_LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -171,6 +328,201 @@ def _mirror_skeleton(event: dict[str, Any]) -> None:
             f.write(json.dumps(sk, ensure_ascii=False) + "\n")
     except (OSError, ValueError, TypeError):
         pass
+
+
+# ---------- log-from-hook (PostToolUse Agent matcher; out-of-band) ----------
+
+
+WITNESS_OPEN_WINDOW = timedelta(minutes=DEFAULT_WITNESS_STALENESS_MINUTES)
+
+
+def _find_open_witness() -> dict[str, Any] | None:
+    """Most-recently-started witness within `WITNESS_OPEN_WINDOW`, or None.
+
+    Witness selection is timestamp-ordered, not env-var-driven: env vars
+    don't propagate into Claude Code hook subshells, so the hook locates
+    its parent shadow group via the on-disk witness file's `started_at`
+    field. The 30-minute window bounds staleness so a forgotten witness
+    from a prior session can't silently match a fresh Agent dispatch.
+    """
+    if not DEFAULT_WITNESS_DIR.is_dir():
+        return None
+    cutoff = datetime.now() - WITNESS_OPEN_WINDOW
+    candidates: list[tuple[datetime, dict[str, Any]]] = []
+    for p in DEFAULT_WITNESS_DIR.glob("*.json"):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict) or data.get("closed_at"):
+            continue
+        started = data.get("started_at")
+        if not isinstance(started, str):
+            continue
+        try:
+            sdt = datetime.fromisoformat(started)
+        except ValueError:
+            continue
+        if sdt < cutoff:
+            continue
+        candidates.append((sdt, data))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda kv: kv[0], reverse=True)
+    return candidates[0][1]
+
+
+def _agent_native_model(subagent_type: str) -> str:
+    """Resolve `subagent_type` to its native-leg model identity.
+
+    Reads `harness/agents.toml` — `agents.<subagent_type>.voices.native`.
+    Returns "" when the agent is not registered, has no native leg, or
+    the TOML can't be parsed (best-effort; hook never raises).
+    """
+    if not subagent_type:
+        return ""
+    try:
+        path = REPO_ROOT / "harness" / "agents.toml"
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    agents = data.get("agents")
+    if not isinstance(agents, dict):
+        return ""
+    row = agents.get(subagent_type)
+    if not isinstance(row, dict):
+        return ""
+    voices = row.get("voices")
+    if not isinstance(voices, dict):
+        return ""
+    native = voices.get("native")
+    return str(native) if native else ""
+
+
+def _extract_response_text(tool_output: Any) -> str:
+    """Pull a text response out of PostToolUse `tool_output`.
+
+    Two observed shapes:
+      - string: `tool_output["output"]` is a single string
+      - blocks: `tool_output["output"]` is a list of content blocks, each
+        a dict with at least `{"type": "text", "text": "..."}` or just `text`
+    Returns "" when neither shape produces extractable text.
+    """
+    if not isinstance(tool_output, dict):
+        return ""
+    out = tool_output.get("output")
+    if isinstance(out, str):
+        return out
+    if isinstance(out, list):
+        parts: list[str] = []
+        for block in out:
+            if isinstance(block, dict):
+                txt = block.get("text")
+                if isinstance(txt, str):
+                    parts.append(txt)
+        return "\n".join(parts)
+    return ""
+
+
+def cmd_log_from_hook(_args: argparse.Namespace) -> int:
+    """`PostToolUse(Agent)` hook entry — auto-log native legs.
+
+    Reads PostToolUse stdin JSON. When all of these hold, writes one
+    synthetic native-leg JSONL entry (same shape as `cmd_log`):
+
+      1. tool_name == "Agent"
+      2. an open witness exists in DEFAULT_WITNESS_DIR within the 30-min
+         recency window
+      3. the agent's native voice (from harness/agents.toml) resolves to
+         a model identity
+      4. that model + leg="native" matches one of the witness's
+         expected_dispatches
+
+    Silent on every failure path (exit 0). The orchestrator never sees
+    this output. See protocols/shadow-log.md § Mechanism.
+    """
+    del _args  # argparse-callback signature parity; this entrypoint reads stdin, not args
+    try:
+        data = json.loads(sys.stdin.read())
+    except (json.JSONDecodeError, OSError, ValueError):
+        return 0
+    if not isinstance(data, dict) or data.get("tool_name") != "Agent":
+        return 0
+    tool_input = data.get("tool_input")
+    tool_output = data.get("tool_output")
+    if not isinstance(tool_input, dict):
+        return 0
+    # Field-name resilience: Claude Code's PostToolUse(Agent) stdin uses
+    # `subagent_type` and `prompt`, but accept the documented Agent SDK
+    # variants (`agent_type`, `instructions`) as fallback so a future runtime
+    # rename doesn't silently empty the log.
+    subagent_type = str(
+        tool_input.get("subagent_type") or tool_input.get("agent_type") or ""
+    )
+    prompt = str(tool_input.get("prompt") or tool_input.get("instructions") or "")
+    response = _extract_response_text(tool_output)
+    if not response:
+        return 0
+    witness = _find_open_witness()
+    if witness is None:
+        return 0
+    model = _agent_native_model(subagent_type)
+    if not model:
+        return 0
+    expected = witness.get("expected_dispatches") or []
+    if not isinstance(expected, list):
+        return 0
+    # Match priority: an expected_dispatches entry with `subagent_type` set
+    # MUST match the dispatch's subagent_type exactly (defeats cross-task
+    # contamination when two agents share a native model identity, e.g.,
+    # thinker + evolver + scholar all map to `opus`). Entries WITHOUT
+    # `subagent_type` fall back to the model+leg match for backward
+    # compatibility with witnesses written before this field existed.
+    def _matches(e: dict[str, Any]) -> bool:
+        if e.get("model") != model or e.get("leg") != "native":
+            return False
+        expected_sa = e.get("subagent_type")
+        if expected_sa is None:
+            return True
+        return expected_sa == subagent_type
+    if not any(isinstance(e, dict) and _matches(e) for e in expected):
+        return 0
+    input_tokens_approx = max(1, len(prompt) // 4)
+    output_tokens_approx = max(1, len(response) // 4)
+    event = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "shadow_group_id": witness.get("group_id"),
+        "task_type": witness.get("task_type"),
+        "task_dispatch_kind": "native",
+        "model": model,
+        "api_model": None,
+        "endpoint": None,
+        "session": data.get("session_id"),
+        "system": None,
+        "user_prompt": prompt,
+        "status": "ok",
+        "response_content": response,
+        "reasoning_content": None,
+        "finish_reason": "stop",
+        "usage": None,
+        "usage_estimate": {
+            "input_tokens": input_tokens_approx,
+            "output_tokens": output_tokens_approx,
+            "method": "char_approx",
+        },
+        "cost_estimate_method": "char_approx",
+        "latency_s": None,
+        "logged_by": "post_tool_use_hook",
+    }
+    try:
+        DEFAULT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_file = DEFAULT_LOG_DIR / f"{datetime.now().strftime('%Y-%m-%d')}.jsonl"
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    except OSError:
+        return 0
+    _mirror_skeleton(event)
+    return 0
 
 
 # ---------- report ----------
@@ -373,13 +725,12 @@ def cmd_report(args: argparse.Namespace) -> int:
             "missing_legs": missing,
         })
 
-    # Aggregate per task_type per leg-pair. Witness-absent groups are skipped
-    # from pair aggregation: without the witness, the report has no ground
-    # truth for "what legs were expected," and a single-logged-leg group
-    # would contribute vacuous pair stats (per the Reviewer's SHOULD-FIX).
+    # Aggregate per task_type per leg-pair. Groups with 2+ logged legs
+    # produce pair stats regardless of witness presence. Single-leg groups
+    # without a witness are excluded (no pair to compare).
     per_task: dict[str, dict[str, Any]] = {}
     for gs in group_summaries:
-        if not gs.get("witness_present"):
+        if len(gs["legs"]) < 2 and not gs.get("witness_present"):
             gs["excluded_from_pair_stats"] = True
             continue
         tt = gs["task_type"]
@@ -483,9 +834,52 @@ def build_parser() -> argparse.ArgumentParser:
     gs.add_argument("--task", required=True, help="Task type (e.g., system-review, decision, privacy-review).")
     gs.add_argument(
         "--expected", required=True,
-        help='JSON list of expected dispatches, e.g. \'[{"model":"opus","leg":"native"},{"model":"deepseek_pro_max","leg":"direct"}]\'',
+        help=(
+            'JSON list of expected dispatches; each entry has {"model": "...", "leg": "native|direct|codex"} '
+            'AND an optional {"subagent_type": "..."} field used by the hook to disambiguate when multiple '
+            'agents share a native model identity (e.g., thinker, evolver, scholar all on `opus`). Example: '
+            '\'[{"model":"opus","leg":"native","subagent_type":"thinker"},{"model":"deepseek_pro_max","leg":"direct"}]\''
+        ),
     )
     gs.set_defaults(func=cmd_group_start)
+
+    gcp = sub.add_parser(
+        "gc",
+        help="Garbage-collect stale shadow telemetry (orphaned witnesses + aged logs). Wire as SessionEnd hook.",
+        description=(
+            "Two cleanup passes: orphaned witness files older than "
+            "--witness-min minutes; primary llm_calls/ JSONLs older than "
+            "--retention-days days. The $OV mirror skeleton is never "
+            "touched (durable record). Silent best-effort. Designed for "
+            "the Claude Code SessionEnd hook in .claude/settings.json."
+        ),
+    )
+    gcp.add_argument(
+        "--witness-min", type=int, default=DEFAULT_WITNESS_STALENESS_MINUTES,
+        help="Minutes; witnesses older than this are deleted (default 30; matches PostToolUse hook recency window).",
+    )
+    gcp.add_argument(
+        "--retention-days", type=int, default=DEFAULT_LLM_CALLS_RETENTION_DAYS,
+        help="Days; llm_calls JSONLs older than this are deleted (default 90).",
+    )
+    gcp.set_defaults(func=cmd_gc)
+
+    gc = sub.add_parser(
+        "group-close",
+        help="Close a shadow group's witness (call from EXIT trap at multi-leg sites).",
+        description=(
+            "Close a witness so the PostToolUse hook cannot mis-correlate later "
+            "Agent dispatches into a stale group within the 30-min recency window. "
+            "Default deletes the witness file; --mark-closed writes a `closed_at` field "
+            "instead (preserves the witness for forensic replay). Silent best-effort."
+        ),
+    )
+    gc.add_argument("--group", required=True, help="Shadow group UUID (typically `$ATELIER_SHADOW_GROUP`).")
+    gc.add_argument(
+        "--mark-closed", action="store_true",
+        help="Write `closed_at` field instead of deleting the witness file.",
+    )
+    gc.set_defaults(func=cmd_group_close)
 
     lg = sub.add_parser("log", help="Append a synthetic native/codex-leg log entry.")
     lg.add_argument("--group", required=True, help="Shadow group UUID.")
@@ -493,13 +887,30 @@ def build_parser() -> argparse.ArgumentParser:
     lg.add_argument("--model", required=True, help="Model identity from harness/models.toml.")
     lg.add_argument("--leg", required=True, choices=("native", "codex"), help="Dispatch kind (direct is auto-logged by chat_completion.py).")
     pf = lg.add_mutually_exclusive_group(required=True)
+    pf.add_argument("--prompt-text", help="Inline prompt text.")
     pf.add_argument("--prompt-file", help="Path to prompt text.")
-    pf.add_argument("--prompt-stdin", action="store_true", help="Read prompt from stdin (response must be --response-file).")
+    pf.add_argument("--prompt-stdin", action="store_true", help="Read prompt from stdin (response must be --response-file or --response-text).")
     rf = lg.add_mutually_exclusive_group(required=True)
+    rf.add_argument("--response-text", help="Inline response text.")
     rf.add_argument("--response-file", help="Path to response text.")
-    rf.add_argument("--response-stdin", action="store_true", help="Read response from stdin (prompt must be --prompt-file).")
+    rf.add_argument("--response-stdin", action="store_true", help="Read response from stdin (prompt must be --prompt-file or --prompt-text).")
     lg.add_argument("--log-dir", default=None, help="Override default log dir.")
     lg.set_defaults(func=cmd_log)
+
+    lh = sub.add_parser(
+        "log-from-hook",
+        help="PostToolUse(Agent) hook entry — auto-log native legs (silent).",
+        description=(
+            "Wire as a Claude Code PostToolUse hook with matcher 'Agent'. "
+            "Reads the hook's stdin JSON, scans for an open shadow witness "
+            "(most-recently-started within 30 min), looks up the agent's "
+            "native-leg model in harness/agents.toml, and writes a "
+            "synthetic native-leg JSONL entry when the dispatch matches "
+            "the witness's expected_dispatches. Silent on every failure. "
+            "Contract: protocols/shadow-log.md § Mechanism."
+        ),
+    )
+    lh.set_defaults(func=cmd_log_from_hook)
 
     rp = sub.add_parser("report", help="Aggregate logs and emit cost/verdict-agreement comparison.")
     rp.add_argument("--since", help="YYYY-MM-DD; only include events from this date forward.")

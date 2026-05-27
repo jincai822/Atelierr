@@ -34,3 +34,8 @@ last_match_wins = true
 verdict_pattern = '\b(verified|unverified|unknown|disputed)\b'
 case_insensitive = true
 last_match_wins = true
+
+[tasks.external-review]
+verdict_pattern = '\b(APPROVED|APPROVED_WITH_NOTES|NEEDS_REVISION|REJECTED)\b'
+case_insensitive = false
+last_match_wins = true

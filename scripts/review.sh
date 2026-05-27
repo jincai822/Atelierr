@@ -74,7 +74,7 @@ if [ -f "$REPO_ROOT/scripts/shadow.py" ]; then
   EXPECTED='[{"model":"'"$DIRECT_MODEL"'","leg":"direct"},{"model":"'"$CODEX_MODEL"'","leg":"codex"}]'
   eval "$(python3 "$REPO_ROOT/scripts/shadow.py" group-start \
     --task external-review --expected "$EXPECTED" 2>/dev/null || true)"
-  trap 'unset ATELIER_SHADOW_GROUP ATELIER_TASK_TYPE' EXIT
+  trap 'python3 "$REPO_ROOT/scripts/shadow.py" group-close --group "$ATELIER_SHADOW_GROUP" 2>/dev/null || true; unset ATELIER_SHADOW_GROUP ATELIER_TASK_TYPE' EXIT
 fi
 
 # For the codex leg we also need the codex-side model id and reasoning effort

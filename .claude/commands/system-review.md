@@ -48,24 +48,18 @@ The mechanical script in 1b only matches filename stems under `$OV/` and wikilin
 
 **Run only after 1b returns `hit_count: 0`** (or soft-skips). If 1b aborted with hits, do not dispatch 1c — fix 1b first.
 
-**Before dispatch — shadow group setup (best-effort):** open a correlation group so `shadow.py report` can pair the two privacy-reviewer legs and compute cost + verdict agreement. Best-effort: failure here (missing $OV, script absent) does not block the dispatch; the call just won't be correlated.
+**Before dispatch — shadow group setup (best-effort):** Run a single Bash call to create the witness file. Parse the UUID from the output line `export ATELIER_SHADOW_GROUP="<uuid>"` and **remember it** for the direct-API leg and for cleanup after dispatch. Best-effort: if the call fails, proceed without correlation.
 
 ```bash
 NATIVE_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('privacy-reviewer',{}).get('voices',{}).get('native',''))")
 DIRECT_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('privacy-reviewer',{}).get('voices',{}).get('direct',''))")
-EXPECTED='[{"model":"'"$NATIVE_MODEL"'","leg":"native"},{"model":"'"$DIRECT_MODEL"'","leg":"direct"}]'
-eval "$(python3 scripts/shadow.py group-start --task privacy-review --expected "$EXPECTED" 2>/dev/null || true)"
-trap 'unset ATELIER_SHADOW_GROUP ATELIER_TASK_TYPE' EXIT
+EXPECTED='[{"model":"'"$NATIVE_MODEL"'","leg":"native","subagent_type":"privacy-reviewer"},{"model":"'"$DIRECT_MODEL"'","leg":"direct"}]'
+python3 scripts/shadow.py group-start --task privacy-review --expected "$EXPECTED"
 ```
 
-After the Agent (native privacy-reviewer) returns its verdict, write its synthetic entry (the Bash leg auto-logs via inherited env):
+**Do NOT use `eval` + `trap EXIT` here.** Claude Code runs each Bash call in an isolated subprocess; an EXIT trap would destroy the witness immediately when the Bash call returns, before the Agent dispatch fires. The witness file must stay open on disk until explicit `group-close` after both legs complete.
 
-```bash
-python3 scripts/shadow.py log \
-  --group "$ATELIER_SHADOW_GROUP" \
-  --task privacy-review --model "$NATIVE_MODEL" --leg native \
-  --prompt-file <agent-prompt-text> --response-file <agent-verdict>
-```
+**Native-leg logging is in-band.** After the Agent returns, log its response via `shadow.py log` with `--prompt-text` and `--response-text`. PostToolUse hooks do not fire for Agent tool calls in Claude Code, so the orchestrator must log native legs explicitly.
 
 Dispatch **both legs in parallel — single message, one `Agent` tool call AND one `Bash` tool call**:
 
@@ -90,10 +84,27 @@ DIRECT_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/age
     echo "=== $f ==="
     cat "$f"
   done
-} | uv run scripts/chat_completion.py --model "$DIRECT_MODEL" --max-tokens 0 --prompt -
+} | uv run scripts/chat_completion.py --model "$DIRECT_MODEL" --max-tokens 0 --shadow-group "<SHADOW_UUID>" --task-type privacy-review --prompt -
 ```
 
+Replace `<SHADOW_UUID>` with the UUID captured from `group-start` output. If group-start failed or was skipped, omit `--shadow-group` and `--task-type`.
+
 Both legs return verdicts (CLEAN / NEEDS_REVISION / BLOCKER). The direct-api leg returns `message.content`; treat it as the verdict.
+
+**After both legs return — log native leg and close the shadow group (best-effort):**
+
+Resolve the native model identity, then log the Agent's response inline and close the witness:
+
+```bash
+NATIVE_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('privacy-reviewer',{}).get('voices',{}).get('native',''))")
+python3 scripts/shadow.py log \
+  --group "<SHADOW_UUID>" --task privacy-review --model "$NATIVE_MODEL" --leg native \
+  --prompt-text "<agent prompt summary>" \
+  --response-text "<full agent response text>"
+python3 scripts/shadow.py group-close --group "<SHADOW_UUID>" --mark-closed
+```
+
+Replace `<agent prompt summary>` with a short summary of what was sent to the Agent, and `<full agent response text>` with the Agent's actual response (the verdict text). If group-start was skipped, skip this step too.
 
 **Verdict aggregation** (most-paranoid wins):
 
