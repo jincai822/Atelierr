@@ -63,9 +63,137 @@ Routine prompts implement this by calling Google Drive MCP `create_file` with a 
 
 **Conflict-resolution rule (multi-channel routines).** When a routine uses more than one output channel (any combination of Drive, email, Calendar, or future MCP backends), the Drive file is the canonical output. Every secondary channel MUST point at the Drive file (`see $OV/<path>/<file>.md`) and cap its own content at 5 lines of summary. The user reads one source of truth, not parallel summaries.
 
-**Enforcement.** `scripts/cues.py check_routine_policy` reads `$OV/_meta/routine_watch.toml` and fires a soft cue listing routines that declare neither `drive_write_enforced = true` (Drive write wired) nor `needs_drive_write_update = true` (migration debt acknowledged). The cue surfaces non-compliance at session start; resolve by editing the routine prompt to add Drive write and flipping the flag, or by acknowledging the legacy state explicitly.
+**Enforcement.** Three cues in `scripts/cues.py`:
 
-## How the cue fires
+1. `check_routine_policy`: fires a soft cue listing routines that declare neither `drive_write_enforced = true` nor `needs_drive_write_update = true`. Surfaces non-compliance at session start.
+2. `check_routine_staleness`: fires a hard cue when a routine's latest output file is older than its expected cadence + tolerance. Catches total outages: the routine fires on claude.ai but produces no file in `$OV`. Cadence is estimated from the `cron` field in the TOML entry. Tolerance = `max(2, cadence_days)`.
+3. `check_routine_hitrate`: fires a soft cue when a routine's output count over a lookback window falls below 70% of expected. Catches intermittent failures (e.g., daily routine succeeding every other day). Only evaluates routines with cadence <= 7 days; longer-cadence routines rely on staleness detection. Lookback capped to oldest file date so new routines aren't penalized.
+
+## Halt conditions
+
+Routines execute on the cloud side; the harness only observes their outputs (the Drive-written file). The atelier cannot see a routine looping, OOMing, or burning quota mid-run. The harness-side cues above (`check_routine_staleness`, `check_routine_hitrate`) detect total outages and degraded hit rates *after the fact*; they cannot stop a misbehaving in-progress routine. The only effective halt signal the atelier can emit for a remote routine is a **per-routine prompt contract** the routine itself must respect.
+
+### Per-routine prompt contract
+
+The harness cannot enforce these declarations; they are policy, not mechanism. A routine that violates them will not be detected by the atelier. The contract is honored by the routine author at prompt-write time, not by the harness at runtime.
+
+Every routine prompt MUST declare the following at the top of its instructions, before any data fetch or analysis step:
+
+1. **Single-pass scope.** One pass over the source data per cron fire. No retry loop on partial fetches. If a source is unavailable, write a Drive output that names the missing input and exit; do not retry.
+
+2. **Cost ceiling declared in plain text.** Expected token budget for one fire (typically 5K to 50K depending on scope). The plain-text declaration lets a reviewer detect overrun in the cloud session log.
+
+3. **External-blocker behavior.** If a required MCP connection is unreachable (Drive write fails, Gmail unreachable for a source fetch), the prompt:
+   - Records the failure in the routine's session output.
+   - Skips the Drive write rather than retry.
+   - Does NOT silently degrade to an empty Drive file. An empty file would tombstone the missed run for `check_routine_staleness` as if it succeeded.
+
+4. **Idempotent re-fire.** If the same routine fires twice in the same UTC day (rare cron skew, manual rerun), the second fire detects the existing Drive file and either appends or refuses. It does not overwrite a successful prior output.
+
+## Local execution layer
+
+Some routines need local-only tools (semantic.py, git, lint.py) that remote cloud agents cannot access. These run locally via `launchd` + `claude -p`, coordinated across multiple machines via DynamoDB.
+
+### Architecture
+
+| Concern | Mechanism |
+|---|---|
+| Scheduler | macOS `launchd` plist per routine, fires at configured time |
+| Wrapper | `scripts/routine_runner.sh` handles env, stagger, lock, claim, execution |
+| Cross-machine lock | DynamoDB conditional put (`attribute_not_exists(pk)`) via `scripts/routine_lock.py` |
+| Local audit trail | `$OV/_meta/routine_runs/<routine>/<cycle_id>.toml` claim files |
+| Missed-run detection | `check_local_routine_missed` cue in `scripts/cues.py` |
+
+### routine_watch.toml: local routine entry
+
+```toml
+[[routine]]
+name = "<routine-name>"
+execution = "local"                     # "remote" (default) | "local"
+cron = "<cron expr (local time)>"
+output_dir = "<relative path under $OV>"
+file_pattern = "<glob>"
+label = "<short human label>"
+# No trigger_id (local routines have no claude.ai trigger)
+# No drive_write_enforced (local routines write to $OV directly)
+```
+
+### Coordination config
+
+Optional `[coordination]` table in `routine_watch.toml`:
+
+```toml
+[coordination]
+backend = "dynamodb"    # "dynamodb" | "none" (default)
+```
+
+When `backend = "none"` (or absent), `routine_lock.py` is a no-op: all lock operations return success. Single-machine setups work without AWS.
+
+Override per-session: `export ATELIER_COORDINATION=none` (or `dynamodb`).
+
+### DynamoDB table
+
+Table `atelier-routine-locks`, provisioned 1 WCU / 1 RCU (always-free tier):
+
+| Field | Type | Purpose |
+|---|---|---|
+| `pk` (hash key) | String | `<routine>#<cycle_id>` |
+| `machine` | String | hostname of claiming machine |
+| `status` | String | `running` / `completed` / `failed` |
+| `ttl` | Number | Unix epoch; DynamoDB TTL auto-deletes stale locks |
+
+Setup: `aws-vault exec atelier -- python3 scripts/routine_lock.py setup-table`
+
+### Claim files
+
+Written by `routine_runner.sh` to `$OV/_meta/routine_runs/<routine>/<cycle_id>.toml`:
+
+```toml
+routine = "autoevo-nightly"
+cycle_id = "2026-05-26"
+machine = "atelier-mbp"
+claimed_at = "2026-05-26T05:01:23-07:00"
+status = "completed"
+completed_at = "2026-05-26T05:08:45-07:00"
+duration_seconds = 445
+```
+
+These are gitignored; they sync across machines via Drive's filesystem sync. The cue system reads them locally.
+
+### Execution flow
+
+```
+launchd fires at scheduled time
+  -> routine_runner.sh <routine> <command>
+     -> sleep hash(hostname) % 120 (stagger)
+     -> routine_lock.py acquire (DynamoDB conditional put)
+        -> if held: exit 0 (skip)
+        -> if error: warn + proceed (single-machine fallback)
+     -> write claim file (status=running)
+     -> claude -p "/<command>"
+     -> update claim file (status=completed|failed)
+     -> routine_lock.py release
+```
+
+### Failure modes
+
+| Scenario | Behavior |
+|---|---|
+| Two machines race | DynamoDB atomic lock: exactly one wins. Loser skips. |
+| No machine awake | `check_local_routine_missed` cue fires at next session start |
+| Machine crashes mid-run | DynamoDB TTL (1h default) auto-expires the lock; claim file stays `status=running` |
+| AWS credentials missing | `routine_lock.py` returns success (no-op); single-machine mode |
+| DynamoDB unreachable | Warning logged; routine proceeds (availability over coordination) |
+
+### Vendor lock-in
+
+This section presumes Anthropic Routines remains available. Routines launched in 2026 with no published SLA. If Routines becomes unavailable or substantially changes its contract, every declared routine stops firing and the user must migrate to an alternative scheduler (macOS launchd, GitHub Actions, etc.). The atelier's only commitment is the per-routine prompt contract above; the underlying cron is the user's choice.
+
+A second vendor risk: **routine prompts live on claude.ai, not in this repository.** A prompt edited via the routines UI is not version-controlled by atelier and Anthropic does not currently expose an export API for routine prompt history. If the claude.ai routines surface changes its storage or auth model, the prompts can become unreadable without manual re-fetch.
+
+Mitigation: after each `/schedule update <routine>`, copy the current prompt text into a private archive note (e.g. `<paths.personal>/_routine_prompts/<name>.md` or equivalent under the user's structural conventions). The atelier does not run a periodic prompt-archive cue; the user maintains the cadence manually (a calendar reminder is sufficient; no harness mechanism is required).
+
+## How the cues fire
 
 ```
 SessionStart hook → uv run scripts/cues.py --hook
@@ -76,12 +204,30 @@ SessionStart hook → uv run scripts/cues.py --hook
                                compare latest filename vs acks[output_dir]
                                if newer: collect for cue message
                        → emit cue line if any new files found
+                       → check_routine_staleness:
+                           for each routine entry:
+                               estimate cadence from cron field
+                               extract date from latest output filename
+                               if age > cadence + tolerance: flag as stale
+                       → emit hard cue if any routines stale/missing output
+                       → check_routine_hitrate:
+                           for each routine with cadence <= 7d:
+                               count files in lookback window (capped to oldest file date)
+                               compare actual vs expected (lookback / cadence)
+                               if rate < 70%: flag as degraded
+                       → emit soft cue if any routines degraded
 ```
 
-When the cue fires, the user sees one line at session start:
+When `check_routine_outputs` fires:
 
 ```
 Remote cron routines 有新 output 待 review: <label1> (<filename1>); <label2> (...). 读完后 update `_meta/routine_acks.json` ({<output_dir>: <latest filename>}) 来 mute.
+```
+
+When `check_routine_staleness` fires:
+
+```
+N routine(s) with missing/stale output: <label> (<reason>). Check routine session logs on claude.ai for silent Drive-write failures or missing MCP connections.
 ```
 
 ## Privacy boundary
@@ -96,7 +242,9 @@ The single touchpoint is `check_routine_outputs` reading `$OV/_meta/routine_watc
 
 ## Adding a new routine
 
-1. **Create the remote routine** via `/schedule` skill or the routines UI on claude.ai. Attach the MCP connections it needs (typically Gmail + Google-Drive).
+1. **Create the remote routine** via `/schedule` skill or the routines UI on claude.ai.
+   - Under "MCP connections": attach Google-Drive (required for `$OV` persistence) and any other MCPs the routine needs (e.g., Gmail for email delivery).
+   - After saving, re-open the routine and confirm `mcp_connections` is non-empty. A routine with empty MCP connections will fire on schedule but cannot write to `$OV`, and `check_routine_staleness` will eventually flag the missing output.
 2. **Routine prompt must include** a Drive-write step: `create_file` under `$OV/<your output_dir>/<filename pattern>.md` as the canonical archive. Other channels (email, draft) are optional notification.
 3. **Append to `$OV/_meta/routine_watch.toml`**:
    ```toml
@@ -142,7 +290,7 @@ The output directory itself is left in place (rmdir manually if empty and unwant
 | Cue never fires | `$OV/_meta/routine_watch.toml` missing or unparseable. Run `uv run scripts/cues.py --verbose` and look at the `routine_outputs` debug line. |
 | Cue fires for already-read files | `routine_acks.json` not updated. Update `{<output_dir>: <latest filename>}`. |
 | Cue fires for routine that doesn't exist anymore | Remove the `[[routine]]` block from `routine_watch.toml`. |
-| Routine fires but no file appears in $OV | Drive MCP `create_file` may have failed silently. Check routine session log on claude.ai/code/routines/`<trigger_id>`. The prompt should print full content as fallback. |
+| Routine fires but no file appears in $OV | `check_routine_staleness` cue fires after `cadence + tolerance` days. Root cause: Drive MCP `create_file` failed silently (missing MCP connection, auth expired, or target dir not creatable). Check routine session log on claude.ai. The prompt should print full content as fallback. |
 | Filename sort gives wrong "latest" | Use `YYYY-MM-DD-...` filename prefix so lexicographic sort matches chronological sort. |
 
 ## Related

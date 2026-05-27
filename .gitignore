@@ -48,6 +48,11 @@ semantic.toml
 # Loaded by scripts/_paths.py.
 harness/paths.local.toml
 
+# Per-user environment overrides for headless launchd invocations (export OV=..., etc.).
+# Sourced by scripts/launchd/com.atelier.autoevo-nightly.plist. Contains the user's
+# absolute vault path; should never be committed.
+harness/env.local.sh
+
 # Repo-side local fetch scratch (conference scrapes, throwaway HTML pulls,
 # work-in-progress fetches the user has not promoted to the vault). Distinct
 # from the vault L1 tier `<paths.cache>/` which resolves under $OV/ and is

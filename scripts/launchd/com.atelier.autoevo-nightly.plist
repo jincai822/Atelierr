@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.atelier.autoevo-nightly</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-lc</string>
+        <!-- Delegates to routine_runner.sh which handles:
+             - environment setup ($OV, PATH, ATELIER_SKIP_LOCK_TOUCH)
+             - hostname-based stagger for multi-machine coordination
+             - DynamoDB lock acquire/release (when coordination enabled)
+             - local claim file write for cue system
+             - claude -p invocation and status tracking -->
+        <string>"$HOME/atelier/scripts/routine_runner.sh" autoevo-nightly /autoevo-nightly</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>5</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- launchd captures stdout/stderr to user-readable log paths.
+         The autoevo-nightly script's audit log lives separately under
+         $OV/agent-findings/autoevo-applied-<date>.md; these capture only
+         the shell wrapper + claude CLI's stdout/stderr. -->
+    <key>StandardOutPath</key>
+    <string>/tmp/com.atelier.autoevo-nightly.out</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/com.atelier.autoevo-nightly.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>
