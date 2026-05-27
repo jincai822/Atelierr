@@ -84,9 +84,12 @@ description = "Probes the painter's thoughts with sharp questions; affirms or co
 codex_prompt = "Emulate the Challenger role using `.claude/agents/challenger.md` and the runtime adapter protocol."
 pattern = "generator-verifier"
 used_by = [
+    "commands.autoevo-nightly",
+    "commands.autoevo-review",
     "commands.hi",
     "commands.introspect",
     "commands.prm",
+    "commands.read",
     "commands.sync",
     "intents.introspect",
     "intents.meeting",
@@ -104,6 +107,8 @@ description = "Drafts note-content operations (compactions, merges, new notes, w
 codex_prompt = "Emulate the Curator role using `.claude/agents/curator.md` and the runtime adapter protocol."
 pattern = "orchestrator-subagent"
 used_by = [
+    "commands.autoevo-nightly",
+    "commands.autoevo-review",
     "commands.hi",
     "commands.promote",
     "commands.sync",
@@ -131,10 +136,12 @@ voices = { native = "sonnet", direct = "deepseek_pro" }
 kinds = ["app"]
 dispatch_rationale = ["context-isolation", "tool-isolation"]
 status = "portable-adapted"
-description = "Active decay scanner over $OV/: redundant / time-stale / contradicted / low-signal. Proposes; never deletes. Filesystem-output via $OV/agent-findings/. Le cercle archetype: The Conservator."
-codex_prompt = "Emulate the Forgetter role using `.claude/agents/forgetter.md` and the runtime adapter protocol. Hard contract: propose, never delete; write to `$OV/agent-findings/decay-<ts>.md`, return path only."
+description = "Active decay scanner over $OV/: redundant / time-stale / contradicted / low-signal. Proposes; never deletes. Returns findings inline via envelope; the orchestrator persists them to $OV/agent-findings/. Le cercle archetype: The Conservator."
+codex_prompt = "Emulate the Forgetter role using `.claude/agents/forgetter.md` and the runtime adapter protocol. Hard contract: propose, never delete; return findings inline via the `---begin-result---` / `---end-result---` envelope. The orchestrator persists them; do not write the report yourself."
 pattern = "generator-verifier"
 used_by = [
+    "commands.autoevo-nightly",
+    "commands.autoevo-review",
     "commands.hi",
     "intents.forget",
 ]
@@ -180,6 +187,7 @@ codex_prompt = "Emulate the Reader role using `.claude/agents/reader.md` and the
 pattern = "agent-team"
 used_by = [
     "commands.hi",
+    "commands.read",
     "intents.reading",
     "intents.talk",
 ]
@@ -194,7 +202,7 @@ description = "Deep-cognition variant of Reader: same lenses, same workflow, dis
 codex_prompt = "Emulate the Scholar role using `.claude/agents/scholar.md` and the runtime adapter protocol."
 pattern = "agent-team"
 used_by = [
-    "commands.hi",
+    "commands.read",
 ]
 
 [agents.researcher]
@@ -211,6 +219,7 @@ used_by = [
     "commands.hi",
     "commands.prm",
     "commands.promote",
+    "commands.read",
     "commands.sync",
     "intents.decision",
     "intents.energy-audit",
@@ -238,6 +247,7 @@ used_by = [
     "commands.introspect",
     "commands.prm",
     "commands.promote",
+    "commands.read",
     "commands.sync",
     "commands.system-review",
     "intents.introspect",
@@ -256,6 +266,7 @@ codex_prompt = "Emulate the Scout role using `.claude/agents/scout.md` and the r
 pattern = "agent-team"
 used_by = [
     "commands.hi",
+    "commands.read",
     "intents.reflection",
 ]
 
@@ -271,6 +282,7 @@ pattern = "orchestrator-subagent"
 used_by = [
     "commands.civ",
     "commands.hi",
+    "commands.read",
     "intents.reflection",
     "intents.review",
 ]
@@ -285,8 +297,10 @@ description = "Applies structured thinking frameworks for outside-view reasoning
 codex_prompt = "Emulate the Thinker role using `.claude/agents/thinker.md` and the runtime adapter protocol."
 pattern = "orchestrator-subagent"
 used_by = [
+    "commands.daily-reflection",
     "commands.decision",
     "commands.hi",
+    "commands.read",
     "intents.decision",
 ]
 
@@ -313,6 +327,7 @@ description = "Records user-dictated raw content to the named target file verbat
 codex_prompt = "Emulate the Scribe role using `.claude/agents/scribe.md` and the runtime adapter protocol. Verbatim preservation is the trust property; no paraphrasing, summarizing, or editorialization."
 pattern = "solo"
 used_by = [
+    "commands.daily-reflection",
     "commands.hi",
     "commands.sync",
     "intents.capture",

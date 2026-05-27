@@ -41,9 +41,11 @@ pattern-library.md (Moments, trade routes, recurring patterns)
 
 epistemic-hygiene.md (validation-depth taxonomy) → wiki-schema.md (L4 format)
 local-first-architecture.md (five-tier vault model)
+  └── autoevo.md (nightly autonomous decay sweep + auto-commit; pending queue surface)
 backend-taxonomy.md (external systems + SOT carve-outs; per-backend contracts)
   └── remote-routines.md (cron-style remote agents + cue layer; $OV/_meta/ contract)
   └── drive-zk-ingestion.md (raw landing → $OV ingestion)
+  └── intent-coverage.md (router-miss JSONL log; coverage feedback into harness/intents.toml)
 
 session-log.md (process recording) → meta-reflection.md (system health)
 harness-assumptions.md (model-era assumption registry)

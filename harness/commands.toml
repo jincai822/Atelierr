@@ -160,3 +160,19 @@ direct_only = true
 description = "Read-only perks and trip status dashboard over local trackers."
 codex_prompt = "Run the /perks workflow using `.claude/commands/perks.md` and the runtime adapter protocol."
 
+[commands.autoevo-nightly]
+source = ".claude/commands/autoevo-nightly.md"
+category = "ops"
+status = "portable-adapted"
+direct_only = true
+description = "Autonomous nightly decay sweep with auto-commit; fired by macOS launchd at 05:00 local."
+codex_prompt = "Run the /autoevo-nightly workflow using `.claude/commands/autoevo-nightly.md` and the runtime adapter protocol."
+
+[commands.autoevo-review]
+source = ".claude/commands/autoevo-review.md"
+category = "ops"
+status = "portable-adapted"
+direct_only = true
+description = "Triage the autoevo pending queue produced by /autoevo-nightly."
+codex_prompt = "Run the /autoevo-review workflow using `.claude/commands/autoevo-review.md` and the runtime adapter protocol."
+

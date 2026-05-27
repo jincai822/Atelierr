@@ -158,6 +158,9 @@ def check_zettelm(ov: Path, today: date) -> tuple[Cue | None, str]:
     oldest_age_days = (today - date.fromtimestamp(oldest_mtime)).days
 
     hard = n >= 3 or oldest_age_days > 7
+    # Note: this count is local-only. The remote may have more files
+    # that haven't been pulled yet. /sync pulls before scanning.
+    local_hint = " (本地; remote 可能更多)"
     if hard:
         return (
             Cue(
@@ -165,7 +168,7 @@ def check_zettelm(ov: Path, today: date) -> tuple[Cue | None, str]:
                 severity="hard",
                 command_path=".claude/commands/sync.md",
                 message=(
-                    f"zettelm 有 {n} 条待 digest (最老 {oldest_age_days} 天). "
+                    f"zettelm 有 {n} 条待 digest{local_hint} (最老 {oldest_age_days} 天). "
                     f"建议先跑 `/sync` 把内容归位再继续. 现在跑吗?"
                 ),
             ),
@@ -177,7 +180,7 @@ def check_zettelm(ov: Path, today: date) -> tuple[Cue | None, str]:
             key="zettelm",
             severity="soft",
             command_path=".claude/commands/sync.md",
-            message=f"提示: zettelm 有 {n} 条待 digest. 想现在跑 `/sync`?",
+            message=f"提示: zettelm 有 {n} 条待 digest{local_hint}. 想现在跑 `/sync`?",
         ),
         f"n={n} oldest_age={oldest_age_days}; soft cue",
     )
@@ -411,6 +414,708 @@ def check_routine_policy(ov: Path, today: date) -> tuple[Cue | None, str]:
     )
 
 
+def check_routine_staleness(ov: Path, today: date) -> tuple[Cue | None, str]:
+    """Detect routines that fire but produce no output.
+
+    For each routine in routine_watch.toml, estimates expected cadence from
+    the cron field, then checks whether the latest output file is older than
+    cadence + tolerance. Catches silent Drive-write failures that
+    check_routine_outputs (which only reports *new* files) cannot see.
+    """
+    import re
+    import tomllib
+
+    config_path = ov / "_meta" / "routine_watch.toml"
+    if not config_path.is_file():
+        return None, "_meta/routine_watch.toml missing; skip"
+
+    try:
+        config = tomllib.loads(config_path.read_text())
+    except (tomllib.TOMLDecodeError, OSError) as exc:
+        return None, f"routine_watch.toml parse failed: {exc!r}"
+
+    routines = config.get("routine", [])
+    if not routines:
+        return None, "no routines declared"
+
+    stale: list[str] = []
+    debug_parts: list[str] = []
+
+    for r in routines:
+        label = r.get("label", r.get("name", "?"))
+        output_dir = r.get("output_dir")
+        pattern = r.get("file_pattern", "*")
+        cron = r.get("cron", "")
+        if not output_dir or not cron:
+            debug_parts.append(f"{label}: missing output_dir or cron")
+            continue
+
+        cadence_days = _estimate_cadence_days(cron)
+        if cadence_days is None:
+            debug_parts.append(f"{label}: unparseable cron")
+            continue
+
+        tolerance = max(2, cadence_days)
+        threshold = cadence_days + tolerance
+
+        d = ov / output_dir
+        if not d.is_dir():
+            stale.append(f"{label} (output dir missing)")
+            debug_parts.append(f"{label}: dir missing; cadence={cadence_days}d")
+            continue
+
+        files = sorted(d.glob(pattern), key=lambda p: p.name)
+        if not files:
+            stale.append(f"{label} (no output files)")
+            debug_parts.append(f"{label}: no files; cadence={cadence_days}d")
+            continue
+
+        latest_name = files[-1].name
+        latest_date = _extract_date_from_filename(latest_name)
+        if latest_date is None:
+            debug_parts.append(f"{label}: can't parse date from {latest_name}")
+            continue
+
+        age = (today - latest_date).days
+        if age > threshold:
+            stale.append(f"{label} (last output {age}d ago, expected every {cadence_days}d)")
+            debug_parts.append(f"{label}: age={age}d > threshold={threshold}d")
+        else:
+            debug_parts.append(f"{label}: age={age}d <= threshold={threshold}d; ok")
+
+    debug = "; ".join(debug_parts)
+    if not stale:
+        return None, debug
+
+    listing = "; ".join(stale[:3])
+    if len(stale) > 3:
+        listing += f", +{len(stale) - 3} more"
+
+    return (
+        Cue(
+            key="routine_staleness",
+            severity="hard",
+            command_path="_meta/routine_watch.toml",
+            message=(
+                f"{len(stale)} routine(s) with missing/stale output: {listing}. "
+                f"Check routine session logs on claude.ai for silent Drive-write failures "
+                f"or missing MCP connections."
+            ),
+        ),
+        f"stale={len(stale)}; {debug}",
+    )
+
+
+def check_routine_hitrate(ov: Path, today: date) -> tuple[Cue | None, str]:
+    """Detect routines with intermittent output failures.
+
+    Complements check_routine_staleness (which catches total outages) by
+    counting actual vs expected output files over a lookback window. A daily
+    routine that succeeds every other day never triggers staleness, but its
+    hit rate is 50% and should surface.
+
+    Lookback window: max(14, 3 * cadence) days. This gives enough samples
+    for statistical signal while staying recent enough to reflect current
+    reliability. Fires when hit rate drops below 70%.
+
+    Only evaluates routines with cadence <= 7 days; longer-cadence routines
+    (monthly, quarterly) don't accumulate enough samples for hit-rate math
+    and are adequately covered by check_routine_staleness.
+    """
+    import tomllib
+
+    config_path = ov / "_meta" / "routine_watch.toml"
+    if not config_path.is_file():
+        return None, "_meta/routine_watch.toml missing; skip"
+
+    try:
+        config = tomllib.loads(config_path.read_text())
+    except (tomllib.TOMLDecodeError, OSError) as exc:
+        return None, f"routine_watch.toml parse failed: {exc!r}"
+
+    routines = config.get("routine", [])
+    if not routines:
+        return None, "no routines declared"
+
+    degraded: list[str] = []
+    debug_parts: list[str] = []
+
+    for r in routines:
+        label = r.get("label", r.get("name", "?"))
+        output_dir = r.get("output_dir")
+        pattern = r.get("file_pattern", "*")
+        cron = r.get("cron", "")
+        if not output_dir or not cron:
+            continue
+
+        cadence_days = _estimate_cadence_days(cron)
+        if cadence_days is None or cadence_days > 7:
+            debug_parts.append(f"{label}: cadence={cadence_days}d; skip hitrate")
+            continue
+
+        d = ov / output_dir
+        if not d.is_dir():
+            continue  # staleness cue handles this
+
+        max_lookback = max(14, 3 * cadence_days)
+        cutoff = today - __import__("datetime").timedelta(days=max_lookback)
+
+        files = sorted(d.glob(pattern), key=lambda p: p.name)
+        dated_files: list[date] = []
+        for f in files:
+            fd = _extract_date_from_filename(f.name)
+            if fd is not None:
+                dated_files.append(fd)
+
+        if not dated_files:
+            continue  # staleness cue handles this
+
+        # Cap lookback to oldest file date so new routines aren't penalized
+        # for not existing before their first output.
+        oldest_file = min(dated_files)
+        effective_start = max(cutoff, oldest_file)
+        effective_lookback = (today - effective_start).days
+        if effective_lookback < 1:
+            effective_lookback = 1
+
+        recent = [fd for fd in dated_files if fd >= effective_start]
+        expected = effective_lookback // cadence_days
+        if expected < 3:
+            debug_parts.append(
+                f"{label}: expected={expected} in {effective_lookback}d; too few samples"
+            )
+            continue
+
+        actual = len(recent)
+        rate = actual / expected if expected > 0 else 1.0
+
+        if rate < 0.70:
+            pct = int(rate * 100)
+            degraded.append(f"{label} ({actual}/{expected} runs, {pct}%)")
+            debug_parts.append(
+                f"{label}: {actual}/{expected} in {effective_lookback}d = {pct}%; degraded"
+            )
+        else:
+            pct = int(rate * 100)
+            debug_parts.append(
+                f"{label}: {actual}/{expected} in {effective_lookback}d = {pct}%; ok"
+            )
+
+    debug = "; ".join(debug_parts)
+    if not degraded:
+        return None, debug
+
+    listing = "; ".join(degraded[:3])
+    if len(degraded) > 3:
+        listing += f", +{len(degraded) - 3} more"
+
+    return (
+        Cue(
+            key="routine_hitrate",
+            severity="soft",
+            command_path="_meta/routine_watch.toml",
+            message=(
+                f"{len(degraded)} routine(s) with degraded output rate: {listing}. "
+                f"Routines are firing but Drive writes fail intermittently. "
+                f"Check routine session logs on claude.ai."
+            ),
+        ),
+        f"degraded={len(degraded)}; {debug}",
+    )
+
+
+def _estimate_cadence_days(cron: str) -> int | None:
+    """Estimate cadence in days from a cron-like expression.
+
+    Handles common patterns from routine_watch.toml cron fields:
+      "0 13 * * *"       -> daily (1)
+      "0 10 * * 3"       -> weekly (7)
+      "0 12 */3 * *"     -> every 3 days (3)
+      "0 9 15 2,5,8,11 *" -> quarterly (~90)
+    """
+    # Strip annotations like "UTC (5 AM PT every 3 days)"
+    import re as _re
+
+    cron_clean = _re.split(r"\s+UTC\b", cron)[0].strip()
+    parts = cron_clean.split()
+    if len(parts) < 5:
+        return None
+
+    _minute, _hour, dom, month, dow = parts[:5]
+
+    if month != "*":
+        # Monthly subset: count the months listed
+        months = month.split(",")
+        if len(months) >= 2:
+            return 365 // len(months)
+        return 30
+
+    if dom.startswith("*/"):
+        try:
+            return int(dom[2:])
+        except ValueError:
+            return None
+
+    if dom == "*" and dow == "*":
+        return 1
+
+    if dom == "*" and dow != "*":
+        return 7
+
+    return 30
+
+
+def _extract_date_from_filename(name: str) -> date | None:
+    """Extract YYYY-MM-DD from a filename prefix or embedded pattern."""
+    import re as _re
+
+    m = _re.search(r"(\d{4}-\d{2}-\d{2})", name)
+    if not m:
+        return None
+    try:
+        return date.fromisoformat(m.group(1))
+    except ValueError:
+        return None
+
+
+def check_autoevo_pending(ov: Path, today: date) -> tuple[Cue | None, str]:
+    """Pending autoevo decisions awaiting human triage.
+
+    `/autoevo-nightly` writes uncertain Forgetter findings to
+    `$OV/_meta/autoevo_pending.toml` (status = "pending"). This cue
+    surfaces them at session start with a per-category breakdown so the
+    user can run `/autoevo-review` to triage. Per `protocols/autoevo.md`.
+
+    Severity is `soft` by default. Escalates to `hard` when any of:
+    - any entry's `proposed_at` is more than 14 days ago
+    - any entry's `proposed_at` failed to parse (corrupt_dates > 0); a
+      queue with bad timestamps can hide arbitrarily old entries
+    - any entry's `surface_count >= 3` (the auto-dismiss threshold from
+      `/autoevo-review`; surface before the entry is silently swept)
+
+    Stays silent when the queue file is missing, empty, or all entries
+    are already resolved (status != "pending").
+    """
+    import tomllib
+
+    config_path = ov / "_meta" / "autoevo_pending.toml"
+    if not config_path.is_file():
+        return None, "_meta/autoevo_pending.toml missing; skip"
+
+    try:
+        config = tomllib.loads(config_path.read_text())
+    except (tomllib.TOMLDecodeError, OSError) as exc:
+        # A queue file that exists but cannot be parsed is the worst-of-both:
+        # /autoevo-review will refuse to operate, /autoevo-nightly's queue
+        # append will likely also fail, and silent return here would leave
+        # the user with no signal at all. Fire a hard cue routing the user
+        # to repair the file by hand.
+        return (
+            Cue(
+                key="autoevo_pending",
+                severity="hard",
+                command_path="_meta/autoevo_pending.toml",
+                message=(
+                    f"Autoevo pending queue file is corrupted "
+                    f"(`_meta/autoevo_pending.toml`): {type(exc).__name__}. "
+                    f"`/autoevo-review` and `/autoevo-nightly` queue ops cannot proceed. "
+                    f"Repair by hand (TOML syntax), or back up + restart with an empty file."
+                ),
+            ),
+            f"autoevo_pending.toml parse failed: {exc!r}; hard cue",
+        )
+
+    entries = config.get("pending", [])
+    if not entries:
+        return None, "no pending entries declared"
+
+    # Filter to actually-pending entries.
+    pending = [e for e in entries if e.get("status", "pending") == "pending"]
+    if not pending:
+        return None, f"all {len(entries)} entries resolved"
+
+    # Group by category, track oldest age, count entries with unparseable dates,
+    # count entries the user has repeatedly skipped (auto-dismiss threshold).
+    counts: dict[str, int] = {}
+    oldest_age = 0
+    corrupt_dates = 0
+    repeat_skips = 0
+    for e in pending:
+        cat = str(e.get("category", "unknown"))
+        counts[cat] = counts.get(cat, 0) + 1
+        proposed = e.get("proposed_at", "")
+        try:
+            proposed_date = date.fromisoformat(str(proposed))
+            age = (today - proposed_date).days
+            if age > oldest_age:
+                oldest_age = age
+        except (ValueError, TypeError):
+            corrupt_dates += 1
+        # surface_count >= 3 is the auto-dismiss threshold per
+        # protocols/autoevo.md § Pending queue. If any entry has been
+        # repeatedly skipped, escalate so the user sees them before /autoevo-review
+        # auto-dismisses them on its next run.
+        try:
+            if int(e.get("surface_count", 0)) >= 3:
+                repeat_skips += 1
+        except (ValueError, TypeError):
+            continue
+
+    listing = ", ".join(
+        f"{cat}: {n}" for cat, n in sorted(counts.items(), key=lambda kv: -kv[1])
+    )
+    # Escalate to `hard` on age (>14d), corrupt dates (parsability lost), OR
+    # repeat-skip entries (3+ skips reach auto-dismiss next /autoevo-review).
+    severity: Literal["hard", "soft"] = (
+        "hard"
+        if (oldest_age > 14 or corrupt_dates > 0 or repeat_skips > 0)
+        else "soft"
+    )
+    age_note = f"oldest {oldest_age}d" if oldest_age > 0 else "fresh"
+    corrupt_note = f"; {corrupt_dates} corrupt dates" if corrupt_dates > 0 else ""
+    skip_note = f"; {repeat_skips} ≥3 skips" if repeat_skips > 0 else ""
+    return (
+        Cue(
+            key="autoevo_pending",
+            severity=severity,
+            command_path=".claude/commands/autoevo-review.md",
+            message=(
+                f"{len(pending)} pending autoevo decisions ({listing}; {age_note}{corrupt_note}{skip_note}). "
+                f"`/autoevo-review` to triage."
+            ),
+        ),
+        f"pending={len(pending)} oldest_age={oldest_age} corrupt={corrupt_dates} skips={repeat_skips}; {severity} cue",
+    )
+
+
+def check_autoevo_ran(ov: Path, today: date) -> tuple[Cue | None, str]:
+    """Catches silent nightly-bot failures AND surfaces skipped runs.
+
+    `/autoevo-nightly` writes `<paths.agent_findings>/autoevo-applied-<RUN_DATE>.md`
+    on every run — even when a pre-flight gate aborts (the Skipped section
+    is populated). The bot fires at 05:00 local, so RUN_DATE is today, and
+    this cue (gated to fire after 06:00) inspects today's audit file. Two
+    failure modes to surface:
+
+    1. **Audit file missing.** The bot did not run at all (launchd auth
+       failed, $OV unset, claude CLI missing, etc.). Soft cue pointing at
+       the launchd README.
+    2. **Audit file exists with non-empty Skipped / Errors section.** The
+       bot ran but a pre-flight gate aborted, OR an error occurred during
+       a step. Soft cue pointing at the file so the user can read details.
+
+    Stays silent when:
+    - The agent-findings dir doesn't exist yet (fresh vault, bot never ran).
+    - Today's audit file exists AND its Skipped/Errors sections are
+      empty or contain only "(none)".
+    - It is earlier than 06:00 local today (the 5am bot might still be running).
+
+    Soft cue by default.
+    """
+    from datetime import datetime
+
+    # Don't fire before 06:00 local — bot is given a full hour to complete.
+    if datetime.now().hour < 6:
+        return None, "before 06:00 local; skip"
+
+    findings_dir = tier("agent_findings")
+    if not findings_dir.is_dir():
+        return None, "agent_findings dir missing; bot never installed"
+
+    # The bot runs at 05:00 local and writes its audit log with today's
+    # RUN_DATE. After 06:00 today, today's audit file should exist.
+    expected_name = f"autoevo-applied-{today.isoformat()}.md"
+    expected_path = findings_dir / expected_name
+
+    # Branch 1: audit file missing entirely.
+    if not expected_path.is_file():
+        # If NO audit log exists at all under the dir, the bot was probably
+        # never installed yet — stay silent rather than nag a user who hasn't
+        # set it up.
+        any_audit = list(findings_dir.glob("autoevo-applied-*.md"))
+        if not any_audit:
+            return None, "no audit logs ever; bot not installed yet"
+        return (
+            Cue(
+                key="autoevo_ran",
+                severity="soft",
+                command_path="scripts/launchd/README.md",
+                message=(
+                    f"Nightly autoevo did not run today ({today.isoformat()}). "
+                    f"Check `/tmp/com.atelier.autoevo-nightly.err` and "
+                    f"`~/Library/LaunchAgents/com.atelier.autoevo-nightly.plist`. "
+                    f"Common causes: $OV unset in launchd shell, expired Claude Code credentials, "
+                    f"machine asleep at 05:00."
+                ),
+            ),
+            f"expected {expected_name} missing",
+        )
+
+    # Branch 2: audit file exists — inspect Skipped/Errors sections for
+    # content. A populated Skipped section means a pre-flight gate fired;
+    # a populated Errors section means a mid-run failure happened.
+    try:
+        body = expected_path.read_text()
+    except OSError as exc:
+        return None, f"audit file unreadable: {exc!r}"
+
+    # Parse "### Skipped (reason)" and "### Errors" sections. The audit log
+    # may contain MULTIPLE `## Run` sections in the same day (manual re-runs),
+    # each with its own Skipped / Errors subsections. A single populated
+    # section in any run is enough to fire the cue, so scan all matches.
+    # Stop at the NEXT heading of any level (### or ##) so a Skipped section
+    # body does not accidentally include the immediately-following ### Errors
+    # heading and produce a false "populated" verdict on clean runs.
+    def section_populated(text: str, heading: str) -> bool:
+        import re
+        pat = rf"^###\s+{re.escape(heading)}.*?\n(.*?)(?=^###|^##|\Z)"
+        for m in re.finditer(pat, text, re.MULTILINE | re.DOTALL):
+            for raw in m.group(1).splitlines():
+                line = raw.strip()
+                if not line or line in ("(none)", "- (none)"):
+                    continue
+                return True
+        return False
+
+    skipped = section_populated(body, "Skipped")
+    errored = section_populated(body, "Errors")
+
+    if not skipped and not errored:
+        return None, f"today's audit log clean ({expected_name})"
+
+    parts: list[str] = []
+    if skipped:
+        parts.append("Skipped section populated")
+    if errored:
+        parts.append("Errors section populated")
+    listing = " and ".join(parts)
+    return (
+        Cue(
+            key="autoevo_ran",
+            severity="soft",
+            command_path=str(expected_path.relative_to(ov)),
+            message=(
+                f"Today's nightly autoevo ran with issues: {listing}. "
+                f"Read `{expected_path.relative_to(ov)}` for the audit details."
+            ),
+        ),
+        f"audit log present but {listing}",
+    )
+
+
+def _recap_local_runs(ov: Path, today: date, verbose: bool = False) -> list[str]:
+    """One-liner recaps of recent local routine runs (informational, not cues).
+
+    Reads claim files from `$OV/_meta/routine_runs/*/` for today and yesterday.
+    For completed runs, peeks at the corresponding audit log (if any) to extract
+    counts. Returns a list of human-readable recap lines.
+    """
+    import re
+    import tomllib
+
+    runs_dir = ov / "_meta" / "routine_runs"
+    if not runs_dir.is_dir():
+        return []
+
+    recaps: list[str] = []
+    yesterday = today - __import__("datetime").timedelta(days=1)
+
+    for routine_dir in sorted(runs_dir.iterdir()):
+        if not routine_dir.is_dir():
+            continue
+        routine_name = routine_dir.name
+
+        for check_date in [today, yesterday]:
+            claim = routine_dir / f"{check_date.isoformat()}.toml"
+            if not claim.is_file():
+                continue
+            try:
+                data = tomllib.loads(claim.read_text())
+            except Exception:
+                continue
+
+            status = data.get("status", "unknown")
+            machine = data.get("machine", "?")
+            duration = data.get("duration_seconds")
+
+            if status != "completed":
+                continue
+
+            summary = data.get("result_summary", "")
+            if not summary:
+                summary = _extract_audit_summary(ov, routine_name, check_date)
+
+            dur_str = f" ({duration}s)" if duration else ""
+            date_str = "today" if check_date == today else "yesterday"
+            recap = f"{routine_name} ran {date_str} on {machine}{dur_str}"
+            if summary:
+                recap += f": {summary}"
+            recaps.append(recap)
+            break  # only show the most recent per routine
+
+    if verbose and recaps:
+        for r in recaps:
+            print(f"# debug: recap: {r}", file=sys.stderr)
+
+    return recaps
+
+
+def _extract_audit_summary(ov: Path, routine_name: str, run_date: date) -> str:
+    """Extract a short summary from an autoevo audit log."""
+    import re
+
+    if routine_name != "autoevo-nightly":
+        return ""
+
+    findings_dir = ov / "agent-findings"
+    if not findings_dir.is_dir():
+        return ""
+
+    audit = findings_dir / f"autoevo-applied-{run_date.isoformat()}.md"
+    if not audit.is_file():
+        return ""
+
+    try:
+        body = audit.read_text(errors="replace")
+    except OSError:
+        return ""
+
+    counts: dict[str, int] = {}
+    for heading in ("Auto-applied", "Logged to pending queue", "Skipped", "Errors"):
+        pat = rf"^###\s+{re.escape(heading)}\s*\((\d+)\)"
+        m = re.search(pat, body, re.MULTILINE)
+        if m:
+            counts[heading.split()[0].lower()] = int(m.group(1))
+            continue
+        # Count bullet lines under the heading.
+        sect_pat = rf"^###\s+{re.escape(heading)}.*?\n(.*?)(?=^###|^##|\Z)"
+        sect_m = re.search(sect_pat, body, re.MULTILINE | re.DOTALL)
+        if sect_m:
+            bullets = [
+                ln
+                for ln in sect_m.group(1).splitlines()
+                if ln.strip().startswith("- ") and ln.strip() not in ("- (none)",)
+            ]
+            if bullets:
+                counts[heading.split()[0].lower()] = len(bullets)
+
+    if not counts:
+        return ""
+
+    parts = [f"{k}={v}" for k, v in counts.items()]
+    return ", ".join(parts)
+
+
+def check_local_routine_missed(ov: Path, today: date) -> tuple[Cue | None, str]:
+    """Detect local routines that missed their scheduled run.
+
+    Reads `$OV/_meta/routine_watch.toml` for routines with `execution = "local"`.
+    For each, checks `$OV/_meta/routine_runs/<name>/<cycle_id>.toml` for a
+    claim file with `status = "completed"`. Fires when today's (or yesterday's,
+    for early-morning sessions) claim is missing or failed.
+
+    Gated to fire after 06:00 local so the routine has time to complete.
+    Stays silent when no local routines are declared or `routine_runs/` is absent
+    (bot never installed).
+    """
+    import tomllib
+
+    if datetime.now().hour < 6:
+        return None, "before 06:00 local; skip"
+
+    config_path = ov / "_meta" / "routine_watch.toml"
+    if not config_path.is_file():
+        return None, "_meta/routine_watch.toml missing; skip"
+
+    try:
+        config = tomllib.loads(config_path.read_text())
+    except (tomllib.TOMLDecodeError, OSError) as exc:
+        return None, f"routine_watch.toml parse failed: {exc!r}"
+
+    routines = [r for r in config.get("routine", []) if r.get("execution") == "local"]
+    if not routines:
+        return None, "no local routines declared"
+
+    runs_dir = ov / "_meta" / "routine_runs"
+    if not runs_dir.is_dir():
+        # Never installed on any machine; stay silent until first run.
+        any_local_ever = any(
+            (runs_dir / r.get("name", "")).is_dir() for r in routines
+        )
+        if not any_local_ever:
+            return None, "routine_runs/ absent; never installed"
+
+    missed: list[str] = []
+    debug_parts: list[str] = []
+
+    for r in routines:
+        name = r.get("name", "?")
+        label = r.get("label", name)
+        routine_dir = runs_dir / name
+
+        if not routine_dir.is_dir():
+            # Check if this routine has ever run on any machine.
+            # If not, skip (not installed yet).
+            debug_parts.append(f"{label}: no runs dir")
+            continue
+
+        # Check today's claim, fall back to yesterday for early-morning edge.
+        claim_found = False
+        for check_date in [today, today - __import__("datetime").timedelta(days=1)]:
+            claim = routine_dir / f"{check_date.isoformat()}.toml"
+            if claim.is_file():
+                try:
+                    claim_data = tomllib.loads(claim.read_text())
+                    status = claim_data.get("status", "unknown")
+                    if status == "completed":
+                        claim_found = True
+                        debug_parts.append(f"{label}: {check_date} completed")
+                        break
+                    elif status == "running":
+                        claim_found = True
+                        debug_parts.append(f"{label}: {check_date} still running")
+                        break
+                    elif status == "failed":
+                        missed.append(f"{label} (failed on {check_date})")
+                        debug_parts.append(f"{label}: {check_date} failed")
+                        claim_found = True
+                        break
+                except (tomllib.TOMLDecodeError, OSError):
+                    debug_parts.append(f"{label}: {check_date} claim unreadable")
+                    continue
+
+        if not claim_found:
+            # Check if this routine has EVER run (any .toml in the dir).
+            any_past = list(routine_dir.glob("*.toml"))
+            if any_past:
+                missed.append(f"{label} (no run today)")
+                debug_parts.append(f"{label}: missed today; {len(any_past)} past runs exist")
+            else:
+                debug_parts.append(f"{label}: never ran; skip")
+
+    debug = "; ".join(debug_parts)
+    if not missed:
+        return None, debug
+
+    listing = "; ".join(missed[:3])
+    if len(missed) > 3:
+        listing += f", +{len(missed) - 3} more"
+
+    return (
+        Cue(
+            key="local_routine_missed",
+            severity="soft",
+            command_path="scripts/launchd/README.md",
+            message=(
+                f"{len(missed)} local routine(s) missed: {listing}. "
+                f"Common causes: machine asleep, launchd not loaded, expired credentials. "
+                f"Run the routine manually or check `scripts/launchd/README.md`."
+            ),
+        ),
+        f"missed={len(missed)}; {debug}",
+    )
+
+
 # Registry. To add a new cue, append a `check_*` function above and
 # register it here.
 CHECKS = [
@@ -419,7 +1124,12 @@ CHECKS = [
     ("recurring", check_recurring),
     ("aggregate_freshness", check_aggregate_freshness),
     ("routine_outputs", check_routine_outputs),
+    ("routine_staleness", check_routine_staleness),
+    ("routine_hitrate", check_routine_hitrate),
     ("routine_policy", check_routine_policy),
+    ("autoevo_pending", check_autoevo_pending),
+    ("autoevo_ran", check_autoevo_ran),
+    ("local_routine_missed", check_local_routine_missed),
 ]
 
 
@@ -489,6 +1199,14 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Run only the named cue (debug aid).",
     )
+    parser.add_argument(
+        "--touch-lock",
+        action="store_true",
+        help="Refresh the session-active lock and exit. No cue checks run; "
+        "the lock path is resolved via the registry. Used by the "
+        "UserPromptSubmit hook so long-running sessions keep the lock fresh "
+        "without paying for a full sweep on every prompt.",
+    )
     # Snooze subcommand: `cues.py snooze <key> [--days N]` writes a
     # per-key snooze entry to $OV/_meta/cue_snooze.json. The next session
     # skips fired cues whose key matches until the snooze expires.
@@ -526,7 +1244,59 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     ov = vault_root()
     today = date.today()
+
+    # --touch-lock: lightweight per-prompt refresh path used by the
+    # UserPromptSubmit hook. Touches the lock and exits without running
+    # any cue check. The lock path is resolved via the registry so a
+    # rename of the `cache` segment in harness/paths.toml propagates
+    # to this hook automatically.
+    #
+    # Critical: the scheduled `claude -p "/autoevo-nightly"` invocation is
+    # itself a UserPromptSubmit event — without the env-var guard below,
+    # the hook would touch the lock right before /autoevo-nightly's
+    # pre-flight gate checks the lock, causing the bot to abort every
+    # night with "session-active lock fresh." The launchd plist exports
+    # ATELIER_SKIP_LOCK_TOUCH=1 in its ProgramArguments shell wrapper
+    # so the scheduled run bypasses the refresh.
+    if args.touch_lock:
+        if os.environ.get("ATELIER_SKIP_LOCK_TOUCH"):
+            if args.verbose:
+                print("# debug: lock touch skipped (ATELIER_SKIP_LOCK_TOUCH set)", file=sys.stderr)
+            return 0
+        try:
+            cache_dir = tier("cache")
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            (cache_dir / "atelier-session-lock").touch()
+        except Exception as exc:
+            if args.verbose:
+                print(f"# debug: session-lock touch failed: {exc!r}", file=sys.stderr)
+        return 0
+
     snoozes = _load_snoozes(ov)
+
+    # Session-active lock: when invoked as a SessionStart hook, touch a
+    # marker file so the 5am `/autoevo-nightly` bot can detect a recent
+    # session and bail out per `protocols/autoevo.md` § Pre-flight gates.
+    # SessionStart catches the start of a fresh session; the dedicated
+    # `--touch-lock` path (above) handles the UserPromptSubmit per-prompt
+    # refresh so long-running sessions stay protected past the 6h bail window.
+    #
+    # Skip-flag honor: same logic as --touch-lock. The launchd-invoked
+    # `claude -p "/autoevo-nightly"` triggers SessionStart as well as
+    # UserPromptSubmit; without this guard, the bot would touch the lock
+    # right before its own pre-flight gate reads it, aborting every run.
+    if args.hook:
+        if os.environ.get("ATELIER_SKIP_LOCK_TOUCH"):
+            if args.verbose:
+                print("# debug: SessionStart lock touch skipped (ATELIER_SKIP_LOCK_TOUCH set)", file=sys.stderr)
+        else:
+            try:
+                cache_dir = tier("cache")
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                (cache_dir / "atelier-session-lock").touch()
+            except Exception as exc:
+                if args.verbose:
+                    print(f"# debug: session-lock touch failed: {exc!r}", file=sys.stderr)
 
     fired: list[Cue] = []
     for name, fn in CHECKS:
@@ -549,12 +1319,19 @@ def main(argv: list[str] | None = None) -> int:
             fired.append(cue)
 
     if args.hook:
-        # Claude Code SessionStart hook protocol. Silent when no cue fires;
-        # injects fired cues as a system reminder on the next model call.
-        if not fired:
+        # Claude Code SessionStart hook protocol. Injects fired cues + recent
+        # run recaps as a system reminder on the next model call.
+        recaps = _recap_local_runs(ov, today, verbose=args.verbose)
+        if not fired and not recaps:
             return 0
-        lines = [f"- {c.message} (route: `{c.command_path}`)" for c in fired]
-        context = "Session-start cues (atelier):\n" + "\n".join(lines)
+        sections: list[str] = []
+        if fired:
+            lines = [f"- {c.message} (route: `{c.command_path}`)" for c in fired]
+            sections.append("Session-start cues (atelier):\n" + "\n".join(lines))
+        if recaps:
+            recap_lines = [f"- {r}" for r in recaps]
+            sections.append("Recent local routine runs:\n" + "\n".join(recap_lines))
+        context = "\n".join(sections)
         payload = {
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",

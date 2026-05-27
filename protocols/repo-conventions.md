@@ -138,7 +138,9 @@ Vault-side lint for the conventions in this doc (folder fission, image placement
 
 ## $OV git push policy
 
-`$OV` is typically a git repo with an optional private remote (private GitHub repo). The atelier does not auto-commit or auto-push; both are user-driven. Conventions:
+`$OV` is typically a git repo with an optional private remote (private GitHub repo). The atelier does not auto-commit or auto-push; both are user-driven. **Named exception:** `protocols/autoevo.md` defines a nightly autonomous decay sweep that auto-commits each op to `$OV` so `git revert` is the recovery path. It still never auto-pushes; push remains user-driven for all flows.
+
+Conventions:
 
 - **Push cadence**: at the user's discretion. Reasonable triggers include after `/sync` (which produces a parent commit absorbing zettelm digests), after a `/promote` that lands a new wiki entry, or at end-of-session if anything material changed.
 - **Scope**: whatever the vault's `.gitignore` permits. `cache/` (L1 ephemera) and `assets/` (auto-paste hash-named imports) are typically excluded. `_meta/` (routine config, drive aliases) is typically pushed because it holds load-bearing user-private config; users with sensitive content in `_meta/<backend>.toml` may prefer to gitignore it and re-derive per device. The atelier does not dictate the vault's gitignore.

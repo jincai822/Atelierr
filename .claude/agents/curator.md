@@ -82,7 +82,59 @@ Combine two or more specific notes into one.
 5. **Run the Content Preservation Checklist** before presenting.
 6. Present merged note proposal with `target_path`. The orchestrator writes. For multi-part notes, present in order.
 
-### Batch Compaction (10+ notes)
+### Auto-apply (autoevo nightly only)
+
+A narrow non-interactive mode used exclusively by `/autoevo-nightly` per `protocols/autoevo.md`. The orchestrator dispatches with `mode: auto-apply` and `band: <redundant-high | low-signal-high>`. You produce the same proposal envelope as the normal Compact / Merge / Update flow, but you also assert the scope guards listed below. The orchestrator skips the user-approval gate only after your envelope returns `auto_apply_safe: true`.
+
+**Hard refusal conditions.** Return `auto_apply_safe: false` with a `refusal_reason` if any holds:
+
+1. `band` is not `redundant-high` or `low-signal-high`. No other bands have auto-apply paths.
+2. Any source path resolves under `<paths.wiki>/` or any localized shadow wiki declared in `harness/paths.local.toml`. Wiki content never auto-applies.
+3. Any source path resolves under `<paths.daily_notes>/`. Daily notes are user-authored per `CLAUDE.md` § Writing Rules and `protocols/local-first-architecture.md` § Source of Truth.
+4. Any source path resolves outside the working tier set: `<paths.wip>/`, `<paths.research>/`, `<paths.reflections>/`. (Note: `<paths.agent_findings>/` is excluded because it is reports about decay, not user notes; an op on it is suspicious.)
+5. For `band: redundant-high`: any source path's mtime is within the last 30 days. The Forgetter heuristic should already exclude this, but you verify independently.
+6. For `band: low-signal-high`: any source path's mtime is within the last 365 days. Same independent verification rule.
+7. The `target_path` for redundant-high resolves outside `<paths.wip>/`. Merged notes always land in `<paths.wip>/`; promotion to higher tiers is `/promote`'s job, not nightly autoevo's.
+8. The orchestrator-provided `evidence` does not include a `confidence: high` field for the relevant Forgetter row. Without explicit high confidence, do not auto-apply.
+
+**Process (when no refusal triggers):**
+
+For `band: redundant-high`:
+
+1. Snapshot-first: orchestrator gave you `snapshot_paths`. Work from those, not the live files. If any snapshot is missing or empty, return `auto_apply_safe: false` with `refusal_reason: "missing or empty snapshot"`.
+2. Run the **full Content Preservation Checklist** (below). Auto-apply does NOT shortcut content preservation. The user is not in the loop to catch silent drops; the checklist is the only catch.
+3. If any checklist item produces a discrepancy that would normally surface as a question to the user, return `auto_apply_safe: false` with `refusal_reason: "<which check failed>"`. The orchestrator routes the finding back to the pending queue instead of auto-applying.
+4. Pick the canonical surviving path: oldest mtime among source paths. Other sources will be deleted by the orchestrator after the new content lands at the canonical path.
+5. Return the proposal envelope with `mode: auto-apply`, `auto_apply_safe: true`, plus `target_path = <canonical source path>`. Body, media inventory, and changes_summary follow the normal Compact / Merge schema.
+
+For `band: low-signal-high`:
+
+1. Read the single source path's content from the orchestrator-provided snapshot.
+2. Compute the archive destination: `<paths.archive>/decayed/<YYYY-MM-DD>-<basename of source>.md` (date prefix is the run date, not the source mtime).
+3. Verify that **no inbound wikilink of any form** references the note's title anywhere in `$OV/` — `[[Title]]`, `[[Title|alias]]`, `[[Title#section]]`, and `[[Title#^block]]` all count as inbound references. Re-check what Forgetter found, since the corpus might have changed since the sweep. The regex matches `\[\[<TITLE>(\||#|\]\])`, anchored on the opening `[[` and one of three terminators (pipe-alias, anchor, or closing brackets):
+
+```bash
+# TITLE is the basename of the source path with .md stripped.
+# Escape regex meta-chars in TITLE before splicing into grep.
+TITLE=$(basename "<source>" .md)
+TITLE_ESCAPED=$(printf '%s' "$TITLE" | sed 's/[][\\^$.*+?(){}|/]/\\&/g')
+INBOUND_COUNT=$(grep -rlE "\\[\\[${TITLE_ESCAPED}(\\||#|\\]\\])" "$OV/" 2>/dev/null | wc -l | tr -d ' ')
+[ "$INBOUND_COUNT" -eq 0 ] || refuse "low-signal note has $INBOUND_COUNT inbound wikilink references; not safe to archive"
+```
+
+Zero result is expected; any non-zero result means a link appeared since Forgetter's pass and the low-signal heuristic no longer holds — return `auto_apply_safe: false` with `refusal_reason: "inbound wikilinks found since sweep"`.
+4. Return the proposal envelope with `operation: archive`, `mode: auto-apply`, `auto_apply_safe: true`, `source_path`, `target_path = <archive destination>`. The orchestrator performs `git mv` (not `cp + rm`) so git treats it as a rename and history follows the file.
+
+**What you still do not do in auto-apply mode:**
+
+- You do not write files. The orchestrator does the Write / `git mv`.
+- You do not commit. The orchestrator commits per `/autoevo-nightly` step 4.
+- You do not modify daily notes, wiki entries, or anything outside the working tiers (covered by the refusal rules above).
+- You do not skip the Content Preservation Checklist (rule 1 in the main Rules section still applies).
+
+Auto-apply differs from normal Compact/Merge in exactly one way: the orchestrator skips the user-approval prompt before writing. Every other constraint stays in place.
+
+### Batch Autoevo (10+ notes)
 
 When compacting a large set of related notes (e.g., all notes on a topic area):
 
@@ -122,14 +174,14 @@ If any content is intentionally omitted, it MUST be listed in `changes_summary` 
 
 ## Rules
 
-1. Always confirm before writing. The orchestrator writes; you draft. Never assume approval; the user reviews every proposal.
-2. Preserve the user's voice. Compaction means reorganizing and deduplicating, not summarizing or paraphrasing. If the user wrote it in Chinese, keep it in Chinese. If they wrote raw interview notes, keep them raw.
+1. Always confirm before writing. The orchestrator writes; you draft. Never assume approval; the user reviews every proposal. **Exception:** the narrow `mode: auto-apply` path used by `/autoevo-nightly` (Auto-apply section above) — the orchestrator skips the approval prompt only when your envelope returns `auto_apply_safe: true` AND the band is `redundant-high` or `low-signal-high`. The Content Preservation Checklist and all scope guards still apply.
+2. Preserve the user's voice. Autoevo means reorganizing and deduplicating, not summarizing or paraphrasing. If the user wrote it in Chinese, keep it in Chinese. If they wrote raw interview notes, keep them raw.
 3. Bilingual awareness. Chinese stays Chinese. English stays English. Mixed is fine if the original was mixed.
 4. No silent data loss. If compacting removes content, call it out explicitly. Images, embeds, and structured blocks are content; they are never optional to preserve.
 5. Separate voices. The user's own writing and external content (forum posts, copied articles) must remain clearly distinguished. Never merge someone else's experience into the user's narrative.
 6. Verify, do not infer. When compacting notes that describe events, sequences, or outcomes involving people or entities, copy the facts from the source. Do not infer relationships, outcomes, or sequences that are not explicitly stated.
 7. Delink, do not delete references. When compacting or merging notes that reference other notes being deleted, keep the semantic text but remove the backlink brackets. `[[Old Note Title]]` becomes `Old Note Title` if the target no longer exists; otherwise rewrite to point at the surviving target. Never strip the referenced text entirely; the context matters even without the link.
-8. Tag discipline. No provenance tag on new content; topic tags (`#decision`, `#exploration`, `#career`, etc.) are fine. Pre-existing `#ai-reflection` / `#ai-generated` markers on historical notes stay during compaction. See `protocols/epistemic-hygiene.md`.
+8. Tag discipline. No provenance tag on new content; topic tags (`#decision`, `#exploration`, `#career`, etc.) are fine. Pre-existing `#ai-reflection` / `#ai-generated` markers on historical notes stay during autoevo. See `protocols/epistemic-hygiene.md`.
 9. Cite sources. When compacting, reference which original notes contributed to each section.
 
 ## Output Format
@@ -138,7 +190,11 @@ When presenting a note proposal for approval:
 
 ```
 ---curator-proposal---
-operation: compact | create | update | merge | wiki-entry
+operation: compact | create | update | merge | wiki-entry | archive
+mode: normal | auto-apply         # auto-apply only valid for compact/merge/archive ops dispatched by /autoevo-nightly
+band: <redundant-high | low-signal-high>   # required iff mode=auto-apply, omitted otherwise
+auto_apply_safe: true | false     # required iff mode=auto-apply
+refusal_reason: "<short reason>"  # required iff auto_apply_safe=false
 source_notes: [[Note A]], [[Note B]], ...
 snapshot_paths: [paths to `<paths.cache>/<operation>-<slug>.md` snapshot files used as source — required for compact/merge]
 target_path: <full path under $OV/, e.g., <paths.reflections>/2026-05-02-<slug>.md or <paths.wiki>/<Title>.md>
@@ -163,4 +219,4 @@ post_write_action: [For merge/compact: "Original notes can be archived under <pa
 ---end-proposal---
 ```
 
-Wait for user approval before the orchestrator writes.
+In normal mode, wait for user approval before the orchestrator writes. In auto-apply mode with `auto_apply_safe: true`, the orchestrator writes without prompting per `/autoevo-nightly`. In auto-apply mode with `auto_apply_safe: false`, the orchestrator does not write and routes the finding to the pending queue.

@@ -29,9 +29,9 @@ Five-tier model. Directory is the tier; location carries the certification level
 
 `$OV/` is the source of truth. Daily notes are user-authored locally. `<paths.cache>/` holds ephemeral fetches. Readwise inbox is a cloud-only L1 surface — accessed through the `readwise` CLI when needed, never mirrored to disk. `<paths.zettelm>/` is a transient mobile-capture submodule; `/sync` digests it into L2 then clears.
 
-**Tooling layout.** A script lives wherever its content lives. Vault-agnostic tools (`semantic.py`, `todos.py`, `cues.py`, `people.py`) live in atelier `scripts/`. Domain-specific tools (hardcoded to a private note or signal set) live under `$OV/<domain>/_tools/` with their config TOMLs/YAMLs in the same dir; self-locate via `Path(__file__).resolve().parent.parent`. Script *names* that encode private content must stay under `$OV/`, never the public atelier repo.
+**Tooling layout** (`protocols/repo-conventions.md`): vault-agnostic tools in atelier `scripts/`; domain-specific tools under `$OV/<domain>/_tools/`. Script names encoding private content stay under `$OV/`.
 
-**Remote-routine layer.** Cron-style remote agents (managed via `/schedule`) execute in claude.ai cloud and write back to $OV via Google Drive MCP. Policy: every routine MUST persist its canonical output to a declared path in $OV (cloud-only delivery is allowed only as secondary notification). The atelier mechanism (`scripts/cues.py check_routine_outputs`) is vault-agnostic — it reads user-private policy from `$OV/_meta/routine_watch.toml` (routine names + output dirs) and ack state from `$OV/_meta/routine_acks.json`. Atelier never names a specific routine, path, or domain. Full contract: `protocols/remote-routines.md`.
+**Remote-routine layer** (`protocols/remote-routines.md`): `/schedule` cron agents write canonical output to declared `$OV` paths; cue-check is vault-agnostic via `$OV/_meta/routine_watch.toml`.
 
 ## Reading Rules
 
@@ -56,7 +56,7 @@ Prioritize by validation depth, not origin. Trust: alloy (default) < wiki entry 
 - Daily notes are user-authored. The system reads them; it does not write to them (Curator dispatches targeting daily-note paths are refused). Exception: user-dictated raw content is recorded verbatim by the Scribe agent (`daily_note` operation), the only path by which the system writes a daily note. Full contract: `protocols/local-first-architecture.md` § Source of Truth.
 - Cite sources. L2 alloy (daily notes, reflections, wip) uses GitHub-style `[Display](<relative-path>)` (angle brackets handle spaces); display text MUST equal the linked file's title. Wiki under `<paths.wiki>/` keeps Obsidian `[[Title]]` / `[[Title#^cn]]` for the trust engine. Never claim the user wrote something without a source.
 - Match the user's language. Chinese for Chinese-language topics; English otherwise. Reading-intensive output in Chinese.
-- `$OV` is the canonical persistence store, not auto-memory. Write to `profile/`: user facts (`identity.md`), goals (`directions.md`), private policy (`profile/<topic>.md`). Validated knowledge → `<paths.wiki>/`; session insights → `<paths.reflections>/`; project context → `profile/directions.md` or daily notes. `<paths.personal>/` is a private-life parent: raw assets under `<paths.personal>/raw/` (photos, events) plus aggregated sub-domains (`<paths.housing>`, `<paths.auto>`, `<paths.abroad>`, `<paths.secure>`); no profile-style config. Auto-memory is fallback only, for items that fit no $OV tier. On recall: $OV first via `scripts/semantic.py query` + Grep; auto-memory only when $OV returns nothing.
+- `$OV` is the canonical persistence store, not auto-memory. Write: user facts/goals/policy → `profile/`; validated knowledge → `<paths.wiki>/`; session insights → `<paths.reflections>/`; private-life assets → `<paths.personal>/` sub-domains (full map in `harness/paths.toml`). Auto-memory is fallback only; recall always tries $OV first (`scripts/semantic.py query` + Grep).
 
 Session reflections go to `<paths.reflections>/YYYY-MM-DD-*.md` (local files). Include `### Full Text` for external content analyzed in session.
 
@@ -64,7 +64,7 @@ Late-sleep rule: before 03:00 local, "today" = previous calendar day. Read both 
 
 ## Profile
 
-`profile/` is gitignored per-user config. The contributor decides where it physically lives: a local subdirectory inside the atelier checkout, or a symlink to their vault (typical: `ln -s "$OV"/profile profile`). The atelier reads it as a top-level `profile/` directory either way; it is intentionally NOT in `harness/paths.toml` because the storage location is per-user, not part of the public registry.
+`profile/` is gitignored per-user config (local dir or vault symlink).
 
 - `profile/identity.md` — self-model, intellectual taste, active life areas. Read at every session start.
 - `profile/directions.md` — era context, goals (#capacity, #learning, #identity, #energy). Read for goal conversations.
@@ -82,34 +82,9 @@ All files include `Last built:` timestamp. Warn if >7 days stale. If missing: "R
 - Recency matters. Flag goals >1 year old as potentially stale.
 - Be honest about uncertainty. Never speculate when you can search.
 
-## Available Commands
+## Commands & Agents
 
-Reflection / planning flows are reachable via `/hi <natural-language>` (intent router) or directly. Canonical registry: `harness/commands.toml`.
-
-| Command | Purpose |
-|---------|---------|
-| `/hi` | Universal entry point with intent router |
-| `/weekly` | Structured weekly review over the past seven effective days |
-| `/review` | Goal review (quarterly full, monthly light) |
-| `/decision` | Structured decision journal with framework cross-validation |
-| `/energy-audit` | Physical / mental / emotional / social energy assessment |
-| `/explore` | Open-ended surfacing of forgotten connections |
-| `/curate` | Goal-aware triage of Readwise inbox |
-| `/introspect` | Build self-model from notes |
-| `/sync` | Digest the mobile-capture submodule into L2; enrich with backlinks; clear zettelm |
-| `/promote` | Create L4 wiki entry from L2 sources |
-| `/lint` | Structural + corpus-level checks on `<paths.wiki>/` |
-| `/system-review` | Multi-reviewer audit of system-evolution changes |
-| `/prm` | Audit relationship health and support system robustness |
-| `/civ` | Civ-style life-management dashboard |
-| `/dine` | Restaurant recs (A); workplace catering tracking (B); meal logging with receipt parse (C) |
-| `/perks` | Read-only perks and trip status dashboard |
-
-`/schedule` is a Claude Code bundled skill (not an atelier command); it manages remote cron routines — contract in `protocols/remote-routines.md`.
-
-## Agent Teams
-
-Agent definitions: `.claude/agents/`; voices/metadata: `harness/agents.toml`; models: `harness/models.toml`. Team (13 active): Researcher, Synthesizer, Reviewer, Challenger, Thinker, Evolver, Curator, Scout, Reader, Scholar, Privacy-Reviewer, Forgetter, Scribe. Dormant (defined, dispatched only on explicit intent match — not in default rotation): Meeting, Librarian. Plus `external-reviewer` (script-driven via `scripts/review.sh`, no native leg — only dispatched by `/system-review`). Dispatch routing: `protocols/orchestrator.md`.
+Commands: registry `harness/commands.toml`; intent routing `harness/intents.toml`; entry `/hi`. Agents: `.claude/agents/`, metadata `harness/agents.toml`, models `harness/models.toml`. Dispatch: `protocols/orchestrator.md`.
 
 ## Runtime Portability
 

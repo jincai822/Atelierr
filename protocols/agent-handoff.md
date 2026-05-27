@@ -143,57 +143,73 @@ Dispatch prompt MUST include:
 
 The Curator works exclusively from `snapshot_paths` — it never re-reads the originals. This preserves the "content recoverable even if the user deletes mid-session" property that makes the cache step load-bearing.
 
+**Auto-apply mode (autoevo nightly only).** When the orchestrator dispatches Curator from `/autoevo-nightly`, three additional fields are required:
+
+- `mode`: `auto-apply` (vs. the default `normal` mode used by all human-in-loop flows)
+- `band`: `redundant-high` | `low-signal-high` — which trust band fired; no other values trigger auto-apply
+- `evidence`: the Forgetter row dict that triggered the dispatch, including `confidence: high`; Curator's scope guards (curator.md § Auto-apply hard refusal conditions) verify this before returning `auto_apply_safe: true`
+
+Snapshot creation remains mandatory in auto-apply mode — Curator refuses with `auto_apply_safe: false` and `refusal_reason: "missing or empty snapshot"` if `snapshot_paths` is absent.
+
+## Contract: Orchestrator → Challenger (Probe Contradiction)
+
+Used by `/autoevo-nightly` step 3d to filter rhetorical contradictions from genuine ones before queueing wiki rewrites for human review. Read-only by contract; Challenger does not write any file.
+
+Dispatch prompt MUST include:
+- `task`: `probe-contradiction`
+- `wiki_claim`: full text of the L4 wiki claim Forgetter flagged
+- `contradicting_peer`: relative path under `$OV/` of the L2 note containing the apparent contradiction
+- `contradiction_signal`: the exact phrase from the peer that Forgetter flagged as correction-language
+
+Response envelope:
+- `from`: `challenger`
+- `to`: `orchestrator`
+- `type`: `contradiction-probe`
+- `verdict`: `genuine` (the peer really overturns the wiki claim) | `rhetorical` (the "actually" / "wrong" / "事实上" is rhetorical or refers to a different referent)
+- `rationale`: one short sentence; the orchestrator includes this in the pending-queue entry for `genuine` verdicts and in the audit log § "Contradicted rhetorical dismissals" for `rhetorical` verdicts
+
 ## Contract: Curator → Orchestrator
 
 **Type:** `note-operation`
 
 Required fields:
-- `operation`: compact | merge | create | replace | wiki-entry
-- `target_path`: (required for `wiki-entry`, optional otherwise) Local file path under `<paths.wiki>/<slug>.md` where the orchestrator will write the draft after user approval. Curator cannot Write — it only proposes the path and body.
+- `operation`: compact | merge | create | replace | wiki-entry | archive
+- `mode`: `normal` (default; user-approval gate applies) | `auto-apply` (only valid for compact/merge/archive ops dispatched by `/autoevo-nightly`)
+- `band`: required iff `mode = auto-apply`; one of `redundant-high` | `low-signal-high`. Omitted otherwise.
+- `auto_apply_safe`: required iff `mode = auto-apply`; `true` when Curator's scope guards pass and the content-preservation checklist succeeded, `false` otherwise.
+- `refusal_reason`: required iff `auto_apply_safe = false`; one short sentence explaining which guard tripped. Orchestrator surfaces this to the pending queue.
+- `target_path`: (required for `wiki-entry` and `archive`, optional otherwise) Local file path under `$OV/` where the orchestrator will write the draft after user approval. Curator cannot Write — it only proposes the path and body.
 - `notes_affected`: Array of note titles involved
-- `snapshot_paths`: (required for compact/merge) Array of `<paths.cache>/<operation>-<slug>.md` snapshot file paths used as source. Orchestrator verifies these exist before accepting the proposal.
-- `media_inventory`: (required for compact/merge, omit for create/replace) `{images: count, tables: count, structured_blocks: count, embeds: count}` — counts from source notes. The orchestrator verifies these counts match the output.
+- `snapshot_paths`: (required for compact/merge/archive in any mode) Array of `<paths.cache>/<operation>-<slug>.md` snapshot file paths used as source. Orchestrator verifies these exist before accepting the proposal.
+- `media_inventory`: (required for compact/merge, omit for create/replace/archive) `{images: count, tables: count, structured_blocks: count, embeds: count}` — counts from source notes. The orchestrator verifies these counts match the output.
 - `media_output_count`: (required for compact/merge) `{images: count, tables: count, structured_blocks: count, embeds: count}` — counts in the proposed output. Must match `media_inventory` or differences must be listed in `changes_summary`.
-- `external_content_flagged`: (required for compact/merge, omit for create/replace) boolean — true if any source notes contain content from external sources (forum quotes, others' experiences). If true, those sections must be clearly attributed in `proposed_content`.
-- `proposed_content`: The new/merged content (for user approval)
+- `external_content_flagged`: (required for compact/merge, omit for create/replace/archive) boolean — true if any source notes contain content from external sources (forum quotes, others' experiences). If true, those sections must be clearly attributed in `proposed_content`.
+- `proposed_content`: The new/merged content (for user approval). For `operation: archive`, this is the snapshot content being archived (Curator does not modify it).
 - `estimated_size`: Approximate byte size of `proposed_content`. If >15KB, must include a split plan.
-- `content_integrity`: (required for compact/merge, omit for create/replace) `{verbatim_preserved: boolean, structures_preserved: boolean, images_preserved: boolean, checklist_passed: boolean}` — self-assessment that the Content Preservation Checklist was run
+- `content_integrity`: (required for compact/merge, omit for create/replace/archive) `{verbatim_preserved: boolean, structures_preserved: boolean, images_preserved: boolean, checklist_passed: boolean}` — self-assessment that the Content Preservation Checklist was run
 - `rationale`: Why this operation was recommended
 
 ## Contract: Forgetter → Orchestrator
 
 **Type:** `decay-report`
 
-Forgetter writes a decay report to disk and returns only the path on success; on Write failure it returns the full categorized findings inline so a completed sweep is never lost. Two envelope shapes apply by `mode`:
-
-**Success envelope** (`mode: full | partial`):
+Forgetter is read-only (no `Write` tool); it returns the categorized findings inline. The orchestrator persists the report to disk at `<paths.agent_findings>/decay-<RUN_TS>-<scope-slug>.md` using the inline content verbatim. This single-mode envelope eliminates the prior "filesystem-output is the contract" assumption, which was broken at runtime by Claude Code's subagent system-prompt directive blocking report-shaped file writes.
 
 Required fields:
 - `from`: `forgetter`
 - `to`: `orchestrator`
 - `type`: `decay-report`
-- `report_path`: absolute path under `<paths.agent_findings>/decay-<YYYYMMDD-HHMMSS>.md` (where the agent wrote the report)
-- `mode`: `full` (sweep ran to completion) | `partial` (sweep early-terminated on `max_candidates` or `time_budget_s`)
+- `mode`: `full` (sweep ran to completion) | `partial` (sweep early-terminated on `max_candidates`, `time_budget_s`, or self-stop at 80% of maxTurns)
 - `summary`: `{redundant: N, time_stale: N, contradicted: N, low_signal: N}` — counts per category
+- `findings_inline`: full categorized findings keyed by category (`redundant`, `time_stale`, `contradicted`, `low_signal`), each entry carrying the schema defined in `.claude/agents/forgetter.md` § Output
 
-The orchestrator surfaces `report_path` to the user; the user reads the report directly. Forgetter does NOT echo report contents inline in the success case — filesystem-output is the contract.
+`findings_inline` is required on every successful return (whether `mode: full` or `mode: partial`). The orchestrator writes the report file post-receipt.
 
-**Failed-write envelope** (`mode: failed-write`):
+**No-envelope case (out-of-band).** If Forgetter is interrupted by the runtime and never emits the closing `---end-result---` marker, no envelope reaches the orchestrator. The orchestrator detects this absence and routes the scope to audit § Errors as `forgetter_no_envelope` with `scope`, `tool_calls_observed`, `duration_s`. The next-/hi cue (`scripts/cues.py check_autoevo_ran`) surfaces this via the Errors-section read.
 
-When the report `Write` to `<paths.agent_findings>/decay-<TS>.md` fails (disk full, permission denied, parent directory unwritable), Forgetter MUST return the accumulated findings inline rather than silently dropping the sweep:
+**Per-finding `confidence` field.** Every row in `findings_inline` carries `confidence: high | medium | low` derived per category by the rules in `.claude/agents/forgetter.md` § Confidence Field. The orchestrator (specifically `/autoevo-nightly`) reads this field to decide whether a finding is auto-apply-eligible or routes to the pending queue. Findings without `confidence` (older Forgetter runs, partial reports) default to `medium` and never auto-apply.
 
-Required fields:
-- `from`: `forgetter`
-- `to`: `orchestrator`
-- `type`: `decay-report`
-- `mode`: `failed-write`
-- `write_error`: short string describing the failure
-- `summary`: same shape as success envelope
-- `findings_inline`: full categorized findings with the same per-category fields as the on-disk report, structured by category. The orchestrator surfaces these to the user even though no path was written, and may attempt a retry.
-
-`report_path` is omitted in the failed-write case (no file exists).
-
-**Cross-reference:** the agent-side spec is `.claude/agents/forgetter.md` → "Return Value" and "Failure Modes to Avoid".
+**Cross-reference:** the agent-side spec is `.claude/agents/forgetter.md` → "Operating Principle", "Confidence Field", "Return Value".
 
 ## Contract: Meeting → Orchestrator
 

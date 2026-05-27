@@ -75,6 +75,8 @@ For project slash commands such as `/hi`, `/review`, `/weekly`, and
 `/lint`, read the corresponding `.claude/commands/<name>.md` file and run the
 workflow under this adaptation table. (`/reflect` is an alias for `/hi`.)
 
+`/autoevo-nightly` and `/autoevo-review` are the autonomous-autoevo surface defined by `protocols/autoevo.md`. `/autoevo-nightly` is bot-invoked (headless `claude -p`, launchd at 05:00) and not user-facing; `/autoevo-review` is the morning triage flow for the pending queue. Both are registered in `harness/commands.toml` with `direct_only = true`.
+
 ### Codex `/hi` parity
 
 Codex has no native slash command surface. To replicate `/hi <text>`:
