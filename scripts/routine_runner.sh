@@ -43,6 +43,15 @@ source "$HOME/.profile" 2>/dev/null || true
 source "$ATELIER_DIR/harness/env.local.sh" 2>/dev/null || true
 set -eu
 
+# Claude Code's native installer puts `claude` in ~/.local/bin, which only
+# ~/.zshrc (interactive-only) adds to PATH — not the login profiles sourced
+# above. Without this, `claude -p` below is not found in the headless launchd
+# environment and the routine fails after acquiring the lock. Prepend it.
+case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) [ -d "$HOME/.local/bin" ] && export PATH="$HOME/.local/bin:$PATH" ;;
+esac
+
 : "${OV:?ERROR: OV not set — export it from ~/.zprofile, ~/.profile, or ~/atelier/harness/env.local.sh}"
 
 mkdir -p "$OV/cache" "$OV/_meta/routine_runs/$ROUTINE"
@@ -57,27 +66,27 @@ if [ "${ATELIER_SKIP_STAGGER:-0}" != "1" ]; then
 fi
 
 # --- DynamoDB lock --------------------------------------------------------
-# aws-vault injects credentials from macOS Keychain into the subprocess
-# environment. Fails explicitly if aws-vault or the profile is missing.
+# Credentials come from a dedicated non-interactive AWS profile that boto3
+# reads straight from ~/.aws/credentials. No aws-vault, no macOS Keychain:
+# the Keychain is locked when the screen is locked at 05:00, which is what
+# silently broke earlier runs. The profile is scoped to DynamoDB
+# {Get,Put,Update,Delete}Item on the lock table only. One-time setup lives in
+# scripts/launchd/README.md § Step 2.
 
 LOCK_PY="uv run --directory $ATELIER_DIR python3 $SCRIPTS_DIR/routine_lock.py"
 
-# Check coordination mode: skip aws-vault entirely when coordination=none.
+# Coordination mode is read from routine_watch.toml; "none" skips creds entirely.
 COORD_MODE=$($LOCK_PY status "$ROUTINE" --cycle "$CYCLE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('coordination',''))" 2>/dev/null || echo "")
 
-if [ "$COORD_MODE" = "none" ]; then
-    LOCK_CMD="$LOCK_PY"
-else
-    if ! command -v aws-vault &>/dev/null; then
-        echo "[$(date -Iseconds)] ERROR: aws-vault not found but coordination is enabled. Install: brew install aws-vault" >&2
-        exit 2
-    fi
-    if ! aws-vault list 2>/dev/null | grep -q atelier; then
-        echo "[$(date -Iseconds)] ERROR: aws-vault 'atelier' profile not found. Run: aws-vault add atelier" >&2
-        exit 2
-    fi
-    LOCK_CMD="aws-vault exec atelier --no-session -- $LOCK_PY"
+if [ "$COORD_MODE" != "none" ]; then
+    # boto3 resolves this profile from ~/.aws/credentials with zero prompts.
+    export AWS_PROFILE="${ATELIER_LOCK_AWS_PROFILE:-atelier-lock}"
 fi
+LOCK_CMD="$LOCK_PY"
+
+CLAIM_DIR="$OV/_meta/routine_runs/$ROUTINE"
+CLAIM_FILE="$CLAIM_DIR/$CYCLE.toml"
+HOSTNAME="$(hostname)"
 
 LOCK_RESULT=$($LOCK_CMD acquire "$ROUTINE" --cycle "$CYCLE" 2>&1) || LOCK_EXIT=$?
 LOCK_EXIT=${LOCK_EXIT:-0}
@@ -85,20 +94,33 @@ LOCK_EXIT=${LOCK_EXIT:-0}
 echo "[$(date -Iseconds)] lock acquire: exit=$LOCK_EXIT result=$LOCK_RESULT"
 
 if [ "$LOCK_EXIT" -eq 1 ]; then
+    # Genuine contention: another machine owns this cycle and will write the
+    # shared output plus its own claim under $OV. Stand down cleanly; do NOT
+    # write a claim here (the holder's claim covers the session cue check).
     echo "[$(date -Iseconds)] skipping: lock held by another machine"
     exit 0
 fi
 
 if [ "$LOCK_EXIT" -eq 2 ]; then
-    echo "[$(date -Iseconds)] ERROR: lock acquire failed (credentials missing or DynamoDB unreachable). Fix before retrying." >&2
+    # Credential / DynamoDB failure. Fail LOUD: record a failed claim so the
+    # session cue reports "failed (<reason>)" instead of the misleading
+    # "no run today / machine asleep" default. Flatten + de-quote the reason
+    # so the claim stays valid TOML.
+    SAFE_RESULT=$(printf '%s' "$LOCK_RESULT" | tr '\n' ' ' | sed "s/\"/'/g")
+    cat > "$CLAIM_FILE" <<EOF
+routine = "$ROUTINE"
+cycle_id = "$CYCLE"
+machine = "$HOSTNAME"
+claimed_at = "$(date -Iseconds)"
+status = "failed"
+error = "lock-acquire-failed: $SAFE_RESULT"
+EOF
+    echo "[$(date -Iseconds)] ERROR: lock acquire failed (credentials or DynamoDB). Wrote failed claim. Fix before retrying." >&2
     exit 2
 fi
 
 # --- write local claim file -----------------------------------------------
 
-CLAIM_DIR="$OV/_meta/routine_runs/$ROUTINE"
-CLAIM_FILE="$CLAIM_DIR/$CYCLE.toml"
-HOSTNAME="$(hostname)"
 CLAIMED_AT="$(date -Iseconds)"
 
 cat > "$CLAIM_FILE" <<EOF

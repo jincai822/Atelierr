@@ -387,6 +387,12 @@ def check_routine_policy(ov: Path, today: date) -> tuple[Cue | None, str]:
         return None, "no routines declared"
     violators: list[str] = []
     for r in routines:
+        # Local routines write to $OV directly via the filesystem; the Drive-write
+        # policy applies only to remote (claude.ai) routines that persist over MCP.
+        # Per protocols/remote-routines.md § routine_watch.toml: local entries
+        # carry no drive_write_enforced flag.
+        if r.get("execution") == "local":
+            continue
         if r.get("drive_write_enforced") is True:
             continue
         if r.get("needs_drive_write_update") is True:

@@ -30,23 +30,45 @@ If `OV` is exported from `~/.zprofile` or `~/.profile` already (login-shell scop
 
 ### Step 2 — (optional) enable multi-machine coordination
 
-If you run the same routines on multiple Macs, set up DynamoDB as the cross-machine lock:
+If you run the same routines on multiple Macs, set up DynamoDB as the cross-machine lock. Credentials must be **non-interactive**: the job runs at 05:00 with the screen locked, when the macOS Keychain is unreadable. So `boto3` reads a dedicated static-key profile straight from `~/.aws/credentials` — no `aws-vault`, no Keychain prompt. (aws-vault is an interactive broker; using it for a headless 5am job is what silently broke earlier runs — a locked-Keychain failure was indistinguishable from benign lock contention.)
 
 ```bash
-# Install aws-vault (stores AWS credentials in macOS Keychain)
-brew install aws-vault
-aws-vault add atelier   # prompts for Access Key ID + Secret
+# 1. Create a scoped IAM user (one-time, from a machine with admin creds).
+#    Policy: DynamoDB Get/Put/Update/DeleteItem on atelier-routine-locks only.
+cat > /tmp/atelier-lock-policy.json <<'JSON'
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["dynamodb:GetItem","dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:DeleteItem"],
+    "Resource": "arn:aws:dynamodb:us-west-2:*:table/atelier-routine-locks"
+  }]
+}
+JSON
+aws iam create-user --user-name atelier-routine-lock
+aws iam put-user-policy --user-name atelier-routine-lock \
+  --policy-name atelier-lock --policy-document file:///tmp/atelier-lock-policy.json
+aws iam create-access-key --user-name atelier-routine-lock   # note the keys
 
-# Create the DynamoDB table (one-time, from any machine)
-aws-vault exec atelier -- python3 scripts/routine_lock.py setup-table
+# 2. Write the keys to a non-interactive profile, then lock the file down.
+cat >> ~/.aws/credentials <<'INI'
 
-# Tell routine_watch.toml to use DynamoDB
-# Add to $OV/_meta/routine_watch.toml:
+[atelier-lock]
+aws_access_key_id = AKIA...
+aws_secret_access_key = ...
+region = us-west-2
+INI
+chmod 600 ~/.aws/credentials
+
+# 3. Create the DynamoDB table (one-time, from any machine).
+AWS_PROFILE=atelier-lock python3 scripts/routine_lock.py setup-table
+
+# 4. Tell routine_watch.toml to use DynamoDB:
 #   [coordination]
 #   backend = "dynamodb"
 ```
 
-The table uses provisioned mode (1 WCU / 1 RCU) which is always-free tier. TTL auto-expires stale locks after 1 hour.
+The runner reads `AWS_PROFILE` (default `atelier-lock`; override via `ATELIER_LOCK_AWS_PROFILE`). The table uses provisioned mode (1 WCU / 1 RCU, always-free tier); TTL auto-expires stale locks after 1 hour.
 
 Skip this step for single-machine setups — the lock module is a no-op when `coordination.backend` is absent or `"none"`.
 
@@ -117,14 +139,15 @@ The first manual run is also the auth smoke test: if `claude -p` hits an auth pr
 
 ```bash
 # Check lock status for today's cycle:
-aws-vault exec atelier -- python3 scripts/routine_lock.py status autoevo-nightly
+AWS_PROFILE=atelier-lock python3 scripts/routine_lock.py status autoevo-nightly
 
-# Check local claim file:
+# Check local claim file (status=failed with an `error` line means the lock
+# step itself failed — read the error; status absent means it never ran):
 cat "$OV/_meta/routine_runs/autoevo-nightly/$(date +%Y-%m-%d).toml"
 
 # Test lock acquire/release without running the routine:
-aws-vault exec atelier -- python3 scripts/routine_lock.py acquire autoevo-nightly --cycle test
-aws-vault exec atelier -- python3 scripts/routine_lock.py release autoevo-nightly --cycle test
+AWS_PROFILE=atelier-lock python3 scripts/routine_lock.py acquire autoevo-nightly --cycle test
+AWS_PROFILE=atelier-lock python3 scripts/routine_lock.py release autoevo-nightly --cycle test
 ```
 
 ## Path assumptions
@@ -136,7 +159,7 @@ The plist delegates to `scripts/routine_runner.sh`, which assumes:
 - `python3` on `PATH` (for `routine_lock.py`). Homebrew Python or system Python both work.
 - `$OV` is exported from one of: `~/.zprofile`, `~/.profile`, or `~/atelier/harness/env.local.sh` (see Install step 1). The wrapper tries all three in order and aborts loudly if none work.
 - `$OV/cache/` and `$OV/_meta/routine_runs/` are created on every run via `mkdir -p`, so a fresh install does not silently fail on missing directories.
-- For multi-machine coordination: `aws-vault` on `PATH` and an `atelier` profile in Keychain (see Install step 2). Without it, the lock is a no-op.
+- For multi-machine coordination: an `atelier-lock` profile in `~/.aws/credentials` (non-interactive static keys; see Install step 2). Without it, `boto3` finds no credentials and the lock acquire fails loud (exit 2, `status=failed` claim) rather than silently skipping. Single-machine setups (`backend = "none"`) need no credentials at all.
 
 ## What the schedule does NOT do
 
