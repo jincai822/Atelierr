@@ -58,6 +58,7 @@ harness/env.local.sh
 # from the vault L1 tier `<paths.cache>/` which resolves under $OV/ and is
 # the canonical home for Readwise snapshots and review reports.
 cache/
+.cache/
 
 # One-off / migration scripts that hardcode private vault content
 # (TOPIC_MAPs, lab lists, wiki entry titles). The steady-state generic
