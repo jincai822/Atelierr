@@ -1122,6 +1122,75 @@ def check_local_routine_missed(ov: Path, today: date) -> tuple[Cue | None, str]:
     )
 
 
+def check_career_growth(ov: Path, today: date) -> tuple[Cue | None, str]:
+    """Sunday weekly growth review toward "最懂 research 的 infra engineer".
+
+    Standing user request (2026-05-31): every Sunday, in any conversation,
+    review the past week's growth (papers read, engineering output, foresight
+    RFCs, OSS) against `career/career-plan-2026.md` and flag forgotten / drift
+    / adjust on the route.
+
+    Fires (soft) when:
+      - today is Sunday (weekday 6) AND the last growth-review is >=6 days old
+        (or none exists yet), OR
+      - it's been >9 days since the last growth-review (catches a missed Sunday
+        on whatever weekday the next session lands).
+
+    Goes silent once a `reflections/YYYY-MM-DD-growth-review.md` exists for the
+    current week. Stays silent entirely if the plan file is absent (goal not set
+    up). Snooze: `cues.py snooze career_growth [--days N]`.
+    """
+    plan_path = ov / "career" / "career-plan-2026.md"
+    if not plan_path.is_file():
+        return None, "career/career-plan-2026.md missing; goal not set up"
+
+    refl = tier("reflections")
+    if not refl.is_dir():
+        return None, "reflections dir missing; skip"
+
+    reviews = sorted(refl.glob("*-growth-review.md"))
+    days_since: int | None = None
+    if reviews:
+        try:
+            latest_date = datetime.strptime(reviews[-1].name[:10], "%Y-%m-%d").date()
+            days_since = (today - latest_date).days
+        except ValueError:
+            days_since = None
+
+    is_sunday = today.weekday() == 6  # Mon=0 .. Sun=6
+
+    if days_since is None:
+        fire = is_sunday
+        reason = f"no prior growth-review; sunday={is_sunday}"
+    elif is_sunday and days_since >= 6:
+        fire = True
+        reason = f"sunday, days_since={days_since}"
+    elif days_since > 9:
+        fire = True
+        reason = f"missed sunday, days_since={days_since}"
+    else:
+        fire = False
+        reason = f"days_since={days_since}, weekday={today.weekday()}; fresh"
+
+    if not fire:
+        return None, reason
+
+    return (
+        Cue(
+            key="career_growth",
+            severity="soft",
+            command_path="career/career-plan-2026.md",
+            message=(
+                "周日 growth review: 过去一周朝「最懂 research 的 infra engineer」"
+                "的成长 (论文阅读 / 工程产出 / foresight RFC / OSS),对照 "
+                "`career/career-plan-2026.md` 的 cadence,看有没有忘记 / 偏离 / "
+                "要调整路线。现在过一下吗?"
+            ),
+        ),
+        reason,
+    )
+
+
 # Registry. To add a new cue, append a `check_*` function above and
 # register it here.
 CHECKS = [
@@ -1136,6 +1205,7 @@ CHECKS = [
     ("autoevo_pending", check_autoevo_pending),
     ("autoevo_ran", check_autoevo_ran),
     ("local_routine_missed", check_local_routine_missed),
+    ("career_growth", check_career_growth),
 ]
 
 
