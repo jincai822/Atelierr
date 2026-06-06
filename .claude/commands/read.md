@@ -14,6 +14,16 @@ Procedure for Read intent. Owns Reader/Scholar selection, Readwise prefetch, sou
 
 Before dispatching the reading agent, apply the auto-promotion check from `protocols/orchestrator.md` → "Reader → Scholar auto-promotion". If any condition fires (`word_count > 8000`, source path under `<paths.papers>/` or `<paths.preprints>/`, frontmatter `difficulty: hard`), dispatch **Scholar** instead of Reader. Same lens framework, same prompt — only the bound voices differ. All three Read modes below use this selection.
 
+## Local cache check (before fetching; applies to all three Read modes when the source is a paper or external URL)
+
+If the source is a paper or an external URL (arXiv, conference PDF, a paper named by title), check local material FIRST and only hit the web on a miss. The cached copy is often already on disk; a web round-trip before checking it is wasted latency.
+
+1. Surface prior local material (related notes, not the PDF). Run `uv run scripts/semantic.py query "<title or distinctive keywords>" --top 5`. The index covers `*.md` only (`scripts/semantic.py` walks `rglob("*.md")`), so this finds reading reflections, wiki entries, and any `<slug>-notes.md` artifacts about the paper. It does NOT find the cached PDF itself; treat hits as related-reading context to fold into the session, not as the cache hit-test.
+
+2. Test for an already-cached PDF. Glob the flat paper store for a file matching the author or title: `ls "$OV"/papers/ "$OV"/preprints/ 2>/dev/null | grep -i "<firstauthor-or-distinctive-keyword>"` (resolve `papers` / `preprints` via `harness/paths.toml`). If a match exists, pass that local path to the reading agent and skip the web fetch entirely.
+
+3. Fetch from the web only if both the note query (step 1) and the PDF glob (step 2) miss. After a web fetch, cache the PDF into `<paths.papers>/` so the next read is a local hit (naming convention in `sources/local-papers.md`).
+
 ## Prefetch Step (Readwise podcasts, videos, articles; applies to all three Read modes)
 
 If the source is a Readwise podcast, video, or article (user provides a Readwise URL, `document_id`, or names a podcast), **cache the transcript once before dispatching any reading agent (Reader or Scholar)**. Independent fetches across parallel reading-agent instances are the failure mode this step exists to avoid (same reasoning as the paper cache).
