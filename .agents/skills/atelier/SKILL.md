@@ -29,6 +29,13 @@ agents, or harness portability.
 
 Claude Code command specs are the current workflow source. In Codex, adapt them:
 
+- Codex CLI slash input is reserved for built-in TUI commands. Treat
+  command-shaped user messages such as `hi`, `hi <context>`, `reflect`,
+  `weekly`, `review`, `lint`, and `run <command>` as requests to run
+  `python3 scripts/atelier.py run <command>` using the registry. `reflect`
+  runs `hi`. Use this only for command-shaped messages; ordinary repo or
+  engineering questions that contain these words should be handled normally.
+  Do not launch bot-invoked workflows such as `autoevo-nightly` from shorthand.
 - `Read` means read the local file.
 - `Grep` and `Glob` mean use `rg` or `rg --files` with scoped paths.
 - `Bash` means use the local shell.

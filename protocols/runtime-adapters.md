@@ -36,11 +36,15 @@ prompt <name>` and `python3 scripts/atelier.py agent-prompt <name>`. The
 repo-scoped `atelier` skill points Codex to these registries without loading
 every command or agent spec up front.
 
-Codex does not yet ship a project-level custom slash-command surface, so the
-parity invocation is `python3 scripts/atelier.py run <command>`. The full
-recipe set (run, run --exec, run --resume, run --fork, plus discovery
-commands) is documented in `AGENTS.md` § Codex Quick Recipes — the operational
-canon for Codex sessions, read first by Codex.
+Codex does not yet ship a project-level custom slash-command surface, and the
+interactive CLI reserves slash-prefixed input for built-in TUI commands. The
+parity invocation is therefore `python3 scripts/atelier.py run <command>`.
+`AGENTS.md` also defines model-mediated command shorthands (`hi`, `hi
+<context>`, `reflect`, `run <command>`) so routine Atelier workflows can be
+started from inside Codex without pasting the full shell command. The full
+recipe set (run, run --exec, run --resume, run --fork, plus discovery commands)
+is documented in `AGENTS.md` § Codex Quick Recipes — the operational canon for
+Codex sessions, read first by Codex.
 
 ## Provider-Neutral Rules
 
@@ -101,4 +105,3 @@ When a user asks Codex to run an Atelier command:
 For discovery, launch, resume, and fork recipes (`python3 scripts/atelier.py
 status | commands | prompt | source | agents | agent-prompt | agent-source |
 run [--exec | --resume | --fork]`), see `AGENTS.md` § Codex Quick Recipes.
-

@@ -17,12 +17,29 @@ Portable command invocation:
 ```bash
 python3 scripts/atelier.py status
 python3 scripts/atelier.py commands
+python3 scripts/atelier.py run hi
+python3 scripts/atelier.py run hi "context"
 python3 scripts/atelier.py prompt reflect
 python3 scripts/atelier.py prompt lint
 ```
 
 Paste the generated prompt into Codex. The helper reads `harness/commands.toml`
 and points Codex at the matching `.claude/commands/*.md` spec.
+
+Inside an interactive Codex session, use command-shaped shorthands instead of
+literal slash commands:
+
+```text
+hi
+hi context
+reflect
+run weekly
+run lint
+```
+
+Codex should interpret these through `AGENTS.md` and launch
+`python3 scripts/atelier.py run <command>`. Literal `/hi` is not reliable in
+the Codex TUI because slash input is reserved for Codex built-ins.
 
 Portable role discovery:
 

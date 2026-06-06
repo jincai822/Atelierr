@@ -75,11 +75,34 @@ For project slash commands such as `/hi`, `/review`, `/weekly`, and
 `/lint`, read the corresponding `.claude/commands/<name>.md` file and run the
 workflow under this adaptation table. (`/reflect` is an alias for `/hi`.)
 
+### Codex command shorthands
+
+Codex CLI reserves slash-prefixed input for its own built-in TUI commands. Until
+Codex documents a project-level custom slash-command surface, do not rely on
+literal `/hi` or `/review` inside an interactive Codex session. Instead, treat
+these user messages as Atelier command invocations:
+
+| User says | Codex behavior |
+|---|---|
+| `hi` | Run `python3 scripts/atelier.py run hi`. |
+| `hi <context>` | Run `python3 scripts/atelier.py run hi "<context>"`. |
+| `reflect` or `reflect <context>` | Run the `hi` workflow; `reflect` is an alias. |
+| `run <command>` | Run `python3 scripts/atelier.py run <command>`. |
+| `<command>` where `<command>` is a known user-facing `harness/commands.toml` command | Run `python3 scripts/atelier.py run <command>`. |
+
+Apply this only when the message is command-shaped. If the user is asking an
+ordinary engineering or repo question that merely contains a command word,
+answer the request normally. For unknown commands, run
+`python3 scripts/atelier.py commands` rather than guessing. Do not launch
+bot-invoked workflows such as `autoevo-nightly` from shorthand; explain that
+they are not user-facing and offer the corresponding review flow when one
+exists.
+
 `/autoevo-nightly` and `/autoevo-review` are the autonomous-autoevo surface defined by `protocols/autoevo.md`. `/autoevo-nightly` is bot-invoked (headless `claude -p`, launchd at 05:00) and not user-facing; `/autoevo-review` is the morning triage flow for the pending queue. Both are registered in `harness/commands.toml` with `direct_only = true`.
 
 ### Codex `/hi` parity
 
-Codex has no native slash command surface. To replicate `/hi <text>`:
+Codex has no native project slash-command surface. To replicate `/hi <text>`:
 
 ```bash
 # 1. Match the user's text against the intent router (same logic as hi.md).
