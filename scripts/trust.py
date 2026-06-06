@@ -637,7 +637,12 @@ def load_wiki(as_of: date, only: Path | None = None) -> list[WikiNote]:
     excluded = {"index.md"}
 
     notes: list[WikiNote] = []
-    for path in sorted(WIKI_DIR.glob("*.md")):
+    # rglob (recursive): wiki entries live in domain subdirectories
+    # (ml-models/, rl-infra/, ...), not at the top level. A non-recursive
+    # glob silently scanned 0 entries after the corpus was reorganized into
+    # subdirs. `excluded` matches by basename, so per-subdir index.md files
+    # are skipped too.
+    for path in sorted(WIKI_DIR.rglob("*.md")):
         if path.name in excluded:
             continue
         notes.append(parse_wiki_note(path, as_of))
