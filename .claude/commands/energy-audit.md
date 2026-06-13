@@ -1,3 +1,6 @@
+---
+description: Assessment of physical, mental, emotional, and social energy patterns.
+---
 # Energy Audit
 
 > Also reachable via `/hi <natural language>` (e.g., `/hi I'm drained`, `/hi energy audit`,
@@ -13,7 +16,7 @@ Deep assessment of where your energy goes — physical, mental, emotional, and s
 
 ## Context Loading
 
-1. **Read the last 14 daily notes from the local vault** to track energy patterns: `Read <paths.daily_notes>/<today>.md` back through `Read <paths.daily_notes>/<14-days-ago>.md` (one `Read` per date). For dates missing from the vault, report the gap.
+1. **Read the last 14 daily notes from the local vault** to track energy patterns: `Read <paths.daily_notes>/YYYY/MM/<today>.md` back through `Read <paths.daily_notes>/YYYY/MM/<14-days-ago>.md` (one `Read` per date; notes nest by year/month). For dates missing from the vault, report the gap.
 2. **Search for energy-related notes:**
    - `Grep(pattern: "累|疲惫|精力", path: "$OV/")` — Chinese exhaustion markers (local, exact).
    - `Grep(pattern: "运动|健康|睡眠", path: "$OV/")` — Chinese health markers (local, exact).

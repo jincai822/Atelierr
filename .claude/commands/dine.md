@@ -1,3 +1,6 @@
+---
+description: Restaurant recommendation flow using local context and credit-burn signals.
+---
 ## Purpose
 
 Three intents (auto-detected from args):

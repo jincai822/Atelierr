@@ -1,3 +1,6 @@
+---
+description: Daily reflection procedure — coaching flow grounded in profile, recent notes, and open TODOs. Routed via /hi or invoked directly.
+---
 # Daily Reflection
 
 Run a reflection session grounded in your notes and goals.
@@ -19,9 +22,9 @@ Run a reflection session grounded in your notes and goals.
 
 3. **Pull fresh context from the vault:**
    - Determine the **effective date**: if current local time is before 03:00, use yesterday's date; otherwise use today's. This is the user's day boundary (late-sleep rule). All subsequent "today" references in this session use the effective date.
-   - `Read <paths.daily_notes>/<effective-date>.md` — what you've done today. If the file is missing or empty, note that and proceed; the user may not have captured anything yet.
-   - If effective date differs from the calendar date (late-sleep active), also read `<paths.daily_notes>/<calendar-date>.md` if it exists — the user may have captured something after midnight.
-   - `Read <paths.daily_notes>/<effective-date - 1>.md` — what you did the day before.
+   - `Read <paths.daily_notes>/YYYY/MM/<effective-date>.md` (notes nest by year/month, e.g. `<paths.daily_notes>/2026/06/2026-06-13.md`) — what you've done today. If the file is missing or empty, note that and proceed; the user may not have captured anything yet.
+   - If effective date differs from the calendar date (late-sleep active), also read `<paths.daily_notes>/YYYY/MM/<calendar-date>.md` if it exists — the user may have captured something after midnight.
+   - `Read <paths.daily_notes>/YYYY/MM/<effective-date - 1>.md` — what you did the day before.
    - For recent activity related to your themes, run `Bash: uv run scripts/semantic.py query "<theme>" --after "<7 days ago, YYYY-MM-DD>" --top 5` first — this is the primary content lookup. For structural follow-up (exact strings, known tags), list files modified in the last 7 days with `Bash: find "$OV"/daily-notes "$OV"/reflections -type f -name "*.md" -mtime -7 2>/dev/null | sort`, then `Grep` the theme keyword across those paths.
 
 4. **Load open TODO state (silent — orchestrator working memory):**

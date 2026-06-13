@@ -1,3 +1,6 @@
+---
+description: Structured decision journal with framework cross-validation.
+---
 # Decision Journal
 
 > Also reachable via `/hi <natural language>` (e.g., `/hi should I take the offer`,
@@ -74,7 +77,7 @@ python3 scripts/shadow.py group-start --task decision --expected "$EXPECTED"
 
 **Native-leg logging is in-band.** After the Agent returns, log its response via `shadow.py log` with `--prompt-text` and `--response-text`. PostToolUse hooks do not fire for Agent tool calls in Claude Code, so the orchestrator must log native legs explicitly.
 
-- `Agent` tool, `subagent_type: thinker`, prompt: "Apply <primary framework> + <cross-validation framework> to this decision: <user's framing>. Read the framework files yourself from `frameworks/`. Return verdict + reasoning."
+- `Agent` tool, `subagent_type: thinker`, prompt: "Apply <primary framework> + <cross-validation framework> to this decision: <user's framing>. Read the framework files yourself from `frameworks/`. Return verdict + reasoning. End with a line consisting of `Verdict: ` followed by exactly one word: proceed, defer, or reject."
 - `Bash` tool — must **inline** the framework files in the prompt, because the direct leg has no filesystem access and would otherwise apply a generic model-memory version of each framework. Resolve framework display names to slugged filenames (lowercase, hyphen-separated): "First Principles" → `first-principles.md`, "Wardley Mapping" → `wardley-mapping.md`, etc. Confirm `ls frameworks/` matches before dispatch.
   ```bash
   PRIMARY=frameworks/<primary-slug>.md   # e.g., frameworks/first-principles.md
@@ -84,7 +87,7 @@ python3 scripts/shadow.py group-start --task decision --expected "$EXPECTED"
   [ -n "$DIRECT_MODEL" ] || { echo "ERROR: thinker.direct not found in agents.toml" >&2; exit 1; }
   [ -f "$REPO/$PRIMARY" ] && [ -f "$REPO/$CROSS" ] || { echo "ERROR: framework file missing (check slug mapping)" >&2; exit 1; }
   {
-    printf 'Apply the two frameworks below to this decision: <user'\''s framing>.\nReturn verdict + reasoning.\n\n--- PRIMARY FRAMEWORK (%s) ---\n' "$PRIMARY"
+    printf 'Apply the two frameworks below to this decision: <user'\''s framing>.\nReturn verdict + reasoning. End with a line consisting of "Verdict: " followed by exactly one word: proceed, defer, or reject.\n\n--- PRIMARY FRAMEWORK (%s) ---\n' "$PRIMARY"
     cat "$REPO/$PRIMARY"
     printf '\n\n--- CROSS-VALIDATION FRAMEWORK (%s) ---\n' "$CROSS"
     cat "$REPO/$CROSS"

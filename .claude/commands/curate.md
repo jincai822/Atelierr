@@ -1,3 +1,6 @@
+---
+description: Goal-aware content curation and inbox triage.
+---
 # Curate
 
 > Also reachable via `/hi <natural language>` (e.g., `/hi triage inbox`, `/hi curate readwise`,

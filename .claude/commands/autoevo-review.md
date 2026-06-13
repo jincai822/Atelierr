@@ -1,3 +1,6 @@
+---
+description: Triage the autoevo pending queue produced by /autoevo-nightly.
+---
 # /autoevo-review — Triage the autoevo pending queue
 
 Morning companion to `/autoevo-nightly`. Walks `$OV/_meta/autoevo_pending.toml` one pending entry at a time: apply, skip, defer, or explain-more. Contract: `protocols/autoevo.md`.

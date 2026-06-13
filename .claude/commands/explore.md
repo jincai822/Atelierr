@@ -1,3 +1,6 @@
+---
+description: Open-ended exploration for forgotten connections and emerging themes.
+---
 # Open Exploration
 
 > Also reachable via `/hi <natural language>` (e.g., `/hi explore`, `/hi what am I missing`,

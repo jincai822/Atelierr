@@ -1,3 +1,6 @@
+---
+description: Goal review for quarterly full reviews and monthly light pulses.
+---
 # Goal Review
 
 > Also reachable via `/hi <natural language>` (e.g., `/hi review my goals`,
@@ -50,7 +53,7 @@ Stale-goal floor: if `directions.md` lists goals older than 1 year with no progr
 
 3. **Pull goal-related updates from the local vault, bounded to the lookback window.** Do NOT issue an unbounded `Grep(path: "$OV/")` — an unbounded grep will pull stale historical matches that skew the review. Use `find -print0 | xargs -0 grep` so recency actually binds. Substitute `<N>` with the lookback (90 for full, 30 for pulse):
    - `Bash: find "$OV"/daily-notes "$OV"/reflections "$OV"/gtd "$OV"/wiki -type f -name "*.md" -mtime -<N> -print0 2>/dev/null | xargs -0 grep -HnE "目标|goal|progress|进展|milestone" 2>/dev/null` — recency-bounded goal and progress mentions across both languages in one pass. Safe with an empty working set (xargs does nothing if stdin is empty).
-   - `Read <paths.daily_notes>/<today>.md` for today's context.
+   - `Read <paths.daily_notes>/YYYY/MM/<today>.md` for today's context.
 
 4. **Read key goal notes in full** by `Read`-ing the matching files directly. If a referenced note is genuinely missing from the local vault, report the gap.
 

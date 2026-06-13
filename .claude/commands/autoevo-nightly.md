@@ -1,3 +1,6 @@
+---
+description: Autonomous nightly decay sweep with auto-commit; fired by macOS launchd at 05:00 local.
+---
 # /autoevo-nightly — Autonomous decay sweep + auto-commit
 
 Fired by macOS `launchd` at 5:00 local. Contract: `protocols/autoevo.md`.

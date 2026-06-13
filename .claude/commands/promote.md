@@ -1,3 +1,6 @@
+---
+description: Promote L2 working notes into a schema-compliant L4 wiki entry.
+---
 # /promote — Create L4 wiki entry from L2 source notes
 
 > Also reachable via `/hi <natural language>` (e.g., `/hi promote to wiki`, `/hi canonize this`,

@@ -1,3 +1,6 @@
+---
+description: Structured weekly review over the past seven effective days.
+---
 # Weekly Review
 
 > Also reachable via `/hi <natural language>` (e.g., `/hi weekly review`, `/hi this week`).
@@ -27,7 +30,7 @@ When to invoke:
 2. **Read all reflections from the past 7 days** from `<paths.reflections>/` directory.
 
 3. **Read the past 7 daily notes from the vault:**
-   - `Read <paths.daily_notes>/<today>.md` through `Read <paths.daily_notes>/<7-days-ago>.md` (7 local reads). For any file that is missing or empty, note it and continue — the user may not have written that day. Daily notes are user-authored; the system never writes to them.
+   - `Read <paths.daily_notes>/YYYY/MM/<today>.md` through `Read <paths.daily_notes>/YYYY/MM/<7-days-ago>.md` (7 local reads; notes nest by year/month, e.g. `<paths.daily_notes>/2026/06/2026-06-13.md`). For any file that is missing or empty, note it and continue — the user may not have written that day. Daily notes are user-authored; the system never writes to them.
    - Focus on themes, moods, accomplishments, and struggles.
 
 4. **Search for recent activity in the vault:**
@@ -60,7 +63,7 @@ Daily `/hi` may not run every day. Detect missing days from the past 7 by checki
 Bash: for d in $(seq 0 6); do date_str=$(date -v-${d}d +%Y-%m-%d); ls "$OV"/reflections/${date_str}-reflection*.md 2>/dev/null > /dev/null || echo "missing: $date_str"; done
 ```
 
-Read the daily notes for any missing days (`<paths.daily_notes>/<date>.md`) so context is loaded, then prompt the user with 3 light **week-level** questions (do not force per-day reconstruction):
+Read the daily notes for any missing days (`<paths.daily_notes>/YYYY/MM/<date>.md`) so context is loaded, then prompt the user with 3 light **week-level** questions (do not force per-day reconstruction):
 
 1. **Support pulse (week)**: 这 7 天里, 有哪些有意义的互动 (1:1 / 家人 / 朋友 / 同事) 没记到 daily reflection 里? 谁? 什么类型 (E / I / Inf / A)? 有没有新连接?
 2. **Dining (week)**: 这 7 天有去新餐厅 / 重访旧餐厅没记到 dining log 的吗? (餐厅 + **就餐日期 YYYY-MM-DD** + 评分 + **再去? Y/N/Maybe** + 健康 flag + 必点 + Credit used). Backfill spans multiple days, so the Date column must hold the actual visit date — not the session date — otherwise the date-keyed dining log and credit-cycle tracking break. 评分 + 再去 are mandatory per the `/hi` Dining Pulse rule; do not append a row without both.

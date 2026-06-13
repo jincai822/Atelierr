@@ -1,3 +1,6 @@
+---
+description: Personal relationship management audit grounded in local relationship notes.
+---
 # PRM: Personal Relationship Management
 
 Audit the health and robustness of the user's social support system. Grounded in Dunbar's layer model, House's four-dimension support framework, and the cached research at `<paths.cache>/dunbar-energy-allocation-plosone-2025.md`.

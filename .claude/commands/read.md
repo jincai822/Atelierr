@@ -1,3 +1,6 @@
+---
+description: Read & Discuss procedure — owns the three Read flows (Read & Discuss, Focused Read, Multi-Lens Read) and the Reader/Scholar selection, Readwise prefetch, and source-backup sub-procedures.
+---
 # Read & Discuss
 
 Procedure for Read intent. Owns Reader/Scholar selection, Readwise prefetch, source backup, and the three read modes (Read & Discuss, Focused Read, Multi-Lens Read).

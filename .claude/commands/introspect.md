@@ -1,3 +1,6 @@
+---
+description: Build or refresh profile files from local notes and reading patterns.
+---
 # Introspect
 
 > Also reachable via `/hi <natural language>` (e.g., `/hi rebuild profile`, `/hi who am I`,
@@ -43,8 +46,8 @@ Run these searches in parallel over the local `$OV/` vault. Local grep is instan
 9. `Grep(pattern: "学习", path: "$OV/")` — Chinese learning notes
 
 **Recent Context:**
-10. `Read <paths.daily_notes>/<today>.md` — today
-11. `Read <paths.daily_notes>/<yesterday>.md` — yesterday
+10. `Read <paths.daily_notes>/YYYY/MM/<today>.md` — today
+11. `Read <paths.daily_notes>/YYYY/MM/<yesterday>.md` — yesterday
 12. Recent planning: `Bash: find "$OV"/daily-notes "$OV"/reflections "$OV"/gtd -type f -name "*.md" -mtime -30 | xargs grep -l -i "plan" 2>/dev/null`
 
 Deduplicate results by file path. Prioritize files with recent mtimes. **Semantic pass:** for conceptual angles grep cannot phrase ("curiosity vectors", "intellectual taste", "what am I drawn to"), run `Bash: uv run scripts/semantic.py query "<concept>" --top 10`. Reframe and retry if thin.

@@ -1,3 +1,6 @@
+---
+description: Review system-evolution changes with internal and external reviewers.
+---
 # System Review
 
 Review a system-evolution bundle (protocols, agents, commands, CLAUDE.md, handoff docs) before committing. Runs internal reviewer + external reviewers (codex + direct-api / DeepSeek Pro) in parallel.

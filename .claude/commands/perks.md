@@ -1,3 +1,6 @@
+---
+description: Read-only perks and trip status dashboard over local trackers.
+---
 # Perks & Trip Status
 
 Read-only dashboard. Surfaces open decisions, upcoming deadlines, and data gaps from existing trackers in `<paths.finance>/` and `<paths.travel>/`. Use on revisit to avoid re-reading multiple files.

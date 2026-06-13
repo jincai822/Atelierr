@@ -1,3 +1,6 @@
+---
+description: Universal entry point — intent router for reflection, planning, action, reading, learning, capture, and more.
+---
 # Reflect
 
 Your reflection system. Uses a two-step decision tree with `AskUserQuestion` for native scroll-and-select UI.

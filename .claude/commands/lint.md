@@ -1,3 +1,6 @@
+---
+description: Run harness, privacy, structural, and staleness checks.
+---
 # /lint — Structural + corpus-level checks over `<paths.wiki>/`
 
 > Also reachable via `/hi <natural language>` (e.g., `/hi lint the wiki`, `/hi wiki audit`,

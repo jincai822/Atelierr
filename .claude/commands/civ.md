@@ -1,3 +1,6 @@
+---
+description: Read-only life dashboard over resources, civilizations, and terminal values.
+---
 # Civilization Report
 
 Read-only life dashboard. Single-pass render from vault signals. No new state files.
