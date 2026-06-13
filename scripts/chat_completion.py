@@ -643,6 +643,13 @@ def main(argv: list[str] | None = None) -> int:
         _maybe_log()
         return 1
 
+    # Truncation = caller-visible failure (unless --max-tokens 0 opts out).
+    # Partial content still written to stdout / session so the caller can
+    # recover what arrived; exit code distinguishes truncation from other
+    # success/failure modes. Computed BEFORE _maybe_log() so the
+    # error_kind marker actually lands in the logged event.
+    truncated = finish == "length" and args.max_tokens > 0
+
     log_event.update({
         "status": "ok",
         "response_content": content,
@@ -650,30 +657,24 @@ def main(argv: list[str] | None = None) -> int:
         "finish_reason": finish,
         "usage": resp.get("usage"),
     })
+    if truncated:
+        log_event["error_kind"] = "truncated_max_tokens"
     _maybe_log()
 
-    # Truncation = caller-visible failure (unless --max-tokens 0 opts out).
-    # Partial content still written to stdout / session so the caller can
-    # recover what arrived; exit code distinguishes truncation from other
-    # success/failure modes.
-    truncated = finish == "length" and args.max_tokens > 0
     if truncated:
         sys.stderr.write(
             f"chat_completion: response truncated at max_tokens={args.max_tokens} "
             f"(finish_reason=length). Partial content written to stdout. "
             f"Re-run with a higher --max-tokens to recover the full response.\n"
         )
-        log_event["error_kind"] = "truncated_max_tokens"
     elif finish and finish not in ("stop", "length"):
         # "length" is handled above (or silently accepted when max_tokens=0).
         # Anything else (tool_calls, content_filter, function_call, ...) is
         # unusual enough to surface but not block.
         sys.stderr.write(f"chat_completion: finish_reason={finish} (non-stop)\n")
 
-    if args.emit_json:
-        sys.stdout.write(json.dumps(resp, ensure_ascii=False))
-        return 5 if truncated else 0
-
+    # Session save happens regardless of output format: --json changes what
+    # goes to stdout, not whether the turn persists (--session promises it).
     if session_path is not None:
         history.append(user_msg)
         history.append({"role": "assistant", "content": content})
@@ -682,6 +683,10 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as e:
             sys.stderr.write(f"chat_completion: failed to write session file: {e}\n")
             # Don't fail the command — response is in stdout, caller can recover
+
+    if args.emit_json:
+        sys.stdout.write(json.dumps(resp, ensure_ascii=False))
+        return 5 if truncated else 0
 
     sys.stdout.write(content)
     return 5 if truncated else 0

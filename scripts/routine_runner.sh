@@ -101,11 +101,12 @@ if [ "$LOCK_EXIT" -eq 1 ]; then
     exit 0
 fi
 
-if [ "$LOCK_EXIT" -eq 2 ]; then
-    # Credential / DynamoDB failure. Fail LOUD: record a failed claim so the
-    # session cue reports "failed (<reason>)" instead of the misleading
-    # "no run today / machine asleep" default. Flatten + de-quote the reason
-    # so the claim stays valid TOML.
+if [ "$LOCK_EXIT" -ne 0 ]; then
+    # 2 = credential / DynamoDB failure; anything else (127 = uv missing from
+    # the launchd PATH, etc.) is equally unknown lock state — fail CLOSED, not
+    # open. Record a failed claim so the session cue reports "failed (<reason>)"
+    # instead of the misleading "no run today / machine asleep" default.
+    # Flatten + de-quote the reason so the claim stays valid TOML.
     SAFE_RESULT=$(printf '%s' "$LOCK_RESULT" | tr '\n' ' ' | sed "s/\"/'/g")
     cat > "$CLAIM_FILE" <<EOF
 routine = "$ROUTINE"

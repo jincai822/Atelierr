@@ -5,9 +5,16 @@ Coordinates scheduled routines across multiple machines sharing the same
 vault. Each machine's launchd fires the routine on schedule; this module
 ensures only one machine actually executes per cycle.
 
-Lock primitive: DynamoDB `PutItem` with `attribute_not_exists(pk)`.
-Server-side atomic — no race window regardless of filesystem sync delays.
-TTL column auto-expires stale locks (crashed mid-run).
+Lock primitive: DynamoDB `PutItem` conditioned on `attribute_not_exists(pk)
+OR (ttl < now AND status <> completed)`. Server-side atomic — no race window
+regardless of filesystem sync delays. Stale locks (crashed mid-run, status
+still `running`) are taken over at acquire time once their ttl passes;
+completed locks are never taken over, so a cycle runs at most once even if
+a second machine fires long after the ttl: `release` rewrites a completed
+lock's ttl COMPLETED_TTL (7 days) ahead, so background TTL GC cannot delete
+the finished marker and resurrect it as a fresh acquire within any realistic
+re-fire window. The table's TTL column only garbage-collects old items in the
+background (best-effort, can lag up to ~48h, so acquire cannot rely on it).
 
 When coordination is disabled (no AWS credentials or config says "none"),
 all operations are no-ops that return success, so single-machine setups
@@ -40,6 +47,7 @@ from pathlib import Path
 
 TABLE_NAME = "atelier-routine-locks"
 TTL_DEFAULT = 3600  # 1 hour
+COMPLETED_TTL = 7 * 86400  # 7 days: keep a completed marker past any re-fire window
 AWS_REGION = os.environ.get("ATELIER_AWS_REGION", "us-west-2")
 
 
@@ -74,7 +82,11 @@ def _get_client():
     try:
         import boto3
     except ImportError:
-        print("ERROR: boto3 not installed. Run: uv pip install boto3", file=sys.stderr)
+        print(
+            "ERROR: boto3 not installed. Run this script via `uv run` "
+            "(boto3 is a project dependency; `uv sync` installs it).",
+            file=sys.stderr,
+        )
         return None
 
     try:
@@ -122,7 +134,21 @@ def acquire(routine: str, cycle: str | None, ttl: int) -> int:
                 "status": {"S": "running"},
                 "ttl": {"N": str(now + ttl)},
             },
-            ConditionExpression="attribute_not_exists(pk)",
+            # Take over expired locks here: DynamoDB's TTL deletion is
+            # best-effort background GC and can lag long past expiry.
+            # A completed lock is never taken over: its ttl is acquire-time
+            # (now + ttl), so without the status guard a late invocation of
+            # the same cycle (e.g. a second machine firing a missed launchd
+            # job hours later) would rerun a finished cycle.
+            ConditionExpression=(
+                "attribute_not_exists(pk) OR "
+                "(#ttl < :now AND (attribute_not_exists(#s) OR #s <> :completed))"
+            ),
+            ExpressionAttributeNames={"#ttl": "ttl", "#s": "status"},
+            ExpressionAttributeValues={
+                ":now": {"N": str(now)},
+                ":completed": {"S": "completed"},
+            },
         )
         print(json.dumps({"acquired": True, "machine": hostname, "cycle": cycle_id}))
         return 0
@@ -164,13 +190,17 @@ def release(routine: str, cycle: str | None) -> int:
         client.update_item(
             TableName=TABLE_NAME,
             Key={"pk": {"S": pk}},
-            UpdateExpression="SET #s = :s, completed_at = :t",
+            # Extend ttl on completion so DynamoDB's background TTL GC cannot
+            # delete a finished marker and let a late same-cycle re-fire
+            # (attribute_not_exists(pk) becomes true) rerun the cycle.
+            UpdateExpression="SET #s = :s, completed_at = :t, #ttl = :newttl",
             ConditionExpression="machine = :m",
-            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeNames={"#s": "status", "#ttl": "ttl"},
             ExpressionAttributeValues={
                 ":s": {"S": "completed"},
                 ":t": {"S": datetime.now(timezone.utc).isoformat()},
                 ":m": {"S": hostname},
+                ":newttl": {"N": str(int(time.time()) + COMPLETED_TTL)},
             },
         )
         print(json.dumps({"released": True, "cycle": cycle_id}))

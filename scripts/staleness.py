@@ -40,9 +40,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _paths import tier, vault_root  # type: ignore[import-not-found]  # noqa: E402
-
-_OV = vault_root()
+from _paths import tier  # type: ignore[import-not-found]  # noqa: E402
 
 # L2 directories to scan (daily-notes excluded: capture stream, not working
 # knowledge). health excluded: longitudinal records, different lifecycle.
@@ -179,25 +177,26 @@ def scan(
     # Build reference corpus: wiki entries + recent reflections + recent daily notes.
     corpus: list[Path] = []
     if WIKI_DIR.exists():
-        corpus.extend(WIKI_DIR.glob("*.md"))
+        corpus.extend(WIKI_DIR.rglob("*.md"))
 
-    reflections_dir = _OV / "reflections"
+    reflections_dir = tier("reflections")
     if reflections_dir.exists():
         corpus.extend(reflections_dir.glob("*.md"))
 
     # Last 30 days of daily notes for recency-weighted reference counting.
-    daily_dir = _OV / "daily-notes"
+    daily_dir = tier("daily_notes")
     if daily_dir.exists():
         for i in range(30):
             d = today - timedelta(days=i)
-            p = daily_dir / f"{d.isoformat()}.md"
+            # Daily notes nest as daily-notes/YYYY/MM/YYYY-MM-DD.md.
+            p = daily_dir / f"{d:%Y}" / f"{d:%m}" / f"{d.isoformat()}.md"
             if p.exists():
                 corpus.append(p)
 
     # Collect wiki entry stems for promotion-candidate detection.
     wiki_stems: set[str] = set()
     if WIKI_DIR.exists():
-        for p in WIKI_DIR.glob("*.md"):
+        for p in WIKI_DIR.rglob("*.md"):
             if p.name != "index.md":
                 wiki_stems.add(p.stem)
 

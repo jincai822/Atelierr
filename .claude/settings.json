@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run scripts/cues.py --hook",
+            "command": "uv run \"${CLAUDE_PROJECT_DIR:-.}/scripts/cues.py\" --hook",
             "statusMessage": "Loading session cues",
             "timeout": 10
           }
@@ -22,12 +22,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run scripts/cues.py --touch-lock 2>/dev/null || true",
+            "command": "uv run \"${CLAUDE_PROJECT_DIR:-.}/scripts/cues.py\" --touch-lock 2>/dev/null || true",
             "timeout": 3
           },
           {
             "type": "command",
-            "command": "uv run scripts/atelier.py intent-hook --runtime claude-code",
+            "command": "uv run \"${CLAUDE_PROJECT_DIR:-.}/scripts/atelier.py\" intent-hook --runtime claude-code",
             "timeout": 5
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/scripts/peer_review_gate.py",
+            "command": "[ -f ~/.claude/scripts/peer_review_gate.py ] && python3 ~/.claude/scripts/peer_review_gate.py 2>/dev/null || true",
             "timeout": 3
           }
         ]
@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run scripts/shadow.py gc 2>/dev/null || true",
+            "command": "uv run \"${CLAUDE_PROJECT_DIR:-.}/scripts/shadow.py\" gc 2>/dev/null || true",
             "timeout": 10
           }
         ]

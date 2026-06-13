@@ -74,7 +74,10 @@ if [ -f "$REPO_ROOT/scripts/shadow.py" ]; then
   EXPECTED='[{"model":"'"$DIRECT_MODEL"'","leg":"direct"},{"model":"'"$CODEX_MODEL"'","leg":"codex"}]'
   eval "$(python3 "$REPO_ROOT/scripts/shadow.py" group-start \
     --task external-review --expected "$EXPECTED" 2>/dev/null || true)"
-  trap 'python3 "$REPO_ROOT/scripts/shadow.py" group-close --group "$ATELIER_SHADOW_GROUP" 2>/dev/null || true; unset ATELIER_SHADOW_GROUP ATELIER_TASK_TYPE' EXIT
+  # ${VAR:-} guard: if group-start failed above, the variable is unset and a
+  # bare dereference would abort the trap under `set -u` (group-close already
+  # no-ops on an empty group).
+  trap 'python3 "$REPO_ROOT/scripts/shadow.py" group-close --group "${ATELIER_SHADOW_GROUP:-}" 2>/dev/null || true; unset ATELIER_SHADOW_GROUP ATELIER_TASK_TYPE 2>/dev/null || true' EXIT
 fi
 
 # For the codex leg we also need the codex-side model id and reasoning effort
@@ -248,14 +251,17 @@ run_direct_api() {
   # silently truncates real findings; that is the worst trade in this codebase.
   local body
   body="$PROMPT"$'\n\n'"$(build_diff)"
-  printf '%s' "$body" | python3 scripts/chat_completion.py \
+  printf '%s' "$body" | python3 "$REPO_ROOT/scripts/chat_completion.py" \
       --model "$DIRECT_MODEL" --max-tokens 0 --prompt - > "$out" 2> "$err"
   local rc=$?
   if [ $rc -eq 0 ]; then
     echo "[direct-api] done → $out"
     return 0
   fi
-  if [ $rc -eq 2 ]; then
+  if [ $rc -eq 2 ] && grep -q "chat_completion:" "$err" 2>/dev/null; then
+    # chat_completion.py's own exit 2 (config error) always writes a
+    # "chat_completion:" stderr line. A bare interpreter exit 2 (e.g.
+    # python3 can't open the script) must NOT soft-skip.
     echo "[direct-api] config missing (api_env unset) — skipped (stderr: $err)" >&2
     return 127
   fi

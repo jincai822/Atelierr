@@ -42,8 +42,14 @@ def load() -> Dict[str, Any]:
                 cfg.update(file_cfg["embedding"])
             else:
                 cfg.update(file_cfg)
-        except Exception:
-            pass  # fall back to defaults silently
+        except Exception as exc:
+            import sys
+
+            print(
+                f"warning: {CONFIG_PATH} is malformed "
+                f"({type(exc).__name__}: {exc}); using built-in defaults",
+                file=sys.stderr,
+            )
     return cfg
 
 

@@ -339,8 +339,14 @@ def main(argv: list[str] | None = None) -> int:
     wikilinks = collect_wikilinks(OV, allowlist, dirs)
 
     def _matches_committed(term: str) -> bool:
+        # Word-boundary prefix only: committed "immunity to change" whitelists
+        # "Immunity To Change Map", but committed "hi" must not whitelist
+        # "Hiking Trip ..." (character-prefix matching did).
         tl = term.lower()
-        return any(tl.startswith(s) or s.startswith(tl) for s in repo_stems)
+        return any(
+            tl == s or tl.startswith(s + " ") or s.startswith(tl + " ")
+            for s in repo_stems
+        )
 
     titles = [t for t in titles if not _matches_committed(t)]
     wikilinks -= {t for t in wikilinks if _matches_committed(t)}

@@ -1082,14 +1082,25 @@ def check_path_registry_drift() -> list[Finding]:
     # fields in commands.toml, intents.toml, etc.), AND `.py` (script
     # docstrings + comments). A stale `$OV/<seg>/` literal anywhere is the
     # same drift class — silent rename-breakage when the registry moves.
-    scan_files: list[Path] = []
-    for root in roots:
-        if root.is_file() and root.suffix in (".md", ".toml", ".py"):
-            scan_files.append(root)
-        elif root.is_dir():
-            scan_files.extend(sorted(root.rglob("*.md")))
-            scan_files.extend(sorted(root.rglob("*.toml")))
-            scan_files.extend(sorted(root.rglob("*.py")))
+    # Scope via git (tracked + untracked-but-not-ignored), matching the
+    # docstring's committed-file claim: a filesystem rglob also swept
+    # gitignored local-only content (scripts/oneoff/, _results_* scratch),
+    # where a private `$OV/<seg>/` literal would fail the gate AND leak the
+    # private segment name into the lint report.
+    root_args = [str(r.relative_to(ROOT)) for r in roots]
+    tracked, t_err = git_list(root_args)
+    if t_err:
+        findings.append(t_err)
+        return findings
+    untracked, u_err = git_list(root_args, others=True)
+    if u_err:
+        findings.append(u_err)
+        return findings
+    scan_files = sorted(
+        ROOT / p
+        for p in set(tracked) | set(untracked)
+        if p.endswith((".md", ".toml", ".py"))
+    )
     py_comment_re = re.compile(r"^\s*#")
     for path in scan_files:
         try:
@@ -1994,6 +2005,141 @@ def check_shadow_group_start() -> list[Finding]:
     return findings
 
 
+def check_command_frontmatter(commands: dict[str, str]) -> list[Finding]:
+    """Every `.claude/commands/*.md` carries `description:` frontmatter that
+    mirrors its `harness/commands.toml` entry.
+
+    The Claude Code runtime reads the file frontmatter for the slash-command
+    list; Codex and intent dispatch read the registry. Without this check the
+    two surfaces drift independently (the original failure mode: no
+    frontmatter at all, so the runtime degraded descriptions to heading
+    text like `/dine — Purpose`).
+    """
+    findings: list[Finding] = []
+    data, err = _load_toml(ROOT / "harness" / "commands.toml")
+    if err:
+        return []  # parse failure already reported by check_commands
+    command_map = (data or {}).get("commands", {}) or {}
+
+    for name, path in sorted(commands.items()):
+        fpath = ROOT / path
+        try:
+            lines = fpath.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        desc: str | None = None
+        if lines and lines[0].strip() == "---":
+            for line in lines[1:]:
+                if line.strip() == "---":
+                    break
+                if line.startswith("description:"):
+                    desc = line[len("description:"):].strip()
+        if desc is None:
+            findings.append(
+                Finding(
+                    "WARN",
+                    "command-frontmatter",
+                    path,
+                    "missing `description:` frontmatter — the runtime degrades "
+                    "the slash-command description to heading text",
+                )
+            )
+            continue
+        entry = command_map.get(name)
+        if isinstance(entry, dict):
+            toml_desc = str(entry.get("description", "")).strip()
+            if toml_desc and desc.strip("\"'") != toml_desc:
+                findings.append(
+                    Finding(
+                        "WARN",
+                        "command-frontmatter-drift",
+                        path,
+                        f"frontmatter description differs from the "
+                        f"harness/commands.toml entry for `{name}` — "
+                        "mirror the registry prose (or update both)",
+                    )
+                )
+        elif entry is not None:
+            findings.append(
+                Finding(
+                    "INFO",
+                    "command-frontmatter-uncheckable",
+                    path,
+                    f"harness/commands.toml entry for `{name}` is not a "
+                    f"table, so the frontmatter drift check cannot compare "
+                    "descriptions — convert the entry to `[commands."
+                    f"{name}]` table form to restore drift coverage",
+                )
+            )
+    return findings
+
+
+def check_reader_scholar_sync() -> list[Finding]:
+    """Guard the deliberate Reader/Scholar near-duplication.
+
+    `.claude/agents/scholar.md` is `.claude/agents/reader.md` modulo a
+    role-name substitution (`Readers`->`Scholars`, `Reader`->`Scholar`,
+    word-bounded, case-sensitive — lowercase `reader` is shared vocabulary
+    like the `---reader-brief---` sentinel and must NOT differ) plus exactly
+    one intentionally divergent body line: the `You are the ...` role intro.
+    The two files drifted silently before this check existed; any further
+    divergence must be a conscious edit to BOTH files (or to this check).
+    """
+    findings: list[Finding] = []
+    reader_p = ROOT / ".claude" / "agents" / "reader.md"
+    scholar_p = ROOT / ".claude" / "agents" / "scholar.md"
+    if not reader_p.is_file() or not scholar_p.is_file():
+        return findings  # absence is the agent registry checks' problem
+
+    def body_lines(path: Path) -> list[str]:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if lines and lines[0].strip() == "---":
+            for i in range(1, len(lines)):
+                if lines[i].strip() == "---":
+                    return lines[i + 1:]
+        return lines
+
+    r_body = body_lines(reader_p)
+    s_body = body_lines(scholar_p)
+    if len(r_body) != len(s_body):
+        findings.append(
+            Finding(
+                "WARN",
+                "reader-scholar-sync",
+                ".claude/agents/scholar.md",
+                f"body line counts differ (reader {len(r_body)} vs scholar "
+                f"{len(s_body)}) — the files must stay line-aligned modulo "
+                "the role-name substitution; re-sync them",
+            )
+        )
+        return findings
+
+    def subst(line: str) -> str:
+        line = re.sub(r"\bReaders\b", "Scholars", line)
+        return re.sub(r"\bReader\b", "Scholar", line)
+
+    mismatches = []
+    for i, (rl, sl) in enumerate(zip(r_body, s_body), start=1):
+        if rl.startswith("You are the ") and sl.startswith("You are the "):
+            continue  # the one allowed divergent body line (role intro)
+        if subst(rl) != sl:
+            mismatches.append(i)
+    if mismatches:
+        shown = ", ".join(str(i) for i in mismatches[:5])
+        more = "" if len(mismatches) <= 5 else f" (+{len(mismatches) - 5} more)"
+        findings.append(
+            Finding(
+                "WARN",
+                "reader-scholar-sync",
+                ".claude/agents/scholar.md",
+                f"{len(mismatches)} body line(s) diverge from reader.md beyond "
+                f"the role-name substitution: body line(s) {shown}{more} — "
+                "re-sync the drifted wording in both files",
+            )
+        )
+    return findings
+
+
 def run_lints() -> list[Finding]:
     findings: list[Finding] = []
     findings.extend(check_root_files())
@@ -2006,6 +2152,8 @@ def run_lints() -> list[Finding]:
     findings.extend(check_capabilities())
     findings.extend(check_agent_registry(agents, models))
     findings.extend(check_commands(commands))
+    findings.extend(check_command_frontmatter(commands))
+    findings.extend(check_reader_scholar_sync())
     findings.extend(check_harness_readme())
     findings.extend(check_atelier_skill())
     findings.extend(check_scripts_zk_paths())

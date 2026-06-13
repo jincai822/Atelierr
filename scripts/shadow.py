@@ -659,11 +659,14 @@ def cmd_report(args: argparse.Namespace) -> int:
     # Stale-cost fail-closed: refuse to emit absolute cost columns if any
     # known-aggregated model is >90d stale, unless --accept-stale-costs.
     stale = _stale_cost_days(costs, today)
-    stale_aggregated = {m: d for m, d in stale.items() if d > 90}
+    # -1 = last_verified missing/unparseable: at least as stale as >90d, so
+    # it fails closed too (silently exempting it defeated the gate's intent).
+    stale_aggregated = {m: d for m, d in stale.items() if d > 90 or d == -1}
     if stale_aggregated and not args.accept_stale_costs:
         sys.stderr.write("ERROR: cost catalog has stale entries:\n")
         for m, d in sorted(stale_aggregated.items()):
-            sys.stderr.write(f"  - {m}: {d}d since last_verified\n")
+            label = f"{d}d since last_verified" if d >= 0 else "last_verified missing/unparseable"
+            sys.stderr.write(f"  - {m}: {label}\n")
         sys.stderr.write(
             "Refresh harness/model_costs.toml or pass --accept-stale-costs to "
             "see annotated values.\n"

@@ -60,12 +60,12 @@ OV = vault_root()
 # infrastructure (cache, assets), other tier homes, and the archive
 # (which is checked separately for overlap with ingestion domains).
 _NON_INGESTION_DOMAINS = {
+    "_meta",
     "agent-findings",
     "archive",
     "assets",
     "cache",
     "daily-notes",
-    "drafts",
     "gtd",
     "papers",
     "preprints",
@@ -76,6 +76,8 @@ _NON_INGESTION_DOMAINS = {
     "sessions",
     "wiki",
     "wiki-cn",
+    "wip",
+    "zettelm",
 }
 
 # Pattern: directory ending in " 2", " 3", " (2)", etc. Finder produces

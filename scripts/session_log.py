@@ -24,9 +24,9 @@ from datetime import date, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _paths import vault_root, fmt  # type: ignore[import-not-found]  # noqa: E402
+from _paths import tier, fmt  # type: ignore[import-not-found]  # noqa: E402
 
-SESSIONS_DIR = vault_root() / "sessions"
+SESSIONS_DIR = tier("sessions")
 
 VALID_TYPES = {
     "reflection",

@@ -107,7 +107,16 @@ DEFAULT_PATH: str | None = None
 # Subdirectories under the vault excluded from indexing (ephemeral caches,
 # not worth embedding). Trailing slash constrains matching to directories
 # (e.g., excludes `$OV/cache/**` but not `$OV/cached_*.md` siblings).
-INDEX_EXCLUDE = {"cache/"}
+# The segment comes from the path registry so a cache-tier rename propagates.
+def _index_exclude() -> set:
+    try:
+        from _paths import tier_segments
+        return {tier_segments().get("cache", "cache") + "/"}
+    except Exception:
+        return {"cache/"}
+
+
+INDEX_EXCLUDE = _index_exclude()
 
 
 def in_real_mode() -> bool:
@@ -267,7 +276,16 @@ def _load_trust_scores() -> dict:
 
         notes = load_wiki(as_of=_date.today())
         _, note_scores = score_notes(notes, as_of=_date.today())
-        return {str(p): s for p, s in note_scores.items()}
+        # trust.py keys by absolute path; the index stores vault-relative
+        # paths. Relativize or the reranker's trust bonus never matches.
+        vault = vault_root()
+        scores: dict = {}
+        for p, s in note_scores.items():
+            try:
+                scores[str(Path(p).relative_to(vault))] = s
+            except ValueError:
+                scores[str(p)] = s
+        return scores
     except Exception:
         return {}
 
@@ -294,6 +312,12 @@ def _build_retriever(with_reranker: bool = True, hybrid: bool = False):
         trust = _load_trust_scores()
         if trust:
             warn(f"loaded trust scores for {len(trust)} wiki entries")
+            indexed = store.get_indexed_mtimes()
+            if indexed and not (trust.keys() & indexed.keys()):
+                warn(
+                    "warning: trust keys match no indexed paths; "
+                    "trust reranking is a no-op (key format drift?)"
+                )
         reranker = TierRecencyReranker(trust_scores=trust)
 
     retriever = Retriever(embedder=embedder, store=store, reranker=reranker)
@@ -332,7 +356,24 @@ def real_query(args: argparse.Namespace) -> int:
     filters = {}
     paths = args.path or [default_path]
     if paths != [default_path]:
-        filters["path_prefix"] = paths
+        # The index stores vault-relative paths, so prefix filters must be
+        # vault-relative too. Relativize absolute --path values; reject ones
+        # outside the vault loudly instead of silently matching nothing.
+        rel_paths = []
+        for p in paths:
+            pp = Path(p)
+            if pp.is_absolute():
+                try:
+                    rel_paths.append(str(pp.resolve().relative_to(vault_root())))
+                except ValueError:
+                    warn(f"--path {p} is outside the vault ({vault_root()}); ignoring")
+                    continue
+            else:
+                rel_paths.append(p)
+        if not rel_paths:
+            warn("no usable --path filters remain; no results")
+            return 0
+        filters["path_prefix"] = rel_paths
 
     after_dt = parse_date(args.after, "--after")
     before_dt = parse_date(args.before, "--before")
@@ -468,8 +509,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--path",
         action="append",
         default=None,
-        help="Restrict to a subdirectory, relative to repo root. "
-        "Repeatable. Default: zk/",
+        help="Restrict to a subdirectory, relative to the vault root ($OV); "
+        "absolute paths under the vault are accepted and relativized. "
+        "Repeatable. Default: the whole vault.",
     )
     q.add_argument(
         "--after",

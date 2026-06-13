@@ -18,7 +18,7 @@ is a Protocol implementation and can be swapped independently.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
@@ -215,16 +215,12 @@ class TierRecencyReranker:
             scored.append((final, r))
 
         scored.sort(key=lambda x: -x[0])
-        results = []
-        for final_score, r in scored[:top_k]:
-            results.append(SearchResult(
-                path=r.path,
-                score=round(final_score, 4),
-                chunk_id=r.chunk_id,
-                chunk_text=r.chunk_text,
-                tier=r.tier,
-            ))
-        return results
+        # replace() keeps every other field (mtime, source, ...) intact;
+        # rebuilding by hand silently dropped fields as the dataclass grew.
+        return [
+            replace(r, score=round(final_score, 4))
+            for final_score, r in scored[:top_k]
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -335,23 +331,49 @@ def _derive_tier(path: str) -> str:
     if len(parts) < 2:
         return "L2"
     subdir = parts[1] if parts[0] == "zk" else parts[0]
-    tier_map = {
-        "wiki": "L4",
-        "papers": "L3",
-        "readwise": "L1",
-        "daily-notes": "L2",
-        "reflections": "L2",
-        "research": "L2",
-        "preprints": "L2",
-        "agent-findings": "L2",
-        "drafts": "L2",
-        "gtd": "L2",
-        "health": "L2",
-        "cache": "L1",
-        "archive": "L2",
-        "sessions": "L2",
-    }
-    return tier_map.get(subdir, "L2")
+    return _segment_tier_map().get(subdir, "L2")
+
+
+# Knowledge level by registry *logical name* (stable; CLAUDE.md § Knowledge
+# Layers). Segments come from harness/paths.toml at runtime so a tier rename
+# (e.g. drafts -> wip) propagates here automatically. Unlisted names are L2.
+_TIER_LEVEL_BY_NAME = {
+    "wiki": "L4",
+    "papers": "L3",
+    "preprints": "L3",
+    "cache": "L1",
+}
+
+_segment_tier_cache: Optional[Dict[str, str]] = None
+
+
+def _segment_tier_map() -> Dict[str, str]:
+    """Return {top-level segment: knowledge level} derived from the path
+    registry. Falls back to a minimal static map if _paths is unavailable
+    (e.g. this module imported outside the repo)."""
+    global _segment_tier_cache
+    if _segment_tier_cache is not None:
+        return _segment_tier_cache
+    # Readwise is an indexed L1 surface but cloud-only, not a registry tier.
+    mapping: Dict[str, str] = {"readwise": "L1"}
+    try:
+        from _paths import tier_segments, vault_root, wiki_dirs
+
+        for name, seg in tier_segments().items():
+            top = seg.split("/")[0]
+            level = _TIER_LEVEL_BY_NAME.get(name, "L2")
+            if level != "L2" or top not in mapping:
+                mapping[top] = level
+        root = vault_root()
+        for wd in wiki_dirs():
+            try:
+                mapping[wd.relative_to(root).parts[0]] = "L4"
+            except ValueError:
+                pass
+    except Exception:
+        mapping.update({"wiki": "L4", "papers": "L3", "preprints": "L3", "cache": "L1"})
+    _segment_tier_cache = mapping
+    return mapping
 
 
 class Retriever:
@@ -473,6 +495,7 @@ class Retriever:
         # Determine which files need re-indexing
         current_paths = set()
         to_index: List[Path] = []
+        to_index_rel: List[str] = []
         for fpath in file_list:
             try:
                 rel = str(fpath.relative_to(repo_root))
@@ -484,6 +507,7 @@ class Retriever:
             # Epsilon of 1s avoids false positives from Drive sync touching mtimes
             if current_mtime - indexed_mtime > 1.0:
                 to_index.append(fpath)
+                to_index_rel.append(rel)
 
         # Remove entries for deleted files
         stale = [p for p in indexed if p not in current_paths]
@@ -504,6 +528,13 @@ class Retriever:
                 f"  {len(to_index)} files changed, {skipped} unchanged",
                 file=sys.stderr,
             )
+
+        # A changed file may now chunk to fewer pieces than its indexed copy;
+        # upsert alone would leave the old trailing chunks searchable. Drop the
+        # file's old chunks first.
+        prior = [rel for rel in to_index_rel if rel in indexed]
+        if prior:
+            self.store.delete_by_path(prior)
 
         added = self.index_files(to_index, repo_root, batch_size, show_progress)
         return added, skipped, removed
@@ -746,7 +777,10 @@ def _passes_filters(r: SearchResult, filters: Dict[str, Any]) -> bool:
     if "path_prefix" in filters:
         prefix = filters["path_prefix"]
         prefixes = prefix if isinstance(prefix, list) else [prefix]
-        if not any(r.path.startswith(p) for p in prefixes):
+        # Directory-boundary match: a "wiki" filter must not also match the
+        # sibling "wiki-cn/" localized shadow. Match the path exactly or as a
+        # "<prefix>/" directory child.
+        if not any(r.path == p or r.path.startswith(p + "/") for p in prefixes):
             return False
     if "tier" in filters and r.tier != filters["tier"]:
         return False
@@ -1033,6 +1067,27 @@ class LanceStore:
         )
         return len(docs)
 
+    @staticmethod
+    def _q(value: str) -> str:
+        """Escape a value for embedding in a double-quoted filter literal."""
+        return str(value).replace('"', '""')
+
+    @staticmethod
+    def _warn(op: str, exc: Exception) -> None:
+        """A failed index operation must be visible: silently returning the
+        degraded value ([] / 0) reads as 'no results', which violates the
+        'if search returns nothing, say so' contract.
+
+        The catch-all `except Exception` at the call sites is deliberate:
+        lancedb's exception taxonomy is not stable across versions, so the
+        contract here is visibility (warn + degrade), not type narrowing."""
+        import sys
+
+        print(
+            f"  warning: lance {op} failed ({type(exc).__name__}: {exc})",
+            file=sys.stderr,
+        )
+
     def search(
         self,
         vector: NDArray[np.float32],
@@ -1046,13 +1101,21 @@ class LanceStore:
         if filters:
             if "path_prefix" in filters:
                 prefix = filters["path_prefix"]
+                # Directory-boundary match (exact or "<prefix>/" child) so a
+                # "wiki" filter does not also match the sibling "wiki-cn/"
+                # localized shadow. See _passes_filters for the in-memory twin.
                 if isinstance(prefix, list):
-                    parts = [f'path LIKE "{p}%"' for p in prefix]
+                    parts = [
+                        f'(path = "{self._q(p)}" OR path LIKE "{self._q(p)}/%")'
+                        for p in prefix
+                    ]
                     where_clauses.append(f"({' OR '.join(parts)})")
                 else:
-                    where_clauses.append(f'path LIKE "{prefix}%"')
+                    where_clauses.append(
+                        f'(path = "{self._q(prefix)}" OR path LIKE "{self._q(prefix)}/%")'
+                    )
             if "tier" in filters:
-                where_clauses.append(f'tier = "{filters["tier"]}"')
+                where_clauses.append(f'tier = "{self._q(filters["tier"])}"')
             if "mtime_after" in filters:
                 where_clauses.append(f"mtime >= {filters['mtime_after']}")
             if "mtime_before" in filters:
@@ -1063,7 +1126,8 @@ class LanceStore:
 
         try:
             results_df = query.to_pandas()
-        except Exception:
+        except Exception as exc:
+            self._warn("search", exc)
             return []
 
         results = []
@@ -1085,36 +1149,52 @@ class LanceStore:
     def delete(self, ids: List[str]) -> int:
         if not ids:
             return 0
-        id_filter = " OR ".join(f'id = "{doc_id}"' for doc_id in ids)
+        id_filter = " OR ".join(f'id = "{self._q(doc_id)}"' for doc_id in ids)
         try:
             self._table.delete(id_filter)
             return len(ids)
-        except Exception:
+        except Exception as exc:
+            self._warn("delete", exc)
             return 0
 
     def get_indexed_mtimes(self) -> Dict[str, float]:
         """Return {path: max_mtime} for all indexed documents."""
+        import sys
+
         try:
-            df = self._table.to_pandas(columns=["path", "mtime"])
+            n = self._table.count_rows()
+            if n == 0:
+                return {}
+            # LanceTable.to_pandas() takes no projection args; use the query
+            # builder so vectors are never materialized.
+            df = self._table.search().select(["path", "mtime"]).limit(n).to_pandas()
             return dict(df.groupby("path")["mtime"].max())
-        except Exception:
+        except Exception as exc:
+            print(
+                f"  warning: could not read indexed mtimes "
+                f"({type(exc).__name__}: {exc}); treating index as empty — "
+                "every file will be re-embedded and deleted-file cleanup is skipped",
+                file=sys.stderr,
+            )
             return {}
 
     def delete_by_path(self, paths: List[str]) -> int:
         """Delete all chunks for the given file paths."""
         if not paths:
             return 0
-        path_filter = " OR ".join(f'path = "{p}"' for p in paths)
+        path_filter = " OR ".join(f'path = "{self._q(p)}"' for p in paths)
         try:
             self._table.delete(path_filter)
             return len(paths)
-        except Exception:
+        except Exception as exc:
+            self._warn("delete_by_path", exc)
             return 0
 
     def count(self) -> int:
         try:
             return self._table.count_rows()
-        except Exception:
+        except Exception as exc:
+            self._warn("count", exc)
             return 0
 
     def stats(self) -> IndexStats:

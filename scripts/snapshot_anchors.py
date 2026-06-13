@@ -48,9 +48,9 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _paths import vault_root  # type: ignore[import-not-found]  # noqa: E402
+from _paths import tier  # type: ignore[import-not-found]  # noqa: E402
 
-WIKI_DIR = vault_root() / "wiki"
+WIKI_DIR = tier("wiki")
 
 # Regex to match anchor lines with url: or gist: types
 # Captures: full line, anchor type+id, and optional readwise field
@@ -93,7 +93,8 @@ def find_anchors_missing_readwise(
     if note_path:
         files = [note_path]
     else:
-        files = sorted(WIKI_DIR.glob("*.md"))
+        # rglob: wiki entries live in domain subdirectories, not at the top level.
+        files = sorted(WIKI_DIR.rglob("*.md"))
 
     results = []
     for fpath in files:
@@ -124,9 +125,9 @@ def search_readwise_for_url(url: str) -> str | None:
     """Check if a URL is already saved in Readwise.
     Returns the document ID if found, None otherwise.
 
-    Uses reader-list-documents with source_url matching rather than
-    reader-search-documents, because search uses hybrid/semantic matching
-    and may return unrelated results.
+    Uses reader-search-documents to fetch candidates, then matches the URL
+    against each candidate's source_url/url fields, because search alone
+    uses hybrid/semantic matching and may return unrelated results.
     """
     try:
         result = subprocess.run(

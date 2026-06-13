@@ -46,7 +46,8 @@ Paths are project-relative. Run from the repo root.
 See also:
     protocols/wiki-schema.md            the schema this parser enforces
     protocols/local-first-architecture.md  layer model
-    handoffs/2026-04-06-phase-bcd-trust-engine.md  Phase B spec
+    handoffs/2026-04-06-phase-bcd-trust-engine.md  Phase B spec (gitignored,
+        author's machine only — not shipped in clones)
 """
 
 from __future__ import annotations
@@ -59,9 +60,9 @@ from datetime import date, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _paths import vault_root  # type: ignore[import-not-found]  # noqa: E402
+from _paths import tier  # type: ignore[import-not-found]  # noqa: E402
 
-WIKI_DIR = vault_root() / "wiki"
+WIKI_DIR = tier("wiki")
 DAMPING = 0.85
 FLOOR = 0.1
 MAX_ITER = 200
@@ -900,7 +901,25 @@ def main(argv: list[str] | None = None) -> int:
     else:
         as_of = date.today()
 
-    notes = load_wiki(as_of, only=args.note)
+    target = None
+    if args.note is not None:
+        # Validate + resolve the requested note, but score against the FULL
+        # corpus: a single-note corpus cannot resolve @cite targets to other
+        # entries, which falsely failed structural integrity (and floored the
+        # scores) for any healthy note citing another.
+        candidate = load_wiki(as_of, only=args.note)[0]
+        notes = load_wiki(as_of)
+        target = next(
+            (n for n in notes if n.path.resolve() == candidate.path.resolve()),
+            None,
+        )
+        if target is None:
+            # Not in the corpus walk (e.g. an excluded basename): fall back
+            # to single-note scoring.
+            notes = [candidate]
+            target = candidate
+    else:
+        notes = load_wiki(as_of)
     claim_scores, note_scores = score_notes(notes, as_of)
 
     if args.index:
@@ -918,11 +937,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.json:
-        sys.stdout.write(format_json(notes, claim_scores, note_scores, as_of))
+        json_notes = [target] if target is not None else notes
+        sys.stdout.write(format_json(json_notes, claim_scores, note_scores, as_of))
         return 0
 
-    if args.note is not None:
-        sys.stdout.write(format_note_detail(notes[0], claim_scores, note_scores, as_of))
+    if target is not None:
+        sys.stdout.write(format_note_detail(target, claim_scores, note_scores, as_of))
         return 0
 
     sys.stdout.write(format_table(notes, claim_scores, note_scores, as_of))

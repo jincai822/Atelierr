@@ -46,12 +46,11 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _paths import vault_root  # type: ignore[import-not-found]  # noqa: E402
+from _paths import tier  # type: ignore[import-not-found]  # noqa: E402
 
-_OV = vault_root()
-GTD_DIR = _OV / "gtd"
-REFLECTIONS_DIR = _OV / "reflections"
-DAILY_NOTES_DIR = _OV / "daily-notes"
+GTD_DIR = tier("gtd")
+REFLECTIONS_DIR = tier("reflections")
+DAILY_NOTES_DIR = tier("daily_notes")
 
 CHECKBOX_RE = re.compile(r"^\s*[+\-*]\s*\[([ xX~/])\]\s+(.*)$")
 LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*+]\s+|\d+\.\s+)(.*)$")
@@ -307,7 +306,8 @@ def detect_closure_candidates(
     cutoff = date.today() - timedelta(days=since_days)
     sources: list[Path] = []
     if DAILY_NOTES_DIR.exists():
-        for f in DAILY_NOTES_DIR.glob("*.md"):
+        # Daily notes nest as daily-notes/YYYY/MM/YYYY-MM-DD.md.
+        for f in DAILY_NOTES_DIR.rglob("*.md"):
             d = filename_date(f)
             if d is not None and d >= cutoff:
                 sources.append(f)

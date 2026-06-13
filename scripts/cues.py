@@ -973,7 +973,7 @@ def _extract_audit_summary(ov: Path, routine_name: str, run_date: date) -> str:
     if routine_name != "autoevo-nightly":
         return ""
 
-    findings_dir = ov / "agent-findings"
+    findings_dir = tier("agent_findings")
     if not findings_dir.is_dir():
         return ""
 
@@ -1140,7 +1140,7 @@ def check_career_growth(ov: Path, today: date) -> tuple[Cue | None, str]:
     current week. Stays silent entirely if the plan file is absent (goal not set
     up). Snooze: `cues.py snooze career_growth [--days N]`.
     """
-    plan_path = ov / "career" / "career-plan-2026.md"
+    plan_path = tier("career") / "career-plan-2026.md"
     if not plan_path.is_file():
         return None, "career/career-plan-2026.md missing; goal not set up"
 

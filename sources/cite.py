@@ -105,7 +105,9 @@ def format_apa(paper):
         return "[Citation not found]"
 
     authors = format_authors_apa(paper.get("authors", []))
-    year = paper.get("year", "n.d.")
+    # `or`: the S2 API returns an explicit `"year": null` for many preprints;
+    # a key-absence default alone would print "(None)".
+    year = paper.get("year") or "n.d."
     title = title_case_apa(paper.get("title", "Untitled"))
     venue = paper.get("venue", "")
     ext_ids = paper.get("externalIds", {}) or {}
