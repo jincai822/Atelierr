@@ -15,11 +15,16 @@
 #   codex   Codex CLI leg, dispatched via `codex exec -m <identity>`.
 #           Reserved for the external-reviewer role today.
 #
-# Multi-leg roles fire all declared legs in parallel on dispatch. The
-# orchestrator issues one tool call per leg in the same assistant message.
-# Single-leg roles (Scribe) fire only their declared leg; this is the
-# explicit carve-out for write-capable / mechanical agents where a second
-# external leg would either duplicate writes or leak verbatim content.
+# `voices` declares each role's INTENDED leg set. Whether all declared
+# legs fire on a given dispatch is the call site's decision, not a
+# universal contract: only the few call sites enumerated in
+# `protocols/orchestrator.md` -> "Voice Dispatch" are multi-leg-enabled
+# today; every other site fires only the role's `native` leg. At an
+# enabled multi-leg site the orchestrator issues one tool call per leg in
+# the same assistant message.
+# Single-leg roles (Scribe) declare only `native`; this is the explicit
+# carve-out for write-capable / mechanical agents where a second external
+# leg would either duplicate writes or leak verbatim content.
 #
 # See `protocols/orchestrator.md` -> "Voice Dispatch" for the canonical
 # dispatch recipe.

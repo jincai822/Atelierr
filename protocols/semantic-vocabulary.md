@@ -31,7 +31,7 @@ Add new entries when a tag is reused across 3+ files and an agent needs to inter
 
 - **Tag slug**: lowercase ASCII or unicode; spaces → `-`; punctuation stripped (`#side-notes`, `#心流`).
 - **No pure-number tags**: `[[2025]]` → strip to plain text `2025`. A tag must contain at least one non-digit character.
-- **Dates**: only ISO `YYYY-MM-DD`. Wikilinks like `[[2024-08-08]]` resolve to `daily-notes/2024-08-08.md` if present, else strip to plain text. Legacy formats (`Thu, August 8th, 2024`, `8/8/2024`, `2024年8月8日`) get normalized to ISO during conversion; do not introduce new ones.
+- **Dates**: only ISO `YYYY-MM-DD`. Wikilinks like `[[2024-08-08]]` resolve to `daily-notes/2024/08/2024-08-08.md` if present, else strip to plain text. Legacy formats (`Thu, August 8th, 2024`, `8/8/2024`, `2024年8月8日`) get normalized to ISO during conversion; do not introduce new ones.
 
 ## Backlink categories (canonical reference)
 
@@ -41,7 +41,7 @@ Add new entries when a tag is reused across 3+ files and an agent needs to inter
 | `[[Foo\|Bar]]` resolves | aliased navigation | `[Bar](relative/Foo.md)` |
 | `[[Foo#Section]]` resolves | section anchor | `[Foo](relative/Foo.md#section-slug)` |
 | `[[Foo#^block]]` resolves | block ref (wikilink-native) | `[Foo](relative/Foo.md)` (block id dropped) |
-| `[[<full-date>]]` | daily-note ref | `[YYYY-MM-DD](daily-notes/YYYY-MM-DD.md)` if file exists, else plain ISO |
+| `[[<full-date>]]` | daily-note ref | `[YYYY-MM-DD](daily-notes/YYYY/MM/YYYY-MM-DD.md)` if file exists, else plain ISO |
 | `[[<pure-digits>]]` | bare year/number | strip to plain text |
 | `[[]]` | empty | strip entirely |
 | `[[Foo]]` unresolved | semantic marker (or broken) | `#foo-slug` tag |

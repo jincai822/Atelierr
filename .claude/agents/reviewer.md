@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Quality-checks reflection outputs and system evolution changes. Three modes: Session Review (content quality), System Diff Review (incremental changes), System Holistic Review (global consistency).
+description: Quality-checks reflection outputs and system evolution changes. Three modes — Session Review (content quality), System Diff Review (incremental changes), System Holistic Review (global consistency).
 tools: Read, Grep, Glob, Bash
 model: sonnet
 maxTurns: 100

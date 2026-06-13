@@ -61,14 +61,15 @@ INI
 chmod 600 ~/.aws/credentials
 
 # 3. Create the DynamoDB table (one-time, from any machine).
-AWS_PROFILE=atelier-lock python3 scripts/routine_lock.py setup-table
+#    Use `uv run` — boto3 lives in the project venv, not system python3.
+AWS_PROFILE=atelier-lock uv run scripts/routine_lock.py setup-table
 
 # 4. Tell routine_watch.toml to use DynamoDB:
 #   [coordination]
 #   backend = "dynamodb"
 ```
 
-The runner reads `AWS_PROFILE` (default `atelier-lock`; override via `ATELIER_LOCK_AWS_PROFILE`). The table uses provisioned mode (1 WCU / 1 RCU, always-free tier); TTL auto-expires stale locks after 1 hour.
+The runner reads `AWS_PROFILE` (default `atelier-lock`; override via `ATELIER_LOCK_AWS_PROFILE`). The table uses provisioned mode (1 WCU / 1 RCU, always-free tier). Stale locks from crashed runs are taken over at acquire time once their TTL (default 1 hour) passes; the table's TTL attribute only garbage-collects old items in the background.
 
 Skip this step for single-machine setups — the lock module is a no-op when `coordination.backend` is absent or `"none"`.
 
@@ -120,12 +121,14 @@ sudo pmset repeat cancel
 ## Manual test (without waiting for 5am)
 
 ```bash
-# Skip the hostname stagger for immediate execution:
-ATELIER_SKIP_STAGGER=1 launchctl start com.atelier.autoevo-nightly
+# Note: an env-var prefix does NOT propagate through `launchctl start` (the
+# job runs in launchd's environment, not your shell's), so this runs WITH the
+# 0-120s hostname stagger:
+launchctl start com.atelier.autoevo-nightly
 tail -f /tmp/com.atelier.autoevo-nightly.out /tmp/com.atelier.autoevo-nightly.err
 ```
 
-Or run the wrapper directly:
+Or run the wrapper directly (env prefix works here, skipping the stagger):
 
 ```bash
 ATELIER_SKIP_STAGGER=1 scripts/routine_runner.sh autoevo-nightly /autoevo-nightly
@@ -138,16 +141,16 @@ The first manual run is also the auth smoke test: if `claude -p` hits an auth pr
 ## Debugging coordination
 
 ```bash
-# Check lock status for today's cycle:
-AWS_PROFILE=atelier-lock python3 scripts/routine_lock.py status autoevo-nightly
+# Check lock status for today's cycle (uv run: boto3 lives in the venv):
+AWS_PROFILE=atelier-lock uv run scripts/routine_lock.py status autoevo-nightly
 
 # Check local claim file (status=failed with an `error` line means the lock
 # step itself failed — read the error; status absent means it never ran):
 cat "$OV/_meta/routine_runs/autoevo-nightly/$(date +%Y-%m-%d).toml"
 
 # Test lock acquire/release without running the routine:
-AWS_PROFILE=atelier-lock python3 scripts/routine_lock.py acquire autoevo-nightly --cycle test
-AWS_PROFILE=atelier-lock python3 scripts/routine_lock.py release autoevo-nightly --cycle test
+AWS_PROFILE=atelier-lock uv run scripts/routine_lock.py acquire autoevo-nightly --cycle test
+AWS_PROFILE=atelier-lock uv run scripts/routine_lock.py release autoevo-nightly --cycle test
 ```
 
 ## Path assumptions
@@ -156,7 +159,7 @@ The plist delegates to `scripts/routine_runner.sh`, which assumes:
 
 - Atelier checked out at `~/atelier/`. Edit the plist's `ProgramArguments` path if elsewhere.
 - `claude` on `PATH` via `/opt/homebrew/bin` (Apple Silicon Homebrew) or `/usr/local/bin` (Intel). The `EnvironmentVariables` block in the plist sets `PATH` because `launchd` does not inherit a login shell's `PATH`.
-- `python3` on `PATH` (for `routine_lock.py`). Homebrew Python or system Python both work.
+- `uv` on `PATH` (the runner invokes `routine_lock.py` via `uv run` so boto3 resolves from the project venv).
 - `$OV` is exported from one of: `~/.zprofile`, `~/.profile`, or `~/atelier/harness/env.local.sh` (see Install step 1). The wrapper tries all three in order and aborts loudly if none work.
 - `$OV/cache/` and `$OV/_meta/routine_runs/` are created on every run via `mkdir -p`, so a fresh install does not silently fail on missing directories.
 - For multi-machine coordination: an `atelier-lock` profile in `~/.aws/credentials` (non-interactive static keys; see Install step 2). Without it, `boto3` finds no credentials and the lock acquire fails loud (exit 2, `status=failed` claim) rather than silently skipping. Single-machine setups (`backend = "none"`) need no credentials at all.

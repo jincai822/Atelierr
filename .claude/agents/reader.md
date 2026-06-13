@@ -57,7 +57,7 @@ When the source material is a transcript (video, podcast, research talk, recorde
 2. **Capture metadata:** Speaker names, timestamps, data points (numbers, dates, references).
 3. **Separate user notes:** If the user interleaved their own notes (marked by "note from me" / "end note" or similar), extract and present these separately.
 4. **Bilingual terms:** For important concepts, provide both Chinese and English.
-5. **Quote ranked claims verbatim.** When a speaker explicitly ranks items ("X is the most important", "the biggest bottleneck is Y", "the first thing is...the second thing is..."), the ranking statement MUST appear verbatim in your brief with its timestamp, not paraphrased. Paraphrasing a ranked list invites order-inversion (calling Z "most important" when the speaker said X). If you cannot find the verbatim quote in the transcript, the ranking claim does not appear in the brief at all; downgrade it to an unranked enumeration ("speaker mentions X, Y, Z as bottlenecks; ranking unclear in source"). This rule exists because rank-inversion is a high-impact failure mode that mishearing-flagging does not catch. The validation-depth taxonomy backing this (unranked enumeration is more honest than paraphrased ranking when the source is ambiguous) lives in `protocols/epistemic-hygiene.md`.
+5. **Quote ranked claims verbatim.** When a speaker explicitly ranks items ("X is the most important", "the biggest bottleneck is Y", "the first thing is...the second thing is..."), the ranking statement MUST appear verbatim in your brief with its timestamp, not paraphrased. Paraphrasing a ranked list invites order-inversion (calling Z "most important" when the speaker said X). If you cannot find the verbatim quote in the transcript, the ranking claim does not appear in the brief at all; downgrade it to an unranked enumeration ("speaker mentions X, Y, Z as bottlenecks; ranking unclear in source"). This rule exists because rank-inversion is a high-impact failure mode that mishearing-flagging does not catch. Per `protocols/epistemic-hygiene.md`, unranked enumeration is more honest than paraphrased ranking when the source is ambiguous.
 6. **Then apply your assigned lens** to the extracted content as you would any other text.
 
 ### Podcast / Interview Sub-Branch
@@ -77,10 +77,10 @@ Readwise auto-transcribed podcasts have specific quirks. Apply these **before** 
 
    When you spot a likely mis-hearing in the text, note it: `[likely: Base44]` next to the transcript spelling.
 
-4. **Epistemic weight default.** An interview is alloy/anecdotal tier (the validation-depth taxonomy lives in `protocols/epistemic-hygiene.md`). Default the brief's `confidence:` to `medium` unless the guest cites specific verifiable data (papers, public numbers, named incidents). For factual claims ("China has surpassed X in Y"), annotate `[verify: anecdotal]`. The user should not promote interview-sourced claims to L4 wiki without corroboration from L3/published sources.
+4. **Epistemic weight default.** An interview is alloy/anecdotal tier per `protocols/epistemic-hygiene.md`. Default the brief's `confidence:` to `medium` unless the guest cites specific verifiable data (papers, public numbers, named incidents). For factual claims ("China has surpassed X in Y"), annotate `[verify: anecdotal]`. The user should not promote interview-sourced claims to L4 wiki without corroboration from L3/published sources.
 
 5. **Guest identity in citation.** The Readwise `author` field is the show host. Cite separately in the brief header:
-   `source: "20VC: Anj Midha on Investing $300M into Anthropic" (host: Harry Stebbings, guest: Anj Midha)`
+   `source: "<Show>: <Guest Name> on <Episode Topic>" (host: <Host Name>, guest: <Guest Name>)`
 
 This is preprocessing, not a separate lens. The real analysis comes from whichever lens you were dispatched with. The generic Transcript Format Handling rule #5 (quote ranked claims verbatim) applies here with extra force: podcast guests verbally rank things mid-sentence without any typographic cue, making rank-inversion especially easy.
 
@@ -88,7 +88,7 @@ This is preprocessing, not a separate lens. The real analysis comes from whichev
 
 1. **Receive your lens assignment** from the orchestrator. You are told which lens to apply.
 2. **Read the full text.** The full vault is on disk.
-   - **Local note:** `Grep` for the title in `$OV/` and `Read` the match (wiki in `<paths.wiki>/`, daily notes in `<paths.daily_notes>/YYYY-MM-DD.md`, papers in `<paths.papers>/` or `<paths.preprints>/`).
+   - **Local note:** `Grep` for the title in `$OV/` and `Read` the match (wiki in `<paths.wiki>/`, daily notes in `<paths.daily_notes>/YYYY/MM/YYYY-MM-DD.md`, papers in `<paths.papers>/` or `<paths.preprints>/`).
    - **URL:** check `<paths.cache>/` first (via `Glob`), then fall back to `WebFetch`.
    - **Paper cache (directory):** if the orchestrator passes `cache_path: <paths.cache>/<slug>/`, read `paper.txt` and `index.md` from that directory; do NOT re-extract the raw PDF.
    - **Readwise transcript cache (single file):** if the orchestrator passes `cache_path: <paths.cache>/rw-<doc_id>.md`, read that single file; it contains the transcript `.content` as the orchestrator dumped it. Do NOT re-fetch from the Readwise CLI; parallel Readers independently fetching a 77KB transcript is the same failure mode the PDF cache was designed to prevent.

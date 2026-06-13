@@ -9,8 +9,12 @@ Provider-neutral registry files for the Atelier runtime layer.
 | `intents.toml` | Intent router registry for `/hi` — trigger phrases mapped to dispatch shape (mode, agents, profile reads, coordination pattern). |
 | `models.toml` | Model identity registry (committed schema: identity names like opus, sonnet, deepseek_pro_max — declarations only, no bindings). Provider/model bindings live in gitignored `profile/models.toml` and merge at runtime. |
 | `capabilities.toml` | Runtime-neutral capability names and the Codex-side tool that implements each. The Claude Code mapping lives in `.claude/agents/*.md` `tools:` frontmatter (single source of truth). |
+| `paths.toml` | Canonical logical-name → vault-path registry for every L1–L4 surface (the `<paths.<name>>` placeholders in docs). Renames happen here; per-user extensions live in gitignored `paths.local.toml`. |
+| `paths.local.toml.example` | Template for the gitignored per-user `paths.local.toml` (localized wikis, sandbox overrides, private tiers). |
+| `model_costs.toml` | Per-1M-token USD prices by model identity, consumed by `scripts/shadow.py report` (fails closed when prices are >90 days stale). Per-user overrides in gitignored `profile/model_costs.toml`. |
+| `shadow_tasks.toml` | Per-task-type verdict-token extraction rules for `scripts/shadow.py report`. |
 
-Provider pricing data lives at `scripts/pricing.toml`, not here. It is offline reference data consumed only by `scripts/pricing.py` for cost estimation and future Pareto-optimal model selection: nothing on the dispatch path loads it, so it stays out of the runtime contract.
+Two pricing surfaces exist. `harness/model_costs.toml` (above) holds per-identity costs on the shadow-report path. `scripts/pricing.toml` is a separate per-provider catalog consumed only by `scripts/pricing.py` for cost estimation and future Pareto-optimal model selection. Nothing on the dispatch path loads either, so both stay out of the runtime contract.
 
 Use the helper CLI instead of scraping TOML directly:
 

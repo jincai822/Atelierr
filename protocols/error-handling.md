@@ -74,7 +74,7 @@ Failures are ranked by severity. Handle at the lowest level possible.
 
 If a session is interrupted:
 1. Check `<paths.reflections>/` for partial output from today.
-2. Check today's daily note (`<paths.daily_notes>/YYYY-MM-DD.md`) for a session write-back the user may have authored. The system never writes to daily notes, so any content there is user-authored; resume from where the user left off.
+2. Check today's daily note (`<paths.daily_notes>/YYYY/MM/YYYY-MM-DD.md`) for a session write-back the user may have authored. Daily notes are user-authored; the sole system write path is the Scribe `daily_note` operation, which records user-dictated content verbatim (`local-first-architecture.md` § Source of Truth). Either way the content reflects the user's own words; resume from where the user left off.
 3. Resume from the last completed step rather than restarting.
 4. If unclear what was done, ask the user.
 

@@ -39,7 +39,7 @@ The alloy layer. Most of the user's active thinking lives here: daily free-write
 
 Older topic directories (career, research, people, etc.) carried over from earlier knowledge systems are parked in `<paths.archive>/` and stay there until individual notes are surfaced upward.
 
-**Transient capture inbox.** `<paths.zettelm>/` is a git submodule (synced from a mobile capture app) that holds short-lived, self-authored content awaiting digest: date-stamped narratives, ad-hoc thoughts, voice recordings, photos, PDFs. It is not its own tier — contents are enriched and routed by `/sync` into the appropriate persistent L2 destinations (`daily-notes/<date>.md` for narrative, `<domain>/raw/` for attachments) and then deleted from zettelm. Nothing should be expected to survive long-term inside `zettelm/`.
+**Transient capture inbox.** `<paths.zettelm>/` is a git submodule (synced from a mobile capture app) that holds short-lived, self-authored content awaiting digest: date-stamped narratives, ad-hoc thoughts, voice recordings, photos, PDFs. It is not its own tier — contents are enriched and routed by `/sync` into the appropriate persistent L2 destinations (`daily-notes/YYYY/MM/<date>.md` for narrative, `<domain>/raw/` for attachments) and then deleted from zettelm. Nothing should be expected to survive long-term inside `zettelm/`.
 
 ### L3 — Externally certified
 

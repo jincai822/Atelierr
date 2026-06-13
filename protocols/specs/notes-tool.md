@@ -20,7 +20,7 @@ This protocol is the source of truth for the tool's contract. Implementation wil
 **Out of scope.**
 - Asset links: `![alt](../assets/foo.bin)`, `![](../assets/img.png)` — assets do not move via this tool. Detected by either `!` image-prefix or path resolving outside `$OV/<note-tier>/`.
 - External URLs: `http://`, `https://`, `mailto:` — never rewritten.
-- Wikilinks: `[[Title]]` — not used in `$OV/` corpus by policy. Lint flags any introduced.
+- Wikilinks: `[[Title]]` — never rewritten by this tool. They are policy only under `<paths.wiki>/` (+ localized shadows, for the trust engine) and in raw-indexing index files; lint flags any introduced outside those surfaces.
 - URL-encoded internal paths (`%20` for space): not currently in use; tool refuses to introduce them. Use angle brackets instead.
 - Cross-vault links into the atelier repo or other repos: not rewritten.
 - Drive-side moves: the tool operates on the git working tree. Drive sync is the user's concern; concurrency rule below.
@@ -60,7 +60,7 @@ Read-only. Prints `path:line:col` for each occurrence. Used by humans to inspect
 Walks every note-to-note link in `$OV/`. Reports:
 - **Broken**: target file does not exist.
 - **Wrong-tier**: link from active tier (`wiki/`, `daily-notes/`, etc.) into `archive/` or `cache/`. Warning, not error.
-- **Wikilink found**: any `[[X]]` in `$OV/` corpus. Error — corpus policy is markdown-only.
+- **Wikilink found**: any `[[X]]` outside `<paths.wiki>/` (+ localized shadows) and raw-indexing index files. Error — outside those surfaces the corpus policy is markdown-only.
 
 Called by `/lint` as one of its corpus-level passes.
 
@@ -73,7 +73,7 @@ Builds a path → backlinks map at `$OV/.notes-index.json` (gitignored — regen
   "built_at": "2026-05-07T...",
   "by_target": {
     "people/<Person Name>.md": [
-      {"file": "daily-notes/2025/2025-12/2025-12-24.md", "line": 1, "col": 14, "form": "angle"}
+      {"file": "daily-notes/2025/12/2025-12-24.md", "line": 1, "col": 14, "form": "angle"}
     ]
   }
 }

@@ -65,8 +65,9 @@
 # paired with Sonnet on every cross-validation role.
 
 [models.deepseek_flash]
-# DeepSeek v4 Flash. The cheap DeepSeek leg paired with Haiku on the
-# scribe (mechanical-capture).
+# DeepSeek v4 Flash. Cheap DeepSeek leg, currently unbound: no committed
+# role binds it (Scribe is single-leg `{native}` by design). Reserved —
+# a gitignored per-user profile may still bind it.
 
 [models.codex_gpt55_max]
 # Codex gpt-5.5 with reasoning_effort = "high".

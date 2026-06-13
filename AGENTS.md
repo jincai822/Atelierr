@@ -6,7 +6,7 @@ Root instructions for Codex and other non-Claude runtimes. Claude Code reads
 This system is **the Atelier** — a workshop wrapping the user's **œuvre**
 (accumulating body of work, kept under `$OV/`). The user is the **Painter**;
 agents collectively are **le cercle**. For the full vocabulary and the
-14-operator archetype map, see `protocols/atelier.md`.
+15-operator archetype map, see `protocols/atelier.md`.
 
 Codex can also discover the repo-scoped `atelier` skill in `.agents/skills/atelier/`.
 
@@ -63,7 +63,7 @@ High-frequency operations. Lift these directly instead of re-deriving from `prot
 | Need | Command |
 |---|---|
 | Semantic vault search | `uv run scripts/semantic.py query "<concept>" --top 10` |
-| Today's daily note | `cat "$OV/daily-notes/$(date +%Y-%m-%d).md"` (before 03:00 local also read previous day) |
+| Today's daily note | `cat "$OV/daily-notes/$(date +%Y/%m/%Y-%m-%d).md"` (before 03:00 local also read previous day) |
 | Wiki entry by title | `rg -l "<title>" "$OV/wiki/"` |
 | Privacy gate | `uv run scripts/privacy_check.py --json` |
 | Harness state / lint | `python3 scripts/harness_lint.py --json` |

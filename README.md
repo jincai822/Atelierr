@@ -12,7 +12,7 @@ Drives natively on Claude Code; the same protocols run under [Codex CLI](https:/
 
 Honest framing matters more here than feature lists. Three rough audiences:
 
-1. **Pattern students.** You want to see how someone wired Claude Code to a personal-knowledge-management substrate end-to-end — agent contracts in `harness/agents.toml`, command portability in `harness/commands.toml`, trust scoring in `scripts/trust.py`, the L1–L4 tier model in `protocols/local-first-architecture.md`, the wiki schema in `protocols/wiki-schema.md`. Take the patterns; leave the configuration. **This is the primary audience.**
+1. **Pattern students.** You want to see how someone wired Claude Code to a personal-knowledge-management substrate end-to-end — agent contracts in `harness/agents.toml`, command portability in `harness/commands.toml`, trust scoring in `scripts/trust.py`, the five-tier (L1–L5) model in `protocols/local-first-architecture.md`, the wiki schema in `protocols/wiki-schema.md`. Take the patterns; leave the configuration. **This is the primary audience.**
 
 2. **System forkers.** You want to run something like this for your own thinking. The repo is MIT-licensed, you can fork it. But: a fresh clone has no `$OV/` vault, no `profile/identity.md`, no Readwise inbox, no archetype mnemonics that mean anything to you. The Atelier vocabulary (le cercle, the Painter, le œuvre) is bespoke. Expect to rip and replace; don't expect to clone-and-run.
 
@@ -34,16 +34,16 @@ If you want a turnkey "second brain," this isn't it — it's also not trying to 
 
 **Wiki** — Crystallize validated thinking into `$OV/wiki/` entries with structured claims, external anchors, and bi-temporal markers. `scripts/trust.py` runs Personalized PageRank with external anchors as trust seeds. `/lint` enforces corpus-level structure and harness health.
 
-Session reflections write to `$OV/reflections/`. Daily notes are user-authored — the system reads them but never writes.
+Session reflections write to `$OV/reflections/`. Daily notes are user-authored — the system reads them; the sole write path is the Scribe agent recording user-dictated content verbatim.
 
 ## Forking the patterns (the primary use case)
 
 If you read one thing in this repo, read these in order:
 
-1. **`protocols/local-first-architecture.md`** — the L1–L4 tier model. This is the load-bearing idea: directory = certification level, no tags required.
+1. **`protocols/local-first-architecture.md`** — the five-tier (L1–L5) model. This is the load-bearing idea: directory = certification level, no tags required.
 2. **`protocols/wiki-schema.md`** — claim markers (`[C1]`, `@anchor`, `@cite`, `@pass`), bi-temporal `valid_at`/`invalid_at` fields, and how `scripts/trust.py` reads them.
 3. **`harness/agents.toml`, `harness/commands.toml`, `harness/models.toml`, `harness/capabilities.toml`** — provider-neutral registries. The Claude Code and Codex runtimes are *adapters*, not first-class consumers. This is the part most worth lifting.
-4. **`scripts/trust.py`** — Personalized PageRank with external anchors as seeds. Stdlib-only, deterministic. ~700 lines including the schema parser. Adapt freely.
+4. **`scripts/trust.py`** — Personalized PageRank with external anchors as seeds. Stdlib-only, deterministic. Adapt freely.
 5. **`scripts/semantic.py`** — pluggable embedder + store backends (BGE-M3 + LanceDB by default). The CLI contract is encoder-agnostic; the embedder choice is yours.
 6. **`scripts/lint.py` and `scripts/privacy_check.py`** — quality gates with structured JSON output. Lint enforces wiki schema integrity; privacy_check fails loud on placebo-pass conditions (empty vault, missing config).
 7. **`.claude/agents/*.md`** — fifteen role specs. Useful as a template for your own agent definitions.
@@ -61,7 +61,8 @@ This is the maintainer's daily-use configuration. Running it identically end-to-
 - A `$OV/` directory with at minimum: `daily-notes/`, `wiki/`, `reflections/`. Other tiers (`papers/`, `cache/`, etc.) are optional.
 
 **Optional:**
-- [Gemini CLI](https://github.com/google-gemini/gemini-cli) — second-opinion external reviewer for `/system-review` (`npm i -g @google/gemini-cli`).
+- [Codex CLI](https://github.com/openai/codex) — default external reviewer leg for `/system-review` (`scripts/review.sh`); a direct-API leg runs in parallel via `scripts/chat_completion.py`.
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli) — legacy reviewer mode, kept as an optional fallback (`npm i -g @google/gemini-cli`).
 
 ### Install
 
@@ -99,7 +100,7 @@ Reflection-type commands (`/hi`, `/weekly`, `/review`, `/decision`, etc.) defaul
 
 ## Sessions
 
-Type `/hi` to get a menu of everything you can do:
+Type `/hi` to get a menu; the main flows:
 
 | Mode | What happens |
 |------|-------------|
@@ -158,18 +159,18 @@ Capture sources                  Local data layer ($OV/)
                      +-----------+-------+-------+-----------+
                      v           v               v           v
                 Le Cercle    Sessions     Frameworks    Trust engine
-                (15 agents)  (12 types)   (22 + xval)   (trust.py,
+                (15 agents)  (/hi menu)   (22 + xval)   (trust.py,
                      |           |               |        lint.py)
                      v           v               v
                 Protocols    $OV/reflections/   Cross-validation
                 (~25 rules)  (session outputs)  & Pattern Library
 ```
 
-**Five-tier knowledge model.** Everything under `$OV/` is classified by depth of crystallization — raw capture (L1), working notes (L2), externally-certified papers (L3), locally-certified wiki entries (L4). Directory = tier; no tags required. Agents read from disk via semantic search and grep.
+**Five-tier knowledge model.** Everything under `$OV/` is classified by depth of crystallization — raw capture (L1), working notes (L2), externally-certified papers (L3), locally-certified wiki entries (L4); L5 (universally certified) is reserved. Directory = tier; no tags required. Agents read from disk via semantic search and grep.
 
 **TrustRank over the wiki.** Wiki entries under `$OV/wiki/` follow a structured schema: `## Claims` with `[C1]`, `[C2]`... headings, each backed by fenced `anchors` blocks containing `@anchor` (external evidence), `@cite` (internal edge to another wiki entry), and `@pass` (reviewer verification) markers with bi-temporal `valid_at`/`invalid_at` fields. `scripts/trust.py` runs Personalized PageRank with external anchors as seeds; trust mass enters the graph only at external sources and propagates through internal cites. No external anchor, no trust. `scripts/lint.py` enforces structural integrity across the corpus.
 
-**Session output.** The orchestrator dispatches agents, gathers findings, runs a quality gate, and writes session output to `$OV/reflections/`. Daily notes are user-authored — the system reads them but never writes. All personal data under `$OV/` is gitignored; only system configuration is committed.
+**Session output.** The orchestrator dispatches agents, gathers findings, runs a quality gate, and writes session output to `$OV/reflections/`. Daily notes are user-authored — the system reads them; the sole write path is the Scribe agent recording user-dictated content verbatim. All personal data under `$OV/` is gitignored; only system configuration is committed.
 
 **Harness engineering.** `CLAUDE.md` is kept under 8KB because it is inherited by every Claude subagent; each line costs N tokens times N agents per session. `AGENTS.md` and `.agents/skills/atelier/SKILL.md` give Codex the root contract and workflow trigger. `harness/models.toml`, `harness/capabilities.toml`, `harness/commands.toml`, `harness/agents.toml`, and `protocols/runtime-adapters.md` keep provider and runtime assumptions explicit. `scripts/atelier.py` gives Codex command and role discovery plus prompt generation. Critical rules live at the top (primacy effect); detailed specifications load on demand from protocols and agent definitions. The Master of the Atelier (Evolver) has a "subtract before adding" principle and a root-instruction budget gate. `/lint` Phase 0 checks harness health alongside the wiki structural pass.
 
@@ -179,7 +180,7 @@ Key design choices:
 - **Deterministic trust scoring**: TrustRank is a stdlib-only Python pass, not an LLM heuristic. The same input always produces the same score.
 - **Era-aware**: tracks life chapters with themes and directions (Mastery, Impact, Freedom, Connection, Creation).
 - **Bilingual**: handles English and Chinese notes; matches your language.
-- **Self-improving**: the Master of the Atelier evolves the system, reviewed by external AI models (Codex, Gemini) via `scripts/review.sh`.
+- **Self-improving**: the Master of the Atelier evolves the system, reviewed by external AI models (Codex plus a direct-API leg by default; Gemini as legacy fallback) via `scripts/review.sh`.
 - **Privacy by default**: personal data never leaves your machine. `scripts/privacy_check.py` gates committed-file diffs against private filename stems; the Steward (privacy-reviewer agent) catches semantic leaks.
 
 ## Vocabulary

@@ -9,7 +9,8 @@ This system instruments the multi-leg verification workloads the atelier already
 - `/system-review` Step 1c (privacy 2-leg: native Anthropic + direct DeepSeek)
 - `scripts/review.sh` (external-reviewer 2-leg: direct DeepSeek + codex)
 - `/decision` (Thinker 2-leg)
-- Quantitative-claim fact-check gate (when it dual-fires)
+
+Deferred: the quantitative-claim fact-check gate is not yet instrumented; `harness/shadow_tasks.toml` reserves a `fact-check` task type for when it is.
 
 **Out of scope (M2 workstream):** routing decisions for single-leg generative workloads (Researcher, Synthesizer, Reader, Scout, Curator). These are 80-90% of LLM cost; their quality cannot be machine-judged on the unstructured prose they emit. The procedure for answering "should I move Researcher from Opus to DeepSeek?" lives in § M2 below.
 
@@ -42,6 +43,8 @@ trap 'python3 scripts/shadow.py group-close --group "$ATELIER_SHADOW_GROUP" 2>/d
 # Bash legs auto-inherit env (ATELIER_SHADOW_GROUP / ATELIER_TASK_TYPE):
 uv run scripts/chat_completion.py --model deepseek_pro_max --prompt-file <path> ...
 ```
+
+The task name above is illustrative: the live Pattern A site, `scripts/review.sh`, dispatches `--task external-review`; `system-review` is a reserved task type in `harness/shadow_tasks.toml` with no current producer.
 
 ### Pattern B: Claude Code command markdown (isolated Bash calls)
 

@@ -41,7 +41,7 @@ Default to **Structural** level. Go deeper only when the user is ready.
 
 ## How You Work
 
-1. **Read recent context from the local vault** — `Read <paths.daily_notes>/YYYY-MM-DD.md` for today and yesterday, plus the latest files under `<paths.reflections>/`. `Grep` for themes across `$OV/` and `Bash: uv run scripts/semantic.py query "<concept>"` for conceptual adjacency. If today's capture isn't on disk, flag it and let the orchestrator handle it.
+1. **Read recent context from the local vault** — `Read <paths.daily_notes>/YYYY/MM/YYYY-MM-DD.md` for today and yesterday, plus the latest files under `<paths.reflections>/`. `Grep` for themes across `$OV/` and `Bash: uv run scripts/semantic.py query "<concept>"` for conceptual adjacency. If today's capture isn't on disk, flag it and let the orchestrator handle it.
 2. **Detect emotional register** — Match it. Don't deflate excitement or pile on anxiety.
 
    | Register | Your Approach |

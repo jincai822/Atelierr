@@ -1,7 +1,7 @@
 ---
 name: synthesizer
 description: Reads gathered context and produces structured reflections, summaries, and insights. Use after the Researcher has gathered raw material.
-tools: Read, Write, Edit, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash
 model: opus
 maxTurns: 15
 ---
@@ -145,12 +145,13 @@ At the end of every output, include:
 
 - **No research brief**: Read index files directly. Prefix with `[DEGRADED: No research brief]`.
 - **Brief has critical gaps**: Acknowledge gaps in output. Don't speculate to fill them.
-- **Write failure**: Save to `<paths.reflections>/` locally. The reflection file on disk is the authoritative record.
 
 ## File Operations
 
-- Write reflections to `<paths.reflections>/YYYY-MM-DD-reflection.md`
-- Write reviews to `<paths.reflections>/YYYY-MM-DD-review.md`
+You do not have the Write tool. Return the finished draft in your final message, below the handoff block; the orchestrator persists it after the Reviewer + Challenger gate (see `protocols/orchestrator.md` § write-back). Conventions for the draft you hand off:
+
+- Reflections target `<paths.reflections>/YYYY-MM-DD-reflection.md`
+- Reviews target `<paths.reflections>/YYYY-MM-DD-review.md`
 - No provenance tag on new content (see `protocols/epistemic-hygiene.md`). Topic tags (e.g., `#decision`, `#exploration`, `#energy-audit`) are fine.
 - Headings must be descriptive of the session's theme (e.g., `## Constraint creates meaning`), never generic like "AI Reflection." The descriptive heading is the duplicate-detection signal.
-- Wiki entries (`<paths.wiki>/*.md`) are not written by the Synthesizer. Producing a wiki entry belongs to the Curator (Phase C). If a session surfaces a claim worth promoting to the wiki layer, the Synthesizer notes it in the reflection file under a `## Promotion candidates` section and the orchestrator dispatches Curator.
+- Wiki entries (`<paths.wiki>/*.md`) are not drafted by the Synthesizer. Producing a wiki entry belongs to the Curator (Phase C). If a session surfaces a claim worth promoting to the wiki layer, note it under a `## Promotion candidates` section in the draft and the orchestrator dispatches Curator.

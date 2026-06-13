@@ -8,7 +8,8 @@ Entry point for all agents. When you need to know how to behave, start here.
 - **During session.** `quality-gates.md` (checkpoints) → `agent-handoff.md` (envelope format) → `error-handling.md` (escalation).
 - **Producing output.** `session-scoring.md` (rubric) → `pattern-library.md` (recurring patterns).
 - **After session.** `meta-reflection.md` (system health) → `session-log.md` (process log).
-- **System evolution.** `harness-assumptions.md` (stale model-era assumptions).
+- **System evolution.** `harness-assumptions.md` (stale model-era assumptions) → `antipatterns.md` (named failure modes for Tier 2+ review) → `repo-conventions.md` ($OV layout, tooling, push policy).
+- **Cross-runtime / narrative.** `runtime-adapters.md` (Claude Code + Codex parity) → `atelier.md` (vocabulary register + cercle archetype map) → `semantic-vocabulary.md` (agent-meaningful tags).
 
 ## By Agent
 
@@ -23,7 +24,10 @@ Entry point for all agents. When you need to know how to behave, start here.
 | **Curator** | error-handling, agent-handoff, epistemic-hygiene |
 | **Scout** | error-handling |
 | **Reader / Scholar** | agent-handoff |
-| **Evolver** | meta-reflection, session-scoring, harness-assumptions |
+| **Evolver** | meta-reflection, session-scoring, harness-assumptions, antipatterns |
+| **Scribe** | agent-handoff, local-first-architecture |
+| **Forgetter** | agent-handoff, autoevo |
+| **Privacy-Reviewer** | agent-handoff, shadow-log |
 
 Dormant agents (Meeting, Librarian): dispatched only on explicit intent match. Contracts live in `agent-handoff.md`.
 
@@ -38,17 +42,23 @@ orchestrator.md
 
 coaching-progressions.md (depth adaptation)
 pattern-library.md (Moments, trade routes, recurring patterns)
+atelier.md (narrative vocabulary register + cercle archetype map)
+semantic-vocabulary.md (agent-meaningful tag registry)
 
 epistemic-hygiene.md (validation-depth taxonomy) → wiki-schema.md (L4 format)
 local-first-architecture.md (five-tier vault model)
   └── autoevo.md (nightly autonomous decay sweep + auto-commit; pending queue surface)
+repo-conventions.md (GitHub-canonical $OV conventions; tooling layout, push policy)
 backend-taxonomy.md (external systems + SOT carve-outs; per-backend contracts)
   └── remote-routines.md (cron-style remote agents + cue layer; $OV/_meta/ contract)
-  └── drive-zk-ingestion.md (raw landing → $OV ingestion)
+  └── drive-zk-ingestion.md (raw landing → $OV ingestion) → raw-indexing.md (wikilink indexes over raw archives)
   └── intent-coverage.md (router-miss JSONL log; coverage feedback into harness/intents.toml)
+  └── shadow-log.md (multi-leg dispatch correlation; cost + verdict-agreement reporting)
 
 session-log.md (process recording) → meta-reflection.md (system health)
 harness-assumptions.md (model-era assumption registry)
+antipatterns.md (named failure-mode catalog for Tier 2+ review)
+runtime-adapters.md (provider-neutral runtime contracts: Claude Code + Codex)
 ```
 
 Deferred specs (not currently load-bearing): `protocols/specs/`.

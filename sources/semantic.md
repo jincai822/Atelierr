@@ -28,22 +28,24 @@ scripts/semantic.py --help
 | `--top N` | Max results. | 10 |
 | `--lang {zh,en,auto}` | Query language hint. No-op in stub mode. | `auto` |
 | `--format {tsv,json}` | Output format. | `tsv` |
+| `--sources LIST` | Comma-separated sources: `local`, `readwise`. Readwise is a federated cloud search via the `readwise` CLI (real mode only; stub mode is local-only and ignores this flag); if the CLI is not installed, that source is skipped with a "CLI not installed, skipping" stderr warning. | `local,readwise` (federated) |
 
 ### Output
 
-TSV (default): one result per line.
+TSV (default): one result per line. Column 3 differs by mode:
 
 ```
-<path>\t<score>\t<matched_tokens>
+<path>\t<score>\t<matched_tokens>   # stub mode
+<path>\t<score>\t<source>           # real mode
 ```
 
-- `path` is relative to the repo root.
+- `path` is relative to the vault root (`$OV`) for local results; readwise results use a `readwise://<document_id>` URI.
 - `score` is in `[0.0, 1.0]`. Higher is better. Stable sort direction across stub and real modes.
   - **Stub:** `min(total_token_hits, 10) / 10`.
   - **Real:** cosine similarity between query embedding and file embedding.
-- `matched_tokens` is a comma-separated list (stub) or always present in real mode.
+- `matched_tokens` (stub only) is a comma-separated token list. `source` (real only) is the source label: `local` or `readwise`.
 
-JSON (`--format json`): a list of objects with `path`, `score`, `matched_tokens`.
+JSON (`--format json`): a list of objects with `path`, `score`, `matched_tokens` (stub), or `path`, `score`, `source`, `matched_tokens` (real mode; `matched_tokens` is always an empty list).
 
 ### Exit codes
 

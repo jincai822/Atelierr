@@ -80,7 +80,7 @@ Readwise auto-transcribed podcasts have specific quirks. Apply these **before** 
 4. **Epistemic weight default.** An interview is alloy/anecdotal tier per `protocols/epistemic-hygiene.md`. Default the brief's `confidence:` to `medium` unless the guest cites specific verifiable data (papers, public numbers, named incidents). For factual claims ("China has surpassed X in Y"), annotate `[verify: anecdotal]`. The user should not promote interview-sourced claims to L4 wiki without corroboration from L3/published sources.
 
 5. **Guest identity in citation.** The Readwise `author` field is the show host. Cite separately in the brief header:
-   `source: "20VC: Anj Midha on Investing $300M into Anthropic" (host: Harry Stebbings, guest: Anj Midha)`
+   `source: "<Show>: <Guest Name> on <Episode Topic>" (host: <Host Name>, guest: <Guest Name>)`
 
 This is preprocessing, not a separate lens. The real analysis comes from whichever lens you were dispatched with. The generic Transcript Format Handling rule #5 (quote ranked claims verbatim) applies here with extra force: podcast guests verbally rank things mid-sentence without any typographic cue, making rank-inversion especially easy.
 
@@ -88,7 +88,7 @@ This is preprocessing, not a separate lens. The real analysis comes from whichev
 
 1. **Receive your lens assignment** from the orchestrator. You are told which lens to apply.
 2. **Read the full text.** The full vault is on disk.
-   - **Local note:** `Grep` for the title in `$OV/` and `Read` the match (wiki in `<paths.wiki>/`, daily notes in `<paths.daily_notes>/YYYY-MM-DD.md`, papers in `<paths.papers>/` or `<paths.preprints>/`).
+   - **Local note:** `Grep` for the title in `$OV/` and `Read` the match (wiki in `<paths.wiki>/`, daily notes in `<paths.daily_notes>/YYYY/MM/YYYY-MM-DD.md`, papers in `<paths.papers>/` or `<paths.preprints>/`).
    - **URL:** check `<paths.cache>/` first (via `Glob`), then fall back to `WebFetch`.
    - **Paper cache (directory):** if the orchestrator passes `cache_path: <paths.cache>/<slug>/`, read `paper.txt` and `index.md` from that directory; do NOT re-extract the raw PDF.
    - **Readwise transcript cache (single file):** if the orchestrator passes `cache_path: <paths.cache>/rw-<doc_id>.md`, read that single file; it contains the transcript `.content` as the orchestrator dumped it. Do NOT re-fetch from the Readwise CLI; parallel Scholars independently fetching a 77KB transcript is the same failure mode the PDF cache was designed to prevent.

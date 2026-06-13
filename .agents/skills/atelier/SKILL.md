@@ -43,8 +43,10 @@ Claude Code command specs are the current workflow source. In Codex, adapt them:
 - `Agent(...)` means use Codex subagents only when permitted; otherwise emulate
   the role sequentially from `.claude/agents/<role>.md`.
 - All vault writes go through the orchestrator (Write/Edit) after explicit user
-  approval. Daily notes (`$OV/daily-notes/`) are user-authored only — system
-  reads them but never writes.
+  approval. Daily notes (`$OV/daily-notes/`) are user-authored: the system
+  reads them but does not write to them. Sole exception: user-dictated raw
+  content recorded verbatim by the Scribe agent (`daily_note` operation); any
+  other system write targeting a daily note is refused.
 
 For unknown commands, do not guess. Run:
 

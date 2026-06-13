@@ -28,6 +28,9 @@ personal
 handoffs
 # Local MCP server URL
 .mcp.json
+# Per-machine permission grants with personal absolute paths (also covered by
+# the author's global git ignore, but the repo must not depend on that)
+.claude/settings.local.json
 # Codex session state
 .context/
 

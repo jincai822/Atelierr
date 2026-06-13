@@ -39,7 +39,7 @@ Five-tier model. Directory is the tier; location carries the certification level
 |---|---|
 | Content query | `Bash: uv run scripts/semantic.py query "<concept>" --top N` |
 | Structural query | `Grep` with path/glob scoped to tier directory |
-| Daily note by date | `Read <paths.daily_notes>/YYYY-MM-DD.md` |
+| Daily note | `Read <paths.daily_notes>/YYYY/MM/YYYY-MM-DD.md` |
 | Note by title | `Grep` for title then `Read` the file |
 | Person note by name | `Bash: uv run scripts/people.py "<name>"` |
 
@@ -52,7 +52,7 @@ Prioritize by validation depth, not origin. Trust: alloy (default) < wiki entry 
 ## Writing Rules
 
 - No em dashes in written output. Use colons, semicolons, parentheses, or restructure.
-- No H1 headings inside markdown files. The filename is the title; the body opens with metadata or `##`. Filenames are space-separated title-case.
+- No H1 headings inside markdown files. The filename is the title; the body opens with metadata or `##`. Filenames are space-separated title-case. Exception: wiki entries and shadows require an H1 title (`protocols/wiki-schema.md`).
 - Daily notes are user-authored. The system reads them; it does not write to them (Curator dispatches targeting daily-note paths are refused). Exception: user-dictated raw content is recorded verbatim by the Scribe agent (`daily_note` operation), the only path by which the system writes a daily note. Full contract: `protocols/local-first-architecture.md` § Source of Truth.
 - Cite sources. L2 alloy (daily notes, reflections, wip) uses GitHub-style `[Display](<relative-path>)` (angle brackets handle spaces); display text MUST equal the linked file's title. Wiki under `<paths.wiki>/` keeps Obsidian `[[Title]]` / `[[Title#^cn]]` for the trust engine. Never claim the user wrote something without a source.
 - Match the user's language. Chinese for Chinese-language topics; English otherwise. Reading-intensive output in Chinese.

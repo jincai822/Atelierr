@@ -20,7 +20,7 @@ macOS `launchd`, 5:00 local, daily.
 
 - Plist: `~/Library/LaunchAgents/com.atelier.autoevo-nightly.plist`
 - Wake-from-sleep: `pmset repeat wakeorpoweron MTWRFSU 04:55:00`
-- Invocation: see the plist's `ProgramArguments` block. The shell wrapper sources `~/.zprofile` / `~/.profile` / `~/atelier/harness/env.local.sh` for `OV`, ensures `$OV/cache` and `~/Library/Logs` exist, then runs `cd ~/atelier && claude -p "/autoevo-nightly"`. Launchd captures stdout/stderr to `/tmp/com.atelier.autoevo-nightly.out` and `.err` (configured via the plist's `StandardOutPath` / `StandardErrorPath`).
+- Invocation: see the plist's `ProgramArguments` block, which delegates to `scripts/routine_runner.sh`. The wrapper sources `~/.zprofile` / `~/.profile` / `~/atelier/harness/env.local.sh` for `OV`, ensures `$OV/cache` and `$OV/_meta/routine_runs/<routine>/` exist, then runs `cd ~/atelier && claude -p "/autoevo-nightly"`. Launchd captures stdout/stderr to `/tmp/com.atelier.autoevo-nightly.out` and `.err` (configured via the plist's `StandardOutPath` / `StandardErrorPath`).
 - The bot's own audit log (what the autoevo did to the vault) is separate: `$OV/agent-findings/autoevo-applied-<YYYY-MM-DD>.md`. The `/tmp/` files capture only the shell wrapper + Claude CLI output, useful for debugging launchd-level failures.
 
 Reversible: `launchctl unload <plist>` + `pmset repeat cancel`.
@@ -61,7 +61,7 @@ The bot bails (writes a one-line entry to the audit log and exits 0) if any of t
 The bot refuses any op under these paths regardless of finding:
 
 - `<paths.wiki>/` and any localized shadow wikis declared in `[paths.wiki_localized]`.
-- `<paths.daily_notes>/` (user-authored per the global writing rules; the system never writes daily notes).
+- `<paths.daily_notes>/` (user-authored per the global writing rules; the sole system write path is Scribe `daily_note` verbatim capture, never autoevo).
 - Any path outside `<paths.wip>/`, `<paths.research>/`, `<paths.reflections>/`, `<paths.agent_findings>/`.
 
 Contradicted findings against L4 wiki entries always go to the pending queue, never auto-applied.
@@ -160,8 +160,8 @@ If the bot bails at a pre-flight gate, the file is still written with the Skippe
 
 Touched (`touch <file>`) by two hook paths wired in `.claude/settings.json`:
 
-- **SessionStart hook** → runs `uv run scripts/cues.py --hook`, which touches the lock after running all cue checks. Fires once per new Claude Code session.
-- **UserPromptSubmit hook** → runs an inline `sh -c 'test -n "${OV:-}" && mkdir -p "$OV/cache" && touch "$OV/cache/atelier-session-lock"'` command. Fires on every user prompt so long-running sessions refresh the lock per prompt.
+- **SessionStart hook** → runs `uv run scripts/cues.py --hook`, which touches the lock before running cue checks. Fires once per new Claude Code session.
+- **UserPromptSubmit hook** → runs `uv run scripts/cues.py --touch-lock 2>/dev/null || true`, which refreshes the lock and exits without running any cue check (the lock path resolves via the paths registry). Fires on every user prompt so long-running sessions refresh the lock per prompt.
 
 `/autoevo-nightly` reads the mtime; if mtime is within the last 6h, abort with reason "session-active lock fresh."
 
@@ -216,7 +216,7 @@ The auto-detection check above takes precedence; explicit tombstones are an addi
 ## What is out of scope
 
 - **Push.** Bot never pushes to `origin`; push remains user-driven per the `$OV` git push convention.
-- **Daily notes.** Bot never reads them as autoevo targets. CLAUDE.md § Writing Rules forbids system writes to daily notes; this protocol upholds that.
+- **Daily notes.** Bot never reads them as autoevo targets. CLAUDE.md § Writing Rules forbids system writes to daily notes (sole exception: Scribe `daily_note` verbatim capture); this protocol upholds that.
 - **Wiki rewrites.** Contradicted findings against L4 are always pending-queue, never auto-applied. The Curator wiki-edit path requires human approval.
 - **Re-indexing decisions.** If the semantic index needs rebuild after a Curator delete/move, this protocol defers to whatever `scripts/semantic.py` does at next query (lazy rebuild assumed unless verified otherwise).
 

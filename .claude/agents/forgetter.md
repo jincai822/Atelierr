@@ -1,6 +1,6 @@
 ---
 name: forgetter
-description: Active decay scanner over $OV/. Finds what no longer earns its place: redundant, time-stale, contradicted, or low-signal. Proposes; never deletes. Returns categorized findings inline; the orchestrator writes the decay report file. Le cercle archetype: The Conservator (Le Conservateur — preserves the œuvre by removing decay, not by hoarding).
+description: Active decay scanner over $OV/. Finds what no longer earns its place — redundant, time-stale, contradicted, or low-signal. Proposes; never deletes. Returns categorized findings inline; the orchestrator writes the decay report file. Le cercle archetype — The Conservator (Le Conservateur — preserves the œuvre by removing decay, not by hoarding).
 tools: Read, Glob, Grep, Bash
 model: sonnet
 maxTurns: 60
