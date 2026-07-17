@@ -107,7 +107,8 @@ Bash: uv run scripts/privacy_check.py --json
 | Yes | `zk_missing: true` | Soft-skip; note "privacy gate skipped (vault not available)". Continue. |
 | Yes | `vacuous_gate: true` | Soft-skip; note "privacy gate skipped (no private dirs to scan)". Continue. |
 | Yes | `hit_count > 0` | ERROR — block; present each `hits` entry verbatim. |
-| Yes | `hit_count == 0`, no skip flag | Pass; continue. |
+| Yes | `hit_count == 0`, non-empty `coverage_warnings` | WARN; surface each coverage gap, then continue. |
+| Yes | `hit_count == 0`, no skip flag or coverage warning | Pass; continue. |
 | No / stdout empty / exit ≥ 2 with no JSON | n/a | Real script error. Surface stderr; soft-skip. |
 
 Normal-scan JSON shape:
@@ -117,21 +118,28 @@ Normal-scan JSON shape:
   "filename_stems": N,
   "wikilink_targets": N,
   "private_slugs": N,
+  "private_terms": N,
+  "private_terms_configured": true,
   "terms_scanned": N,
   "allowlist_size": N,
+  "coverage_warnings": [],
   "hit_count": N,
   "hits": [
-    { "file": "...", "line": N, "private_title": "..." }
+    { "file": "...", "line": N, "private_title": "...", "source": "path|worktree|index" }
   ]
 }
 ```
 
-Any non-empty `hits` array is an ERROR: each entry is a private identifier (filename stem, wikilink target, or slug from `profile/private_slugs.txt`) that appears as literal text in a tracked file. Present each hit verbatim with its file and line number. Remediation:
+Any non-empty `hits` array is an ERROR: each entry is a private identifier (filename stem, wikilink target, slug from `profile/private_slugs.txt`, or exact term from `profile/private_terms.txt`) that appears in a public-bound pathname, worktree file, or staged blob. Present each hit verbatim with its file, source, and line number. Remediation:
 
 - Replace the private title with a generic placeholder (e.g., `Sample Wiki Entry`, `Topic A`).
+- Add private names, places, program labels, and preference phrases that cannot be inferred from vault titles to gitignored `profile/private_terms.txt`, one exact term per line.
 - Or, if the exposure is deliberate (e.g., the title is fully public and appears as an illustrative example), add the stem to `scripts/privacy_allowlist.txt` and document the rationale in the commit message.
 
 The check is a blocking quality gate for any system-evolution commit that touches tracked files when the gate ran meaningfully (no skip flag). Do not proceed to structural lint if Phase 0c returns hits.
+An absent exact-term sidecar is a coverage warning, not proof of a leak. Keep the
+semantic privacy round enabled and populate the gitignored sidecar before
+claiming exact identity or preference coverage.
 
 ### Phase 0d: Auto-memory hygiene
 
@@ -160,7 +168,7 @@ Advisory only: never blocks the run. Exit code 0 always; missing memory dir prod
 ### Phase 1a: Structural lint
 
 ```
-Bash: scripts/lint.py --json
+Bash: python3 scripts/lint.py --json
 ```
 
 Parse the JSON. It has the shape:
@@ -178,7 +186,7 @@ Parse the JSON. It has the shape:
 ### Phase 1b: Staleness lint
 
 ```
-Bash: scripts/staleness.py --json
+Bash: python3 scripts/staleness.py --json
 ```
 
 Parse the JSON. Shape:

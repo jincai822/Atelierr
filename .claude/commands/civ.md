@@ -23,7 +23,7 @@ Spendable, tradeable inputs. Lower layers supply upper ones. From the user's res
 | Layer | Token | What it is | Renewable | Compounds | Vault signal |
 |---|---|---|---|---|---|
 | 0 | **时 Time** | Hours/week allocated | No | No | Not directly tracked; inferred from reflection density per civ |
-| 1 | **气 Energy** | Physical + mental reserves | Yes (rest, exercise) | Yes (health habits) | Weight plan progress, sleep signal, exercise mentions |
+| 1 | **气 Energy** | Physical + mental reserves | Yes (rest, exercise) | Yes (health habits) | Health-plan progress, sleep signal, exercise mentions |
 | 2 | **金 Money** | Financial position | Yes (income) | Yes (investment) | Most recent NW figure from financial plan/reflection |
 | 3 | **识 Skills/Knowledge** | Human capital | Yes | Strongly | Wiki count + reading sessions (30d) |
 | 4 | **缘 Social Capital** | Relationship goodwill, network | Yes (fragile) | Yes (network effects) | Interaction count estimate (30d) + DL0 from PRM |

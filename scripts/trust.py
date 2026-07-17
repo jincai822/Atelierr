@@ -46,8 +46,8 @@ Paths are project-relative. Run from the repo root.
 See also:
     protocols/wiki-schema.md            the schema this parser enforces
     protocols/local-first-architecture.md  layer model
-    handoffs/2026-04-06-phase-bcd-trust-engine.md  Phase B spec (gitignored,
-        author's machine only — not shipped in clones)
+    handoffs/<date>-<topic>.md           optional local design handoff
+        (gitignored and not shipped in clones)
 """
 
 from __future__ import annotations

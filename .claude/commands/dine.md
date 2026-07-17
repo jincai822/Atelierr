@@ -6,7 +6,7 @@ description: Restaurant recommendation flow using local context and credit-burn 
 Three intents (auto-detected from args):
 - **A. Restaurant Recommendation** (default): pick 3 restaurant candidates based on user-supplied context, historical preferences, and credit-burn opportunities. Read-only on catalog docs under this intent.
 - **B. Workplace Catering Tracker**: parse a weekly catering PDF dropped into `$OV/<slug>/catering/`, choose health-aware picks for the user's attendance days, and surface a confirmed table for the user to record themselves (the system does not write to daily notes).
-- **C. Meal Log Capture** (ad-hoc): log a meal the user just ate. Parses receipt images (HEIC/JPG/PNG/PDF) when provided, cross-references catalogs for missing slots, asks ONE compact question for what cannot be derived, shows a draft row + side-effect plan, and appends to the dining log on confirm. Co-equal capture path with `/hi` Dining Pulse.
+- **C. Meal Log Capture** (ad-hoc): log a meal the user just ate. Parses receipt images (HEIC/JPG/PNG/PDF) when provided, cross-references catalogs for missing slots, asks ONE compact question for what cannot be derived, shows a draft row + side-effect plan, and appends to the private meal-history tracker on confirm. Co-equal capture path with `/hi` Dining Pulse.
 
 ## Quick start
 
@@ -14,18 +14,18 @@ Intent A examples:
 - `/dine` → ask all context
 - `/dine 工作日午餐` → use as scene hint, ask remaining
 - `/dine 朋友 4 人 川菜 dinner` → use as filters, ask remaining
-- `/dine SF burn credit` → location SF + flag credit-burn priority
+- `/dine <city> burn credit` → location hint + flag credit-burn priority
 
 Intent B examples (first arg = workplace slug; the folder `$OV/<slug>/catering/` must exist; personal policy lives in gitignored `profile/diet.md`):
 - `/dine <slug>` → find latest PDF in `$OV/<slug>/catering/` covering this week, pick per `profile/diet.md` attendance pattern
 - `/dine <slug> <pdf-path>` → explicit PDF
 - `/dine <slug> all` → all 5 weekdays (override)
-- `/dine <slug> M/T/Th` → custom attendance set (override; any day-code combination works)
+- `/dine <slug> <day-codes>` → custom attendance set (override; any day-code combination works)
 
 Intent C examples (logging a meal you just ate):
-- `/dine log 今天午饭吃的 Cuanyue Malatang 两人 $49.32` → free-text meal report
+- `/dine log 今天午饭吃的 <restaurant> 两人 $<amount>` → free-text meal report
 - `/dine 今天晚饭吃的是 /path/to/receipt.heic` → receipt image (HEIC auto-converted before Read)
-- `/dine 昨天 X 餐厅 dinner $85` → dated free text (respects late-sleep rule)
+- `/dine 昨天 <restaurant> dinner $<amount>` → dated free text (respects late-sleep rule)
 - `/dine log /path/to/receipt.pdf` → receipt PDF outside any catering folder
 
 If args present, parse them as initial filters; only ask for slots not derivable.
@@ -44,7 +44,7 @@ Else route to **Intent C** if any of:
 - Args contain past-tense / reporting markers: `记录` / `log` / `吃了` / `吃的` / `刚吃完` / "今天X吃的" / "昨天Y" / "just had"
 - An image path (`.heic` / `.jpg` / `.jpeg` / `.png`) is provided
 - A `.pdf` path is provided **outside** any `$OV/*/catering/` folder
-- Free text mentions a specific restaurant + amount/party (e.g., `<name> 两人 $49.32`) without a forward-looking verb
+- Free text mentions a specific restaurant + amount/party (e.g., `<name> 两人 $<amount>`) without a forward-looking verb
 
 Do NOT route to C if the message is forward-looking: contains `推荐` / `去哪吃` / `想吃` / `what should I eat` / `where to eat` / `今晚吃什么` → fall through to A.
 
@@ -59,13 +59,13 @@ For missing slots, ask via `AskUserQuestion` or sequential 1-line prompts (which
 
 | Slot | Options | Required |
 |---|---|---|
-| **Location** | Bay Area / SF / Peninsula / South Bay / East Bay / LA / NYC / Other | Y |
+| **Location** | Home region / nearby city / travel destination / other | Y |
 | **Party** | Solo / Partner / Family (N) / Friends (N) / Mixed work | Y |
 | **Meal** | Lunch / Dinner / Brunch / Late night | Y |
 | **Time budget** | Quick (<30min) / Standard (1-2h) / Leisurely (2h+) | Y |
-| Mood / cuisine | Surprise / 中餐 / 不要中餐 / 重辣 / 清淡 / Comfort / 探索新 / Special occasion / 老人友好 | N (default any) |
+| Mood / cuisine | Free text or options declared in `profile/diet.md` | N (default any) |
 | **Health filter** | options enumerated in `profile/diet.md` ("Health filter input options" section) plus `no preference` | N (default no preference) |
-| Budget cap | $20 / $50 / $100 / $150+ / no cap | N |
+| Budget cap | User-supplied cap / no cap | N |
 | Avoid recent | Last 30 / 60 / 90 days | N (default 30) |
 
 ## Step 2: Load data (parallel)
@@ -73,11 +73,11 @@ For missing slots, ask via `AskUserQuestion` or sequential 1-line prompts (which
 The user's vault holds these catalogs under `<paths.travel>/` and `<paths.finance>/`. Discover the actual filenames via `Grep` on those directories at runtime; do not hardcode private filenames here.
 
 - Regional dining catalog (rotation + Michelin wishlist + 场景索引), under `<paths.travel>/`
-- Dining log (history with 评分 + 再去 + recency), under `<paths.travel>/`
+- Meal-history tracker (history with 评分 + 再去 + recency), under `<paths.travel>/`
 - Credit-perks dining catalog (Cycle Tracking + city catalogs), under `<paths.travel>/`
-- Perks ledger (current cycle credit status, for burn signal), under `<paths.finance>/`
-- Restaurant gift cards (prepaid balances per restaurant, for soft "use it" signal), under `<paths.finance>/`
-- For LA / NYC / other city: use the credit-perks catalog city section + the corresponding city Michelin guide under `<paths.archive>/practical/travel/`
+- Benefits tracker (current cycle credit status, for burn signal), under `<paths.finance>/`
+- Prepaid-balance tracker (balances per restaurant, for a soft "use it" signal), under `<paths.finance>/`
+- For travel destinations: use the matching city section plus the corresponding local guide under `<paths.archive>/practical/travel/`
 
 **Missing-file fallback:** if any of these is absent, skip it silently and note the gap in the closing line ("scored without [missing source]"). The recommendation still produces; the user can decide whether to recreate the catalog.
 
@@ -90,7 +90,7 @@ The user's vault holds these catalogs under `<paths.travel>/` and `<paths.financ
 - Drive time fits time budget (heuristic: 🚗 count × 15min one-way)
 - For Quick lunch: ⌛ ≤ 1
 - For "Special occasion": Michelin OR Exclusive Tables only
-- Skip restaurants visited within `avoid recent` window (from the dining log)
+- Skip restaurants visited within `avoid recent` window (from the meal-history tracker)
 
 **Soft scoring** (rank candidates):
 | Factor | Score |
@@ -132,7 +132,7 @@ Brief reasoning paragraph (2-3 lines) below the table:
 ## Step 5: Close
 
 End with one line:
-> "选哪个? (回 1/2/3) 我帮你 OpenTable / Resy 查时段, 或者 /dine + 新约束 重排"
+> "选哪个? (回 1/2/3) 我帮你在常用 booking platforms 查时段, 或者 /dine + 新约束 重排"
 
 Do NOT auto-book; just surface candidates.
 
@@ -153,7 +153,7 @@ Read the PDF (`Read` tool). Extract per-day sections (Mon/Tue/Wed/Thu/Fri). Each
 
 Read attendance pattern from `profile/diet.md` (the section matching the resolved `<slug>`, key: `Attendance days`). Override via the second CLI arg:
 - `all` → all 5 weekdays present in the PDF
-- `M/T/Th`, `T/Th`, `W/F`, etc. → custom set (case-insensitive day codes; any combination)
+- `<day-codes>` → custom set (case-insensitive day codes; any combination)
 
 If `profile/diet.md` is absent or has no entry for `<slug>` → ask the user once, do not assume a default. Map each chosen day code to an absolute date based on the resolved week.
 
@@ -209,8 +209,8 @@ For images / PDFs, extract: restaurant name, items + spicy markers, subtotal / t
 Read `profile/diet.md` § Catalog files first to resolve the three filenames below; if `profile/diet.md` is missing or the section is empty, skip the catalog lookups and note that in the closing line.
 
 - `Grep` the city catalog file under `<paths.travel>/` for the restaurant → derive `类型`, `City`, `⭐` if listed.
-- `Grep` the dining log file under `<paths.travel>/` for the restaurant → first-time-or-not flag (used in 必点·备注 line if first time).
-- `Grep` the gift-card catalog file under `<paths.finance>/` for the restaurant → if listed, expect a Credit slot of `Gift Card (no UR)` unless receipt says otherwise.
+- `Grep` the meal-history file under `<paths.travel>/` for the restaurant → first-time-or-not flag (used in 必点·备注 line if first time).
+- `Grep` the prepaid-balance file under `<paths.finance>/` for the restaurant → if listed, expect the profile-defined prepaid payment label unless the receipt says otherwise.
 - If any catalog file is missing, skip silently and note in the closing line.
 
 ### C.3 Auto-derive what you can
@@ -221,14 +221,14 @@ Read `profile/diet.md` § Catalog files first to resolve the three filenames bel
 | **City** | Catalog match → use; else infer from restaurant address on receipt; else ask. |
 | **类型** | Catalog match → use; else infer from restaurant name (湘菜/川菜/etc.); else ask. |
 | **⭐** | Catalog match only; else blank. |
-| **Platform** | Receipt "Dine IN" → `W dine-in`; "Pickup/To-Go" → `W pickup`; OpenTable / Resy / DoorDash from booking source if visible; else ask. |
-| **Credit** | Payment method → CSR (Visa) means `CSR #1 (+<UR estimate> @3x dining)` where UR estimate = round(subtotal × 3); Apple Pay → `Apple Pay (card 待 confirm)`; gift card → `Gift Card (no UR)`. |
-| **健康 flags** | Heuristic from dish names. Cheatsheet: 粉蒸肉/红烧肉/扣肉/猪手 → `肥肉多`; 油炸/酥/脆皮 → `油炸`; 麻辣/水煮/干锅 → `重辣` / `油重`; 凉拌/清炒/白灼 → `清淡`; 全肉无蔬菜 → `蔬菜0` / `protein-heavy`; 1 蔬 + 2 肉 → `蔬菜少 (1/3)`; 米粉/麻辣烫 → `钠重`. Combine with `·`. Always show derivation to user in confirm prompt so they can correct. |
+| **Platform** | Infer dine-in, pickup, delivery, or a visible booking source; preserve the source label when present; else ask. |
+| **Credit** | Map the visible payment method through the private benefit profile. If no mapping exists, record the method without inferring a card or rewards program. |
+| **健康 flags** | Apply the taxonomy and dish mappings in `profile/diet.md`. If the profile is absent, use only generic visible attributes and label them as inferred. Always show the derivation in the confirm prompt so the user can correct it. |
 
 Required slots that cannot be derived: ask the user in **ONE compact prompt** (not a 6-question waterfall). Required = 评分 (1-10), 再去 (Y/N/Maybe), and any of {City / 类型 / Platform} that the auto-derive could not fill. Optional 1-line note at the end.
 
 Example compact prompt:
-> `City? · 评分 1-10? · 再去 Y/N/Maybe? · Platform (W dine-in / W pickup / OT / R / DD)? · 1 句备注?`
+> `City? · 评分 1-10? · 再去 Y/N/Maybe? · Platform? · 1 句备注?`
 
 ### C.4 Side-effect plan
 
@@ -238,7 +238,7 @@ Before writing, plan side effects. Each is opt-in via the confirm prompt (see C.
 |---|---|---|
 | Meal log append | Always | Append row to the meal log file (under `<paths.travel>/`, filename per `profile/diet.md`); bump `Last updated:` to today. |
 | Gift card update | Receipt shows gift-card balance line OR user volunteers balance | Update existing row in the gift-card catalog file (under `<paths.finance>/`, filename per `profile/diet.md`): Balance + Last updated + Source; or insert new row if first time. |
-| Perks Ledger nudge | Credit slot maps to a tracked cycle credit (CSR dining 3x UR, OpenTable H1/H2, Resy quarterly, Sapphire Tables) | Suggest update; cite which row's `Cycle subtotal` would change by +$<amount>. Do NOT auto-write; surface as a one-liner for the user to apply manually. |
+| Benefits-tracker nudge | Credit slot maps to a tracked benefit cycle in the private profile | Suggest an update and cite the affected row without copying program policy into this command. Do NOT auto-write; surface as a one-liner for the user to apply manually. |
 | Catalog promotion flag | 评分 ≥ 8 AND 再去 = Y AND restaurant not currently in the relevant city catalog file (per `profile/diet.md`) | One-line suggestion at the end: `→ 考虑 promote 到 <city catalog name> (评分 N + 再去 Y, 还没在 catalog)`. Do NOT write. |
 | Daily note | (never) | Daily notes are user-authored. Do NOT auto-create even if today's note is missing. |
 
@@ -253,7 +253,7 @@ Draft row (meal log):
 Side effects:
   1. Append row to meal log + bump Last updated
   2. <gift card update if any>
-  3. <perks ledger nudge if any>
+  3. <benefits-tracker nudge if any>
   4. <catalog promotion flag if any>
 
 OK to apply 1-N? (yes / partial: "1,2" / no / edit: tell me what to change)
@@ -265,19 +265,19 @@ User says `yes` → apply all. Partial → apply only the listed numbers. `no` �
 
 For the meal log: use `Edit` to insert the new row at the correct date position (the table is roughly chronological; insert before the next-newer-date row, or append at the end if today is the newest). Bump `Last updated:` line. For the gift-card catalog: same `Edit` pattern.
 
-For Perks Ledger: do NOT write — surface the one-liner only.
+For the benefits tracker: do NOT write; surface the one-liner only.
 
 ### C.7 Report
 
 One line:
-> `Logged: <Restaurant> <Date> 评 <N>/10. <one optional flag, e.g., "Gift card balance now $X" or "→ promote candidate" or "Perks Ledger: CSR #1 dining +$Y to apply manually">.`
+> `Logged: <Restaurant> <Date> 评 <N>/10. <one optional flag, e.g., "prepaid balance updated", "promote candidate", or "benefits tracker update to apply manually">.`
 
 ## Rules
 
 Intent A:
-- **Read-only on catalog docs (under Intent A)**: do NOT modify the regional dining catalog or the credit-perks catalog when handling a recommendation request. The dining log is also read-only under Intent A — appends route through Intent C (or `/hi` Dining Pulse).
+- **Read-only on catalog docs (under Intent A)**: do NOT modify the regional dining catalog or the credit-perks catalog when handling a recommendation request. The meal-history tracker is also read-only under Intent A; appends route through Intent C (or `/hi` Dining Pulse).
 - **0 candidates after hard filter**: relax most-restrictive constraint by 1 step, retry; surface 1-2 closest matches with flag "relaxed: <constraint>"
-- **Always show credit-burn opportunity** if relevant (any perk-program H1/H2 cycle ≤ 60d deadline + unused, per the live perks ledger under `<paths.finance>/`). Even if credit餐厅 doesn't match exact mood, surface as 4th line with format: `💡 Credit-burn alt: <restaurant> ($<amount> <half>, deadline <MM/DD>)`
+- **Always show credit-burn opportunity** if relevant under the live private benefits tracker. Even if the eligible restaurant does not match the exact mood, surface a fourth line using only the currently relevant benefit details.
 - **Match user language**: Chinese-dominant if cuisine is Chinese; English if Western
 - **Keep output under 30 lines** (table + 2-3 line reasoning + 1 close line)
 - **No web search**: cuisine + restaurant data comes from local catalog files only
@@ -285,7 +285,7 @@ Intent A:
 Intent B:
 - **Read-only on the PDF**: never modify the catering PDF
 - **Read-only on daily notes**: daily notes are user-authored; the system surfaces picks for the user to record themselves and never writes to `<paths.daily_notes>/`
-- **Does not touch the dining log**: workplace catering is excluded by design (low signal density per memory)
+- **Does not touch the meal-history tracker**: workplace catering is excluded by design (low signal density per memory)
 - **Per-day skip on parse failure**: if any one day's section fails to parse, skip that day with a logged warning; do not abort the whole batch
 - **No web search**: menu data comes from the PDF only
 
@@ -294,7 +294,7 @@ Intent C:
 - **One compact prompt for missing slots**: do NOT waterfall 6 questions. Group required-and-underivable slots into a single line.
 - **HEIC + large image handling**: if the input image is HEIC or > 256KB, convert via `sips -s format jpeg -Z 900 <src> --out /tmp/<basename>.jpg` first, then `Read` the JPEG. Do not assume ImageMagick.
 - **Read-only on daily notes**: do NOT auto-create today's daily note even if it's missing. Daily notes are user-authored.
-- **Read-only on Perks Ledger**: surface the cycle-credit nudge as a one-liner; never auto-write to the ledger.
+- **Read-only on the benefits tracker**: surface the cycle-credit nudge as a one-liner; never auto-write to the tracker.
 - **Match user language**: Chinese-dominant for Chinese cuisine; English otherwise.
 - **No web search**: restaurant data comes from local catalogs and the user-provided receipt only.
 - **Tight output**: draft row + side-effect list + one-line confirm prompt. No preamble.

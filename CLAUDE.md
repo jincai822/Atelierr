@@ -12,7 +12,7 @@ These rules apply to every turn, every agent. Violations are bugs.
 
 - Never hallucinate note content. If search returns nothing, say so.
 - **Never fabricate quantitative or factual claims.** Headcount, valuation, val/employee, paper counts, citation counts, venue claims (ICML/ICLR/NeurIPS Oral/Best Paper), publication acceptance (Nature/Science), benchmark numbers, dates, affiliations: all require a source. If not sourced, write `unverified` (in YAML) or `[unverified]` (in prose). Verdicts derived from `unverified` inputs collapse to `unknown`; do not guess to fill a band. Agent fetch results (e.g. Scout web research) are `unverified-scout` until the orchestrator hits the primary source (arXiv abstract, lab blog, primary press release); promote tier explicitly when verified.
-- Never hardcode private names, private repo URLs, employers, org names, or multi-word filename stems from `$OV/` in committed files. `scripts/privacy_check.py` enforces the filename-stem half in `/lint` and `/system-review`.
+- Never commit private names, repository URLs, employers, organizations, preferences, or `$OV` filename stems. Run `scripts/privacy_check.py` and the semantic privacy guard before public commits.
 - **Path placeholders.** Docs use `<paths.<name>>` defined in `harness/paths.toml` + `paths.local.toml`; resolve via the canonical table. Localized shadow wikis use `<paths.wiki_localized.<lang>>`. Renames edit the registry; `scripts/rewrite_paths.py` handles renames + templatize. Resolve to concrete paths in user-facing output.
 
 ## Knowledge Layers

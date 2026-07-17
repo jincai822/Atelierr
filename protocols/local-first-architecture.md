@@ -138,7 +138,7 @@ The expected steady-state ratio is roughly: hundreds of L1/L2 notes for every L4
 
 ## Aggregation vs. Detail (orthogonal to L1-L5)
 
-L1-L5 measures certification depth, not aggregation. Within a single tier (typically L2), the user often maintains both *detail files* (one file per subject — e.g. `<paths.travel>/trips/<trip>.md`) and *aggregate trackers* (one file summarizing many subjects — e.g. `<paths.travel>/2026.md` master calendar, `<paths.travel>/Hyatt.md` FN inventory, `<paths.finance>/Perks Ledger.md`). Aggregates are hand-mirrored views over the details; nothing pushes detail edits back to the aggregates.
+L1-L5 measures certification depth, not aggregation. Within a single tier (typically L2), the user often maintains both *detail files* (one file per subject, e.g. `<paths.travel>/trips/<trip>.md`) and *aggregate trackers* (one file summarizing many subjects, e.g. `<paths.travel>/<calendar>.md`, `<paths.travel>/<inventory>.md`, or `<paths.finance>/<benefits-tracker>.md`). Aggregates are hand-mirrored views over the details; nothing pushes detail edits back to the aggregates.
 
 The system handles this asymmetry at **read time**, not write time. Read commands that surface aggregate values (`/perks`, `/civ`) run `scripts/aggregate_freshness.py` as a pre-step and emit a divergence warning when any aggregate's `Last updated:` line lags the newest detail file. The convention: detail files are the SOT; aggregates may be stale; readers must cross-check the detail before quoting an aggregate value as authoritative. This is a read-time guard against antipattern #6 (shadow state) — the divergence is made visible rather than silently propagated.
 

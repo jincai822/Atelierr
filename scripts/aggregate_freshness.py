@@ -5,8 +5,8 @@ aggregate_freshness.py: detect aggregate-vs-detail staleness.
 Problem this exists for. Atelier's L1-L5 axis describes *certification depth*
 but is silent about *aggregation*. Detail files (e.g. `travel/trips/<trip>.md`)
 are the source of truth for a specific subject; aggregate trackers (e.g.
-`travel/2026.md` master calendar, `travel/Hyatt.md` FN inventory, `finance/
-Perks Ledger.md`) are hand-mirrored views over many subjects. When the user
+`travel/<calendar>.md`, `travel/<inventory>.md`, and
+`finance/<benefits-tracker>.md`) are hand-mirrored views over many subjects. When the user
 updates a detail file, nothing pushes back to the aggregates, so read commands
 (`/perks`, `/civ`, ...) can surface stale facts as authoritative. This is
 antipattern #6 (shadow state) at the data layer.
@@ -35,7 +35,8 @@ anyway.
 CLI:
     aggregate_freshness.py \
         --subjects travel/trips \
-        --aggregates travel/2026.md travel/Hyatt.md finance/'Perks Ledger.md' \
+        --aggregates travel/<calendar>.md travel/<inventory>.md \
+            finance/<benefits-tracker>.md \
         --json
 
     # Or walk $OV automatically for files declaring themselves aggregates:
@@ -313,7 +314,7 @@ def format_human_discover(payload: dict, stale_only: bool) -> str:
     if not groups:
         if stale_only:
             return f"aggregate freshness: 0 stale of {payload['discovered']} discovered\n"
-        return f"aggregate freshness: 0 aggregates discovered under $OV\n"
+        return "aggregate freshness: 0 aggregates discovered under $OV\n"
     lines: list[str] = []
     header = (
         f"aggregate freshness ({payload['stale_count']} stale of "

@@ -1,21 +1,30 @@
 #!/usr/bin/env python3
 """
-privacy_check.py: Detect private-vault identifier leaks in committed files.
+privacy_check.py: Detect private identifiers in public-bound repository files.
 
-Two automated discovery sources, no manual denylist needed:
+Automated discovery sources:
 
-  1. Filename stems: multi-word `*.md` stems under PRIVATE_DIRS in `$OV/`.
+  1. Filename stems: multi-word `*.md` stems under content dirs in `$OV/`.
   2. Wiki-link targets: `[[...]]` references extracted from vault content.
      Catches person names, private note titles, and concepts that may not
      have their own files. Filtered to multi-word ASCII targets and any
      non-ASCII targets to avoid false positives on system vocabulary.
+  3. Local exact terms: optional `profile/private_terms.txt`, one private
+     name, place, or preference phrase per line. `profile/private_slugs.txt`
+     remains the single-word compatibility list.
+
+The scanner reads public-bound pathnames, working-tree content, and staged
+index blobs when they differ. A filename-only or partially staged leak
+therefore cannot hide behind a cleaned-up working copy.
 
 Auto-skip rules (all fully automated):
   - Single ASCII words from wiki-links (too generic: Reflect, Protocol).
-  - Terms matching committed file stems (if `frameworks/foo-bar.md` is
-    tracked, "Foo Bar" is intentionally public).
   - File paths (contain `/`), dates, noise patterns.
   - Explicit opt-out via `privacy_allowlist.txt` for edge cases.
+
+Existing public filenames are not automatically trusted. If a private title is
+also deliberately public, it must be named in `privacy_allowlist.txt`. This
+keeps an earlier leak from silently exempting itself forever.
 
 CLI:
     uv run scripts/privacy_check.py                   human report
@@ -37,10 +46,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-ALLOWLIST = Path(__file__).resolve().parent / "privacy_allowlist.txt"
-PRIVATE_SLUGS = (
-    Path(__file__).resolve().parent.parent / "profile" / "private_slugs.txt"
-)
+REPO_ROOT = Path(__file__).resolve().parents[1]
+ALLOWLIST = REPO_ROOT / "scripts" / "privacy_allowlist.txt"
+PRIVATE_SLUGS = REPO_ROOT / "profile" / "private_slugs.txt"
+PRIVATE_TERMS = REPO_ROOT / "profile" / "private_terms.txt"
 
 _INFRA_DIRS = {"cache", "assets", ".obsidian"}
 
@@ -64,6 +73,18 @@ _WIKILINK_RE = re.compile(r'(?<!\!)\[\[([^\]]+)\]\]')
 _DATE_RE = re.compile(r'^\d{4}(-\d{2}(-\d{2})?)?$')
 _NOISE_RE = re.compile(r'^[.\s]+$')
 _NUMERIC_RE = re.compile(r'^[\d\s,.\-]+$')
+_SINGLE_ASCII_WORD_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _is_allowlisted(term: str, allowlist: set[str]) -> bool:
+    folded = term.casefold()
+    return any(folded == entry.casefold() for entry in allowlist)
+
+
+def _separator_variants(term: str) -> set[str]:
+    """Return literal and space-normalized forms for slug-shaped titles."""
+    normalized = re.sub(r"[-_]+", " ", term).strip()
+    return {candidate for candidate in (term.strip(), normalized) if candidate}
 
 
 def load_allowlist() -> set[str]:
@@ -101,6 +122,23 @@ def load_private_slugs() -> set[str]:
     return out
 
 
+def load_private_terms() -> set[str]:
+    """Load exact private literals from the gitignored profile sidecar.
+
+    This list covers identifiers and preference phrases that filename and
+    wikilink discovery cannot infer reliably. Matching is case-insensitive.
+    """
+    if not PRIVATE_TERMS.exists():
+        return set()
+    out: set[str] = set()
+    for line in PRIVATE_TERMS.read_text(encoding="utf-8").splitlines():
+        term = line.strip()
+        if not term or term.startswith("#"):
+            continue
+        out.add(term)
+    return out
+
+
 def collect_titles(root: Path, allowlist: set[str], dirs: list[str]) -> list[str]:
     titles: set[str] = set()
     for sub in dirs:
@@ -109,11 +147,15 @@ def collect_titles(root: Path, allowlist: set[str], dirs: list[str]) -> list[str
             continue
         for f in p.rglob("*.md"):
             stem = f.stem
-            if stem in SKIP_STEMS or len(stem.split()) < 2:
+            variants = _separator_variants(stem)
+            normalized = re.sub(r"[-_]+", " ", stem).strip()
+            if stem in SKIP_STEMS or len(normalized.split()) < 2:
                 continue
-            if stem in allowlist:
+            if _DATE_RE.fullmatch(stem) or _NUMERIC_RE.fullmatch(normalized):
                 continue
-            titles.add(stem)
+            for candidate in variants:
+                if not _is_allowlisted(candidate, allowlist):
+                    titles.add(candidate)
     return sorted(titles)
 
 
@@ -126,8 +168,6 @@ def _is_private_wikilink(target: str) -> bool:
     """
     if len(target) < 2:
         return False
-    if '/' in target or target.endswith('.md'):
-        return False
     if _DATE_RE.match(target) or _NOISE_RE.match(target):
         return False
     if _NUMERIC_RE.match(target):
@@ -137,6 +177,17 @@ def _is_private_wikilink(target: str) -> bool:
         non_ascii_count = sum(1 for c in target if ord(c) > 127)
         return non_ascii_count >= 3
     return len(target.split()) >= 2
+
+
+def _wikilink_candidates(raw_target: str) -> set[str]:
+    """Extract basename and separator variants from an Obsidian target."""
+    target = raw_target.split("|", 1)[0].split("#", 1)[0].strip()
+    if not target:
+        return set()
+    target = target.replace("\\", "/").rsplit("/", 1)[-1]
+    if target.lower().endswith(".md"):
+        target = target[:-3]
+    return _separator_variants(target)
 
 
 def collect_wikilinks(root: Path, allowlist: set[str], dirs: list[str]) -> set[str]:
@@ -158,15 +209,32 @@ def collect_wikilinks(root: Path, allowlist: set[str], dirs: list[str]) -> set[s
             except OSError:
                 continue
             for m in _WIKILINK_RE.finditer(text):
-                target = m.group(1).split("|")[0].strip()
-                if target in SKIP_STEMS or target in allowlist:
-                    continue
-                if _is_private_wikilink(target):
-                    targets.add(target)
+                for target in _wikilink_candidates(m.group(1)):
+                    if target in SKIP_STEMS or _is_allowlisted(target, allowlist):
+                        continue
+                    if _is_private_wikilink(target):
+                        targets.add(target)
     return targets
 
 
-def tracked_files() -> list[str]:
+def _git_paths(args: list[str], repo_root: Path) -> list[str]:
+    result = subprocess.run(
+        ["git", *args, "-z"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        sys.stderr.write(f"privacy_check: `git {' '.join(args)}` failed: {stderr}\n")
+        raise SystemExit(2)
+    return sorted(
+        os.fsdecode(raw)
+        for raw in result.stdout.split(b"\0")
+        if raw
+    )
+
+
+def tracked_files(repo_root: Path = REPO_ROOT) -> list[str]:
     """Files tracked by git PLUS untracked-but-not-ignored files.
 
     The privacy gate cares about content about to enter the repo, not just
@@ -175,68 +243,117 @@ def tracked_files() -> list[str]:
     gate has a trivial bypass: add a leak in a new file and it is invisible
     to `git ls-files`.
     """
-    out: set[str] = set()
-    for cmd in (
-        ["git", "ls-files"],
-        ["git", "ls-files", "-o", "--exclude-standard"],
-    ):
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        if res.returncode != 0:
-            sys.stderr.write(
-                f"privacy_check: `{' '.join(cmd)}` failed: {res.stderr}\n"
-            )
-            sys.exit(2)
-        for line in res.stdout.splitlines():
-            if line.strip():
-                out.add(line)
-    return sorted(out)
+    tracked = _git_paths(["ls-files"], repo_root)
+    untracked = _git_paths(["ls-files", "-o", "--exclude-standard"], repo_root)
+    return sorted(set(tracked) | set(untracked))
 
 
-def committed_stems(files: list[str]) -> set[str]:
-    """Derive normalized stems from tracked .md files.
+def staged_files(repo_root: Path = REPO_ROOT) -> list[str]:
+    """Index paths whose staged blob will survive the next commit."""
+    return _git_paths(
+        ["diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+        repo_root,
+    )
 
-    If `frameworks/immunity-to-change.md` is committed, then
-    "immunity to change" is intentionally public and should not
-    be flagged when it also appears as a vault wiki-link target.
-    """
-    stems: set[str] = set()
-    for f in files:
-        p = Path(f)
-        if p.suffix != ".md":
+
+def _worktree_text(repo_root: Path, relative: str) -> str | None:
+    path = repo_root / relative
+    try:
+        if path.is_symlink():
+            return os.readlink(path)
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _index_text(repo_root: Path, relative: str) -> str | None:
+    result = subprocess.run(
+        ["git", "show", f":{relative}"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.decode("utf-8", errors="ignore")
+
+
+def content_sources(
+    files: list[str], repo_root: Path = REPO_ROOT
+) -> list[tuple[str, str, str]]:
+    """Return `(path, source, text)` for worktree and divergent staged blobs."""
+    sources: list[tuple[str, str, str]] = []
+    worktree: dict[str, str] = {}
+    for relative in files:
+        text = _worktree_text(repo_root, relative)
+        if text is None:
             continue
-        raw = p.stem.replace("-", " ").replace("_", " ")
-        stems.add(raw.lower())
-    return stems
+        worktree[relative] = text
+        sources.append((relative, "worktree", text))
+    for relative in staged_files(repo_root):
+        text = _index_text(repo_root, relative)
+        if text is not None and text != worktree.get(relative):
+            sources.append((relative, "index", text))
+    return sources
 
 
-def scan(terms: list[str], files: list[str]) -> list[dict]:
+def path_sources(files: list[str]) -> list[tuple[str, str, str]]:
+    """Expose normalized public-bound pathnames to the literal scanner."""
+    return [
+        (
+            relative,
+            "path",
+            re.sub(r"[-_/\\]+", " ", relative),
+        )
+        for relative in files
+    ]
+
+
+def scan(terms: list[str], sources: list[tuple[str, str, str]]) -> list[dict]:
+    """Case-insensitive scan with word boundaries for ASCII terms."""
     hits: list[dict] = []
-    for f in files:
-        try:
-            content = Path(f).read_text(encoding="utf-8", errors="ignore")
-        except (OSError, UnicodeDecodeError):
-            continue
+    normalized_terms = [
+        (
+            term,
+            term.casefold(),
+            re.compile(
+                rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])",
+                re.IGNORECASE,
+            )
+            if term.isascii()
+            else None,
+        )
+        for term in terms
+    ]
+    for relative, source, content in sources:
+        folded_content = content.casefold()
         lines: list[str] | None = None
-        for t in terms:
-            if t not in content:
+        folded_lines: list[str] | None = None
+        for term, folded_term, pattern in normalized_terms:
+            if folded_term not in folded_content:
                 continue
             if lines is None:
                 lines = content.splitlines()
-            for i, line in enumerate(lines, 1):
-                if t in line:
+                folded_lines = [line.casefold() for line in lines]
+            assert folded_lines is not None
+            for i, (line, folded_line) in enumerate(zip(lines, folded_lines), 1):
+                matched = pattern.search(line) is not None if pattern else folded_term in folded_line
+                if matched:
                     hits.append({
-                        "file": f,
+                        "file": relative,
                         "line": i,
-                        "private_title": t,
+                        "private_title": term,
+                        "source": source,
                     })
                     break
     return hits
 
 
-def scan_slugs(slugs: set[str], files: list[str]) -> list[dict]:
+def scan_slugs(
+    slugs: set[str], sources: list[tuple[str, str, str]]
+) -> list[dict]:
     """Scan files for single-word private slugs.
 
-    Case-insensitive, word-boundary aware (\\b<slug>\\b) so a slug "foo"
+    Case-insensitive, ASCII-word-boundary aware so a slug "foo"
     matches "Foo" and "foo's" but not "foobar" or "tofoo". Private slugs
     are typically employer names or codenames that need this stricter
     boundary check; the multi-word `scan` uses substring match because
@@ -245,15 +362,12 @@ def scan_slugs(slugs: set[str], files: list[str]) -> list[dict]:
     if not slugs:
         return []
     pattern = re.compile(
-        r"\b(" + "|".join(re.escape(s) for s in sorted(slugs)) + r")\b",
+        r"(?<![A-Za-z0-9_])(" + "|".join(re.escape(s) for s in sorted(slugs))
+        + r")(?![A-Za-z0-9_])",
         re.IGNORECASE,
     )
     hits: list[dict] = []
-    for f in files:
-        try:
-            content = Path(f).read_text(encoding="utf-8", errors="ignore")
-        except (OSError, UnicodeDecodeError):
-            continue
+    for relative, source, content in sources:
         seen_in_file: set[str] = set()
         for i, line in enumerate(content.splitlines(), 1):
             for m in pattern.finditer(line):
@@ -262,9 +376,10 @@ def scan_slugs(slugs: set[str], files: list[str]) -> list[dict]:
                     continue
                 seen_in_file.add(slug)
                 hits.append({
-                    "file": f,
+                    "file": relative,
                     "line": i,
                     "private_title": slug,
+                    "source": source,
                 })
     return hits
 
@@ -273,9 +388,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="scripts/privacy_check.py",
         description=(
-            "Scan tracked files for private-vault filename leaks. Fails "
-            "with exit 1 if any multi-word private filename stem appears "
-            "as a literal substring in a committed file."
+            "Scan public-bound files and divergent staged blobs for private "
+            "vault identifiers and locally declared private terms."
         ),
     )
     ap.add_argument("--json", action="store_true", help="Emit JSON output.")
@@ -284,8 +398,8 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "Exit 0 when the gate would scan vacuously: either $OV is "
-            "missing, OR $OV exists but has no private dirs and no "
-            "private_slugs.txt. Without this flag, both cases exit 2 "
+            "missing, OR $OV exists but has no private dirs, private terms, "
+            "or private slugs. Without this flag, both cases exit 2 "
             "to avoid a placebo green light for fresh clones."
         ),
     )
@@ -313,11 +427,18 @@ def main(argv: list[str] | None = None) -> int:
 
     allowlist = load_allowlist()
     private_slugs = load_private_slugs()
+    private_terms = load_private_terms()
+    coverage_warnings: list[str] = []
+    if not PRIVATE_TERMS.exists():
+        coverage_warnings.append(
+            "profile/private_terms.txt is absent; exact identity and preference "
+            "coverage depends on derived vault titles plus semantic review"
+        )
     dirs = _discover_private_dirs(OV)
-    if not dirs and not private_slugs and not args.allow_empty_ov:
+    if not dirs and not private_slugs and not private_terms and not args.allow_empty_ov:
         msg = (
             f"privacy_check: $OV={OV} contains no private dirs and no "
-            "private_slugs.txt is configured; gate would pass vacuously. "
+            "private term sidecar is configured; gate would pass vacuously. "
             "Pass --allow-empty-ov to acknowledge."
         )
         if args.json:
@@ -335,24 +456,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     titles = collect_titles(OV, allowlist, dirs)
     files = tracked_files()
-    repo_stems = committed_stems(files)
+    sources = content_sources(files)
+    sources.extend(path_sources(files))
     wikilinks = collect_wikilinks(OV, allowlist, dirs)
-
-    def _matches_committed(term: str) -> bool:
-        # Word-boundary prefix only: committed "immunity to change" whitelists
-        # "Immunity To Change Map", but committed "hi" must not whitelist
-        # "Hiking Trip ..." (character-prefix matching did).
-        tl = term.lower()
-        return any(
-            tl == s or tl.startswith(s + " ") or s.startswith(tl + " ")
-            for s in repo_stems
-        )
-
-    titles = [t for t in titles if not _matches_committed(t)]
-    wikilinks -= {t for t in wikilinks if _matches_committed(t)}
     all_terms = sorted(set(titles) | wikilinks)
-    hits = scan(all_terms, files) if all_terms else []
-    hits.extend(scan_slugs(private_slugs, files))
+    private_term_slugs = {
+        term.casefold()
+        for term in private_terms
+        if _SINGLE_ASCII_WORD_RE.fullmatch(term)
+    }
+    private_term_phrases = private_terms - {
+        term for term in private_terms if _SINGLE_ASCII_WORD_RE.fullmatch(term)
+    }
+    phrase_terms = sorted(set(all_terms) | private_term_phrases)
+    slug_terms = private_slugs | private_term_slugs
+    hits = scan(phrase_terms, sources) if phrase_terms else []
+    hits.extend(scan_slugs(slug_terms, sources))
 
     if args.json:
         print(json.dumps({
@@ -360,19 +479,25 @@ def main(argv: list[str] | None = None) -> int:
             "filename_stems": len(titles),
             "wikilink_targets": len(wikilinks),
             "private_slugs": len(private_slugs),
-            "terms_scanned": len(all_terms) + len(private_slugs),
+            "private_terms": len(private_terms),
+            "private_terms_configured": PRIVATE_TERMS.exists(),
+            "terms_scanned": len(phrase_terms) + len(slug_terms),
             "allowlist_size": len(allowlist),
+            "coverage_warnings": coverage_warnings,
             "hit_count": len(hits),
             "hits": hits,
         }, indent=2))
     else:
         if not hits:
             print(
-                f"privacy_check: clean ({len(all_terms) + len(private_slugs)} "
+                f"privacy_check: clean ({len(phrase_terms) + len(slug_terms)} "
                 f"private terms scanned: {len(titles)} filename stems + "
                 f"{len(wikilinks)} wikilink targets + "
-                f"{len(private_slugs)} private slugs, 0 leaks)"
+                f"{len(private_slugs)} private slugs + "
+                f"{len(private_terms)} explicit private terms, 0 leaks)"
             )
+            for warning in coverage_warnings:
+                print(f"privacy_check: coverage warning: {warning}", file=sys.stderr)
             return 0
         files_hit = sorted({h["file"] for h in hits})
         print(
@@ -380,12 +505,19 @@ def main(argv: list[str] | None = None) -> int:
             f"{len(files_hit)} file(s)"
         )
         for h in hits:
-            print(f"  {h['file']}:{h['line']}: {h['private_title']!r}")
+            source = {
+                "index": " [staged index]",
+                "path": " [pathname]",
+                "worktree": "",
+            }.get(h.get("source"), f" [{h.get('source', 'unknown')}]")
+            print(f"  {h['file']}:{h['line']}{source}: {h['private_title']!r}")
+        for warning in coverage_warnings:
+            print(f"privacy_check: coverage warning: {warning}", file=sys.stderr)
         print()
         print(
             "Each line shows a private identifier from your $OV vault "
-            "(filename stem or [[wikilink]] target) appearing in a tracked "
-            "file. Replace with a generic placeholder, or add the term to "
+            "(filename stem, [[wikilink]] target, or local private term) "
+            "appearing in a public-bound file. Replace with a generic placeholder, or add the term to "
             "scripts/privacy_allowlist.txt if the exposure is deliberate."
         )
 
