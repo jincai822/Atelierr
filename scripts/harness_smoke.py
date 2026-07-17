@@ -222,7 +222,6 @@ def check_runtime_selector() -> None:
     neutral_env = os.environ.copy()
     for key in (
         "ATELIER_ACTIVE_RUNTIME",
-        "ATELIER_RUNTIME",
         "CODEX_THREAD_ID",
         "CLAUDECODE",
         "CLAUDE_PROJECT_DIR",
