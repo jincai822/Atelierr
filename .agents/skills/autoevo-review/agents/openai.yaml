@@ -1,0 +1,7 @@
+interface:
+  display_name: "Atelier $autoevo-review"
+  short_description: "Run the Atelier $autoevo-review skill in Codex"
+  default_prompt: "Use $autoevo-review to run the matching Atelier command."
+
+policy:
+  allow_implicit_invocation: false

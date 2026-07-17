@@ -31,53 +31,54 @@ uv run scripts/privacy_check.py --json
 
 Parse stdout as JSON. `--json` mode emits the document on every run regardless of exit code; `exit 1` is the script's normal "hits found" signal, not a script error.
 
-Match top-to-bottom — first matching row wins. Field defaults when keys are absent: `zk_missing` → `false` (only the missing-vault payload sets it); `vacuous_gate` → `false` (only the empty-dirs payload sets it); `hit_count` → `len(hits)` (only the skip payloads omit it).
+Match top-to-bottom — first matching row wins. Field defaults when keys are absent: `zk_missing` → `false` (only the missing-vault payload sets it); `vacuous_gate` → `false` (only the empty-dirs payload sets it); `coverage_warnings` → `[]`; `hit_count` → `len(hits)` (only the skip payloads omit it).
 
-| JSON parses? | zk_missing | vacuous_gate | hit_count | Action |
-|---|---|---|---|---|
-| Yes | true | any | any (often absent) | Soft-skip; note "privacy gate skipped (vault not available)" in synthesis. Proceed to Step 2. |
-| Yes | any | true | any (often absent) | Soft-skip; note "privacy gate skipped (no private dirs to scan)" in synthesis. Proceed to Step 2. |
-| Yes | false | false | >0 | Abort with `NEEDS_REVISION`. Present each `hits` entry verbatim (`file:line` + `private_title`). Do not dispatch reviewers; fix leaks, re-run `/system-review`. |
-| Yes | false | false | 0 | Proceed to Step 2. |
-| No, OR stdout empty, OR exit ≥2 with no JSON | any | any | any | Real script error. Surface stderr, soft-skip, note "privacy gate skipped (script error)" in synthesis. |
+| JSON parses? | zk_missing | vacuous_gate | hit_count | coverage_warnings | Action |
+|---|---|---|---|---|---|
+| Yes | true | any | any (often absent) | any | Soft-skip; note "privacy gate skipped (vault not available)" in synthesis. Proceed to Step 2. |
+| Yes | any | true | any (often absent) | any | Soft-skip; note "privacy gate skipped (no private dirs to scan)" in synthesis. Proceed to Step 2. |
+| Yes | false | false | >0 | any | Abort with `NEEDS_REVISION`. Present each `hits` entry verbatim (`file:line` + `private_title`). Do not dispatch reviewers; fix leaks, re-run `/system-review`. |
+| Yes | false | false | 0 | non-empty | Proceed to Step 1c and carry the coverage warning into synthesis. Do not describe the mechanical gate as complete. |
+| Yes | false | false | 0 | empty | Proceed to Step 1c. |
+| No, OR stdout empty, OR exit ≥2 with no JSON | any | any | any | any | Real script error. Surface stderr, soft-skip, note "privacy gate skipped (script error)" in synthesis. |
 
-The script scans tracked files PLUS untracked-but-not-ignored files (per `tracked_files()` in `scripts/privacy_check.py`), so a brand-new command file with a leak is caught before it is staged.
+The script scans public-bound pathnames and file content for tracked plus untracked-but-not-ignored files. When a staged blob differs from the working copy, it scans both, so cleaning the worktree after staging cannot hide a leak. It also loads exact local names, places, and preference phrases from gitignored `profile/private_terms.txt` when present.
 
 Rationale: privacy leaks are a hard veto regardless of score. Catching them deterministically before dispatching the expensive external reviewers saves tokens and prevents NEEDS_REVISION cycles caused by mechanical issues a script already knows. Mirrors `/lint` Phase 0c.
 
 ### 1c. Semantic privacy double-guard (blocking, cross-provider)
 
-The mechanical script in 1b only matches filename stems under `$OV/` and wikilink targets. It misses **semantic** leaks: real names, restaurants, $-amount + deadline pairs, demographic phrases, personal taxonomies. Step 1c closes that gap with the privacy-reviewer's two voices (declared in `harness/agents.toml`). Cross-provider disagreement carries more diagnostic weight than two samples of the same model.
+The mechanical script in 1b matches discovered private titles and locally declared exact terms. It still misses **semantic** leaks: contextual identity clues, previously undeclared restaurants, amount-plus-deadline combinations, demographic phrases, and mirrored personal taxonomies. Step 1c closes that gap with the privacy-reviewer's two voices (declared in `harness/agents.toml`). Cross-provider disagreement carries more diagnostic weight than two samples of the same model.
 
 **Run only after 1b returns `hit_count: 0`** (or soft-skips). If 1b aborted with hits, do not dispatch 1c — fix 1b first.
 
 **Before dispatch — shadow group setup (best-effort):** Run a single Bash call to create the witness file. Parse the UUID from the output line `export ATELIER_SHADOW_GROUP="<uuid>"` and **remember it** for the direct-API leg and for cleanup after dispatch. Best-effort: if the call fails, proceed without correlation.
 
 ```bash
-NATIVE_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('privacy-reviewer',{}).get('voices',{}).get('native',''))")
+NATIVE_MODEL=$(python3 scripts/shadow.py native-model --agent privacy-reviewer)
 DIRECT_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('privacy-reviewer',{}).get('voices',{}).get('direct',''))")
 EXPECTED='[{"model":"'"$NATIVE_MODEL"'","leg":"native","subagent_type":"privacy-reviewer"},{"model":"'"$DIRECT_MODEL"'","leg":"direct"}]'
 python3 scripts/shadow.py group-start --task privacy-review --expected "$EXPECTED"
 ```
 
-**Do NOT use `eval` + `trap EXIT` here.** Claude Code runs each Bash call in an isolated subprocess; an EXIT trap would destroy the witness immediately when the Bash call returns, before the Agent dispatch fires. The witness file must stay open on disk until explicit `group-close` after both legs complete.
+**Do NOT use `eval` + `trap EXIT` here.** Claude Code and Codex run each workflow shell call in an isolated subprocess; an EXIT trap would destroy the witness immediately when that call returns, before the native project-agent dispatch fires. The witness file must stay open on disk until explicit `group-close` after both legs complete.
 
-**Native-leg logging is in-band.** After the Agent returns, log its response via `shadow.py log` with `--prompt-text` and `--response-text`. PostToolUse hooks do not fire for Agent tool calls in Claude Code, so the orchestrator must log native legs explicitly.
+**Native-leg logging is in-band.** After the selected runtime's project agent returns, log its response via `shadow.py log` with `--prompt-text` and `--response-text`. The runtime-aware `native-model` helper prevents Codex results from being labeled with a Claude model identity.
 
-Dispatch **both legs in parallel — single message, one `Agent` tool call AND one `Bash` tool call**:
+Dispatch **both legs in parallel in one message: one native project-agent call and one shell call**:
 
-**Leg A — Anthropic side (`Agent` tool, `subagent_type: privacy-reviewer`):**
+**Leg A - native project agent (`subagent_type: privacy-reviewer`):**
 
-> Privacy review the uncommitted bundle. Walk `git status --short` and `git diff HEAD --` yourself; for untracked-but-not-ignored files, `Read` them in full. Cross-reference `profile/` files (canonical config home; gitignored but on disk) to detect taxonomy mirroring and value coincidences with what's about to be committed. Apply all leak categories from your agent definition. Return verdict per the format in your spec. You are instance `A` (Anthropic leg); do not coordinate with the direct-api leg.
+> Privacy review the uncommitted bundle. Walk `git status --short` and `git diff HEAD --` yourself; for untracked-but-not-ignored files, `Read` them in full. Cross-reference `profile/` files (canonical config home; gitignored but on disk) to detect taxonomy mirroring and value coincidences with what's about to be committed. Apply all leak categories from your agent definition. Return verdict per the format in your spec. You are instance `A` (native leg); do not coordinate with the direct-api leg.
 
-**Leg B — direct-api side (`Bash` tool, single call):**
+**Leg B - direct-api side (single shell call):**
 
 Resolve the direct-leg model identity from the canonical voices binding (so this dispatch tracks `harness/agents.toml` automatically and never drifts from the schema):
 
 ```bash
 DIRECT_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('privacy-reviewer',{}).get('voices',{}).get('direct',''))")
 {
-  echo 'Privacy review the uncommitted bundle. Identify semantic leaks: real names, restaurants, $-amount + deadline pairs, demographic phrases, personal taxonomies, employer slugs that the mechanical filename-stem scanner misses. You are instance B (direct-api leg); do not coordinate with the Anthropic leg. Output one of: CLEAN | NEEDS_REVISION (with SHOULD-FIX list) | BLOCKER (with leak descriptions and file:line pointers).'
+  echo 'Privacy review the uncommitted bundle. Identify semantic leaks: real names, restaurants, $-amount + deadline pairs, demographic phrases, personal taxonomies, employer slugs that the mechanical filename-stem scanner misses. You are instance B (direct-api leg); do not coordinate with the native leg. Output one of: CLEAN | NEEDS_REVISION (with SHOULD-FIX list) | BLOCKER (with leak descriptions and file:line pointers).'
   echo
   echo '--- DIFF ---'
   git diff HEAD --
@@ -96,10 +97,10 @@ Both legs return verdicts (CLEAN / NEEDS_REVISION / BLOCKER). The direct-api leg
 
 **After both legs return — log native leg and close the shadow group (best-effort):**
 
-Resolve the native model identity, then log the Agent's response inline and close the witness:
+Resolve the native model identity, then log the project agent's response inline and close the witness:
 
 ```bash
-NATIVE_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('privacy-reviewer',{}).get('voices',{}).get('native',''))")
+NATIVE_MODEL=$(python3 scripts/shadow.py native-model --agent privacy-reviewer)
 python3 scripts/shadow.py log \
   --group "<SHADOW_UUID>" --task privacy-review --model "$NATIVE_MODEL" --leg native \
   --prompt-text "<agent prompt summary>" \
@@ -107,18 +108,18 @@ python3 scripts/shadow.py log \
 python3 scripts/shadow.py group-close --group "<SHADOW_UUID>" --mark-closed
 ```
 
-Replace `<agent prompt summary>` with a short summary of what was sent to the Agent, and `<full agent response text>` with the Agent's actual response (the verdict text). If group-start was skipped, skip this step too.
+Replace `<agent prompt summary>` with a short summary of what was sent to the project agent, and `<full agent response text>` with its actual response (the verdict text). If group-start was skipped, skip this step too.
 
 **Verdict aggregation** (most-paranoid wins):
 
-| Leg A (Anthropic) | Leg B (direct-api) | Action |
+| Leg A (native) | Leg B (direct-api) | Action |
 |---|---|---|
 | CLEAN | CLEAN | Proceed to Step 2 |
 | CLEAN | NEEDS_REVISION | Surface SHOULD-FIX list as concerns; proceed to Step 2 (do not block) |
 | NEEDS_REVISION | NEEDS_REVISION | Surface union of SHOULD-FIX as concerns; proceed to Step 2 |
 | Either | BLOCKER | **Abort** with `NEEDS_REVISION`. Present union of BLOCKERs verbatim. Do not dispatch Step 2 reviewers. Fix and re-run `/system-review`. |
 
-If the direct-api leg soft-skips (exit 2 — api_env unset), note "direct-api leg unavailable; cross-provider check downgraded to single-leg Anthropic" in the synthesis and continue with Leg A's verdict only. Do not block on direct-api availability.
+If the direct-api leg soft-skips (exit 2 - api_env unset), note "direct-api leg unavailable; cross-provider check downgraded to single native leg" in the synthesis and continue with Leg A's verdict only. Do not block on direct-api availability.
 
 Cross-provider rationale: two instances of the same model from the same provider have correlated failure modes (training lineage, tokenizer, corpus). The privacy-reviewer's two voices share none of those. Disagreement here is more likely to surface a real leak than two same-model samples would.
 
@@ -126,7 +127,7 @@ Cross-provider rationale: two instances of the same model from the same provider
 
 Send a **single** assistant message containing both tool calls:
 
-- **Internal reviewer** — `Agent` tool, `subagent_type: reviewer`. Prompt: "Run System Diff Review + System Holistic Review on the uncommitted bundle. Walk `git diff` and `git status` yourself. Include the Phase scope brief (what moved, what was deferred). Return: (a) 4-dim score card (Contract integrity, Wiring correctness, Bug absence, Claim fidelity, each 0-10); (b) antipattern scan walking every entry in `protocols/antipatterns.md` (count entries from the file at scan time) with FLAG or N/A-with-reason for each; (c) concern list with severity (BLOCKER / SHOULD-FIX / NICE-TO-HAVE) and `file:line` pointers, minimum 3 or a 'Hunted but not found' section; (d) pre-mortem one-liner; (e) scope clarifier block. Overall verdict per reviewer.md Scoring: APPROVED / NEEDS_REVISION / REJECTED (no APPROVED_WITH_NOTES for system reviews; any dim <6 or missing artifact forces NEEDS_REVISION)."
+- **Internal reviewer** - native project agent `reviewer`. Prompt: "Run System Diff Review + System Holistic Review on the uncommitted bundle. Walk `git diff` and `git status` yourself. Include the Phase scope brief (what moved, what was deferred). Return: (a) 4-dim score card (Contract integrity, Wiring correctness, Bug absence, Claim fidelity, each 0-10); (b) antipattern scan walking every entry in `protocols/antipatterns.md` (count entries from the file at scan time) with FLAG or N/A-with-reason for each; (c) concern list with severity (BLOCKER / SHOULD-FIX / NICE-TO-HAVE) and `file:line` pointers, minimum 3 or a 'Hunted but not found' section; (d) pre-mortem one-liner; (e) scope clarifier block. Overall verdict per reviewer.md Scoring: APPROVED / NEEDS_REVISION / REJECTED (no APPROVED_WITH_NOTES for system reviews; any dim <6 or missing artifact forces NEEDS_REVISION)."
 
 - **External reviewers (codex + direct-api / DeepSeek Pro)** — one `Bash` call, `timeout: 600000`:
   ```bash

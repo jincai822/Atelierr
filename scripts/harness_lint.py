@@ -13,14 +13,16 @@ Claude Code and Codex:
   5. Tracked command specs are represented in harness/commands.toml.
   6. Tracked agent specs are represented in harness/agents.toml.
   7. The harness reference doc exists.
-  8. Codex has a repo-scoped Atelier skill for workflow discovery.
-  9. Intent/agent registry coherence: every `intents.<name>.agents[*]`
+  8. Codex has repo-scoped command skills, native agent adapters, and hooks.
+ 9. Intent/agent registry coherence: every `intents.<name>.agents[*]`
      resolves to an agent in `harness/agents.toml`; pattern values in
      both registries are drawn from the allowed set; `agents.<name>.used_by`
      is consistent with the intents/commands walk; orphans flagged.
  10. Every `intents.<name>.mode` is reachable from the Sub-mode procedures
      map in `.claude/commands/hi.md`; every `intents.<name>.profile_reads`
      filename exists at `profile/<name>`.
+ 11. The native runtime selector has a Codex shipped default, a supported
+     Claude choice, and a gitignored local override.
 
 Exit code: 0 if no ERROR-level findings, 1 if any ERROR-level finding.
 argparse returns 2 on CLI usage errors.
@@ -281,8 +283,8 @@ def check_models(agents: dict[str, dict[str, str]]) -> tuple[list[Finding], dict
 
     Schema model: `harness/models.toml` (committed) declares model identities
     as `[models.X]` entries (opus, sonnet, deepseek_pro_max, ...). Each entry
-    is allowed to be an empty table — the docstring above the entry carries
-    the rationale, and the binding values (claude_code, codex, direct_api,
+    carries a runtime-neutral reasoning tier. Binding values (claude_code,
+    codex, direct_api,
     direct_api_base, api_env, direct_api_extras, direct_api_timeout,
     codex_reasoning_effort) live in `profile/models.toml` (gitignored).
 
@@ -351,6 +353,16 @@ def check_models(agents: dict[str, dict[str, str]]) -> tuple[list[Finding], dict
                     f"model `{model_name}` has binding key `{k}` (move to profile/models.toml)",
                 )
             )
+        reasoning_tier = entry.get("reasoning_tier")
+        if reasoning_tier not in {"light", "balanced", "deep"}:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "models-reasoning-tier",
+                    "harness/models.toml",
+                    f"model `{model_name}` reasoning_tier must be light, balanced, or deep",
+                )
+            )
 
     findings.extend(_check_model_bindings(agents, models))
     return findings, models
@@ -371,9 +383,9 @@ def _check_model_bindings(
     findings: list[Finding] = []
 
     # Cross-check Claude frontmatter `model:` against the native voice leg
-    # for every role declared in harness/agents.toml. Drift here means the
-    # Anthropic-side dispatch (Agent tool) and the harness's declared native
-    # voice disagree, which silently routes to the wrong model.
+    # for every role declared in harness/agents.toml. This validates the
+    # Claude runtime edge only. Codex model and reasoning configuration is
+    # validated separately against each project agent adapter.
     harness_path = ROOT / "harness" / "agents.toml"
     if harness_path.exists():
         h_data, _ = _load_toml(harness_path)
@@ -418,6 +430,9 @@ def _check_model_bindings(
     binding_models = data.get("models", {}) or {}
 
     for model_name in sorted(models):
+        model_schema = models.get(model_name)
+        if isinstance(model_schema, dict) and model_schema.get("binding_optional") is True:
+            continue
         if model_name not in binding_models:
             findings.append(
                 Finding(
@@ -463,6 +478,184 @@ def check_capabilities() -> list[Finding]:
     return findings
 
 
+def check_runtime_registry() -> list[Finding]:
+    """Validate the native runtime registry and local-selection contract."""
+    findings: list[Finding] = []
+    path = ROOT / "harness" / "runtimes.toml"
+    data, err = _load_toml(path)
+    if err:
+        return [err]
+    assert data is not None
+
+    runtime = data.get("runtime")
+    runtimes = data.get("runtimes")
+    if not isinstance(runtime, dict) or not isinstance(runtimes, dict):
+        return [
+            Finding(
+                "ERROR",
+                "runtime-registry-shape",
+                rel(path),
+                "registry must define [runtime] and [runtimes.<name>] tables",
+            )
+        ]
+
+    if runtime.get("default") != "codex":
+        findings.append(
+            Finding(
+                "ERROR",
+                "runtime-default",
+                rel(path),
+                "the shipped runtime default must be `codex`; use the local override for Claude",
+            )
+        )
+    if runtime.get("local_override") != "harness/runtime.local.toml":
+        findings.append(
+            Finding(
+                "ERROR",
+                "runtime-local-override",
+                rel(path),
+                "runtime.local_override must be `harness/runtime.local.toml`",
+            )
+        )
+    if runtime.get("environment_override") != "ATELIER_RUNTIME":
+        findings.append(
+            Finding(
+                "ERROR",
+                "runtime-environment-override",
+                rel(path),
+                "runtime.environment_override must be `ATELIER_RUNTIME`",
+            )
+        )
+
+    expected_prefixes = {"codex": "$", "claude": "/"}
+    if set(runtimes) != set(expected_prefixes):
+        findings.append(
+            Finding(
+                "ERROR",
+                "runtime-set",
+                rel(path),
+                f"runtime registry must contain exactly {sorted(expected_prefixes)}",
+            )
+        )
+    required_fields = (
+        "label",
+        "executable",
+        "command_prefix",
+        "native_shadow_identity",
+        "shell_args",
+        "interactive_args",
+        "non_interactive_args",
+    )
+    for name, expected_prefix in expected_prefixes.items():
+        entry = runtimes.get(name)
+        if not isinstance(entry, dict):
+            continue
+        for field in required_fields:
+            if field not in entry:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "runtime-field",
+                        rel(path),
+                        f"runtimes.{name} is missing `{field}`",
+                    )
+                )
+        if entry.get("command_prefix") != expected_prefix:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "runtime-command-prefix",
+                    rel(path),
+                    f"runtimes.{name}.command_prefix must be `{expected_prefix}`",
+                )
+            )
+        shadow_identity = entry.get("native_shadow_identity")
+        if name == "claude" and shadow_identity != "role":
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "runtime-shadow-identity",
+                    rel(path),
+                    "Claude native_shadow_identity must be `role`",
+                )
+            )
+        if name == "codex" and isinstance(shadow_identity, str):
+            models_data, models_err = _load_toml(ROOT / "harness" / "models.toml")
+            if models_err:
+                findings.append(models_err)
+            else:
+                assert models_data is not None
+                models = models_data.get("models", {})
+                if not isinstance(models, dict) or shadow_identity not in models:
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            "runtime-shadow-identity",
+                            rel(path),
+                            f"Codex native_shadow_identity `{shadow_identity}` is not declared in harness/models.toml",
+                        )
+                    )
+        for field, value in entry.items():
+            if field.endswith("_args") and (
+                not isinstance(value, list)
+                or not all(isinstance(item, str) for item in value)
+            ):
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "runtime-args-shape",
+                        rel(path),
+                        f"runtimes.{name}.{field} must be a list of strings",
+                    )
+                )
+
+    supporting_paths = (
+        ROOT / "harness" / "runtime.local.toml.example",
+        ROOT / "scripts" / "atelier_runtime.py",
+    )
+    for supporting_path in supporting_paths:
+        if not supporting_path.exists():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "runtime-support-file",
+                    rel(supporting_path),
+                    "runtime selector support file is missing",
+                )
+            )
+
+    gitignore = _read(ROOT / ".gitignore")
+    if "harness/runtime.local.toml" not in gitignore:
+        findings.append(
+            Finding(
+                "ERROR",
+                "runtime-local-ignore",
+                ".gitignore",
+                "the per-user runtime preference must remain gitignored",
+            )
+        )
+
+    local_path = ROOT / "harness" / "runtime.local.toml"
+    if local_path.exists():
+        local_data, local_err = _load_toml(local_path)
+        if local_err:
+            findings.append(local_err)
+        else:
+            assert local_data is not None
+            local_runtime = local_data.get("runtime")
+            local_default = local_runtime.get("default") if isinstance(local_runtime, dict) else None
+            if local_default not in expected_prefixes:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "runtime-local-default",
+                        rel(local_path),
+                        f"local runtime default must be one of {sorted(expected_prefixes)}",
+                    )
+                )
+    return findings
+
+
 def check_agent_registry(
     agents: dict[str, dict[str, str]],
     models: dict[str, Any],
@@ -474,8 +667,8 @@ def check_agent_registry(
     referenced must exist in `harness/models.toml`. Source paths must match the discovered
     `.claude/agents/*.md` file (one exception: script-driven agents like
     `external-reviewer` declare a non-`.claude/agents/` source and have no
-    Claude-side spec). Codex prompt should reference the source path so
-    Codex emulators can route discovery.
+    Claude-side spec). Codex prompt should reference the source path so native
+    adapters and sequential fallbacks can route discovery.
     """
     findings: list[Finding] = []
     data, err = _load_toml(ROOT / "harness" / "agents.toml")
@@ -726,6 +919,226 @@ def check_agent_registry(
     return findings
 
 
+def check_codex_agent_adapters(models: dict[str, Any]) -> list[Finding]:
+    """Validate project-scoped Codex agents against the portable registry."""
+    findings: list[Finding] = []
+    registry_data, err = _load_toml(ROOT / "harness" / "agents.toml")
+    if err:
+        return [err]
+    assert registry_data is not None
+    registry = registry_data.get("agents", {})
+    if not isinstance(registry, dict):
+        return findings
+
+    adapter_dir = ROOT / ".codex" / "agents"
+    expected = {
+        name: entry
+        for name, entry in registry.items()
+        if isinstance(entry, dict) and entry.get("status") != "script-driven"
+    }
+    if not adapter_dir.is_dir():
+        return [
+            Finding(
+                "ERROR",
+                "codex-agents-dir-missing",
+                rel(adapter_dir),
+                "project-scoped Codex agent directory is missing",
+            )
+        ]
+
+    actual = {path.stem: path for path in adapter_dir.glob("*.toml")}
+    for name, entry in sorted(expected.items()):
+        path = actual.get(name)
+        if path is None:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "codex-agent-missing",
+                    rel(adapter_dir / f"{name}.toml"),
+                    f"portable agent `{name}` has no native Codex adapter",
+                )
+            )
+            continue
+        config, config_err = _load_toml(path)
+        if config_err:
+            findings.append(config_err)
+            continue
+        assert config is not None
+        if config.get("name") != name:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "codex-agent-name",
+                    rel(path),
+                    f"adapter name `{config.get('name')}` must match registry key `{name}`",
+                )
+            )
+        expected_description = str(entry.get("description", ""))
+        if config.get("description") != expected_description:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "codex-agent-description-drift",
+                    rel(path),
+                    f"adapter description differs from harness/agents.toml for `{name}`",
+                )
+            )
+        effort_by_tier = {"light": "low", "balanced": "medium", "deep": "high"}
+        voices = entry.get("voices")
+        native_identity = voices.get("native") if isinstance(voices, dict) else None
+        model_entry = models.get(native_identity) if isinstance(native_identity, str) else None
+        reasoning_tier = model_entry.get("reasoning_tier") if isinstance(model_entry, dict) else None
+        expected_effort = effort_by_tier.get(reasoning_tier)
+        if config.get("model_reasoning_effort") != expected_effort:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "codex-agent-effort-drift",
+                    rel(path),
+                    f"adapter model_reasoning_effort differs from the native voice tier for `{name}`",
+                )
+            )
+        instructions = config.get("developer_instructions")
+        if not isinstance(instructions, str) or not instructions.strip():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "codex-agent-instructions",
+                    rel(path),
+                    "adapter must declare non-empty `developer_instructions`",
+                )
+            )
+            continue
+        source = str(entry.get("source", ""))
+        for needle in ("AGENTS.md", "CLAUDE.md", source):
+            if needle and needle not in instructions:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "codex-agent-source-routing",
+                        rel(path),
+                        f"developer_instructions must reference `{needle}`",
+                    )
+                )
+
+    for name, path in sorted(actual.items()):
+        if name not in expected:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "codex-agent-unregistered",
+                    rel(path),
+                    f"native Codex agent `{name}` is not a portable role in harness/agents.toml",
+                )
+            )
+    return findings
+
+
+def check_codex_hooks() -> list[Finding]:
+    """Validate the native Codex lifecycle bridge used by Atelier."""
+    path = ROOT / ".codex" / "hooks.json"
+    try:
+        payload = json.loads(_read(path))
+    except FileNotFoundError:
+        return [Finding("ERROR", "codex-hooks-missing", rel(path), "native Codex hooks are missing")]
+    except json.JSONDecodeError as exc:
+        return [Finding("ERROR", "codex-hooks-json", rel(path), str(exc))]
+
+    hooks = payload.get("hooks", {}) if isinstance(payload, dict) else {}
+    if not isinstance(hooks, dict):
+        return [Finding("ERROR", "codex-hooks-shape", rel(path), "top-level `hooks` must be an object")]
+
+    def commands_for(event: str) -> list[str]:
+        groups = hooks.get(event, [])
+        if not isinstance(groups, list):
+            return []
+        commands: list[str] = []
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            handlers = group.get("hooks", [])
+            if not isinstance(handlers, list):
+                continue
+            for handler in handlers:
+                if isinstance(handler, dict) and isinstance(handler.get("command"), str):
+                    commands.append(handler["command"])
+        return commands
+
+    findings: list[Finding] = []
+    required = (
+        ("SessionStart", ("scripts/cues.py", "--hook", "--runtime codex")),
+        ("UserPromptSubmit", ("scripts/cues.py", "--touch-lock")),
+        ("UserPromptSubmit", ("scripts/intent_coverage.py", "intent-hook", "--runtime codex")),
+        ("Stop", ("scripts/shadow.py", "gc")),
+    )
+    for event, needles in required:
+        commands = commands_for(event)
+        if not any(all(needle in command for needle in needles) for command in commands):
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "codex-hook-routing",
+                    rel(path),
+                    f"{event} must include a command containing {list(needles)}",
+                )
+            )
+    return findings
+
+
+def check_claude_hooks() -> list[Finding]:
+    """Validate the supported Claude lifecycle edge alongside Codex."""
+    path = ROOT / ".claude" / "settings.json"
+    try:
+        payload = json.loads(_read(path))
+    except FileNotFoundError:
+        return [Finding("ERROR", "claude-hooks-missing", rel(path), "Claude hooks are missing")]
+    except json.JSONDecodeError as exc:
+        return [Finding("ERROR", "claude-hooks-json", rel(path), str(exc))]
+
+    hooks = payload.get("hooks", {}) if isinstance(payload, dict) else {}
+    if not isinstance(hooks, dict):
+        return [Finding("ERROR", "claude-hooks-shape", rel(path), "top-level `hooks` must be an object")]
+
+    def commands_for(event: str) -> list[str]:
+        groups = hooks.get(event, [])
+        if not isinstance(groups, list):
+            return []
+        commands: list[str] = []
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            handlers = group.get("hooks", [])
+            if not isinstance(handlers, list):
+                continue
+            for handler in handlers:
+                if isinstance(handler, dict) and isinstance(handler.get("command"), str):
+                    commands.append(handler["command"])
+        return commands
+
+    findings: list[Finding] = []
+    required = (
+        ("SessionStart", ("scripts/cues.py", "--hook", "--runtime claude")),
+        ("UserPromptSubmit", ("scripts/cues.py", "--touch-lock")),
+        (
+            "UserPromptSubmit",
+            ("scripts/intent_coverage.py", "intent-hook", "--runtime claude-code"),
+        ),
+        ("SessionEnd", ("scripts/shadow.py", "gc")),
+    )
+    for event, needles in required:
+        commands = commands_for(event)
+        if not any(all(needle in command for needle in needles) for command in commands):
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "claude-hook-routing",
+                    rel(path),
+                    f"{event} must include a command containing {list(needles)}",
+                )
+            )
+    return findings
+
+
 def check_commands(commands: dict[str, str]) -> list[Finding]:
     findings: list[Finding] = []
     data, err = _load_toml(ROOT / "harness" / "commands.toml")
@@ -853,7 +1266,7 @@ def check_harness_readme() -> list[Finding]:
         ]
     text = _read(path)
     findings: list[Finding] = []
-    for needle in ("commands.toml", "agents.toml", "models.toml", "capabilities.toml", "scripts/atelier.py"):
+    for needle in ("commands.toml", "agents.toml", "models.toml", "capabilities.toml", "runtimes.toml", ".agents/skills"):
         if needle not in text:
             findings.append(
                 Finding(
@@ -987,7 +1400,13 @@ def check_atelier_skill() -> list[Finding]:
         )
 
     text = _read(path)
-    for needle in ("harness/commands.toml", "harness/agents.toml", "scripts/atelier.py", "protocols/runtime-adapters.md"):
+    for needle in (
+        "harness/commands.toml",
+        "harness/agents.toml",
+        "harness/runtimes.toml",
+        ".claude/commands/",
+        "protocols/runtime-adapters.md",
+    ):
         if needle not in text:
             findings.append(
                 Finding(
@@ -997,6 +1416,139 @@ def check_atelier_skill() -> list[Finding]:
                     f"skill must reference `{needle}`",
                 )
             )
+    metadata_path = path.parent / "agents" / "openai.yaml"
+    if not metadata_path.exists():
+        findings.append(
+            Finding(
+                "ERROR",
+                "skill-metadata-missing",
+                rel(metadata_path),
+                "Atelier skill must provide Codex UI metadata",
+            )
+        )
+    else:
+        metadata = _read(metadata_path)
+        for needle in ("display_name:", "short_description:", "$atelier", "allow_implicit_invocation: true"):
+            if needle not in metadata:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "skill-metadata-field",
+                        rel(metadata_path),
+                        f"skill metadata must contain `{needle}`",
+                    )
+                )
+    return findings
+
+
+def check_codex_command_skills() -> list[Finding]:
+    """Validate explicit Codex `$command` skills against commands.toml."""
+    findings: list[Finding] = []
+    data, err = _load_toml(ROOT / "harness" / "commands.toml")
+    if err:
+        return [err]
+    assert data is not None
+    commands = data.get("commands", {})
+    if not isinstance(commands, dict):
+        return findings
+
+    skills_dir = ROOT / ".agents" / "skills"
+    user_commands = {
+        name
+        for name, entry in commands.items()
+        if isinstance(entry, dict) and entry.get("user_facing", True) is not False
+    }
+    actual_skills = {path.parent.name for path in skills_dir.glob("*/SKILL.md")}
+    allowed_skills = user_commands | {"atelier"}
+    for name in sorted(actual_skills - allowed_skills):
+        findings.append(
+            Finding(
+                "ERROR",
+                "codex-command-skill-unregistered",
+                rel(skills_dir / name / "SKILL.md"),
+                f"Codex skill `{name}` is neither a user-facing command nor the Atelier router",
+            )
+        )
+
+    for name, entry in sorted(commands.items()):
+        if not isinstance(entry, dict) or entry.get("user_facing", True) is False:
+            continue
+        source = str(entry.get("source", ""))
+        skill_path = skills_dir / name / "SKILL.md"
+        if not skill_path.exists():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "codex-command-skill-missing",
+                    rel(skill_path),
+                    f"user-facing command `{name}` must be invokable as `${name}`",
+                )
+            )
+            continue
+
+        fields = parse_agent_frontmatter(skill_path)
+        if fields.get("name") != name:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "codex-command-skill-name",
+                    rel(skill_path),
+                    f"skill frontmatter name must be `{name}`",
+                )
+            )
+        if f"${name}" not in fields.get("description", ""):
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "codex-command-skill-description",
+                    rel(skill_path),
+                    f"skill description must advertise `${name}`",
+                )
+            )
+
+        text = _read(skill_path)
+        for needle in ("AGENTS.md", "CLAUDE.md", source):
+            if needle and needle not in text:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "codex-command-skill-source",
+                        rel(skill_path),
+                        f"skill must reference `{needle}`",
+                    )
+                )
+        if "scripts/atelier.py" in text or "scripts/intent_coverage.py" in text:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "codex-command-skill-bridge",
+                    rel(skill_path),
+                    "interactive command skills must read their source directly, not call a Python bridge",
+                )
+            )
+
+        metadata_path = skill_path.parent / "agents" / "openai.yaml"
+        if not metadata_path.exists():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "codex-command-skill-metadata",
+                    rel(metadata_path),
+                    "command skill must provide Codex UI metadata",
+                )
+            )
+            continue
+        metadata = _read(metadata_path)
+        for needle in (f"${name}", "allow_implicit_invocation: false"):
+            if needle not in metadata:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "codex-command-skill-metadata",
+                        rel(metadata_path),
+                        f"command skill metadata must contain `{needle}`",
+                    )
+                )
     return findings
 
 
@@ -1350,8 +1902,8 @@ def check_intents_registry(
       - `claude_agents` from `load_claude_agents()` (`.claude/agents/*.md`):
         canonical for Claude Code subagent dispatch.
       - `harness_agents` from `harness/agents.toml` `[agents]` table:
-        canonical for Codex parity (Codex emulates roles by reading this
-        registry, not by walking the .claude tree).
+        canonical for Codex parity (native `.codex/agents/` adapters expose
+        this registry and route back to the .claude role brief).
 
     A row is fully valid only when both registries know the agent. Missing
     in either registry is an ERROR with a distinct code so operators can
@@ -1970,21 +2522,17 @@ def check_shadow_group_start() -> list[Finding]:
     yet exist (the design names them but the user has not yet instrumented
     them) emit INFO; existing files without the invocation emit ERROR.
 
-    TODO(shadow-log F1'/F4): cross-validate expected_dispatches against
-    voices.<leg> in harness/agents.toml AND optional subagent_type per
-    multi-leg call site. Today the orchestrator builds EXPECTED from a
-    voices.native read but nothing enforces that the model identity it
-    emits equals the model identity the PostToolUse hook resolves at log
-    time. A drift between the two silently empties native legs in the
-    report. Follow-up after Phase 2 ships.
+    Sites with a runtime-native project-agent leg must also use
+    `shadow.py native-model --agent <role>`. This prevents Codex agent output
+    from being mislabeled with a Claude model identity and cost row.
     """
-    sites = (
-        ".claude/commands/system-review.md",
-        ".claude/commands/decision.md",
-        "scripts/review.sh",
-    )
+    sites = {
+        ".claude/commands/system-review.md": "privacy-reviewer",
+        ".claude/commands/decision.md": "thinker",
+        "scripts/review.sh": None,
+    }
     findings: list[Finding] = []
-    for rel in sites:
+    for rel, native_role in sites.items():
         path = ROOT / rel
         if not path.exists():
             findings.append(
@@ -2001,6 +2549,18 @@ def check_shadow_group_start() -> list[Finding]:
                         f"{rel} dispatches multi-leg but does not invoke `shadow.py group-start`; "
                         "shadow-log report will silently degrade. Add a group-start "
                         "invocation at flow entry (see protocols/shadow-log.md).")
+            )
+        if native_role is not None and not re.search(
+            rf"shadow\.py\s+native-model\s+--agent\s+{re.escape(native_role)}\b",
+            text,
+        ):
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "shadow-native-model-missing",
+                    rel,
+                    f"{rel} must resolve `{native_role}` through `shadow.py native-model` before native-leg correlation",
+                )
             )
     return findings
 
@@ -2150,12 +2710,17 @@ def run_lints() -> list[Finding]:
     model_findings, models = check_models(agents)
     findings.extend(model_findings)
     findings.extend(check_capabilities())
+    findings.extend(check_runtime_registry())
     findings.extend(check_agent_registry(agents, models))
+    findings.extend(check_codex_agent_adapters(models))
+    findings.extend(check_codex_hooks())
+    findings.extend(check_claude_hooks())
     findings.extend(check_commands(commands))
     findings.extend(check_command_frontmatter(commands))
     findings.extend(check_reader_scholar_sync())
     findings.extend(check_harness_readme())
     findings.extend(check_atelier_skill())
+    findings.extend(check_codex_command_skills())
     findings.extend(check_scripts_zk_paths())
     findings.extend(check_path_registry_drift())
     intents, intent_findings = load_intents()

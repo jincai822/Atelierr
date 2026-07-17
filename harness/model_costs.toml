@@ -1,7 +1,9 @@
 # Per-1M-token USD prices by model identity. Committed schema; OSS-portable.
 #
 # Per-user overrides live in `profile/model_costs.toml` (gitignored,
-# last-wins). One row per identity declared in `harness/models.toml`.
+# last-wins). One row per priced identity declared in `harness/models.toml`.
+# Dynamic runtime slots such as `codex_native` intentionally have no committed
+# price.
 #
 # Schema:
 #   input_per_1m_usd         input tokens per 1M, USD

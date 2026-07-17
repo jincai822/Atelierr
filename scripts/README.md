@@ -15,21 +15,22 @@ Executable tooling for the Atelier knowledge layer. All scripts are stdlib-only 
 | `snapshot_anchors.py` | Saves `url:` / `gist:` wiki anchors to Readwise and backfills the `readwise:` document ID so anchor evidence stays durable | B | `readwise` CLI |
 | `lint.py` | Structural + corpus-level lint over `$OV/wiki/` — parse errors, duplicate titles, slug drift, orphan entries, graph topology | D | stdlib |
 | `harness_lint.py` | Claude Code and Codex portability lint — root instructions, model profiles, capability mappings, command and agent registries | ops | stdlib |
-| `harness_smoke.py` | Smoke test for the portable harness helper and lint JSON surfaces | ops | stdlib |
-| `atelier.py` | Portable command/agent discovery and Codex prompt generation from `harness/*.toml` | ops | stdlib |
-| `privacy_check.py` | Scans tracked files for private-vault filename-stem leaks; opt-outs live in `privacy_allowlist.txt`; wired into `/lint` Phase 0c | ops | stdlib |
+| `harness_smoke.py` | Smoke test for native command skills, agent adapters, hooks, and lint JSON | ops | stdlib |
+| `atelier_runtime.py` | Native runtime selector: resolves the Codex or Claude default, persists a gitignored local preference, and launches registered workflows without generating adapter prompts | ops | stdlib |
+| `intent_coverage.py` | Deterministic Claude `/hi` and Codex `$hi` intent diagnostics, miss logging, hook entry, and batch coverage report | ops | stdlib |
+| `privacy_check.py` | Scans public-bound pathnames, worktree files, and divergent staged blobs for private vault titles plus exact local terms from gitignored `profile/private_terms.txt`; deliberate public opt-outs live in `privacy_allowlist.txt`; wired into `/lint` Phase 0c | ops | stdlib |
 | `zk_audit.py` | Post-ingestion hygiene audit for `$OV/`: missing READMEs, raw-without-digest, archive↔working overlap, root orphans, suspicious dirs; wired into `/lint` Phase 0b | ops | stdlib |
 | `staleness.py` | L2 staleness scoring — surfaces dormant, stale, and promotion-candidate notes | D | stdlib |
 | `aggregate_freshness.py` | Aggregate-vs-detail staleness guard — flags aggregate trackers whose `Last updated:` is older than their newest subject file; `--discover` walks `freshness: required` frontmatter | ops | stdlib |
 | `auto_memory_audit.py` | Audit pass over Claude Code auto-memory — surfaces stale, orphaned, dead-linked, or self-flagged provisional entries for human invalidation | ops | stdlib |
 | `people.py` | Canonical person-note lookup by name fragment — pathlib walk (no xargs word-splitting); opt-in body-field matching via env var | ops | stdlib |
-| `cues.py` | Unified quiet-by-default cue checker for `/hi` session start — silent when nothing fires, one tab-separated line per due cue | ops | stdlib |
+| `cues.py` | Unified quiet-by-default cue checker for Claude `/hi` and Codex `$hi` session start; silent when nothing fires and runtime-native command syntax when a cue is due | ops | stdlib |
 | `recurring.py` | Manages recurring obligations in `$OV/gtd/recurring.md` — re-emerging tasks with `every:` / `last-done:` due computation, distinct from one-shot GTD items | ops | stdlib |
 | `todos.py` | Aggregate open TODOs from `$OV/gtd/` and reflection Next Action sections; computes priority from `due:` / `priority:` / age; flags closure candidates from daily-note language; subcommands `list`, `stale`, `closure-candidates`, `digest` — `digest` powers `/daily-reflection` Step 0 (reached via `/hi`) | ops | stdlib |
 | `session_log.py` | Session event log skeleton generator — handles late-sleep date rule and collision auto-increment | E | stdlib |
 | `shadow.py` | Cross-provider shadow-log correlation + reporting — `group-start` / `group-close` witnesses for multi-leg call sites, `report` over the JSONL call logs | ops | stdlib |
 | `routine_lock.py` | Distributed lock for scheduled routines via DynamoDB conditional put — one machine executes per cycle; stale locks taken over at acquire time once their TTL passes | ops | `boto3` (skipped when coordination is "none") |
-| `routine_runner.sh` | launchd wrapper for scheduled routines — env setup, hostname stagger, lock acquire, claim file, `claude -p` execution, lock release | ops | `claude` CLI, `routine_lock.py` |
+| `routine_runner.sh` | launchd wrapper for scheduled routines: env setup, hostname stagger, lock acquire, claim file, selected headless runtime, lock release | ops | `codex` CLI by default (`claude` selectable), `routine_lock.py` |
 | `rewrite_paths.py` | Mechanical half of a tier rename — rewrites `$OV/<old>` to `$OV/<new>` across committed docs after editing `harness/paths.toml` | ops | stdlib |
 | `relink.py` | Fixes broken markdown links after file moves — rewrites refs to each filename stem's current location (`--dry-run` / `--apply`) | ops | stdlib |
 | `fission.py` | Generic directory fission per the 32-entry rule — splits a directory's .md children into bucket subdirs (first-letter, year-month, year/month); pair with `relink.py` | ops | stdlib |
@@ -41,11 +42,31 @@ Executable tooling for the Atelier knowledge layer. All scripts are stdlib-only 
 
 ## Portable Harness
 
-`scripts/atelier.py status` summarizes the Claude/Codex registry state.
-Use `commands`, `agents`, `prompt`, and `agent-prompt` subcommands to discover
-portable workflows without scraping `harness/*.toml` directly.
-Run `scripts/harness_smoke.py` after harness edits to verify the helper and JSON
-surfaces end to end without touching `$OV/`.
+Claude commands under `.claude/commands/` and Codex skills under
+`.agents/skills/` are the native runtime edges. Run `scripts/harness_smoke.py`
+after harness edits to verify those mappings and lifecycle hooks without
+touching `$OV/`.
+
+`scripts/atelier_runtime.py` is optional for direct interactive use. It ships
+with Codex selected, launches `$<command>` or `/<command>` unchanged, and lets
+the user persist Claude with `python3 scripts/atelier_runtime.py use claude`.
+
+## Public-repo privacy gate
+
+Keep identity, goals, locations, account labels, schedules, and preference
+policy under gitignored `$OV/` or `profile/`. Add exact literals that cannot be
+inferred from vault filenames to `profile/private_terms.txt`, one per line;
+single-word compatibility entries may remain in `profile/private_slugs.txt`.
+Neither file is committed.
+
+Before a public-bound commit, run `uv run scripts/privacy_check.py --json`.
+The scanner checks tracked and untracked public-bound paths and files plus any
+divergent staged blobs. Its JSON reports a coverage warning when the local
+exact-term sidecar is absent; a clean hit count does not erase that warning.
+Then run `$system-review` for the semantic privacy guard, which looks for
+contextual identity, financial, demographic, schedule, and taxonomy leaks that
+exact matching cannot recognize. These gates protect new commits; they do not
+remove content from existing Git history or remote forks.
 
 ## `trust.py` — quick reference
 

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Atelier $energy-audit"
+  short_description: "Run the Atelier $energy-audit skill in Codex"
+  default_prompt: "Use $energy-audit to run the matching Atelier command."
+
+policy:
+  allow_implicit_invocation: false

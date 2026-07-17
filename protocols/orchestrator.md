@@ -16,7 +16,7 @@ When the system needs a new behavior, choose the lightest primitive that covers 
 
 | Primitive | When | Trigger | Examples in this repo |
 |---|---|---|---|
-| **Hook** (`.claude/settings.json` `hooks` block) | Programmatic event handler. Safety gate, mechanical lint, session-start cue. Always-on, no model judgment. | Tool event (SessionStart, PreToolUse, etc.) | SessionStart cues via `scripts/cues.py`; `scripts/privacy_check.py` at commit; `scripts/harness_lint.py` on protocol edits |
+| **Hook** (`.claude/settings.json` or `.codex/hooks.json`) | Programmatic event handler. Safety gate, mechanical lint, session-start cue. Always-on, no model judgment. | Runtime lifecycle or tool event | SessionStart cues via `scripts/cues.py`; intent coverage via `scripts/intent_coverage.py`; shadow-log cleanup via `scripts/shadow.py` |
 | **Skill** (`.claude/skills/<name>/SKILL.md`) | Thin entry hint that auto-triggers on semantic match against user phrasing. Lowers friction of typing `/hi` first. Skills here forward to `/hi`; the canonical intent router (`harness/intents.toml`) stays the decision point. | Model judges the description matches user input | `.claude/skills/capture/`, `.claude/skills/reading/` |
 | **Command** (`.claude/commands/<name>.md`) | Explicit `/slash` invocation. User names the operation. | User types `/<name>` | `/curate`, `/sync`, `/lint`, `/promote`, `/hi` |
 | **Agent** (`.claude/agents/<name>.md`) | Delegated subprocess with isolated context. Use when the task needs research or tool use that would bloat main context, or when role/voice separation matters (Reviewer's voice is not Challenger's voice). | Orchestrator dispatches via the `Agent` tool | The cercle (Researcher, Reviewer, Challenger, Curator, ...) |
@@ -96,12 +96,12 @@ Daily notes are user-authored; the system reads, does not write. Curator dispatc
 
 Every role declares a `voices` keyed inline table in `harness/agents.toml` mapping leg name to model identity. Three leg types:
 
-- **`native`** — Anthropic-side leg dispatched via `Agent` tool (`subagent_type: <role>`); the model resolves from the role's `.claude/agents/<role>.md` frontmatter `model:` field.
-- **`direct`** — direct-api leg dispatched via `uv run scripts/chat_completion.py --model <identity> --max-tokens 0 --prompt -` with the prompt on stdin.
-- **`codex`** — Codex CLI leg dispatched via `codex exec` (today only used by `external-reviewer` via `scripts/review.sh`).
+- **`native`** - project-agent leg in the selected interactive runtime. Claude Code dispatches the role's `.claude/agents/<role>.md`; Codex dispatches `.codex/agents/<role>.toml`. Claude uses role frontmatter for its model. Codex inherits the selected session model and maps the native voice identity's `reasoning_tier` from `harness/models.toml` to `model_reasoning_effort`.
+- **`direct`** - direct-api leg dispatched via `uv run scripts/chat_completion.py --model <identity> --max-tokens 0 --prompt -` with the prompt on stdin.
+- **`codex`** - explicit external Codex CLI reviewer leg dispatched via `codex exec`, independently of the selected interactive runtime. Today it is used only by `external-reviewer` through `scripts/review.sh`.
 
 Schema split:
-- **What identities exist** → `harness/models.toml` (committed; declarations only)
+- **What identities and reasoning tiers exist** → `harness/models.toml` (committed)
 - **How identities map to providers** → `profile/models.toml` (gitignored; bindings)
 - **Which voices each role binds** → `harness/agents.toml` (`voices` per agent)
 
@@ -115,15 +115,15 @@ Pattern at a multi-leg call site (the orchestrator fires one tool call per leg i
 
 | Voices declared | Multi-leg dispatch shape |
 |---|---|
-| `{native = "X", direct = "Y"}` | `Agent(subagent_type=role, …)` + `Bash(chat_completion.py --model Y --max-tokens 0 …)` |
-| `{native = "X"}` only | `Agent(subagent_type=role, …)` only — single-leg by design |
-| `{direct = "Y", codex = "Z"}` | `Bash(chat_completion.py --model Y …)` + `Bash(codex exec -m Z …)` — script-driven only (see `scripts/review.sh`) |
+| `{native = "X", direct = "Y"}` | Selected runtime's native project agent + `chat_completion.py --model Y --max-tokens 0` |
+| `{native = "X"}` only | Selected runtime's native project agent only; single-leg by design |
+| `{direct = "Y", codex = "Z"}` | `chat_completion.py --model Y` + `codex exec -m Z`; script-driven only (see `scripts/review.sh`) |
 
 The dispatched legs share the same user-facing prompt. Agents whose work depends on tool calls (vault reads, file writes) cannot be perfectly mirrored — the direct-api leg sees the prompt only. Treat the second leg as a cross-check on verdict / framing, not on the tool-driven output.
 
 ### Single-leg roles (write-capable carve-out)
 
-Roles that write files or handle verbatim user-authored content declare only the `native` leg. Today: **Scribe** (`voices = {native = "haiku"}`). Rationale: a parallel direct-api leg would either (a) produce duplicate writes or (b) leak verbatim user content to an external API. The single-leg declaration is explicit; lint accepts any non-empty voices table. Add a single-leg carve-out only when the role meets one of these conditions and document why in the agent's description.
+Roles that write files or handle verbatim user-authored content declare only the `native` leg. Today: **Scribe** (`voices = {native = "haiku"}`). Rationale: a parallel direct-api leg would either (a) produce duplicate writes or (b) leak verbatim user content to an external API. The selected runtime performs the one write. The single-leg declaration is explicit; lint accepts any non-empty voices table. Add a single-leg carve-out only when the role meets one of these conditions and document why in the agent's description.
 
 ### Currently-enabled multi-leg call sites
 
@@ -131,7 +131,7 @@ The multi-leg dispatch shape is enabled at these specific sites today:
 
 - **`/system-review` Step 1c** — privacy-reviewer's `native` + `direct` legs both fire (worked example in that command file).
 - **`scripts/review.sh`** — external-reviewer's `direct` + `codex` legs both fire.
-- **`/decision` (decision journals):** Thinker's `native` + `direct` legs both fire. Decisions are single-shot, high-stakes choices where single-model framing is the failure mode dual-voice exists for. Pattern: dispatch Thinker via `Agent` in parallel with a `Bash` call to `chat_completion.py --model <thinker.voices.direct>` carrying the same framing prompt. At synthesis, surface any disagreement on framework choice or verdict before presenting to the user.
+- **`/decision` (decision journals):** Thinker's `native` + `direct` legs both fire. Decisions are single-shot, high-stakes choices where single-model framing is the failure mode dual-voice exists for. Pattern: dispatch Thinker through the selected runtime's native project-agent surface in parallel with `chat_completion.py --model <thinker.voices.direct>` carrying the same framing prompt. At synthesis, surface any disagreement on framework choice or verdict before presenting to the user.
 - **Quantitative-claim outputs (synthesis-time check, all roles, all sites):** whenever an agent's returned output contains the fabrication-prone fact classes in CLAUDE.md § "Critical Rules", the orchestrator inspects the dispatch shape at synthesis time. If the dispatch was single-leg `native`, the orchestrator either (a) redispatches the role's `direct` leg in parallel as a disagreement detector on the same prompt and diffs numeric / factual claims at synthesis, OR (b) marks every claim in those fact classes as `unverified` before write-back. **Option (a) is a disagreement detector, not a verification gate**: two-leg agreement does NOT promote `unverified` claims to verified, because both legs see the same prompt and can co-hallucinate. Verification still requires a primary-source citation (arXiv abstract, lab blog, primary press release) under the Critical Rules. Option (a)'s value is catching disagreement between legs (a real fabrication signal) and forcing the claim to `unverified` regardless. **Option (a) requires the role to have a `direct` voice declared; for the Scribe role (single-leg-only by carve-out), option (b) is the mandatory fallback.** This is a post-dispatch gate, not a per-call-site predeclaration; it applies uniformly without requiring every command file to opt in.
 
 Every other dispatch site (the Reading hub in `/hi` for non-fact-bearing reads, ad-hoc Reader / Scout / Curator calls that produce only narrative or capture, single-source restatements) fires only the role's `native` leg. The `direct` leg is declared in `voices` as a forward binding for when that call site opts in. To enable a second leg at any new call site, follow the worked example in `/system-review` Step 1c. Lint does NOT enforce dual dispatch at every call site; the schema is intent, the call site is policy.

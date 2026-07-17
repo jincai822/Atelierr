@@ -1,0 +1,7 @@
+interface:
+  display_name: "Atelier $reflect"
+  short_description: "Run the Atelier $reflect skill in Codex"
+  default_prompt: "Use $reflect to run the matching Atelier command."
+
+policy:
+  allow_implicit_invocation: false

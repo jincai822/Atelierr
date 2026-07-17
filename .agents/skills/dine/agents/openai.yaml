@@ -1,0 +1,7 @@
+interface:
+  display_name: "Atelier $dine"
+  short_description: "Run the Atelier $dine skill in Codex"
+  default_prompt: "Use $dine to run the matching Atelier command."
+
+policy:
+  allow_implicit_invocation: false

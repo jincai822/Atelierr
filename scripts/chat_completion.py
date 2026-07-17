@@ -70,7 +70,8 @@ source-of-record for full prompts/responses; $OV gets the bones for
 cross-machine + cross-leg report aggregation). `task_dispatch_kind` in
 the event is always `direct` for chat_completion.py calls; native-leg
 entries (written explicitly by `scripts/shadow.py log --leg native`
-in-band after each Agent dispatch — see Pattern B in
+in-band after each native project-agent dispatch; the runtime-aware identity
+comes from `scripts/shadow.py native-model` - see Pattern B in
 `protocols/shadow-log.md`) carry `native`.
 Cost is NOT computed at write time; `scripts/shadow.py report` derives
 cost retroactively from the latest `harness/model_costs.toml` so a price

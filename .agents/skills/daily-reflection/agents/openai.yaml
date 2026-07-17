@@ -1,0 +1,7 @@
+interface:
+  display_name: "Atelier $daily-reflection"
+  short_description: "Run the Atelier $daily-reflection skill in Codex"
+  default_prompt: "Use $daily-reflection to run the matching Atelier command."
+
+policy:
+  allow_implicit_invocation: false

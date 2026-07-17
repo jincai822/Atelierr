@@ -51,6 +51,11 @@ semantic.toml
 # Loaded by scripts/_paths.py.
 harness/paths.local.toml
 
+# Per-user runtime preference. The committed default lives in
+# harness/runtimes.toml; this file can select Claude or Codex locally.
+harness/runtime.local.toml
+harness/.runtime.local.*.tmp
+
 # Per-user environment overrides for headless launchd invocations (export OV=..., etc.).
 # Sourced by scripts/launchd/com.atelier.autoevo-nightly.plist. Contains the user's
 # absolute vault path; should never be committed.

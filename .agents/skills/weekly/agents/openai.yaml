@@ -1,0 +1,7 @@
+interface:
+  display_name: "Atelier $weekly"
+  short_description: "Run the Atelier $weekly skill in Codex"
+  default_prompt: "Use $weekly to run the matching Atelier command."
+
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Atelier $decision"
+  short_description: "Run the Atelier $decision skill in Codex"
+  default_prompt: "Use $decision to run the matching Atelier command."
+
+policy:
+  allow_implicit_invocation: false

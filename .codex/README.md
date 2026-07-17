@@ -1,10 +1,10 @@
 # Codex
 
-Codex runs against the Atelier system. It reads the root `AGENTS.md` and can
-discover the repo-scoped skill in `.agents/skills/atelier/SKILL.md` (skill
-directory name remains `atelier` until the optional repo-rename phase).
-The current Claude Code command files remain the native command specs, and
-Codex adapts them through `protocols/runtime-adapters.md`.
+Codex runs against the Atelier system. It reads the root `AGENTS.md` and
+discovers repo-scoped skills under `.agents/skills/`.
+The current Claude Code command files remain the workflow specs. Codex adapts
+them through `protocols/runtime-adapters.md`, exposes roles through
+`.codex/agents/`, and reuses lifecycle scripts through `.codex/hooks.json`.
 
 Start an interactive Codex session from the repo root:
 
@@ -12,41 +12,63 @@ Start an interactive Codex session from the repo root:
 codex -C . --sandbox workspace-write
 ```
 
-Portable command invocation:
+Atelier's shared runtime selector also ships with Codex selected:
 
 ```bash
-python3 scripts/atelier.py status
-python3 scripts/atelier.py commands
-python3 scripts/atelier.py run hi
-python3 scripts/atelier.py run hi "context"
-python3 scripts/atelier.py prompt reflect
-python3 scripts/atelier.py prompt lint
+python3 scripts/atelier_runtime.py status
+python3 scripts/atelier_runtime.py run hi
 ```
 
-Paste the generated prompt into Codex. The helper reads `harness/commands.toml`
-and points Codex at the matching `.claude/commands/*.md` spec.
+The selector only launches the native CLI surface. It does not generate a
+prompt or start a nested process inside an active Codex thread. A user can
+persist Claude as the launcher and launchd default with
+`python3 scripts/atelier_runtime.py use claude`.
 
-Inside an interactive Codex session, use command-shaped shorthands instead of
-literal slash commands:
+Inside an active Codex thread, use explicit skills as the counterpart to
+Claude slash commands:
 
 ```text
-hi
-hi context
-reflect
-run weekly
-run lint
+$hi
+$hi context
+$reflect
+$weekly
+$lint
 ```
 
-Codex should interpret these through `AGENTS.md` and launch
-`python3 scripts/atelier.py run <command>`. Literal `/hi` is not reliable in
-the Codex TUI because slash input is reserved for Codex built-ins.
+Each skill reads the matching `.claude/commands/*.md` source directly and
+executes it in the current thread. No Python command bridge is required.
 
-Portable role discovery:
+From an external shell or automation, launch Codex directly with the skill
+mention quoted from the shell:
 
 ```bash
-python3 scripts/atelier.py agents
-python3 scripts/atelier.py agent-prompt researcher
+codex -C . '$hi'
+codex -C . '$hi context'
+codex exec -C . '$lint'
 ```
+
+Codex discovers native roles from `.codex/agents/*.toml`. The adapters remain
+thin: `harness/agents.toml` supplies discovery descriptions and each adapter
+loads its authoritative `.claude/agents/*.md` role brief. Inspect active
+subagents with `/agent` in the CLI.
+
+Native hooks provide session cues, session-lock refresh, out-of-band intent
+miss logging, and turn-stop shadow-log cleanup. On the first session after
+checkout or after a hook change, open `/hooks` and trust the project
+definitions.
+
+Literal project slash commands are unavailable because the Codex TUI owns the
+slash namespace. Use the corresponding explicit skill:
+
+```text
+$hi
+$hi context
+$weekly
+$review
+```
+
+Type `$` in the composer to browse command skills. Inspect native roles with
+`/agent` in the CLI.
 
 Code review:
 

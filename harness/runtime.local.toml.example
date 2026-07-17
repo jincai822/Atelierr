@@ -1,0 +1,9 @@
+# Copy to `harness/runtime.local.toml`, or run:
+#
+#   python3 scripts/atelier_runtime.py use claude
+#
+# The local file is gitignored. `ATELIER_RUNTIME` still takes precedence for
+# one process.
+
+[runtime]
+default = "claude"

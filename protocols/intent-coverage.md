@@ -1,10 +1,13 @@
 # Intent Coverage
 
-Feedback loop for `/hi` intent routing. Captures the inputs the router was uncertain about so we can extend `harness/intents.toml` based on real usage instead of guesswork.
+Feedback loop for the shared hi intent router, invoked as `/hi` in Claude Code
+and `$hi` in Codex. It captures inputs the router was uncertain about so we can
+extend `harness/intents.toml` based on real usage instead of guesswork.
 
 ## What gets logged
 
-A miss is any `/hi <text>` invocation where the orchestrator could not classify the intent with high confidence. Three kinds:
+A miss is any Claude `/hi <text>` or Codex `$hi <text>` invocation where the
+orchestrator could not classify the intent with high confidence. Three kinds:
 
 | Kind | Trigger |
 |---|---|
@@ -41,7 +44,7 @@ Schema:
 }
 ```
 
-Field key for `ambiguity_candidates[].matched_pattern` deliberately matches the key produced by `scripts/atelier.py intent --json` (the matcher returns `matched_pattern`, never `pattern`); the orchestrator passes candidates straight through without renaming. `ambiguity_candidates`, `ambiguity_candidates_raw`, `clarified_to`, `final_dispatch`, and `notes` are all optional. `initial_match.name/priority/matched_pattern` may be null when the orchestrator didn't have a clean initial match to attribute (rare; usually present even for fallback). `priority` is dropped to null silently when `--initial-priority` fails to parse as int.
+Field key for `ambiguity_candidates[].matched_pattern` deliberately matches the key produced by `scripts/intent_coverage.py intent --json` (the matcher returns `matched_pattern`, never `pattern`); the orchestrator passes candidates straight through without renaming. `ambiguity_candidates`, `ambiguity_candidates_raw`, `clarified_to`, `final_dispatch`, and `notes` are all optional. `initial_match.name/priority/matched_pattern` may be null when the orchestrator didn't have a clean initial match to attribute (rare; usually present even for fallback). `priority` is dropped to null silently when `--initial-priority` fails to parse as int.
 
 ## Producer side — dual path
 
@@ -49,34 +52,42 @@ Two producers feed the same JSONL, partitioned by `match_kind`:
 
 | Producer | Surface | Captures | Token cost into orchestrator |
 |---|---|---|---|
-| `intent-hook` | `UserPromptSubmit` hook (Claude Code only; wired in `.claude/settings.json`) | `fallback`, `ambiguous` — mechanically derivable from the raw input via `match_intents()` | **0** — runs before the orchestrator responds; stdout never feeds back |
+| `intent-hook` | `UserPromptSubmit` hook (`.claude/settings.json` and `.codex/hooks.json`) | `fallback`, `ambiguous`: mechanically derivable from the raw input via `match_intents()` | **0**; runs before the orchestrator responds, and stdout never feeds back |
 | `intent-log` | In-band `Bash:` call by the orchestrator | `low_confidence` — heuristic LLM judgment over message shape (see `.claude/commands/hi.md` § Clarify before dispatching) | ~200-300 tokens per call (Bash command + result) |
 
 The hook captures the bulk of misses (fallback is purely "no patterns matched"; ambiguous is purely "2+ tied at top priority" — both deterministic). The orchestrator's in-band call covers only the LLM-judged `low_confidence` branch + any clarification-time enrichment that the hook cannot observe.
 
-Codex runtime has no `UserPromptSubmit` hook surface, so the Codex orchestrator runs the FULL `intent-log` Bash call for all three match-kinds (in-band cost across the board). Hook-produced rows carry `"logged_by": "user_prompt_submit_hook"`; orchestrator-produced rows omit that field — use this for attribution-by-runtime in the report.
+Codex uses its native `UserPromptSubmit` hook for explicit `$hi` and `$reflect`
+skill invocations. Both runtimes therefore hook-log `fallback` and `ambiguous`;
+only `low_confidence` remains an in-band orchestrator call. Hook-produced rows
+carry `"logged_by": "user_prompt_submit_hook"`; orchestrator-produced rows omit
+that field, which preserves producer attribution in the report.
 
-The shape of the in-band call is documented in `.claude/commands/hi.md` § Miss Logging. The hook command is wired as:
+The shape of the in-band call is documented in `.claude/commands/hi.md` § Miss Logging. The shared hook entry is wired with the runtime label appropriate to each edge:
 
 ```
 {"type": "command",
- "command": "uv run scripts/atelier.py intent-hook --runtime claude-code",
+ "command": "uv run scripts/intent_coverage.py intent-hook --runtime claude-code",
+ "timeout": 5}
+
+{"type": "command",
+ "command": "uv run scripts/intent_coverage.py intent-hook --runtime codex",
  "timeout": 5}
 ```
 
-inside `.claude/settings.json` → `hooks.UserPromptSubmit[0].hooks[]`.
+The first lives in `.claude/settings.json`; the second lives in `.codex/hooks.json`.
 
-The write is best-effort — `scripts/atelier.py intent-log` always returns exit code 0 (orchestrator Bash calls can ignore the exit code with confidence):
+The write is best-effort — `scripts/intent_coverage.py intent-log` always returns exit code 0 (orchestrator Bash calls can ignore the exit code with confidence):
 
 - An empty `--input`, a malformed `--candidates` JSON, or a non-int `--initial-priority` each degrade silently (warning to stderr) without aborting the call. Malformed candidates are preserved verbatim under `ambiguity_candidates_raw` so a later batch-review can still see the orchestrator's intent.
-- The script silently no-ops on OSError so a slow / unmounted `$OV` never blocks a live `/hi`.
+- The script silently no-ops on OSError so a slow or unmounted `$OV` never blocks a live hi invocation.
 - One `f.write(json.dumps(...) + "\n")` per entry. On POSIX with `O_APPEND`, this is atomic up to `PIPE_BUF` (4 KiB on Linux, 512 B on macOS for some filesystems). The expected entry size (≤1 KB) keeps every write safely under that ceiling. Larger payloads may interleave; the consumer's per-line `json.JSONDecodeError` handler drops any malformed lines so a torn write degrades to lost data, never corrupted reports.
 - No locking; concurrent writers from parallel Codex sessions are rare in practice and an occasional interleave doesn't matter for batch aggregation.
 
 ## Consumer side — batch review
 
 ```
-uv run scripts/atelier.py intent-misses [--since YYYY-MM-DD] [--match-kind <kind>] [--runtime claude-code|codex] [--top N] [--json]
+uv run scripts/intent_coverage.py intent-misses [--since YYYY-MM-DD] [--match-kind <kind>] [--runtime claude-code|codex] [--top N] [--json]
 ```
 
 `--since` filters at **file-date** granularity (the log file's `YYYY-MM-DD` stem), not at event-timestamp granularity. A TZ-skewed event near midnight is grouped with its file's date, so `--since 2026-05-15` reads the whole `2026-05-15.jsonl` file even when only late-evening events are wanted.
@@ -85,7 +96,7 @@ Output:
 
 - Counts by `match_kind` (how often we fall back vs disambiguate).
 - Top distinct phrases (lowercased, ≤200 chars) with count, distinct days, and which kinds they hit.
-- Coverage signal: phrases recurring across at least the distinct-days threshold defined in `scripts/atelier.py` as `INTENT_MISS_DISTINCT_DAYS_THRESHOLD` (currently 3) are flagged as candidate triggers — strong enough that user is hitting the gap repeatedly, not just once.
+- Coverage signal: phrases recurring across at least the distinct-days threshold defined in `scripts/intent_coverage.py` as `INTENT_MISS_DISTINCT_DAYS_THRESHOLD` (currently 3) are flagged as candidate triggers — strong enough that user is hitting the gap repeatedly, not just once.
 - A note line `(N event(s) had empty raw_input — counted in by-kind totals, omitted from the phrase table)` appears when applicable; `kind_counts` and `phrase_stats` deliberately disagree by N in that case so a fire-time logging glitch is visible in the audit, not silently dropped.
 
 Run cadence: opportunistic. No automated cue yet; check during `/system-review` or before sprints of harness work. This is a deliberate v1 scope choice — the cue template would mirror `check_routine_outputs` (directory existence + recent entry count + ack-state in `$OV/_meta/`), and adding it is tracked as the natural v2 step. Without the cue, the user discovers the backlog by remembering to run `intent-misses`; this is acceptable while traffic is low.
@@ -95,8 +106,8 @@ Run cadence: opportunistic. No automated cue yet; check during `/system-review` 
 Three outcomes per recurring phrase:
 
 1. **Add a pattern to an existing intent.** The user's phrasing is a synonym for an intent that already exists, just not enumerated. Edit the matching `patterns = [...]` list in `harness/intents.toml`. Cheap, low-risk; the substring matcher handles it immediately.
-2. **Add a new intent.** The phrase describes a workflow `/hi` doesn't model yet (e.g., a recurring engineering directive pattern). Decide whether `/hi` is the right surface, or whether the workflow belongs as a direct slash command (in `harness/commands.toml`) or a skill (in `.claude/skills/`).
-3. **Confirm it stays a miss.** Some misses are correct — `/hi` is the reflection entry point, and the user typing an engineering directive into it is genuinely out of scope. Reflection-as-fallback is the safe degradation. Document the call by leaving the entry in the log; the recurring count itself is the audit trail.
+2. **Add a new intent.** The phrase describes a workflow `hi` doesn't model yet (e.g., a recurring engineering directive pattern). Decide whether Claude `/hi` and Codex `$hi` are the right surfaces, or whether the workflow belongs as a direct registered command with both native edges, or as a semantic Claude entry hint in `.claude/skills/`.
+3. **Confirm it stays a miss.** Some misses are correct. Claude `/hi` and Codex `$hi` are reflection entry points, and an engineering directive typed into either may genuinely be out of scope. Reflection-as-fallback is the safe degradation. Document the call by leaving the entry in the log; the recurring count itself is the audit trail.
 
 Do NOT add patterns that would steal from another intent's substring space. The TOML header has cautionary notes (`"read"` would snag `"curate readwise"`, etc.); the lesson generalizes — prefer phrase-shaped patterns (`"improve the repo"`) over single-token patterns (`"improve"`).
 
@@ -109,5 +120,5 @@ The log accumulates indefinitely. There is no rotation / compaction policy yet �
 - `harness/intents.toml` — canonical intent registry; misses feed pattern additions here.
 - `.claude/commands/hi.md` § Clarify before dispatching — heuristic for when to flag as `low_confidence`.
 - `.claude/commands/hi.md` § Miss Logging — exact Bash shape orchestrator runs.
-- `scripts/atelier.py` — `intent-log` and `intent-misses` subcommands; source of truth for the path and the distinct-days threshold.
+- `scripts/intent_coverage.py` — `intent-log` and `intent-misses` subcommands; source of truth for the path and the distinct-days threshold.
 - `protocols/shadow-log.md` — sibling JSONL-append + report system. Different write target (canonical to `$OV/` here, redacted mirror skeleton there) but a useful precedent if this log ever grows multi-leg / verdict-aggregation needs.

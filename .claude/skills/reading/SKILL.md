@@ -15,7 +15,7 @@ URL collision is the main risk for this skill. URLs and wikilinks appear in many
 - **Curate / inbox triage** (`triage my inbox`, `curate readwise` — even when followed by URLs): routes to curate.
 - **Save for later** (`save this <url>`, `just save this`): routes to capture (Scribe records the URL verbatim).
 - **Question with citation** (`what does X think about <url>?`): the question is the request; the URL is supporting context. Routes to the default reflection / decision intent.
-- **Dining log with restaurant link**: routes to dine.
+- **Meal-history tracker with restaurant link**: routes to dine.
 - **Wikilinks inside structured notes** (`see also [[Foo]]`): not a read request unless the user explicitly says so.
 
 Trigger only when the URL, wikilink, or "read this" phrase IS the request payload — the user wants the system to read the linked content and discuss it, full stop.
@@ -30,7 +30,9 @@ Do not bypass `/hi`. Do not call Reader directly. The router applies the same pr
 
 Skill auto-trigger is semantic — Claude Code matches this skill's frontmatter description against the user's phrasing, judging relevance with the model itself rather than literal patterns. Intent matching inside `/hi` is exact (TOML `patterns` plus priority resolution against other intents). The two stages have different precision properties: the skill widens the natural-language entry surface; the router stays the single decision point for what runs.
 
-This division is documented in `protocols/runtime-adapters.md` § Runtime Surfaces. Codex does not read `.claude/skills/`; Codex reaches the reading flow through `python3 scripts/atelier.py run hi` or by reading `.claude/commands/hi.md` directly.
+This division is documented in `protocols/runtime-adapters.md` § Runtime
+Surfaces. Codex does not read `.claude/skills/`; Codex reaches the same flow
+through `$hi <user-text>`.
 
 ## Maintenance
 

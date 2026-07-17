@@ -1,0 +1,15 @@
+---
+name: prm
+description: "Run the Atelier `/prm` workflow in Codex using the shared command registry. Use when the user explicitly invokes `$prm`. Personal relationship management audit grounded in local relationship notes."
+---
+
+## Atelier Command
+
+Run the explicit Codex `$prm` skill. Its authoritative workflow source is
+the Claude Code `/prm` command specification.
+
+1. Read `AGENTS.md` and `CLAUDE.md`.
+2. Read the authoritative `.claude/commands/prm.md` command specification directly.
+3. Execute it in this thread using the Codex adaptation table in `AGENTS.md`.
+4. Treat text following `$prm` as command context or arguments.
+5. Do not start a nested Codex process; complete the workflow in this thread.

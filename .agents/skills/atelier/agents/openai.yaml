@@ -1,0 +1,7 @@
+interface:
+  display_name: "Atelier"
+  short_description: "Run Atelier reflection and knowledge workflows"
+  default_prompt: "Use $atelier to route this request through the appropriate Atelier workflow."
+
+policy:
+  allow_implicit_invocation: true

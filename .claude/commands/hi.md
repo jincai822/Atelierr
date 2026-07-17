@@ -3,11 +3,11 @@ description: Universal entry point — intent router for reflection, planning, a
 ---
 # Reflect
 
-Your reflection system. Uses a two-step decision tree with `AskUserQuestion` for native scroll-and-select UI.
+Your reflection system. Uses a two-step decision tree with `AskUserQuestion` on Claude Code and the available choice UI or numbered fallback on Codex.
 
 ## Routing & Dispatch
 
-### Intent Routing (when user types `/hi <context>`)
+### Intent Routing (Claude `/hi <context>`, Codex `$hi <context>`)
 
 Routing rules live in `harness/intents.toml` (canonical). Read that file at session start to know the dispatch shape per intent: trigger phrases (`patterns`), the dispatch sub-mode (`mode`), the agents the orchestrator is expected to dispatch (`agents`), and the matching priority. Do not duplicate those fields here; when adding or changing a routing rule, edit the TOML and let this file reference it.
 
@@ -42,11 +42,13 @@ Substring matching can produce **low-confidence wins** that the user did not int
 
 The bar: **never silently route to a sub-mode that opens a file, calls an external API, or starts a multi-agent chain when the user's input could have meant something materially different.** Capture (single Scribe write), Read (Reader+Researcher), Decision (Researcher+Thinker), and the big chains (Sync, Weekly, Review, Promote) all qualify. Reflection-as-default does NOT qualify; it's the safe degradation.
 
-The Codex orchestrator runs the same logic via `python3 scripts/atelier.py intent "<text>" --json` and inspects `fallback` + the heuristic above. The Codex side then offers the choice in-line as a numbered prompt rather than `AskUserQuestion` (Codex has no equivalent UI).
+The Codex `$hi` skill reads this specification plus `harness/intents.toml` and
+applies the same routing and confidence rules directly. It uses the active
+surface's native choice UI when available, otherwise a numbered prompt.
 
 ### Miss Logging
 
-Dual-path. The mechanically-derivable branches are captured out-of-band by a `UserPromptSubmit` hook (`scripts/atelier.py intent-hook`, registered in `.claude/settings.json`); the orchestrator covers only the LLM-judgment branch in-band.
+Dual-path. The mechanically-derivable branches are captured out-of-band by a `UserPromptSubmit` hook (`scripts/intent_coverage.py intent-hook`, registered in `.claude/settings.json` and `.codex/hooks.json`); the orchestrator covers only the LLM-judgment branch in-band.
 
 - **Fallback** (no patterns matched) — **HOOK-LOGGED**. The hook runs the same matcher at prompt-submit time. Do NOT call `intent-log` from the orchestrator.
 - **Ambiguous** (2+ non-fallback intents tied at top priority) — **HOOK-LOGGED**. Same hook path; ambiguity candidates captured deterministically.
@@ -57,7 +59,7 @@ The happy path (high-confidence single winner with no clarification) is not logg
 For the low-confidence case only:
 
 ```
-Bash: uv run scripts/atelier.py intent-log \
+Bash: uv run scripts/intent_coverage.py intent-log \
   --input "<raw /hi text the user typed>" \
   --match-kind low_confidence \
   --runtime claude-code \
@@ -71,13 +73,13 @@ Bash: uv run scripts/atelier.py intent-log \
 
 The script is best-effort and always returns exit code 0 — malformed args and filesystem errors each degrade silently. The orchestrator can dispatch the Bash call without `|| true` or other exit-code guards.
 
-Codex parity: Codex has no `UserPromptSubmit` hook surface. The Codex orchestrator runs the FULL `intent-log` Bash call for all three match-kinds (`--runtime codex`), accepting the in-band token cost as the cost of having no hook layer cross-runtime.
+Codex parity: `.codex/hooks.json` runs `intent-hook --runtime codex` for explicit `$hi` and `$reflect` prompts. Fallback and ambiguous misses are therefore hook-logged on both runtimes. Codex only runs the in-band `intent-log --runtime codex` call for the low-confidence LLM-judgment branch.
 
-The log file lands at `$OV/_meta/intent_misses/YYYY-MM-DD.jsonl` (one line per miss, regardless of producer). Hook-produced rows carry `"logged_by": "user_prompt_submit_hook"` for attribution; orchestrator-produced rows omit that field. Batch review: `uv run scripts/atelier.py intent-misses [--since YYYY-MM-DD] [--match-kind <kind>]`. Recurrence threshold = `INTENT_MISS_DISTINCT_DAYS_THRESHOLD` (currently 3) distinct file-dates. Full workflow + dual-path producer contract: `protocols/intent-coverage.md`.
+The log file lands at `$OV/_meta/intent_misses/YYYY-MM-DD.jsonl` (one line per miss, regardless of producer). Hook-produced rows carry `"logged_by": "user_prompt_submit_hook"` for attribution; orchestrator-produced rows omit that field. Batch review: `uv run scripts/intent_coverage.py intent-misses [--since YYYY-MM-DD] [--match-kind <kind>]`. Recurrence threshold = `INTENT_MISS_DISTINCT_DAYS_THRESHOLD` (currently 3) distinct file-dates. Full workflow + dual-path producer contract: `protocols/intent-coverage.md`.
 
 ### Parallel-dispatch guarantee
 
-When `harness/intents.toml` declares `parallel = true` for a matched intent, the orchestrator MUST dispatch the listed agents in a **single message containing multiple tool calls** (Claude Code) or **a single batch invocation** (Codex). Sequential dispatch (one agent per turn) for a parallel-marked intent is a latency regression and a contract violation.
+When `harness/intents.toml` declares `parallel = true` for a matched intent, the orchestrator MUST dispatch the listed agents in a **single message containing multiple tool calls** (Claude Code) or **a single native project-agent batch** from `.codex/agents/` (Codex). Sequential dispatch (one agent per turn) for a parallel-marked intent is a latency regression and a contract violation.
 
 This applies to:
 - `intents.reading` (Reader + Researcher)
@@ -95,7 +97,7 @@ Verification: in the routing announcement, suffix `(parallel)` after the agent l
 
 <!-- sub-mode-procedures-map -->
 
-Once an intent matches, the orchestrator's next step is to read and follow the procedure mapped from the intent's `mode` field. This is what makes the dual path real (`/<name>` direct OR `/hi <natural-language>` both execute the same procedure). For modes pointing at an external procedure file, read the file and execute it as if the user had typed `/<name>` directly. The procedure file's prose is the authority on dispatch shape, write-back, and any approval gates. For inline modes, follow the named section below in this file.
+Once an intent matches, the orchestrator's next step is to read and follow the procedure mapped from the intent's `mode` field. This makes direct invocation and natural-language routing execute the same procedure: Claude uses `/<name>` or `/hi <natural-language>`, while Codex uses `$<name>` or `$hi <natural-language>`. For modes pointing at an external procedure file, read the file and execute it as though the user invoked that runtime's direct command. The procedure file's prose is the authority on dispatch shape, write-back, and approval gates. For inline modes, follow the named section below in this file.
 
 | `mode` | Procedure |
 |---|---|

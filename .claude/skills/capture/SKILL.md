@@ -19,7 +19,9 @@ If the user's input is *not* a clean capture shape (mixes a record-this clause w
 
 Skill auto-trigger is semantic — Claude Code matches this skill's frontmatter description against the user's phrasing, judging relevance with the model itself rather than literal patterns. Intent matching inside `/hi` is exact (TOML `patterns` plus a documented shape detector for `intents.capture`). The two stages have different precision properties: the skill widens the natural-language entry surface; the router stays the single decision point for what runs.
 
-This division is documented in `protocols/runtime-adapters.md` § Runtime Surfaces. Codex does not read `.claude/skills/`; Codex reaches the capture flow through `python3 scripts/atelier.py run hi` or by reading `.claude/commands/hi.md` directly.
+This division is documented in `protocols/runtime-adapters.md` § Runtime
+Surfaces. Codex does not read `.claude/skills/`; Codex reaches the same flow
+through `$hi <user-text>`.
 
 ## Maintenance
 

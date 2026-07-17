@@ -34,9 +34,9 @@ description = "Write local files under $OV/ or the repo (reflections, cache, har
 codex = ["apply_patch", "local file edit"]
 
 [capabilities.spawn_role]
-description = "Delegate a role to a subagent or emulate it sequentially."
-codex = ["Codex subagent when permitted", "sequential emulation"]
+description = "Delegate a role to a native project subagent or emulate it sequentially."
+codex = ["project agent: .codex/agents/<role>.toml", "sequential emulation fallback"]
 
 [capabilities.ask_user]
 description = "Ask the user to choose among workflow branches."
-codex = ["plain question", "numbered options"]
+codex = ["native choice UI when available", "numbered options fallback"]

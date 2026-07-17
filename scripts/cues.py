@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""cues.py: Unified, quiet-by-default cue checker for /hi session start.
+"""cues.py: Unified, quiet-by-default cue checker for native hi session start.
 
-Why this exists: `/hi` (no args) needs to surface "you forgot to run X"
+Why this exists: Claude `/hi` and Codex `$hi` need to surface "you forgot to run X"
 nudges (weekly review overdue, mobile-capture inbox pending). The old
 pattern was inline Bash blocks in `.claude/commands/hi.md` that printed
 debug lines (`days_since=4 latest=...`, `zettelm_pending=0`) into the
@@ -35,7 +35,7 @@ where the user has reviewed the state and accepted the lag (e.g.,
 aggregate_freshness when the underlying aggregate update is queued).
 
 Exits 0 always. Failing to find the vault still exits 0 with no output
-so an unconfigured environment never blocks `/hi`.
+so an unconfigured environment never blocks either native hi workflow.
 """
 
 from __future__ import annotations
@@ -44,6 +44,7 @@ import argparse
 import json
 import os
 import sys
+import tomllib
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -60,6 +61,53 @@ class Cue:
     severity: str  # "hard" | "soft"
     command_path: str  # relative path to the command file to route into on Yes
     message: str  # user-facing Chinese prompt
+
+
+def _resolve_output_runtime(requested: str) -> str:
+    """Resolve which native command syntax user-facing cue text should use."""
+    if requested in {"claude", "codex"}:
+        return requested
+    active = os.environ.get("ATELIER_ACTIVE_RUNTIME")
+    if active in {"claude", "codex"}:
+        return active
+    if os.environ.get("CODEX_THREAD_ID"):
+        return "codex"
+    if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_PROJECT_DIR"):
+        return "claude"
+    try:
+        from atelier_runtime import load_registry, resolve_runtime
+
+        runtime, _ = resolve_runtime(load_registry())
+        return runtime
+    except Exception:
+        # Cue checks are intentionally fail-open. The committed runtime default
+        # is Codex, so retain that surface if preference resolution is broken.
+        return "codex"
+
+
+def _format_runtime_message(message: str, runtime: str) -> str:
+    """Render registered workflow references in the active runtime's syntax."""
+    if runtime != "codex":
+        return message
+    registry_path = Path(__file__).resolve().parents[1] / "harness" / "commands.toml"
+    try:
+        commands = tomllib.loads(registry_path.read_text(encoding="utf-8")).get(
+            "commands", {}
+        )
+    except (OSError, tomllib.TOMLDecodeError):
+        return message
+    if not isinstance(commands, dict):
+        return message
+    for name, entry in sorted(commands.items(), key=lambda item: -len(item[0])):
+        if not isinstance(entry, dict):
+            continue
+        replacement = (
+            f"`${name}`"
+            if entry.get("user_facing", True) is not False
+            else f"`{name}`"
+        )
+        message = message.replace(f"`/{name}`", replacement)
+    return message
 
 
 # --- individual checks ----------------------------------------------------
@@ -428,7 +476,6 @@ def check_routine_staleness(ov: Path, today: date) -> tuple[Cue | None, str]:
     cadence + tolerance. Catches silent Drive-write failures that
     check_routine_outputs (which only reports *new* files) cannot see.
     """
-    import re
     import tomllib
 
     config_path = ov / "_meta" / "routine_watch.toml"
@@ -850,7 +897,7 @@ def check_autoevo_ran(ov: Path, today: date) -> tuple[Cue | None, str]:
                     f"Nightly autoevo did not run today ({today.isoformat()}). "
                     f"Check `/tmp/com.atelier.autoevo-nightly.err` and "
                     f"`~/Library/LaunchAgents/com.atelier.autoevo-nightly.plist`. "
-                    f"Common causes: $OV unset in launchd shell, expired Claude Code credentials, "
+                    f"Common causes: $OV unset in launchd shell, expired selected-runtime credentials, "
                     f"machine asleep at 05:00."
                 ),
             ),
@@ -916,7 +963,6 @@ def _recap_local_runs(ov: Path, today: date, verbose: bool = False) -> list[str]
     For completed runs, peeks at the corresponding audit log (if any) to extract
     counts. Returns a list of human-readable recap lines.
     """
-    import re
     import tomllib
 
     runs_dir = ov / "_meta" / "routine_runs"
@@ -1123,12 +1169,11 @@ def check_local_routine_missed(ov: Path, today: date) -> tuple[Cue | None, str]:
 
 
 def check_career_growth(ov: Path, today: date) -> tuple[Cue | None, str]:
-    """Sunday weekly growth review toward "最懂 research 的 infra engineer".
+    """Sunday growth review against the current career plan.
 
-    Standing user request (2026-05-31): every Sunday, in any conversation,
-    review the past week's growth (papers read, engineering output, foresight
-    RFCs, OSS) against `career/career-plan-2026.md` and flag forgotten / drift
-    / adjust on the route.
+    Reviews the past week's learning, engineering output, forward-looking
+    design work, and public contributions. The actual goals and cadence stay
+    in the private plan rather than being copied into this public script.
 
     Fires (soft) when:
       - today is Sunday (weekday 6) AND the last growth-review is >=6 days old
@@ -1137,12 +1182,22 @@ def check_career_growth(ov: Path, today: date) -> tuple[Cue | None, str]:
         on whatever weekday the next session lands).
 
     Goes silent once a `reflections/YYYY-MM-DD-growth-review.md` exists for the
-    current week. Stays silent entirely if the plan file is absent (goal not set
-    up). Snooze: `cues.py snooze career_growth [--days N]`.
+    current week. Stays silent entirely if no career plan is present. Snooze:
+    `cues.py snooze career_growth [--days N]`.
     """
-    plan_path = tier("career") / "career-plan-2026.md"
-    if not plan_path.is_file():
-        return None, "career/career-plan-2026.md missing; goal not set up"
+    career_dir = tier("career")
+    plan_candidates = [
+        path
+        for path in career_dir.glob("*.md")
+        if path.is_file() and "plan" in path.stem.casefold()
+    ]
+    if not plan_candidates:
+        return None, "no career plan found; goal not set up"
+    plan_path = max(plan_candidates, key=lambda path: path.stat().st_mtime)
+    try:
+        plan_ref = plan_path.relative_to(ov).as_posix()
+    except ValueError:
+        plan_ref = plan_path.as_posix()
 
     refl = tier("reflections")
     if not refl.is_dir():
@@ -1179,12 +1234,11 @@ def check_career_growth(ov: Path, today: date) -> tuple[Cue | None, str]:
         Cue(
             key="career_growth",
             severity="soft",
-            command_path="career/career-plan-2026.md",
+            command_path=plan_ref,
             message=(
-                "周日 growth review: 过去一周朝「最懂 research 的 infra engineer」"
-                "的成长 (论文阅读 / 工程产出 / foresight RFC / OSS),对照 "
-                "`career/career-plan-2026.md` 的 cadence,看有没有忘记 / 偏离 / "
-                "要调整路线。现在过一下吗?"
+                "周日 growth review: 对照当前 career plan,回顾过去一周的学习、"
+                "工程产出、前瞻设计和公开贡献,看看有没有忘记、偏离或需要调整"
+                "路线。现在过一下吗?"
             ),
         ),
         reason,
@@ -1250,7 +1304,7 @@ def snooze_cue(ov: Path, key: str, until: date) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Quiet-by-default cue checks for /hi session start."
+        description="Quiet-by-default cue checks for Claude /hi and Codex $hi session start."
     )
     parser.add_argument(
         "--json",
@@ -1260,9 +1314,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--hook",
         action="store_true",
-        help="Emit Claude Code SessionStart hook output: when cues fire, "
+        help="Emit Claude Code or Codex SessionStart hook output: when cues fire, "
         "print a `hookSpecificOutput.additionalContext` JSON; when silent, "
         "print nothing. Exit 0 always.",
+    )
+    parser.add_argument(
+        "--runtime",
+        choices=("auto", "claude", "codex"),
+        default="auto",
+        help="Render registered workflow references for this runtime (default: auto).",
     )
     parser.add_argument(
         "--verbose",
@@ -1315,6 +1375,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     args = parser.parse_args(argv)
+    output_runtime = _resolve_output_runtime(args.runtime)
 
     if not os.environ.get("OV"):
         return 0
@@ -1327,13 +1388,12 @@ def main(argv: list[str] | None = None) -> int:
     # rename of the `cache` segment in harness/paths.toml propagates
     # to this hook automatically.
     #
-    # Critical: the scheduled `claude -p "/autoevo-nightly"` invocation is
-    # itself a UserPromptSubmit event — without the env-var guard below,
+    # Critical: the scheduled headless runtime invocation is itself a
+    # UserPromptSubmit event. Without the env-var guard below,
     # the hook would touch the lock right before /autoevo-nightly's
     # pre-flight gate checks the lock, causing the bot to abort every
-    # night with "session-active lock fresh." The launchd plist exports
-    # ATELIER_SKIP_LOCK_TOUCH=1 in its ProgramArguments shell wrapper
-    # so the scheduled run bypasses the refresh.
+    # night with "session-active lock fresh." The launchd runner exports
+    # ATELIER_SKIP_LOCK_TOUCH=1 so the scheduled run bypasses the refresh.
     if args.touch_lock:
         if os.environ.get("ATELIER_SKIP_LOCK_TOUCH"):
             if args.verbose:
@@ -1358,7 +1418,7 @@ def main(argv: list[str] | None = None) -> int:
     # refresh so long-running sessions stay protected past the 6h bail window.
     #
     # Skip-flag honor: same logic as --touch-lock. The launchd-invoked
-    # `claude -p "/autoevo-nightly"` triggers SessionStart as well as
+    # headless autoevo runtime triggers SessionStart as well as
     # UserPromptSubmit; without this guard, the bot would touch the lock
     # right before its own pre-flight gate reads it, aborting every run.
     if args.hook:
@@ -1392,11 +1452,12 @@ def main(argv: list[str] | None = None) -> int:
             tag = "FIRED" if cue else "silent"
             print(f"# debug: {name} {tag}: {reason}", file=sys.stderr)
         if cue:
+            cue.message = _format_runtime_message(cue.message, output_runtime)
             fired.append(cue)
 
     if args.hook:
-        # Claude Code SessionStart hook protocol. Injects fired cues + recent
-        # run recaps as a system reminder on the next model call.
+        # Shared SessionStart hook protocol. Injects fired cues plus recent
+        # run recaps as context on the next Claude Code or Codex model call.
         recaps = _recap_local_runs(ov, today, verbose=args.verbose)
         if not fired and not recaps:
             return 0

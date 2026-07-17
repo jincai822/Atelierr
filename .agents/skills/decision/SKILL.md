@@ -1,0 +1,15 @@
+---
+name: decision
+description: "Run the Atelier `/decision` workflow in Codex using the shared command registry. Use when the user explicitly invokes `$decision`. Structured decision journal with framework cross-validation."
+---
+
+## Atelier Command
+
+Run the explicit Codex `$decision` skill. Its authoritative workflow source is
+the Claude Code `/decision` command specification.
+
+1. Read `AGENTS.md` and `CLAUDE.md`.
+2. Read the authoritative `.claude/commands/decision.md` command specification directly.
+3. Execute it in this thread using the Codex adaptation table in `AGENTS.md`.
+4. Treat text following `$decision` as command context or arguments.
+5. Do not start a nested Codex process; complete the workflow in this thread.

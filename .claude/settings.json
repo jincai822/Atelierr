@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run \"${CLAUDE_PROJECT_DIR:-.}/scripts/cues.py\" --hook",
+            "command": "uv run \"${CLAUDE_PROJECT_DIR:-.}/scripts/cues.py\" --hook --runtime claude",
             "statusMessage": "Loading session cues",
             "timeout": 10
           }
@@ -27,7 +27,7 @@
           },
           {
             "type": "command",
-            "command": "uv run \"${CLAUDE_PROJECT_DIR:-.}/scripts/atelier.py\" intent-hook --runtime claude-code",
+            "command": "uv run \"${CLAUDE_PROJECT_DIR:-.}/scripts/intent_coverage.py\" intent-hook --runtime claude-code",
             "timeout": 5
           }
         ]

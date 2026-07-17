@@ -7,20 +7,18 @@ Companion to `scripts/chat_completion.py`. Mechanism:
   - A multi-leg call site (e.g., /system-review Step 1c, /decision,
     scripts/review.sh) opens a shadow group via `shadow.py group-start`,
     which writes a witness file under `~/.cache/atelier/shadow_groups/`
-    and emits a UUID + env-export line to stdout. The site MUST also
-    register an EXIT trap that calls `shadow.py group-close` so the
-    witness is removed before the 30-min recency window expires —
-    otherwise the PostToolUse hook can mis-correlate later, unrelated
-    Agent dispatches into the still-open group.
+    and emits a UUID + env-export line to stdout. The site MUST also call
+    `shadow.py group-close` after all legs finish so the witness is removed
+    before the 30-minute recency window expires. Shell-owned sites may use an
+    EXIT trap; runtime workflows use an explicit later call because each shell
+    tool invocation is isolated.
   - Direct-API legs auto-log via chat_completion.py reading env vars
     (ATELIER_SHADOW_GROUP, ATELIER_TASK_TYPE).
-  - Native legs (Claude Code Agent tool) are auto-captured by the
-    PostToolUse(Agent) hook running `shadow.py log-from-hook`. The
-    hook scans witness files, resolves the agent's subagent_type to
-    its `voices.native` model identity via `harness/agents.toml`, and
-    matches against the witness's `expected_dispatches`. Manual
-    `shadow.py log --leg native` remains available for ad-hoc replay /
-    fallback when the hook can't be wired (e.g., test fixtures).
+  - Native project-agent legs are logged in-band via
+    `shadow.py log --leg native`. `shadow.py native-model` resolves the
+    correct runtime identity so Codex results are not mislabeled with a
+    Claude model identity. `log-from-hook` remains available for replay and
+    test fixtures.
   - Codex legs are still logged in-band via `shadow.py log --leg codex`
     (no PostToolUse(Bash) hook today).
   - `shadow.py report` aggregates all logs, deduplicates, groups by UUID,
@@ -35,19 +33,22 @@ Subcommands:
         disambiguates when multiple agents share a native model identity.
 
     group-close --group <uuid> [--mark-closed]
-        Close a witness — delete by default, or write `closed_at` field
-        with --mark-closed. Call from the multi-leg site's EXIT trap.
+        Close a witness: delete by default, or write `closed_at` field
+        with --mark-closed. Call from the multi-leg site's completion path.
 
     log --group <uuid> --task <name> --model <id> --leg <native|direct|codex>
         --prompt-file <path> --response-file <path> [--prompt-stdin]
         [--response-stdin]
-        Append a synthetic native/codex leg entry. For native legs the
-        PostToolUse hook is the primary path; this stays for codex legs
-        and ad-hoc replay.
+        Append a synthetic native/codex leg entry. Production native and
+        Codex logging is in-band through this command.
+
+    native-model --agent <role> [--runtime auto|claude|codex]
+        Resolve the model identity used to correlate a native project-agent
+        leg in the active runtime.
 
     log-from-hook
-        PostToolUse(Agent) hook entry — auto-log native legs. Wire as a
-        Claude Code PostToolUse hook with matcher 'Agent'. Silent.
+        Optional PostToolUse(Agent) replay entry. Not wired in production;
+        retained for fixtures and forensic replay.
 
     report [--since YYYY-MM-DD] [--task-type X] [--accept-stale-costs] [--json]
         Aggregate logs and emit cost/verdict-agreement comparison.
@@ -75,6 +76,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 COSTS_TOML = REPO_ROOT / "harness" / "model_costs.toml"
 SHADOW_TASKS_TOML = REPO_ROOT / "harness" / "shadow_tasks.toml"
+RUNTIMES_TOML = REPO_ROOT / "harness" / "runtimes.toml"
 DEFAULT_LOG_DIR = Path.home() / ".cache" / "atelier" / "llm_calls"
 DEFAULT_WITNESS_DIR = Path.home() / ".cache" / "atelier" / "shadow_groups"
 
@@ -118,7 +120,7 @@ def cmd_group_start(args: argparse.Namespace) -> int:
     return 0
 
 
-# ---------- gc (session-end cleanup) ----------
+# ---------- gc (lifecycle cleanup) ----------
 
 
 DEFAULT_LLM_CALLS_RETENTION_DAYS = 90
@@ -128,16 +130,16 @@ DEFAULT_WITNESS_STALENESS_MINUTES = 30
 
 
 def cmd_gc(args: argparse.Namespace) -> int:
-    """Garbage-collect stale shadow telemetry. Designed for the `SessionEnd`
-    hook in `.claude/settings.json` but also runnable manually.
+    """Garbage-collect stale shadow telemetry. Designed for Claude's
+    `SessionEnd` and Codex's `Stop` hooks, but also runnable manually.
 
     Two cleanup passes:
 
       1. **Orphaned witnesses** (`~/.cache/atelier/shadow_groups/*.json`):
          delete files older than `--witness-min` minutes (default 30, matching
          the PostToolUse hook's recency window). Defends against witnesses
-         left behind when an EXIT trap was bypassed (session crash, manual
-         kill, or `/peer-review` reverted before its `group-close` call).
+         left behind when completion cleanup was bypassed (session crash,
+         manual kill, or a workflow abort before its `group-close` call).
 
       2. **Aged primary log** (`~/.cache/atelier/llm_calls/*.jsonl`): delete
          files older than `--retention-days` days (default 90). The `$OV`
@@ -163,7 +165,7 @@ def cmd_gc(args: argparse.Namespace) -> int:
     retention_days = args.retention_days
     # Defend against retention_days == 0 OR witness_min == 0 — both would
     # produce a cutoff equal to "now", making every file appear stale and
-    # wiping the cache. The SessionEnd hook fires `gc` with default args,
+    # wiping the cache. Lifecycle hooks fire `gc` with default args,
     # so a config typo like `--retention-days 0` would wipe everything.
     if retention_days == 0 or witness_min == 0:
         sys.stderr.write(
@@ -219,16 +221,16 @@ def cmd_gc(args: argparse.Namespace) -> int:
 def cmd_group_close(args: argparse.Namespace) -> int:
     """Close a shadow group's witness file.
 
-    Multi-leg call sites MUST invoke this from their EXIT trap so the
-    PostToolUse hook does not mis-correlate later, unrelated Agent dispatches
-    into a still-open witness within the 30-min recency window. Two equivalent
+    Multi-leg call sites MUST invoke this from their completion path. A
+    persistent shell may use an EXIT trap; a runtime workflow with isolated
+    shell calls invokes it explicitly after all legs return. Two equivalent
     completion modes: write `closed_at` (preserved for forensics) OR delete
     the witness file (cleanest; reclaims disk). Default is to delete; pass
     `--mark-closed` to write the field instead.
 
-    Silent best-effort — exit 0 on any failure. Missing witness, permissions
-    error, malformed JSON: all degrade silently so an orphaned group_id in
-    the env never breaks the EXIT trap.
+    Silent best-effort: exit 0 on any failure. Missing witness, permissions
+    error, malformed JSON: all degrade silently so cleanup never breaks the
+    enclosing workflow.
     """
     group_id = args.group.strip() if args.group else ""
     if not group_id:
@@ -397,6 +399,60 @@ def _agent_native_model(subagent_type: str) -> str:
         return ""
     native = voices.get("native")
     return str(native) if native else ""
+
+
+def _active_runtime(explicit: str) -> str:
+    """Resolve the runtime for a native project-agent leg.
+
+    Active-session signals take precedence over the external launcher's
+    preference. Outside either runtime, use the same local and committed
+    selection contract as `scripts/atelier_runtime.py`.
+    """
+    if explicit != "auto":
+        return explicit
+    active = os.environ.get("ATELIER_ACTIVE_RUNTIME")
+    if active in {"codex", "claude"}:
+        return active
+    if os.environ.get("CODEX_THREAD_ID"):
+        return "codex"
+    if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_PROJECT_DIR"):
+        return "claude"
+    selected = os.environ.get("ATELIER_RUNTIME")
+    if selected in {"codex", "claude"}:
+        return selected
+    try:
+        from atelier_runtime import load_registry, resolve_runtime
+
+        return resolve_runtime(load_registry())[0]
+    except Exception:
+        return "codex"
+
+
+def _runtime_native_model(subagent_type: str, runtime: str) -> str:
+    if runtime == "claude":
+        return _agent_native_model(subagent_type)
+    try:
+        data = tomllib.loads(RUNTIMES_TOML.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    runtimes = data.get("runtimes")
+    row = runtimes.get(runtime) if isinstance(runtimes, dict) else None
+    identity = row.get("native_shadow_identity") if isinstance(row, dict) else None
+    if identity == "role":
+        return _agent_native_model(subagent_type)
+    return str(identity) if identity else ""
+
+
+def cmd_native_model(args: argparse.Namespace) -> int:
+    runtime = _active_runtime(args.runtime)
+    identity = _runtime_native_model(args.agent, runtime)
+    if not identity:
+        sys.stderr.write(
+            f"shadow: no native model identity for agent={args.agent!r} runtime={runtime!r}\n"
+        )
+        return 2
+    print(identity)
+    return 0
 
 
 def _extract_response_text(tool_output: Any) -> str:
@@ -840,21 +896,21 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             'JSON list of expected dispatches; each entry has {"model": "...", "leg": "native|direct|codex"} '
             'AND an optional {"subagent_type": "..."} field used by the hook to disambiguate when multiple '
-            'agents share a native model identity (e.g., thinker, evolver, scholar all on `opus`). Example: '
-            '\'[{"model":"opus","leg":"native","subagent_type":"thinker"},{"model":"deepseek_pro_max","leg":"direct"}]\''
+            'agents can share a native model identity (for example, Codex project agents use `codex_native`). Example: '
+            '\'[{"model":"codex_native","leg":"native","subagent_type":"thinker"},{"model":"deepseek_pro_max","leg":"direct"}]\''
         ),
     )
     gs.set_defaults(func=cmd_group_start)
 
     gcp = sub.add_parser(
         "gc",
-        help="Garbage-collect stale shadow telemetry (orphaned witnesses + aged logs). Wire as SessionEnd hook.",
+        help="Garbage-collect stale shadow telemetry (orphaned witnesses + aged logs). Wire as a runtime lifecycle hook.",
         description=(
             "Two cleanup passes: orphaned witness files older than "
             "--witness-min minutes; primary llm_calls/ JSONLs older than "
             "--retention-days days. The $OV mirror skeleton is never "
             "touched (durable record). Silent best-effort. Designed for "
-            "the Claude Code SessionEnd hook in .claude/settings.json."
+            "the Claude SessionEnd and Codex Stop hooks."
         ),
     )
     gcp.add_argument(
@@ -869,7 +925,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     gc = sub.add_parser(
         "group-close",
-        help="Close a shadow group's witness (call from EXIT trap at multi-leg sites).",
+        help="Close a shadow group's witness from the multi-leg completion path.",
         description=(
             "Close a witness so the PostToolUse hook cannot mis-correlate later "
             "Agent dispatches into a stale group within the 30-min recency window. "
@@ -900,11 +956,24 @@ def build_parser() -> argparse.ArgumentParser:
     lg.add_argument("--log-dir", default=None, help="Override default log dir.")
     lg.set_defaults(func=cmd_log)
 
+    nm = sub.add_parser(
+        "native-model",
+        help="Resolve the active runtime's shadow identity for a project agent.",
+    )
+    nm.add_argument("--agent", required=True, help="Registered project-agent role.")
+    nm.add_argument(
+        "--runtime",
+        choices=("auto", "claude", "codex"),
+        default="auto",
+        help="Runtime override; auto detects the active session (default).",
+    )
+    nm.set_defaults(func=cmd_native_model)
+
     lh = sub.add_parser(
         "log-from-hook",
-        help="PostToolUse(Agent) hook entry — auto-log native legs (silent).",
+        help="Optional PostToolUse(Agent) native-leg replay logger; not wired.",
         description=(
-            "Wire as a Claude Code PostToolUse hook with matcher 'Agent'. "
+            "Retained for replay and fixtures; production logging is in-band. "
             "Reads the hook's stdin JSON, scans for an open shadow witness "
             "(most-recently-started within 30 min), looks up the agent's "
             "native-leg model in harness/agents.toml, and writes a "

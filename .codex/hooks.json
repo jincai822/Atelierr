@@ -1,0 +1,44 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run \"$(git rev-parse --show-toplevel)/scripts/cues.py\" --hook --runtime codex",
+            "statusMessage": "Loading Atelier session cues",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run \"$(git rev-parse --show-toplevel)/scripts/cues.py\" --touch-lock",
+            "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "uv run \"$(git rev-parse --show-toplevel)/scripts/intent_coverage.py\" intent-hook --runtime codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run \"$(git rev-parse --show-toplevel)/scripts/shadow.py\" gc 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

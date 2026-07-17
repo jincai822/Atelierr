@@ -1,0 +1,15 @@
+---
+name: daily-reflection
+description: "Run the Atelier `/daily-reflection` workflow in Codex using the shared command registry. Use when the user explicitly invokes `$daily-reflection`. Daily reflection procedure: coaching flow grounded in profile, recent notes, and open TODOs. Routed via /hi or invoked directly."
+---
+
+## Atelier Command
+
+Run the explicit Codex `$daily-reflection` skill. Its authoritative workflow source is
+the Claude Code `/daily-reflection` command specification.
+
+1. Read `AGENTS.md` and `CLAUDE.md`.
+2. Read the authoritative `.claude/commands/daily-reflection.md` command specification directly.
+3. Execute it in this thread using the Codex adaptation table in `AGENTS.md`.
+4. Treat text following `$daily-reflection` as command context or arguments.
+5. Do not start a nested Codex process; complete the workflow in this thread.

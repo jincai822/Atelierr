@@ -1,0 +1,7 @@
+interface:
+  display_name: "Atelier $review"
+  short_description: "Run the Atelier $review skill in Codex"
+  default_prompt: "Use $review to run the matching Atelier command."
+
+policy:
+  allow_implicit_invocation: false

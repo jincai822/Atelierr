@@ -1,0 +1,40 @@
+# Native runtime registry.
+#
+# The shipped default is Codex. A user can persist a different default in the
+# gitignored `harness/runtime.local.toml`, or override one invocation with the
+# `ATELIER_RUNTIME` environment variable or `--runtime` on
+# `scripts/atelier_runtime.py`.
+#
+# Argument vectors are executed directly, without a shell. `{root}` expands to
+# the Atelier repository root. The workflow prompt is appended as the final
+# argument by the launcher.
+
+[runtime]
+default = "codex"
+local_override = "harness/runtime.local.toml"
+environment_override = "ATELIER_RUNTIME"
+
+[runtimes.codex]
+label = "Codex"
+executable = "codex"
+command_prefix = "$"
+native_shadow_identity = "codex_native"
+shell_args = ["-C", "{root}"]
+interactive_args = ["-C", "{root}"]
+non_interactive_args = ["exec", "-C", "{root}"]
+resume_interactive_args = ["resume", "--last"]
+resume_non_interactive_args = ["exec", "resume", "--last"]
+fork_interactive_args = ["fork", "--last"]
+
+[runtimes.claude]
+label = "Claude Code"
+executable = "claude"
+command_prefix = "/"
+native_shadow_identity = "role"
+shell_args = []
+interactive_args = []
+non_interactive_args = ["-p"]
+resume_interactive_args = ["--continue"]
+resume_non_interactive_args = ["--continue", "-p"]
+fork_interactive_args = ["--continue", "--fork-session"]
+fork_non_interactive_args = ["--continue", "--fork-session", "-p"]
