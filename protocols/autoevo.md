@@ -20,8 +20,33 @@ macOS `launchd`, 5:00 local, daily.
 
 - Plist: `~/Library/LaunchAgents/com.atelier.autoevo-nightly.plist`
 - Wake-from-sleep: `pmset repeat wakeorpoweron MTWRFSU 04:55:00`
-- Invocation: see the plist's `ProgramArguments` block, which delegates to `scripts/routine_runner.sh`. The wrapper sources `~/.zprofile` / `~/.profile` / `~/atelier/harness/env.local.sh` for `OV`, ensures `$OV/cache` and `$OV/_meta/routine_runs/<routine>/` exist, then runs `cd ~/atelier && claude -p "/autoevo-nightly"`. Launchd captures stdout/stderr to `/tmp/com.atelier.autoevo-nightly.out` and `.err` (configured via the plist's `StandardOutPath` / `StandardErrorPath`).
-- The bot's own audit log (what the autoevo did to the vault) is separate: `$OV/agent-findings/autoevo-applied-<YYYY-MM-DD>.md`. The `/tmp/` files capture only the shell wrapper + Claude CLI output, useful for debugging launchd-level failures.
+- Invocation: see the plist's `ProgramArguments` block, which delegates to `scripts/routine_runner.sh`. The wrapper sources `~/.zprofile` / `~/.profile` / `~/atelier/harness/env.local.sh` for `OV`, ensures `$OV/cache` and `$OV/_meta/routine_runs/<routine>/` exist, resolves the runtime through `scripts/atelier_runtime.py`, then runs the registered command source. Codex is the committed default; gitignored `harness/runtime.local.toml` or `ATELIER_RUNTIME` can select Claude. Launchd captures stdout/stderr to `/tmp/com.atelier.autoevo-nightly.out` and `.err` (configured via the plist's `StandardOutPath` / `StandardErrorPath`).
+- The bot's own audit log (what the autoevo did to the vault) is separate: `$OV/agent-findings/autoevo-applied-<YYYY-MM-DD>.md`. The `/tmp/` files capture only the shell wrapper and headless runtime output, useful for debugging launchd-level failures.
+
+### Headless Codex boundary
+
+The runner invokes `codex exec` with an ephemeral session, web search disabled,
+user config ignored, and interactive approvals disabled. It uses
+`danger-full-access` because Codex `workspace-write` protects `.git/` as
+read-only, while autoevo's recovery contract requires one Git commit per
+destructive operation. This is a deliberate high-trust exception for this
+local bot, not the default permission profile for interactive Atelier work.
+
+Before launching Codex, the runner rebuilds its environment from an empty base
+and passes only the local path, vault routing, hook guards, the dry-run flag,
+and optional Codex location or CA settings. Credentials loaded for the distributed lock and
+unrelated login-profile secrets are not inherited by model-run shell commands.
+
+The semantic boundary remains this command contract: pre-flight clean-tree and
+privacy gates; bounded sweep scopes; no wiki or daily-note writes; no push; and
+recoverable per-operation commits. Project hooks remain enabled. The runner
+passes `ATELIER_SKIP_LOCK_TOUCH=1` so its own SessionStart and UserPromptSubmit
+hooks do not refresh the session-active lock immediately before pre-flight.
+
+When Claude is selected, the same wrapper invokes the native `/autoevo-nightly`
+surface through `claude -p`. The command's semantic boundary, lock behavior,
+and audit contract are unchanged; Claude Code applies its own configured
+permission policy.
 
 Reversible: `launchctl unload <plist>` + `pmset repeat cancel`.
 
@@ -35,6 +60,13 @@ The bot bails (writes a one-line entry to the audit log and exits 0) if any of t
 | Dirty `$OV` working tree | `git -C "$OV" status --porcelain` non-empty | Don't compound user intent into bot commits. |
 | Dirty zettelm submodule | same check inside `<paths.zettelm>/` | User is mid mobile-capture digest. |
 | Privacy gate | `uv run scripts/privacy_check.py --json` returns `hit_count > 0` | Hard veto; never commit a leak. |
+
+Every abort still writes the cue-visible audit file. Its Git commit is
+path-limited with `git commit --only -- <audit-path>` so an already-dirty index
+cannot be swept into the audit commit. The bot never deletes a stale
+`index.lock`, resets the index, or stages unrelated paths. If the path-limited
+audit commit fails during an abort, the file remains on disk for
+`check_autoevo_ran` and the runtime log records the Git error.
 
 ## Trust bands
 
@@ -158,9 +190,10 @@ If the bot bails at a pre-flight gate, the file is still written with the Skippe
 
 ## Concurrency lock: `<paths.cache>/atelier-session-lock`
 
-Touched (`touch <file>`) by two hook paths wired in `.claude/settings.json`:
+Touched (`touch <file>`) by two hook paths wired at both runtime edges in
+`.claude/settings.json` and `.codex/hooks.json`:
 
-- **SessionStart hook** → runs `uv run scripts/cues.py --hook`, which touches the lock before running cue checks. Fires once per new Claude Code session.
+- **SessionStart hook** → runs `uv run scripts/cues.py --hook`, which touches the lock before running cue checks. Fires once per new interactive session.
 - **UserPromptSubmit hook** → runs `uv run scripts/cues.py --touch-lock 2>/dev/null || true`, which refreshes the lock and exits without running any cue check (the lock path resolves via the paths registry). Fires on every user prompt so long-running sessions refresh the lock per prompt.
 
 `/autoevo-nightly` reads the mtime; if mtime is within the last 6h, abort with reason "session-active lock fresh."

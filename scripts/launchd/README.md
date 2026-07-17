@@ -73,7 +73,37 @@ The runner reads `AWS_PROFILE` (default `atelier-lock`; override via `ATELIER_LO
 
 Skip this step for single-machine setups — the lock module is a no-op when `coordination.backend` is absent or `"none"`.
 
-### Step 3 — install and load the plist
+### Step 3: prepare the selected headless runtime
+
+The shipped default uses `codex exec`. Authenticate once interactively and
+review the repo's project hooks before relying on the unattended schedule:
+
+```bash
+codex login status
+codex -C .
+# In the TUI, open /hooks and trust the reviewed project hooks.
+```
+
+The scheduled invocation is ephemeral, ignores user-level Codex configuration,
+disables web search, starts from a narrow sanitized environment, and runs without interactive approvals. It uses
+`danger-full-access` because the workflow must write per-operation commits to
+`$OV/.git/`, which Codex `workspace-write` deliberately protects as read-only.
+Use this permission profile only for the bounded autoevo bot.
+
+To use Claude Code instead, authenticate its CLI and persist the local runtime
+choice before loading or testing the job:
+
+```bash
+claude auth status
+python3 scripts/atelier_runtime.py use claude
+python3 scripts/atelier_runtime.py status
+```
+
+Run `python3 scripts/atelier_runtime.py use codex` to restore Codex. The local
+preference is gitignored and is read by the launchd wrapper at execution time,
+so the plist does not need to change.
+
+### Step 4: install and load the plist
 
 ```bash
 PLIST=com.atelier.autoevo-nightly.plist
@@ -128,15 +158,24 @@ launchctl start com.atelier.autoevo-nightly
 tail -f /tmp/com.atelier.autoevo-nightly.out /tmp/com.atelier.autoevo-nightly.err
 ```
 
-Or run the wrapper directly (env prefix works here, skipping the stagger):
+Or run the wrapper directly with the selected default, skipping the stagger:
 
 ```bash
-ATELIER_SKIP_STAGGER=1 scripts/routine_runner.sh autoevo-nightly /autoevo-nightly
+ATELIER_SKIP_STAGGER=1 \
+  scripts/routine_runner.sh autoevo-nightly /autoevo-nightly
 ```
 
-The audit log for the run itself (what the bot did to the vault) lives at `$OV/agent-findings/autoevo-applied-<YYYY-MM-DD>.md`; the `/tmp/` files capture the wrapper + Claude CLI output. The claim file at `$OV/_meta/routine_runs/autoevo-nightly/<date>.toml` records status and timing.
+Use an environment override to test the other runtime without changing the
+persistent preference:
 
-The first manual run is also the auth smoke test: if `claude -p` hits an auth prompt, it'll log to `/tmp/com.atelier.autoevo-nightly.err`. Resolve by running `claude` interactively once to refresh credentials; the cached auth then survives subsequent headless invocations.
+```bash
+ATELIER_SKIP_STAGGER=1 ATELIER_RUNTIME=codex \
+  scripts/routine_runner.sh autoevo-nightly /autoevo-nightly
+```
+
+The audit log for the run itself (what the bot did to the vault) lives at `$OV/agent-findings/autoevo-applied-<YYYY-MM-DD>.md`; the `/tmp/` files capture the wrapper and Codex CLI output. The claim file at `$OV/_meta/routine_runs/autoevo-nightly/<date>.toml` records status and timing.
+
+The first manual run is also the auth smoke test. If `codex exec` cannot use the cached ChatGPT login, it logs the failure to `/tmp/com.atelier.autoevo-nightly.err`. Resolve it with `codex login`, then rerun `codex login status` and the direct wrapper test. If Claude is selected, diagnose its authentication through `claude auth status` and the same direct wrapper test.
 
 ## Debugging coordination
 
@@ -158,7 +197,7 @@ AWS_PROFILE=atelier-lock uv run scripts/routine_lock.py release autoevo-nightly 
 The plist delegates to `scripts/routine_runner.sh`, which assumes:
 
 - Atelier checked out at `~/atelier/`. Edit the plist's `ProgramArguments` path if elsewhere.
-- `claude` on `PATH` via `/opt/homebrew/bin` (Apple Silicon Homebrew) or `/usr/local/bin` (Intel). The `EnvironmentVariables` block in the plist sets `PATH` because `launchd` does not inherit a login shell's `PATH`.
+- `codex` on `PATH` via `/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`. The plist and wrapper populate these locations because `launchd` does not inherit an interactive shell's `PATH`.
 - `uv` on `PATH` (the runner invokes `routine_lock.py` via `uv run` so boto3 resolves from the project venv).
 - `$OV` is exported from one of: `~/.zprofile`, `~/.profile`, or `~/atelier/harness/env.local.sh` (see Install step 1). The wrapper tries all three in order and aborts loudly if none work.
 - `$OV/cache/` and `$OV/_meta/routine_runs/` are created on every run via `mkdir -p`, so a fresh install does not silently fail on missing directories.

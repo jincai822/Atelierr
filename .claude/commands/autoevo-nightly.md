@@ -5,14 +5,14 @@ description: Autonomous nightly decay sweep with auto-commit; fired by macOS lau
 
 Fired by macOS `launchd` at 5:00 local. Contract: `protocols/autoevo.md`.
 
-This command is intended for **headless invocation** (`claude -p "/autoevo-nightly"`). It runs unattended, auto-applies the high-confidence Forgetter band, logs the rest to a pending queue for next /hi, and commits every destructive op to `$OV`. It never pushes. It never touches `<paths.wiki>/`, `<paths.daily_notes>/`, or anything outside the three working-tier sweep scopes (`<paths.wip>/`, `<paths.research>/`, `<paths.reflections>/`). `<paths.agent_findings>/` is a write target for the audit log only — never a sweep scope.
+This command is intended for **headless invocation** through `scripts/routine_runner.sh`, which uses the selected local runtime. Codex is the shipped default; Claude can be selected persistently with `python3 scripts/atelier_runtime.py use claude` or for one process with `ATELIER_RUNTIME=claude`. It runs unattended, auto-applies the high-confidence Forgetter band, logs the rest to a pending queue for next /hi, and commits every destructive op to `$OV`. It never pushes. It never touches `<paths.wiki>/`, `<paths.daily_notes>/`, or anything outside the three working-tier sweep scopes (`<paths.wip>/`, `<paths.research>/`, `<paths.reflections>/`). `<paths.agent_findings>/` is a write target for the audit log only, never a sweep scope.
 
 If invoked interactively, the same contract holds — the bot does not wait for human approval. To review what it does before it does it, set the `DRY_RUN=1` env var (see step 8).
 
 ## Run shape
 
 ```
-launchd 05:00 -> claude -p "/autoevo-nightly" -> orchestrator runs this file
+launchd 05:00 -> routine_runner.sh -> selected headless runtime -> orchestrator runs this file
 ```
 
 The orchestrator MUST execute this command verbatim, sequentially. No parallel agent dispatches (each commit must complete before the next op begins). On any unrecoverable error, abort the run, write the partial audit log, and exit. Failures surface as cues at next /hi via the pre-flight gates section.
@@ -364,7 +364,7 @@ if [ -f "$LOCK" ]; then
 fi
 ```
 
-Six hours is the bound per `protocols/autoevo.md`. An absent lock file is treated as "no recent session" (permissive default — the first run after install proceeds). If the lock is fresh, log skip and exit. The lock writer is `scripts/cues.py --hook` invoked by the SessionStart hook in `.claude/settings.json` AND by the UserPromptSubmit hook (so long-running sessions refresh the lock per prompt).
+Six hours is the bound per `protocols/autoevo.md`. An absent lock file is treated as "no recent session" (the permissive default lets the first run after install proceed). If the lock is fresh, log skip and exit. The lock writer is `scripts/cues.py --hook` invoked by the SessionStart hook in `.claude/settings.json` or `.codex/hooks.json` and by each runtime's UserPromptSubmit hook (so long-running sessions refresh the lock per prompt).
 
 ### 1b. $OV is a git work tree AND clean
 
@@ -968,22 +968,32 @@ Run ID: <RUN_TS>
 - (none) | <error description>
 ```
 
-Commit the audit log. The path resolves via the registry-bound `$PATHS_FINDINGS` from step 0:
+Commit the audit log with a path-limited commit. This is load-bearing on
+pre-flight aborts: the gate may have detected an already-dirty index, and a
+plain `git commit` would absorb unrelated staged work. The path resolves via
+the registry-bound `$PATHS_FINDINGS` from step 0:
 
 ```bash
 FINDINGS_REL="${PATHS_FINDINGS#$OV/}"   # portable shell strip; macOS realpath has no --relative-to
 git -C "$OV" add -- "${FINDINGS_REL}/autoevo-applied-${RUN_DATE}.md"
-git -C "$OV" commit -m "$(cat <<'EOF'
+git -C "$OV" commit --only -m "$(cat <<'EOF'
 [autoevo:audit] agent-findings: record nightly run <RUN_DATE>
 
 Auto-applied: <N>, Pending: <M>, Errors: <K>
 
 Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
 EOF
-)"
+)" -- "${FINDINGS_REL}/autoevo-applied-${RUN_DATE}.md"
 ```
 
-The audit log itself being committed means `git log --grep='\[autoevo:audit\]'` gives a chronological index of every nightly run.
+Never remove an existing `index.lock`, reset the index, or otherwise repair Git
+state during this step. If the audit commit fails after a pre-flight abort,
+leave the audit file on disk, print the commit error to the captured runtime
+log, and exit 0. `check_autoevo_ran` reads the file directly, so the skip still
+surfaces next session. On a normal run that passed the clean-tree gate, an audit
+commit failure remains fatal.
+
+The audit log itself being committed means `git log --grep='\[autoevo:audit\]'` gives a chronological index of every successful audit commit.
 
 ## Step 8: Dry-run override
 

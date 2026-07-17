@@ -92,14 +92,15 @@ Every routine prompt MUST declare the following at the top of its instructions, 
 
 ## Local execution layer
 
-Some routines need local-only tools (semantic.py, git, lint.py) that remote cloud agents cannot access. These run locally via `launchd` + `claude -p`, coordinated across multiple machines via DynamoDB.
+Some routines need local-only tools (semantic.py, git, lint.py) that remote cloud agents cannot access. These run locally via `launchd` plus the selected headless runtime, coordinated across multiple machines via DynamoDB. Codex is the shipped default; Claude is a supported persistent or per-process selection.
 
 ### Architecture
 
 | Concern | Mechanism |
 |---|---|
 | Scheduler | macOS `launchd` plist per routine, fires at configured time |
-| Wrapper | `scripts/routine_runner.sh` handles env, stagger, lock, claim, execution |
+| Wrapper | `scripts/routine_runner.sh` handles env, stagger, lock, claim, runtime selection, execution |
+| Runtime | `harness/runtimes.toml` default plus gitignored local preference; `ATELIER_RUNTIME` is the one-process override |
 | Cross-machine lock | DynamoDB conditional put (`attribute_not_exists(pk)`) via `scripts/routine_lock.py` |
 | Local audit trail | `$OV/_meta/routine_runs/<routine>/<cycle_id>.toml` claim files |
 | Missed-run detection | `check_local_routine_missed` cue in `scripts/cues.py` |
@@ -168,9 +169,9 @@ launchd fires at scheduled time
      -> sleep hash(hostname) % 120 (stagger)
      -> routine_lock.py acquire (DynamoDB conditional put)
         -> if held: exit 0 (skip)
-        -> if error: warn + proceed (single-machine fallback)
+        -> if error: write failed claim and exit (unknown lock state)
      -> write claim file (status=running)
-     -> claude -p "/<command>"
+     -> selected headless runtime executes the registered command source
      -> update claim file (status=completed|failed)
      -> routine_lock.py release
 ```
@@ -182,8 +183,8 @@ launchd fires at scheduled time
 | Two machines race | DynamoDB atomic lock: exactly one wins. Loser skips. |
 | No machine awake | `check_local_routine_missed` cue fires at next session start |
 | Machine crashes mid-run | DynamoDB TTL (1h default) auto-expires the lock; claim file stays `status=running` |
-| AWS credentials missing | `routine_lock.py` returns success (no-op); single-machine mode |
-| DynamoDB unreachable | Warning logged; routine proceeds (availability over coordination) |
+| AWS credentials missing | With coordination enabled, write a failed claim and exit. Set coordination to `none` explicitly for single-machine mode. |
+| DynamoDB unreachable | Write a failed claim and exit; unknown lock state fails closed. |
 
 ### Vendor lock-in
 

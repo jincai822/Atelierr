@@ -14,7 +14,7 @@
              - hostname-based stagger for multi-machine coordination
              - DynamoDB lock acquire/release (when coordination enabled)
              - local claim file write for cue system
-             - claude -p invocation and status tracking -->
+             - selected headless runtime invocation and status tracking -->
         <string>"$HOME/atelier/scripts/routine_runner.sh" autoevo-nightly /autoevo-nightly</string>
     </array>
 
@@ -32,7 +32,7 @@
     <!-- launchd captures stdout/stderr to user-readable log paths.
          The autoevo-nightly script's audit log lives separately under
          $OV/agent-findings/autoevo-applied-<date>.md; these capture only
-         the shell wrapper + claude CLI's stdout/stderr. -->
+         the shell wrapper + selected runtime's stdout/stderr. -->
     <key>StandardOutPath</key>
     <string>/tmp/com.atelier.autoevo-nightly.out</string>
 
