@@ -24,6 +24,7 @@ See also:
 Usage:
     scripts/semantic.py query "<text>" [OPTIONS]
     scripts/semantic.py status [--format text|json]
+    scripts/semantic.py corpus [--format text|json]
     scripts/semantic.py index [--rebuild | --if-stale]
     scripts/semantic.py --help
 
@@ -1174,9 +1175,12 @@ def real_index(args: argparse.Namespace) -> int:
         audit=corpus_audit,
         update=update,
     )
-    warn(
-        "search_efficiency "
-        + json.dumps(report, ensure_ascii=False, separators=(",", ":"))
+    print(
+        json.dumps(
+            {"search_efficiency": report},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
     )
     return 0
 
@@ -1187,6 +1191,9 @@ def real_index(args: argparse.Namespace) -> int:
 
 
 def cmd_query(args: argparse.Namespace) -> int:
+    if args.context and args.format != "json":
+        warn("--context requires --format json")
+        return 2
     if in_real_mode() and LANCE_DIR == _LANCE_OLD:
         warn(
             "querying legacy index at ~/.cache/reflectl/lance/; run "

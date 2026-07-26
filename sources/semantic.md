@@ -23,6 +23,7 @@ even when no complete snapshot can be resolved.
 ```
 scripts/semantic.py query "<text>" [OPTIONS]
 scripts/semantic.py status [--format text|json]
+scripts/semantic.py corpus [--format text|json]
 scripts/semantic.py index [--rebuild | --if-stale]
 scripts/semantic.py --help
 ```
@@ -46,6 +47,7 @@ scripts/semantic.py --help
 | Call | Meaning |
 |---|---|
 | `semantic.py status --format json` | Compare current nonempty Markdown paths and mtimes with the stored index without loading the embedding model. |
+| `semantic.py corpus --format json` | Audit scope classification, hard exclusions, raw locator coverage, exact duplicates, and estimated chunks without loading an embedding model. |
 | `semantic.py index` | Incrementally update changed paths and remove deleted paths. |
 | `semantic.py index --if-stale` | Run the lightweight freshness check first; load the embedding model only when drift exists. Used by scheduled maintenance. |
 | `semantic.py index --rebuild` | Clear and rebuild the complete index. Keep this manual. |
@@ -73,12 +75,13 @@ JSON (`--format json`): a list of objects with `path`, `score`, `source`, and
 
 - `0` — success (including zero results).
 - `0` — `status` completed, whether the index is fresh or stale.
+- `0` — `corpus` completed its read-only audit.
 - `2` — usage error (bad flag, unparseable date).
 - `2` — `status` could not inspect an existing index.
 
 ### Streams
 
-- **stdout:** results only. Parseable by `xargs`, `awk`, etc.
+- **stdout:** query results or command-specific reports. Query output remains parseable by `xargs`, `awk`, etc.
 - **stderr:** mode banner, warnings, diagnostics. Always emitted; callers should not silence stderr.
 
 ## When to call this script

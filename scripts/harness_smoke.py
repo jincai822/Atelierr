@@ -579,103 +579,222 @@ def check_semantic_maintenance() -> None:
         )
 
 
-def check_semantic_corpus() -> None:
-    parser = semantic.build_parser()
-    defaults = parser.parse_args(["query", "fixture"])
-    explicit = parser.parse_args(
-        [
-            "query",
-            "fixture",
-            "--scope",
-            "raw",
-            "--context",
-            "--sources",
-            "local,readwise",
-        ]
-    )
-    expect(
-        defaults.scope == semantic_corpus.ACTIVE_SCOPE
-        and defaults.context is False
-        and defaults.sources == "local",
-        "semantic query defaults are not local, active, and bounded-on-demand",
-    )
-    expect(
-        explicit.scope == semantic_corpus.RAW_SCOPE
-        and explicit.context is True
-        and explicit.sources == "local,readwise",
-        "semantic query parser lost explicit scope, context, or source controls",
-    )
-
+def check_semantic_corpus_policy() -> None:
     with tempfile.TemporaryDirectory(prefix="atelier-semantic-corpus-") as temp_dir:
         vault = Path(temp_dir)
-        fixtures = {
-            "reflections/current.md": "current authored note\n",
-            "archive/old.md": "archived note\n",
-            "sessions/process.md": "process record\n",
-            "inbox/pending.md": "pending capture\n",
-            "finance/raw/tax/manifest.txt": "raw text receipt\n",
-            "cache/ignored.md": "ephemeral cache\n",
-            "empty.md": "",
+        fixture_files = {
+            "active.md": "## Active\ncurrent authored knowledge\n",
+            "duplicate.md": "## Active\ncurrent authored knowledge\n",
+            "archive/old.md": "## Old\ncold history\n",
+            "inbox/pending.md": "## Pending\nunreviewed capture\n",
+            "sessions/2099-01-01-test.md": "## Continuity\nprocess only\n",
+            "cache/noise.md": "cache noise\n",
+            "_meta/noise.md": "operational noise\n",
+            "_routine_prompts/noise.md": "prompt noise\n",
+            ".trash/noise.md": "trash noise\n",
+            "archive/orphan-stubs/noise.md": "stub noise\n",
+            "research/tool/node_modules/pkg/README.md": "dependency docs\n",
+            "finance/raw/tax-2099/receipt.txt": "readable raw receipt\n",
         }
-        for relative, content in fixtures.items():
+        for relative, content in fixture_files.items():
             path = vault / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
-        binary = vault / "finance/raw/tax/receipt.pdf"
-        binary.write_bytes(b"%PDF fixture")
+        binary = b"same-binary-provenance"
+        for relative in (
+            "finance/raw/tax-2099/receipt.pdf",
+            "travel/raw/confirmations/receipt-copy.pdf",
+        ):
+            path = vault / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(binary)
+        (vault / "empty.md").write_text("", encoding="utf-8")
+        (vault / "whitespace.md").write_text(" \n\t", encoding="utf-8")
 
-        all_records = list(
+        decisions = tuple(semantic_corpus.iter_file_decisions(vault))
+        by_path = {item.relative_path: item for item in decisions}
+        expect(
+            by_path["active.md"].included
+            and by_path["archive/old.md"].scope == "archive"
+            and by_path["inbox/pending.md"].scope == "inbox"
+            and by_path["sessions/2099-01-01-test.md"].scope == "process"
+            and by_path["finance/raw/tax-2099/receipt.txt"].scope == "raw",
+            "central corpus scope classification drift",
+        )
+        for excluded_path in (
+            "cache/noise.md",
+            "_meta/noise.md",
+            "_routine_prompts/noise.md",
+            ".trash/noise.md",
+            "archive/orphan-stubs/noise.md",
+            "research/tool/node_modules/pkg/README.md",
+            "empty.md",
+            "whitespace.md",
+        ):
+            expect(
+                not by_path[excluded_path].included,
+                f"hard or empty corpus path was included: {excluded_path}",
+            )
+
+        active = tuple(
             semantic_corpus.iter_corpus_records(
                 vault,
-                scope=semantic_corpus.ALL_SCOPE,
+                scope="active",
+                files=decisions,
             )
         )
-        all_paths = {record.path for record in all_records}
-        locator_paths = {
-            record.path
-            for record in all_records
-            if record.representation == semantic_corpus.RAW_LOCATOR_REPRESENTATION
-        }
-        expect(
-            {
-                "reflections/current.md",
-                "archive/old.md",
-                "sessions/process.md",
-                "inbox/pending.md",
-                "finance/raw/tax/manifest.txt",
-            }
-            <= all_paths
-            and "cache/ignored.md" not in all_paths
-            and "empty.md" not in all_paths
-            and len(locator_paths) == 1,
-            f"semantic corpus inclusion or raw locator policy drift: {all_paths}",
-        )
-
-        active_paths = {
-            record.path
-            for record in semantic_corpus.iter_corpus_records(
+        raw = tuple(
+            semantic_corpus.iter_corpus_records(
                 vault,
-                scope=semantic_corpus.ACTIVE_SCOPE,
+                scope="raw",
+                files=decisions,
             )
-        }
+        )
         expect(
-            "reflections/current.md" in active_paths
-            and locator_paths <= active_paths
-            and "archive/old.md" not in active_paths
-            and "sessions/process.md" not in active_paths
-            and "inbox/pending.md" not in active_paths
-            and "finance/raw/tax/manifest.txt" not in active_paths,
-            f"semantic active scope leaked deeper corpus zones: {active_paths}",
+            any(row.representation == "raw_locator" for row in active)
+            and not any(row.representation == "raw_text" for row in active),
+            "active scope did not substitute raw locators for full raw text",
+        )
+        expect(
+            any(row.representation == "raw_locator" for row in raw)
+            and any(row.representation == "raw_text" for row in raw),
+            "raw scope omitted locator or readable raw content",
+        )
+        locator = next(row for row in active if row.representation == "raw_locator")
+        expect(
+            "same-binary-provenance" not in locator.text
+            and semantic_corpus.scope_matches(locator, "active")
+            and semantic_corpus.scope_matches(locator, "raw"),
+            "raw locator extracted binary content or lost dual-scope visibility",
         )
 
-        audit = semantic_corpus.audit_corpus(vault)
-        expect(
-            audit["by_scope"][semantic_corpus.ACTIVE_SCOPE]["records"]
-            == len(active_paths)
-            and audit["raw"]["locator_records"] == 1
-            and audit["summary"]["excluded_files"] >= 2,
-            f"semantic corpus audit disagrees with retrieval policy: {audit}",
+        audit = semantic_corpus.audit_corpus(
+            vault,
+            chunk_estimator=semantic_backends.chunk_markdown,
         )
+        expect(
+            audit["by_exclusion_reason"]["dependency_tree"]["files"] == 1,
+            "dependency-tree exclusion missing from corpus audit",
+        )
+        expect(
+            audit["exact_duplicates"]["basis"] == "all_regular_physical_files"
+            and audit["exact_duplicates"]["groups"] >= 2
+            and audit["exact_duplicates"]["included_text"]["groups"] >= 1,
+            "all-file and included-text duplicate summaries did not reconcile",
+        )
+
+        fingerprint_drift = semantic._freshness_from_manifest(
+            {
+                locator.path: {
+                    "mtime": locator.mtime,
+                    "manifest_fingerprint": "new",
+                }
+            },
+            {
+                locator.path: {
+                    "mtime": locator.mtime,
+                    "manifest_fingerprint": "old",
+                }
+            },
+            physical_count=0,
+        )
+        expect(
+            fingerprint_drift["modified"] == 1 and fingerprint_drift["fresh"] is False,
+            "raw locator fingerprint drift did not invalidate freshness",
+        )
+
+    query_args = semantic.build_parser().parse_args(["query", "fixture"])
+    expect(
+        query_args.scope == "active"
+        and query_args.sources == "local"
+        and query_args.context is False,
+        "semantic query defaults are not local active bounded opt-in",
+    )
+    hits = [
+        semantic.QueryHit(
+            path="same.md",
+            score=0.9,
+            chunk_id=0,
+            chunk_text="x" * 700,
+        ),
+        semantic.QueryHit(
+            path="same.md",
+            score=0.8,
+            chunk_id=1,
+            chunk_text="duplicate chunk",
+        ),
+        *[
+            semantic.QueryHit(
+                path=f"@raw-locator/domain/raw/cluster-{index}",
+                score=0.7 - index * 0.01,
+                chunk_text="Raw cluster locator",
+                tier="L1",
+                representation="raw_locator",
+            )
+            for index in range(3)
+        ],
+        semantic.QueryHit(path="other.md", score=0.5, chunk_text="other"),
+    ]
+    collapsed = semantic._collapse_hits(hits, top=10, requested_scope="active")
+    expect(
+        len([hit for hit in collapsed if hit.path == "same.md"]) == 1
+        and len([hit for hit in collapsed if hit.representation == "raw_locator"]) == 2,
+        "result collapse or active raw-locator cap drift",
+    )
+    capsule = semantic._capsule(collapsed[0], "active")
+    expect(
+        len(capsule["snippet"]) <= 600 and capsule["truncated"] is True,
+        "result capsule exceeded the 600-character source budget",
+    )
+
+    class FakeStats:
+        total_chunks = 12
+        model_name = "fixture"
+
+    class FakeRetriever:
+        def query(
+            self,
+            _query: str,
+            *,
+            top_k: int,
+            filters: dict[str, object],
+        ) -> list[semantic_backends.SearchResult]:
+            expect(top_k == 30 and filters == {"scope": "active"}, "probe drift")
+            return [
+                semantic_backends.SearchResult(
+                    path="same.md",
+                    score=0.9,
+                    chunk_id=0,
+                    chunk_text="first",
+                ),
+                semantic_backends.SearchResult(
+                    path="same.md",
+                    score=0.8,
+                    chunk_id=1,
+                    chunk_text="second",
+                ),
+                semantic_backends.SearchResult(
+                    path="other.md",
+                    score=0.7,
+                    chunk_text="other",
+                ),
+            ]
+
+        @staticmethod
+        def stats() -> FakeStats:
+            return FakeStats()
+
+    efficiency = semantic._search_efficiency_report(
+        FakeRetriever(),
+        audit=audit,
+        update={"mode": "fixture"},
+    )
+    expect(
+        efficiency["corpus"]["default_scope_reduction_pct"] >= 0
+        and efficiency["query_probe"]["queries"] == 3
+        and efficiency["query_probe"]["duplicate_chunk_reduction_pct"] > 0,
+        "post-index search efficiency report lost scope, latency, or dedup metrics",
+    )
 
 
 def check_autoevo_reliability() -> None:
@@ -3757,7 +3876,7 @@ def main() -> int:
         ("dining audit", check_dining_audit),
         ("semantic cache-first", check_semantic_cache_first),
         ("semantic maintenance", check_semantic_maintenance),
-        ("semantic corpus", check_semantic_corpus),
+        ("semantic corpus policy", check_semantic_corpus_policy),
         ("autoevo reliability", check_autoevo_reliability),
         ("runtime selector", check_runtime_selector),
         ("runtime cue syntax", check_runtime_cue_syntax),
