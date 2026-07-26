@@ -25,13 +25,20 @@ When to invoke:
 
 ## Context Loading
 
-1. **Read profile files:** `profile/identity.md` + `profile/directions.md`
+1. Reuse the current `weekly` context projection from `$hi`; for direct
+   invocation, run `uv run scripts/context_bundle.py --intent weekly
+   --byte-budget 20480 --format json`.
 
-2. **Read all reflections from the past 7 days** from `<paths.reflections>/` directory.
+2. Use the projected reflection headings and closing sections as the first
+   pass. Search the seven-day window semantically and read only the source
+   sections needed to verify a weekly pattern:
 
-3. **Read the past 7 daily notes from the vault:**
-   - `Read <paths.daily_notes>/YYYY/MM/<today>.md` through `Read <paths.daily_notes>/YYYY/MM/<7-days-ago>.md` (7 local reads; notes nest by year/month, e.g. `<paths.daily_notes>/2026/06/2026-06-13.md`). For any file that is missing or empty, note it and continue — the user may not have written that day. Daily notes are user-authored; the system never writes to them.
-   - Focus on themes, moods, accomplishments, and struggles.
+   `Bash: uv run scripts/semantic.py query "weekly themes moods accomplishments struggles" --after "<7 days ago, YYYY-MM-DD>" --top 10 --context --format json`
+
+3. Inspect daily-note file presence for the past seven effective dates. Use the
+   bounded capsules first, then read a matching daily-note section or complete
+   short note only when it is needed for a claim. Missing or empty days remain
+   missing evidence. Daily notes are user-authored and read-only.
 
 4. **Search for recent activity in the vault:**
    - Build the recency window: `Bash: find "$OV"/daily-notes "$OV"/reflections "$OV"/gtd -type f -name "*.md" -mtime -7 2>/dev/null | sort`
@@ -63,7 +70,10 @@ Daily `/hi` may not run every day. Detect missing days from the past 7 by checki
 Bash: for d in $(seq 0 6); do date_str=$(date -v-${d}d +%Y-%m-%d); ls "$OV"/reflections/${date_str}-reflection*.md 2>/dev/null > /dev/null || echo "missing: $date_str"; done
 ```
 
-Read the daily notes for any missing days (`<paths.daily_notes>/YYYY/MM/<date>.md`) so context is loaded, then prompt the user with 3 light **week-level** questions (do not force per-day reconstruction):
+Check whether daily notes exist for reflection-missing days. Read a note only
+when its capsule or a concrete weekly question requires source evidence, then
+prompt the user with 3 light **week-level** questions (do not force per-day
+reconstruction):
 
 1. **Support pulse (week)**: 这 7 天里, 有哪些有意义的互动 (1:1 / 家人 / 朋友 / 同事) 没记到 daily reflection 里? 谁? 什么类型 (E / I / Inf / A)? 有没有新连接?
 2. **Dining (week)**: 这 7 天有去新餐厅 / 重访旧餐厅没记到 meal-history tracker 的吗? (餐厅 + **就餐日期 YYYY-MM-DD** + 评分 + **再去? Y/N/Maybe** + 健康 flag + 人数 + 总额 + 必点 + Credit used). Backfill spans multiple days, so the Date column must hold the actual visit date, not the session date. 人均仅在人数和总额都有来源时计算。评分 + 再去 are mandatory per the `/hi` Dining Pulse rule; do not append a row without both.

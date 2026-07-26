@@ -41,21 +41,27 @@ Stale-goal floor: if `directions.md` lists goals older than 1 year with no progr
 ## Prerequisites
 
 1. Check if `profile/identity.md` exists. If not, tell the user: "No profile found. Run `/introspect` first to build your self-model." and stop.
-2. Read `profile/identity.md`. Check the `Last built:` date. If older than 7 days, warn: "Your profile is stale (built on [date]). Consider running `/introspect` to refresh."
+2. Read only its `Last built:` line. If older than 7 days, warn: "Your profile is stale (built on [date]). Consider running `/introspect` to refresh."
 
 ## Context Loading
 
-1. **Read profile files:**
-   - `profile/identity.md` — reflection context
-   - `profile/directions.md` — goals with categories and metrics
+1. Reuse the current `review` context projection from `$hi`; for direct
+   invocation, run `uv run scripts/context_bundle.py --intent review
+   --byte-budget 20480 --format json`.
 
-2. **Read all reflections from the lookback window** from the `<paths.reflections>/` directory. Lookback depends on the form chosen from Cadence: **90 days for full quarterly review**, **30 days for light pulse**. If none exist, note this is the first review.
+2. Use the projected reflection headings and closing sections as the continuity
+   seed. Search the selected lookback window, 90 days for a full review or 30
+   days for a pulse, and triage bounded capsules before reading 3 to 5 relevant
+   source sections. Do not preload every reflection in the window.
 
 3. **Pull goal-related updates from the local vault, bounded to the lookback window.** Do NOT issue an unbounded `Grep(path: "$OV/")` — an unbounded grep will pull stale historical matches that skew the review. Use `find -print0 | xargs -0 grep` so recency actually binds. Substitute `<N>` with the lookback (90 for full, 30 for pulse):
    - `Bash: find "$OV"/daily-notes "$OV"/reflections "$OV"/gtd "$OV"/wiki -type f -name "*.md" -mtime -<N> -print0 2>/dev/null | xargs -0 grep -HnE "目标|goal|progress|进展|milestone" 2>/dev/null` — recency-bounded goal and progress mentions across both languages in one pass. Safe with an empty working set (xargs does nothing if stdin is empty).
-   - `Read <paths.daily_notes>/YYYY/MM/<today>.md` for today's context.
+   - Add today's daily note only if current capture is necessary for a disputed
+     or missing goal state.
 
-4. **Read key goal notes in full** by `Read`-ing the matching files directly. If a referenced note is genuinely missing from the local vault, report the gap.
+4. Read key goal-note sections directly. Read a complete file only when the
+   full goal record is required. If a referenced note is genuinely missing
+   from the local vault, report the gap.
 
 ## Analysis
 

@@ -55,7 +55,8 @@ sessions        = "sessions"
 # L2 transient — mobile-capture submodule, digested then cleared by /sync.
 zettelm         = "zettelm"
 
-# L1 — raw capture
+# L1: pending or raw capture
+inbox           = "inbox"
 cache           = "cache"
 
 [paths.wiki_localized]

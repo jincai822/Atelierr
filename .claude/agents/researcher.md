@@ -15,13 +15,13 @@ The user's entire vault lives under `<paths.daily_notes>/` (`YYYY/MM/YYYY-MM-DD.
 
 | Intent | Command |
 |---|---|
-| Conceptual / semantic content query | `Bash: uv run scripts/semantic.py query "<concept>" --top 10` — this is the **default** for any content-shaped query, not a fallback |
+| Conceptual / semantic content query | `Bash: uv run scripts/semantic.py query "<concept>" --top 10 --context --format json` as the default bounded local-active scan |
 | Structural query: known tag, exact title, date range, file presence | `Grep` (with `glob` / `path` scoped to the relevant tier directory) |
 | Read a daily note | `Read <paths.daily_notes>/YYYY/MM/YYYY-MM-DD.md` |
 | Read a note by title | `Grep` for the title, then `Read` the match |
 | Discover tags in the corpus | `Bash: grep -rohE '#[A-Za-z][A-Za-z0-9_-]*' "$OV"/ \| sort -u \| head -50` |
 
-Semantic-primary rule. For anything phrased as a concept ("how does X relate to Y", "what did I think about Z", "find notes about...") the first move is `uv run scripts/semantic.py query`, not Grep. The semantic script is embedding-backed when `~/.cache/atelier/lance/` exists (rebuild with `uv run scripts/semantic.py index` on each machine). Grep is reserved for structural queries where you already know the exact string (a tag name, a known title, a date pattern, a file path). If semantic returns thin results, *then* fall through to grep with synonym variants — not the other way around.
+Semantic-primary rule. For anything phrased as a concept ("how does X relate to Y", "what did I think about Z", "find notes about...") the first move is `uv run scripts/semantic.py query "<concept>" --top 10 --context --format json`, not Grep. The default is local `active` scope. Select `raw`, `archive`, `inbox`, or `process` explicitly when the intent requires it, and opt into Readwise with `--sources local,readwise`. The semantic script is embedding-backed when `~/.cache/atelier/lance/` exists (rebuild with `uv run scripts/semantic.py index` on each machine). Grep is reserved for structural queries where you already know the exact string (a tag name, a known title, a date pattern, a file path). If semantic returns thin results, *then* fall through to grep with synonym variants.
 
 Fast-path for semantic / exploratory sessions. For `/explore`, forgotten-connection queries, and paradigm-shift prompts ("what am I missing?", "surprise me", "find a contradiction"), `uv run scripts/semantic.py query` is already your first move by default. Do not exhaust synonym grep first. Note `semantic-first` in the handoff so the choice is transparent.
 
@@ -30,16 +30,19 @@ Fast-path for semantic / exploratory sessions. For `/explore`, forgotten-connect
 Don't search randomly. Follow this strategy:
 
 ### Phase 1: Broad Scan (cast the net)
-- **Conceptual queries start with semantic:** `Bash: uv run scripts/semantic.py query "<concept>" --top 10`. Run the Chinese framing and the English framing as separate calls when the topic straddles languages.
+- **Conceptual queries start with semantic:** `Bash: uv run scripts/semantic.py query "<concept>" --top 10 --context --format json`. Run the Chinese framing and the English framing as separate calls when the topic straddles languages.
 - **Structural queries start with Grep:** known tag (`#moment`), exact title, date pattern, file presence. Always run Chinese + English variants for topical terms: `Grep(pattern: "目标", path: "$OV/")` AND `Grep(pattern: "goal", path: "$OV/")`.
 - Narrow by subdirectory when the user's intent is tier-specific (`<paths.wiki>/` for certified, `<paths.daily_notes>/` for capture stream, `<paths.reflections>/` for prior sessions)
 - Use file mtime or filename date to weight recency but don't exclude old matches
 
 ### Phase 2: Targeted Retrieval (read the hits)
-- `Read` the top 10-15 most relevant files in full
-- Prioritize: wiki entries > recent daily notes > reflections > thematic matches elsewhere
+- Triage at most 10 result capsules and collapse repeated chunks from one file.
+- Read the relevant sections from 3 to 5 files.
+- Read a complete file only when section context is insufficient or the task requires the integrity of the full argument or record.
+- Prioritize: wiki entries > recent daily notes > reflections > thematic matches elsewhere.
+- Treat `raw_locator` as a provenance pointer. Use `--scope raw` to search readable raw text and inspect only the selected source.
 - Do not filter by provenance tag. Relevance is validation depth + topic match. Notes carrying `#ai-reflection` or `#ai-generated` are alloy and are included like any other alloy note. See `protocols/epistemic-hygiene.md`.
-- Batch efficiency: `Read` is cheap over local files — there is no network round-trip and no size limit. The files are already on disk, so no caching is required. Cache only synthesized findings (e.g., cross-note comparison tables), not raw note content.
+- Batch section reads where practical. Cache only synthesized findings such as cross-note comparison tables, not raw note content.
 
 ### Phase 3: Gap Filling (what's missing?)
 - Review what you found against the query — what angles are uncovered?
@@ -91,8 +94,9 @@ context_tokens: <approximate>
 
 **Search Strategy:**
 - Queries run: [list of searches with type and language]
-- Notes scanned: [count]
-- Notes read in full: [count]
+- Capsules triaged: [count, maximum 10]
+- Source sections read: [count, normally 3 to 5]
+- Notes read in full: [count and why each full read was required]
 
 **Sources Found:**
 | Note | Last Edited | Relevance |

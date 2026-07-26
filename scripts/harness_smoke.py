@@ -34,6 +34,7 @@ import routine_lock
 import routine_result
 import semantic
 import semantic_backends
+import semantic_corpus
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
@@ -575,6 +576,105 @@ def check_semantic_maintenance() -> None:
         expect(
             "lazy rebuild" not in path.read_text(encoding="utf-8").lower(),
             f"{path.relative_to(ROOT)} still claims query refreshes the index",
+        )
+
+
+def check_semantic_corpus() -> None:
+    parser = semantic.build_parser()
+    defaults = parser.parse_args(["query", "fixture"])
+    explicit = parser.parse_args(
+        [
+            "query",
+            "fixture",
+            "--scope",
+            "raw",
+            "--context",
+            "--sources",
+            "local,readwise",
+        ]
+    )
+    expect(
+        defaults.scope == semantic_corpus.ACTIVE_SCOPE
+        and defaults.context is False
+        and defaults.sources == "local",
+        "semantic query defaults are not local, active, and bounded-on-demand",
+    )
+    expect(
+        explicit.scope == semantic_corpus.RAW_SCOPE
+        and explicit.context is True
+        and explicit.sources == "local,readwise",
+        "semantic query parser lost explicit scope, context, or source controls",
+    )
+
+    with tempfile.TemporaryDirectory(prefix="atelier-semantic-corpus-") as temp_dir:
+        vault = Path(temp_dir)
+        fixtures = {
+            "reflections/current.md": "current authored note\n",
+            "archive/old.md": "archived note\n",
+            "sessions/process.md": "process record\n",
+            "inbox/pending.md": "pending capture\n",
+            "finance/raw/tax/manifest.txt": "raw text receipt\n",
+            "cache/ignored.md": "ephemeral cache\n",
+            "empty.md": "",
+        }
+        for relative, content in fixtures.items():
+            path = vault / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        binary = vault / "finance/raw/tax/receipt.pdf"
+        binary.write_bytes(b"%PDF fixture")
+
+        all_records = list(
+            semantic_corpus.iter_corpus_records(
+                vault,
+                scope=semantic_corpus.ALL_SCOPE,
+            )
+        )
+        all_paths = {record.path for record in all_records}
+        locator_paths = {
+            record.path
+            for record in all_records
+            if record.representation == semantic_corpus.RAW_LOCATOR_REPRESENTATION
+        }
+        expect(
+            {
+                "reflections/current.md",
+                "archive/old.md",
+                "sessions/process.md",
+                "inbox/pending.md",
+                "finance/raw/tax/manifest.txt",
+            }
+            <= all_paths
+            and "cache/ignored.md" not in all_paths
+            and "empty.md" not in all_paths
+            and len(locator_paths) == 1,
+            f"semantic corpus inclusion or raw locator policy drift: {all_paths}",
+        )
+
+        active_paths = {
+            record.path
+            for record in semantic_corpus.iter_corpus_records(
+                vault,
+                scope=semantic_corpus.ACTIVE_SCOPE,
+            )
+        }
+        expect(
+            "reflections/current.md" in active_paths
+            and locator_paths <= active_paths
+            and "archive/old.md" not in active_paths
+            and "sessions/process.md" not in active_paths
+            and "inbox/pending.md" not in active_paths
+            and "finance/raw/tax/manifest.txt" not in active_paths,
+            f"semantic active scope leaked deeper corpus zones: {active_paths}",
+        )
+
+        audit = semantic_corpus.audit_corpus(vault)
+        expect(
+            audit["by_scope"][semantic_corpus.ACTIVE_SCOPE]["records"]
+            == len(active_paths)
+            and audit["raw"]["locator_records"] == 1
+            and audit["summary"]["excluded_files"] >= 2,
+            f"semantic corpus audit disagrees with retrieval policy: {audit}",
         )
 
 
@@ -3126,6 +3226,186 @@ def check_runtime_cue_syntax() -> None:
         )
 
 
+def check_context_bundle() -> None:
+    with tempfile.TemporaryDirectory(prefix="atelier-context-") as temp_dir:
+        root = Path(temp_dir)
+        vault = root / "vault"
+        for relative in (
+            "profile",
+            "sessions",
+            "reflections",
+            "daily-notes/2099/01",
+            "research",
+        ):
+            (vault / relative).mkdir(parents=True, exist_ok=True)
+
+        (vault / "profile" / "identity.md").write_text(
+            "Last built: 2099-01-03\n\n## Identity\nstable identity\n",
+            encoding="utf-8",
+        )
+        (vault / "profile" / "directions.md").write_text(
+            "Last built: 2099-01-03\n\n## Direction\nactive direction\n",
+            encoding="utf-8",
+        )
+        (vault / "sessions" / "2099-01-03-reflection.md").write_text(
+            "## Continuity\ncarry this\n\n"
+            "## Anomalies\nnotice this\n\n"
+            "## Full Text\nmust not preload\n",
+            encoding="utf-8",
+        )
+        (vault / "reflections" / "2099-01-02-reflection.md").write_text(
+            "## Theme\nbody must stay out of the heading projection\n\n"
+            "## Next Action\ndo one bounded thing\n",
+            encoding="utf-8",
+        )
+        daily = vault / "daily-notes" / "2099" / "01" / "2099-01-03.md"
+        daily.write_text("## Today\nexplicit daily context\n", encoding="utf-8")
+        (vault / "research" / "source.md").write_text(
+            "## Alpha\nalpha only\n\n## Beta\nbeta only\n",
+            encoding="utf-8",
+        )
+
+        capture_stdout = run(
+            [
+                "scripts/context_bundle.py",
+                "--intent",
+                "capture",
+                "--vault",
+                str(vault),
+                "--effective-date",
+                "2099-01-03",
+                "--format",
+                "json",
+            ]
+        )
+        capture = json.loads(capture_stdout)
+        expect(
+            not any(row["component"] == "profile" for row in capture["excerpts"]),
+            "empty profile_reads unexpectedly loaded profile content",
+        )
+        expect(
+            not any(row["component"] == "daily" for row in capture["excerpts"]),
+            "daily context must remain opt-in",
+        )
+        expect(
+            capture["budget"]["output_bytes"] == len(capture_stdout.encode("utf-8")),
+            "context bundle JSON byte accounting drift",
+        )
+
+        reflection_stdout = run(
+            [
+                "scripts/context_bundle.py",
+                "--intent",
+                "reflection",
+                "--vault",
+                str(vault),
+                "--effective-date",
+                "2099-01-03",
+                "--component",
+                "profile",
+                "--component",
+                "session",
+                "--component",
+                "reflections",
+                "--component",
+                "daily",
+                "--component",
+                "sources",
+                "--source",
+                "research/source.md#Beta",
+                "--byte-budget",
+                "8192",
+                "--format",
+                "json",
+            ]
+        )
+        reflection = json.loads(reflection_stdout)
+        excerpts = reflection["excerpts"]
+        expect(
+            {row["section"] for row in excerpts if row["component"] == "session"}
+            == {"Continuity", "Anomalies"},
+            "session projection leaked non-continuity sections",
+        )
+        expect(
+            any(row["source"] == str(daily.relative_to(vault)) for row in excerpts),
+            "explicit daily component did not resolve effective-date note",
+        )
+        expect(
+            any(
+                row["source"] == "research/source.md"
+                and row["section"] == "Beta"
+                and "beta only" in row["content"]
+                and "alpha only" not in row["content"]
+                for row in excerpts
+            ),
+            "explicit source section projection drift",
+        )
+        expect(
+            "body must stay out" not in reflection_stdout,
+            "reflection projection loaded a full low-priority section body",
+        )
+        expect(
+            len(reflection_stdout.encode("utf-8")) <= 8192,
+            "context bundle exceeded its selected byte budget",
+        )
+
+        injected = json.dumps(
+            {
+                "name": "capture",
+                "mode": "wrong",
+                "profile_reads": ["../../outside.md"],
+            }
+        )
+        routed = json.loads(
+            run(
+                [
+                    "scripts/context_bundle.py",
+                    "--route-json",
+                    injected,
+                    "--vault",
+                    str(vault),
+                    "--effective-date",
+                    "2099-01-03",
+                    "--format",
+                    "json",
+                ]
+            )
+        )
+        expect(
+            sorted(routed["route"].get("packet_registry_mismatch", []))
+            == ["mode", "profile_reads"],
+            "route packet mismatch was not made visible",
+        )
+        expect(
+            not any(row["component"] == "profile" for row in routed["excerpts"]),
+            "route packet injected an undeclared profile path",
+        )
+
+        outside = root / "outside.md"
+        outside.write_text("must not read\n", encoding="utf-8")
+        escaped = subprocess.run(
+            [
+                PYTHON,
+                "scripts/context_bundle.py",
+                "--intent",
+                "reflection",
+                "--vault",
+                str(vault),
+                "--component",
+                "sources",
+                "--source",
+                str(outside),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        expect(
+            escaped.returncode != 0 and "escapes the vault" in escaped.stderr,
+            "context bundle accepted a source outside the selected vault",
+        )
+
+
 def check_privacy_scanner() -> None:
     """Catch staged-only leaks and the boundary cases that previously escaped."""
     privacy_role = (ROOT / ".claude" / "agents" / "privacy-reviewer.md").read_text(
@@ -3477,9 +3757,11 @@ def main() -> int:
         ("dining audit", check_dining_audit),
         ("semantic cache-first", check_semantic_cache_first),
         ("semantic maintenance", check_semantic_maintenance),
+        ("semantic corpus", check_semantic_corpus),
         ("autoevo reliability", check_autoevo_reliability),
         ("runtime selector", check_runtime_selector),
         ("runtime cue syntax", check_runtime_cue_syntax),
+        ("bounded context projection", check_context_bundle),
         ("privacy scanner", check_privacy_scanner),
         ("Codex routine runner", check_codex_routine_runner),
         ("routine capability profiles", check_routine_profiles),

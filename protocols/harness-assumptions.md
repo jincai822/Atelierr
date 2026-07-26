@@ -52,11 +52,12 @@ Voice band vocabulary used in this file:
 
 | Rule | Location | Current Value | Re-test When |
 |------|----------|--------------|-------------|
-| Reflections loaded at session start | session-continuity.md, hi.md | Last 3 | Context window doubles |
-| Daily notes loaded | hi.md, session-continuity.md | Last 3-7 | Context window doubles |
-| Profile token estimate | hi.md, session-continuity.md | 3-5K identity, 5-10K directions | Profile format changes significantly |
-| Agent prompt + protocols budget | hi.md, session-continuity.md | ~2K | Agent definitions grow beyond budget |
-| Session log excerpt budget | hi.md, session-continuity.md | ~500-1K | Session logs grow in scope |
+| Generic route context | context_bundle.py, session-continuity.md, hi.md | At most 12 KB serialized UTF-8 | Context needs or model window changes materially |
+| Selected workflow context | context_bundle.py, session-continuity.md | At most 20 KB before targeted source reads | Workflow evidence needs exceed the cap repeatedly |
+| Reflection continuity | context_bundle.py | Headings plus at most two high-signal closing sections from up to 3 files | Reflection structure changes |
+| Daily-note preload | context_bundle.py, hi.md | Explicit component only | More routes demonstrably require current capture |
+| Profile preload | context_bundle.py, intents.toml | Only selected row's `profile_reads` | Intent ownership changes |
+| Session-log preload | context_bundle.py | Latest `Continuity` and `Anomalies` sections only | Session schema changes |
 
 ### Temporal Thresholds
 

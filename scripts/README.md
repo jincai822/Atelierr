@@ -6,8 +6,9 @@ Executable tooling for the Atelier knowledge layer. All scripts are stdlib-only 
 
 | Script | Purpose | Phase | Deps |
 |---|---|---|---|
-| `semantic.py` | Local semantic search over `$OV/` with model-free freshness inspection, drift-gated incremental indexing, BGE-M3 embeddings, LanceDB, and tier-aware reranking; lexical fallback when index is absent | B.5 | `lancedb`, `sentence-transformers` (optional; falls back to lexical) |
+| `semantic.py` | Scoped local semantic search over `$OV/` with bounded context capsules, model-free freshness inspection, drift-gated incremental indexing, raw locator cards, BGE-M3 embeddings, LanceDB, and tier-aware reranking; lexical fallback when index is absent | B.5 | `lancedb`, `sentence-transformers` (optional; falls back to lexical) |
 | `semantic_backends.py` | Backend implementations for semantic.py (LanceDB embedding backend, lexical fallback) | B.5 | `lancedb`, `sentence-transformers` (optional) |
+| `semantic_corpus.py` | Deterministic semantic corpus policy: scope classification, exclusions, raw locator generation, duplicate accounting, and read-only audits | B.5 | stdlib |
 | `semantic_eval.py` | Offline evaluation harness for semantic.py — builds a wikilink-derived gold set from the vault and computes retrieval metrics | B.5 | `lancedb`, `sentence-transformers` |
 | `semantic_index_runner.sh` | Owner-gated, offline, timeout-bounded launchd wrapper for `semantic.py index --if-stale`; loads no embedding model when the corpus is current | ops | `uv`, `caffeinate`, `routine_owner.py` |
 | `config.py` | Loads device-dependent semantic-index parameters from gitignored `semantic.toml`; safe defaults when the file is missing | B.5 | stdlib |
@@ -31,6 +32,7 @@ Executable tooling for the Atelier knowledge layer. All scripts are stdlib-only 
 | `recurring.py` | Manages recurring obligations in `$OV/gtd/recurring.md` — re-emerging tasks with `every:` / `last-done:` due computation, distinct from one-shot GTD items | ops | stdlib |
 | `todos.py` | Aggregate open TODOs from `$OV/gtd/` and reflection Next Action sections; computes priority from `due:` / `priority:` / age; flags closure candidates from daily-note language; subcommands `list`, `stale`, `closure-candidates`, `digest` — `digest` powers `/daily-reflection` Step 0 (reached via `/hi`) | ops | stdlib |
 | `session_log.py` | Session event log skeleton generator — handles late-sleep date rule and collision auto-increment | E | stdlib |
+| `context_bundle.py` | Builds route-first, byte-bounded profile and continuity projections from the intent registry | E | stdlib |
 | `shadow.py` | Cross-provider shadow-log correlation + reporting — `group-start` / `group-close` witnesses for multi-leg call sites, `report` over the JSONL call logs | ops | stdlib |
 | `command_timeout.py` | Runs one scheduled subprocess with an epoch-based wall-clock timeout that survives macOS sleep and terminates its process group on expiry | ops | stdlib |
 | `autoevo_preflight.py` | Checks autoevo Git, session, privacy, semantic, branch, and LFS readiness before model launch; writes a checksum-owned blocker audit without repairing Git | ops | stdlib, `git`, `uv`, optional Git LFS |

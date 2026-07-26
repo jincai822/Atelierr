@@ -18,7 +18,7 @@ These rules apply to every turn, every agent. Violations are bugs.
 
 ## Knowledge Layers
 
-Five-tier model. Directory is the tier; location carries the certification level.
+Directory carries the five-tier certification level.
 
 | Tier | Location | Meaning |
 |---|---|---|
@@ -28,23 +28,28 @@ Five-tier model. Directory is the tier; location carries the certification level
 | L2 | every L2 surface in `harness/paths.toml` (see registry for the full list) | Working: free-writes, reflections, research, drafts |
 | L1 | Readwise (cloud inbox, accessed via CLI; no local mirror), `<paths.cache>/` | Raw capture |
 
-`$OV/` is the source of truth. Daily notes are user-authored locally. `<paths.cache>/` holds ephemeral fetches. Readwise inbox is a cloud-only L1 surface — accessed through the `readwise` CLI when needed, never mirrored to disk. `<paths.zettelm>/` is a transient mobile-capture submodule; `/sync` digests it into L2 then clears.
+`$OV/` is the source of truth. Daily notes are user-authored. `<paths.cache>/`
+is ephemeral. Readwise is cloud-only and accessed through its CLI, never
+mirrored. `<paths.zettelm>/` is transient mobile capture digested by `/sync`.
 
-**Tooling layout:** Shared tools live in `scripts/`; private tools stay under `$OV/`.
+Shared tools live in `scripts/`; private tools stay under `$OV/`.
 
-**Remote-routine layer** (`protocols/remote-routines.md`): `/schedule` cron agents write canonical output to declared `$OV` paths; cue-check is vault-agnostic via `$OV/_meta/routine_watch.toml`.
+Remote routines write canonical output to declared `$OV` paths; see
+`protocols/remote-routines.md`.
 
 ## Reading Rules
 
 | Intent | Command |
 |---|---|
-| Content query | `Bash: uv run scripts/semantic.py query "<concept>" --top N` |
+| Content query | `Bash: uv run scripts/semantic.py query "<concept>" --top N --context --format json` |
 | Structural query | `Grep` with path/glob scoped to tier directory |
 | Daily note | `Read <paths.daily_notes>/YYYY/MM/YYYY-MM-DD.md` |
 | Note by title | `Grep` for title then `Read` the file |
 | Person note by name | `Bash: uv run scripts/people.py "<name>"` |
 
-- Semantic-primary search. Content queries start with `uv run scripts/semantic.py query`, not Grep. Grep is for structural queries only.
+- Semantic-primary search. Content queries start with bounded local `active`
+  results from `semantic.py`; select other scopes or Readwise explicitly.
+  Grep is structural only.
 - Local-first reads. Read from `$OV/` via Read + Grep + semantic.py.
 - Aggregate freshness. Before quoting an aggregate tracker (any file with frontmatter `freshness: required`) as authoritative, run `uv run scripts/aggregate_freshness.py --discover --stale-only`; cross-check the subject file when an aggregate appears. Convention defined in `protocols/local-first-architecture.md` § Aggregation vs. Detail.
 
@@ -67,11 +72,17 @@ Late-sleep rule: before 03:00 local, "today" = previous calendar day. Read both 
 
 `profile/` is gitignored per-user config (local dir or vault symlink).
 
-- `profile/identity.md` — self-model, intellectual taste, active life areas. Read at every session start.
-- `profile/directions.md` — era context, goals (#capacity, #learning, #identity, #energy). Read for goal conversations.
-- `profile/expertise.md` — domain knowledge, research taste. Read when relevant.
+- `profile/identity.md`: self-model, intellectual taste, active life areas.
+- `profile/directions.md`: era context, goals, and live commitments.
+- `profile/expertise.md`: domain knowledge and research taste.
 
-All files include `Last built:` timestamp. Warn if >7 days stale. If missing: "Run `/introspect` first."
+Route first. `scripts/context_bundle.py` loads only the selected intent's
+`profile_reads` plus bounded continuity. Load expertise only when relevant;
+obey `protocols/session-continuity.md` budgets.
+
+All profile files include `Last built:` timestamp. Warn if a loaded file is
+more than 7 days stale. If a required file is missing: "Run `/introspect`
+first."
 
 ## Coaching Style
 

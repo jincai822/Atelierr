@@ -37,7 +37,9 @@ scripts/semantic.py --help
 | `--top N` | Max results. | 10 |
 | `--lang {zh,en,auto}` | Query language hint. No-op in stub mode. | `auto` |
 | `--format {tsv,json}` | Output format. | `tsv` |
-| `--sources LIST` | Comma-separated sources: `local`, `readwise`. Readwise is a federated cloud search via the `readwise` CLI (real mode only; stub mode is local-only and ignores this flag); if the CLI is not installed, that source is skipped with a "CLI not installed, skipping" stderr warning. | `local,readwise` (federated) |
+| `--scope {active,raw,archive,inbox,process,all}` | Select the indexed knowledge zone. `active` includes compact raw locator cards, not raw file contents. | `active` |
+| `--context` | With JSON output, return bounded section capsules with heading, snippet, tier, scope, and representation. | off |
+| `--sources LIST` | Comma-separated sources: `local`, `readwise`. Readwise is opt-in and uses its CLI in real mode; stub mode remains local-only. | `local` |
 
 ### Freshness and indexing
 
@@ -63,7 +65,9 @@ TSV (default): one result per line. Column 3 differs by mode:
   - **Real:** cosine similarity between query embedding and file embedding.
 - `matched_tokens` (stub only) is a comma-separated token list. `source` (real only) is the source label: `local` or `readwise`.
 
-JSON (`--format json`): a list of objects with `path`, `score`, `matched_tokens` (stub), or `path`, `score`, `source`, `matched_tokens` (real mode; `matched_tokens` is always an empty list).
+JSON (`--format json`): a list of objects with `path`, `score`, `source`, and
+`matched_tokens`. Add `--context` for bounded capsules with `heading`,
+`snippet`, `tier`, `scope`, `representation`, and truncation state.
 
 ### Exit codes
 
@@ -110,6 +114,8 @@ Restricted to reflections in the last 30 days, JSON output:
 scripts/semantic.py query "energy drain" \
     --path "$OV"/reflections \
     --after 2026-03-07 \
+    --scope active \
+    --context \
     --format json
 ```
 

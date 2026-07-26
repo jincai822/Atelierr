@@ -19,7 +19,9 @@ User says something like:
 
 ## Prerequisites
 
-1. Read `profile/identity.md` and `profile/directions.md` for context.
+1. Reuse the current `decision` context projection from `$hi`; for direct
+   invocation, run `uv run scripts/context_bundle.py --intent decision
+   --format json`.
 2. Read `frameworks/cross-validation.md` for framework selection.
 
 ## The Decision Process
@@ -45,7 +47,7 @@ This determines how much analysis is appropriate.
 ### Step 3: Search for Relevant History
 
 Pull prior thinking from the local vault.
-- `Bash: uv run scripts/semantic.py query "<decision topic>" --top 10` — **primary**: has the user thought about adjacent versions of this before? Reframe and retry if thin.
+- `Bash: uv run scripts/semantic.py query "<decision topic>" --top 10 --context --format json` — **primary**: has the user thought about adjacent versions of this before? Reframe and retry if thin.
 - `Grep(pattern: "<key terms>", path: "$OV/")` — exact-match related notes for structural follow-up. Try both languages.
 - `Grep(pattern: "<goal keyword>", path: "<paths.gtd>/")` AND `Grep(pattern: "<goal keyword>", path: "<paths.wiki>/")` — two separate calls; `Grep`'s `path` takes a single root, not a space-separated list. Checks which active goals (gtd) and which certified directions (wiki) are affected by this decision.
 

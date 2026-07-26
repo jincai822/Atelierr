@@ -11,17 +11,23 @@ Deep assessment of where your energy goes — physical, mental, emotional, and s
 
 ## Prerequisites
 
-1. Read `profile/identity.md` for context.
-2. Read `profile/directions.md` for #energy category goals.
+1. Reuse the current `energy-audit` context projection from `$hi`; for direct
+   invocation, run `uv run scripts/context_bundle.py --intent energy-audit
+   --format json`.
+2. Retrieve a specific profile section only if the bounded projection omits
+   evidence needed for the audit.
 
 ## Context Loading
 
-1. **Read the last 14 daily notes from the local vault** to track energy patterns: `Read <paths.daily_notes>/YYYY/MM/<today>.md` back through `Read <paths.daily_notes>/YYYY/MM/<14-days-ago>.md` (one `Read` per date; notes nest by year/month). For dates missing from the vault, report the gap.
+1. **Search the last 14 days of daily notes** with
+   `uv run scripts/semantic.py query "physical mental emotional social energy patterns" --path daily-notes --after YYYY-MM-DD --top 10 --context --format json`.
+   Triage the capsules, then read only the relevant sections from 3 to 5
+   source notes. Report missing evidence rather than loading every daily note.
 2. **Search for energy-related notes:**
    - `Grep(pattern: "累|疲惫|精力", path: "$OV/")` — Chinese exhaustion markers (local, exact).
    - `Grep(pattern: "运动|健康|睡眠", path: "$OV/")` — Chinese health markers (local, exact).
    - `Grep(pattern: "exercise|health|sleep", path: "$OV/")` — English health markers (local, exact).
-   - `Bash: uv run scripts/semantic.py query "tired exhausted drained" --top 10` — **primary** for affective states that may not use literal "tired/exhausted" language. Reframe the concept and retry if results are thin.
+   - `Bash: uv run scripts/semantic.py query "tired exhausted drained" --top 10 --context --format json` — **primary** for affective states that may not use literal "tired/exhausted" language. Reframe the concept and retry if results are thin.
 
 ## The Four Energy Dimensions
 

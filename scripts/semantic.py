@@ -38,13 +38,25 @@ import json
 import re
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator, List, Optional, Tuple
+from typing import Any, Iterator, List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from _paths import vault_root  # type: ignore[import-not-found]  # noqa: E402
+from semantic_corpus import (  # type: ignore[import-not-found]  # noqa: E402
+    ACTIVE_SCOPE,
+    ALL_SCOPE,
+    RAW_LOCATOR_REPRESENTATION,
+    VALID_SCOPES,
+    CorpusRecord,
+    audit_corpus,
+    build_raw_locator_records,
+    iter_corpus_records,
+    iter_file_decisions,
+)
 
 # Lance index is machine-local (rebuild is ~7s on MPS, not worth syncing binaries).
 # Per-embedder subdirs keep indices from different models isolated by dimension
@@ -107,6 +119,20 @@ LANCE_DIR = _resolve_lance_dir()
 # $OV set; only commands that actually walk the vault (query, index)
 # require $OV.
 DEFAULT_PATH: str | None = None
+
+
+@dataclass
+class QueryHit:
+    path: str
+    score: float
+    chunk_id: int = 0
+    chunk_text: str = ""
+    tier: str = ""
+    mtime: float = 0.0
+    source: str = "local"
+    scope: str = ACTIVE_SCOPE
+    representation: str = "authored"
+    matched_tokens: tuple[str, ...] = ()
 
 
 # Subdirectories under the vault excluded from indexing (ephemeral caches,
@@ -175,6 +201,90 @@ def _has_non_whitespace(path: Path) -> Optional[bool]:
         return False
     except OSError:
         return None
+
+
+def _corpus_snapshot(
+    vault: Path,
+) -> tuple[tuple[Any, ...], list[Path], tuple[CorpusRecord, ...]]:
+    """Classify one consistent physical snapshot and derive locator records."""
+    decisions = tuple(iter_file_decisions(vault))
+    physical_files = [
+        item.absolute_path
+        for item in decisions
+        if item.included and item.absolute_path is not None
+    ]
+    locators = build_raw_locator_records(vault, files=decisions)
+    return decisions, physical_files, locators
+
+
+def _current_corpus_manifest(
+    vault: Path,
+) -> tuple[dict[str, dict[str, Any]], int, tuple[CorpusRecord, ...], list[str]]:
+    decisions, _, locators = _corpus_snapshot(vault)
+    manifest: dict[str, dict[str, Any]] = {}
+    unreadable: list[str] = []
+    physical_count = 0
+    for item in decisions:
+        if item.included:
+            physical_count += 1
+            manifest[item.relative_path] = {
+                "mtime": item.mtime,
+                "manifest_fingerprint": "",
+            }
+        elif item.exclusion_reason == "unreadable":
+            unreadable.append(item.relative_path)
+    for record in locators:
+        manifest[record.path] = {
+            "mtime": record.mtime,
+            "manifest_fingerprint": record.manifest_fingerprint,
+        }
+    return manifest, physical_count, locators, sorted(unreadable)
+
+
+def _freshness_from_manifest(
+    current: dict[str, dict[str, Any]],
+    indexed: dict[str, dict[str, Any]],
+    *,
+    physical_count: int,
+    unreadable: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Compare physical and generated corpus records with the stored manifest."""
+    current_paths = set(current)
+    indexed_paths = set(indexed)
+    new_paths = sorted(current_paths - indexed_paths)
+    removed_paths = sorted(indexed_paths - current_paths)
+    modified_paths: list[str] = []
+    for path in sorted(current_paths & indexed_paths):
+        current_row = current[path]
+        indexed_row = indexed[path]
+        mtime_changed = (
+            float(current_row.get("mtime", 0.0)) - float(indexed_row.get("mtime", 0.0))
+            > 1.0
+        )
+        fingerprint = str(current_row.get("manifest_fingerprint", "") or "")
+        indexed_fingerprint = str(indexed_row.get("manifest_fingerprint", "") or "")
+        fingerprint_changed = bool(fingerprint) and fingerprint != indexed_fingerprint
+        if mtime_changed or fingerprint_changed:
+            modified_paths.append(path)
+
+    unreadable_paths = sorted(unreadable)
+    return {
+        "fresh": not (new_paths or modified_paths or removed_paths or unreadable_paths),
+        "current_files": physical_count,
+        "current_records": len(current),
+        "indexed_files": len(indexed),
+        "indexed_records": len(indexed),
+        "new": len(new_paths),
+        "modified": len(modified_paths),
+        "removed": len(removed_paths),
+        "unreadable": len(unreadable_paths),
+        "samples": {
+            "new": new_paths[:20],
+            "modified": modified_paths[:20],
+            "removed": removed_paths[:20],
+            "unreadable": unreadable_paths[:20],
+        },
+    }
 
 
 def _freshness_from_files(
@@ -247,40 +357,49 @@ def inspect_index_freshness(
     index_dir: Optional[Path] = None,
 ) -> dict[str, Any]:
     """Inspect index drift without loading the embedding model."""
-    from semantic_backends import read_lance_index_mtimes
+    from semantic_backends import (
+        LanceStore,
+        read_lance_index_manifest,
+        read_lance_index_schema_columns,
+    )
 
     active_vault = vault or vault_root()
     active_index = index_dir or LANCE_DIR
-    files = list(
-        walk_markdown(
-            [str(active_vault)],
-            after=None,
-            before=None,
-            exclude=INDEX_EXCLUDE,
-        )
+    current_manifest, physical_count, locators, unreadable = _current_corpus_manifest(
+        active_vault
     )
 
-    indexed_mtimes: dict[str, float] = {}
+    indexed_manifest: dict[str, dict[str, Any]] = {}
     index_present = False
+    schema_current = False
     error: Optional[str] = None
     if active_index.exists():
         try:
-            stored = read_lance_index_mtimes(str(active_index))
+            stored = read_lance_index_manifest(str(active_index))
             if stored is not None:
-                indexed_mtimes = stored
+                indexed_manifest = stored
                 index_present = True
+                columns = read_lance_index_schema_columns(str(active_index)) or set()
+                schema_current = LanceStore.CORPUS_METADATA_COLUMNS.issubset(columns)
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
 
-    result = _freshness_from_files(files, active_vault, indexed_mtimes)
+    result = _freshness_from_manifest(
+        current_manifest,
+        indexed_manifest,
+        physical_count=physical_count,
+        unreadable=unreadable,
+    )
     result.update(
         {
             "index_path": str(active_index),
             "index_present": index_present,
+            "schema_current": schema_current,
+            "raw_locator_records": len(locators),
             "error": error,
         }
     )
-    if not index_present or error is not None:
+    if not index_present or not schema_current or error is not None:
         result["fresh"] = False
     return result
 
@@ -288,11 +407,15 @@ def inspect_index_freshness(
 def _freshness_summary(result: dict[str, Any]) -> str:
     state = "fresh" if result["fresh"] else "stale"
     summary = (
-        f"{state}: current={result['current_files']}, "
-        f"indexed={result['indexed_files']}, new={result['new']}, "
+        f"{state}: current_files={result['current_files']}, "
+        f"current_records={result.get('current_records', result['current_files'])}, "
+        f"indexed_records={result.get('indexed_records', result['indexed_files'])}, "
+        f"new={result['new']}, "
         f"modified={result['modified']}, removed={result['removed']}, "
         f"unreadable={result['unreadable']}"
     )
+    if result.get("schema_current") is False:
+        summary += ", schema=migration-required"
     if result.get("error"):
         summary += f", error={result['error']}"
     return summary
@@ -370,9 +493,14 @@ def walk_markdown(
 
 def lexical_score(path: Path, tokens: List[str]) -> Tuple[float, List[str]]:
     try:
-        text = path.read_text(encoding="utf-8", errors="replace").lower()
+        text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return 0.0, []
+    return lexical_score_text(text, tokens)
+
+
+def lexical_score_text(text: str, tokens: List[str]) -> Tuple[float, List[str]]:
+    text = text.lower()
     matched: List[str] = []
     total = 0
     for tok in tokens:
@@ -385,6 +513,143 @@ def lexical_score(path: Path, tokens: List[str]) -> Tuple[float, List[str]]:
     return min(1.0, total / 10.0), matched
 
 
+def _derive_hit_tier(path: str, representation: str) -> str:
+    if representation in {"raw_text", RAW_LOCATOR_REPRESENTATION}:
+        return "L1"
+    top = path.split("/", 1)[0]
+    try:
+        from _paths import tier_segments, wiki_dirs
+
+        if any(
+            str(directory.relative_to(vault_root())).split("/", 1)[0] == top
+            for directory in wiki_dirs()
+        ):
+            return "L4"
+        segments = tier_segments()
+        if top in {
+            segments.get("papers", "papers").split("/", 1)[0],
+            segments.get("preprints", "preprints").split("/", 1)[0],
+        }:
+            return "L3"
+        if top in {
+            segments.get("cache", "cache").split("/", 1)[0],
+            segments.get("inbox", "inbox").split("/", 1)[0],
+        }:
+            return "L1"
+    except Exception:
+        if top == "wiki":
+            return "L4"
+        if top in {"papers", "preprints"}:
+            return "L3"
+        if top in {"cache", "inbox"}:
+            return "L1"
+    return "L2"
+
+
+def _normalize_path_prefix(value: str, vault: Path) -> Optional[str]:
+    path = Path(value)
+    if path.is_absolute():
+        try:
+            return path.resolve().relative_to(vault).as_posix()
+        except ValueError:
+            warn(f"--path {value} is outside the vault ({vault}); ignoring")
+            return None
+    return value.strip("/")
+
+
+def _path_matches(path: str, prefixes: Sequence[str]) -> bool:
+    return any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
+
+
+def _collapse_hits(
+    hits: Sequence[QueryHit],
+    *,
+    top: int,
+    requested_scope: str,
+) -> list[QueryHit]:
+    """Keep the best chunk per path and cap active raw-locator competition."""
+    ordered = sorted(hits, key=lambda hit: (-hit.score, hit.path, hit.chunk_id))
+    unique: list[QueryHit] = []
+    seen: set[tuple[str, str]] = set()
+    locator_count = 0
+    for hit in ordered:
+        key = (hit.source, hit.path)
+        if key in seen:
+            continue
+        if (
+            requested_scope == ACTIVE_SCOPE
+            and hit.representation == RAW_LOCATOR_REPRESENTATION
+        ):
+            if locator_count >= 2:
+                continue
+            locator_count += 1
+        seen.add(key)
+        unique.append(hit)
+        if len(unique) >= top:
+            break
+    return unique
+
+
+_CAPSULE_HEADING = re.compile(r"^#{1,6}[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+_CAPSULE_LIMIT = 600
+
+
+def _capsule(hit: QueryHit, requested_scope: str) -> dict[str, Any]:
+    text = hit.chunk_text.strip()
+    heading_match = _CAPSULE_HEADING.search(text)
+    heading = (
+        heading_match.group(1).strip().rstrip("#").strip()
+        if heading_match
+        else Path(hit.path).stem
+    )
+    truncated = len(text) > _CAPSULE_LIMIT
+    if truncated:
+        marker = "\n[truncated]"
+        snippet = text[: _CAPSULE_LIMIT - len(marker)].rstrip() + marker
+    else:
+        snippet = text
+    return {
+        "path": hit.path,
+        "score": round(hit.score, 4),
+        "source": hit.source,
+        "tier": hit.tier,
+        "scope": requested_scope if requested_scope != ALL_SCOPE else hit.scope,
+        "representation": hit.representation,
+        "chunk_id": hit.chunk_id,
+        "heading": heading,
+        "snippet": snippet,
+        "truncated": truncated,
+    }
+
+
+def _emit_hits(
+    hits: Sequence[QueryHit],
+    *,
+    output_format: str,
+    context: bool,
+    requested_scope: str,
+) -> None:
+    if output_format == "json":
+        if context:
+            payload = [_capsule(hit, requested_scope) for hit in hits]
+        else:
+            payload = [
+                {
+                    "path": hit.path,
+                    "score": round(hit.score, 4),
+                    "source": hit.source,
+                    "matched_tokens": list(hit.matched_tokens),
+                }
+                for hit in hits
+            ]
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
+    for hit in hits:
+        third = ",".join(hit.matched_tokens) if hit.matched_tokens else hit.source
+        print(f"{hit.path}\t{hit.score:.3f}\t{third}")
+
+
 def stub_query(args: argparse.Namespace) -> int:
     warn("stub mode: lexical fallback, results are NOT semantic")
 
@@ -393,39 +658,62 @@ def stub_query(args: argparse.Namespace) -> int:
         warn("query tokenized to empty; no results")
         return 0
 
-    # Resolve $OV early; fail fast before any walk work.
-    default_path = str(vault_root())
-
-    paths = args.path or [default_path]
+    vault = vault_root()
+    prefixes: list[str] = []
+    for raw_path in args.path or []:
+        prefix = _normalize_path_prefix(raw_path, vault)
+        if prefix is not None:
+            prefixes.append(prefix)
+    if args.path and not prefixes:
+        warn("no usable --path filters remain; no results")
+        return 0
     after = parse_date(args.after, "--after")
     before = parse_date(args.before, "--before")
 
     if args.lang != "auto":
         warn(f"--lang {args.lang} is a no-op in stub mode")
+    if args.sources != "local":
+        warn("stub mode is local-only; external sources are ignored")
 
-    vault = vault_root()
-    results: List[Tuple[str, float, List[str]]] = []
-    for md in walk_markdown(paths, after, before):
-        score, matched = lexical_score(md, tokens)
+    results: list[QueryHit] = []
+    for record in iter_corpus_records(vault, scope=args.scope):
+        if prefixes and not _path_matches(record.path, prefixes):
+            continue
+        modified = datetime.fromtimestamp(record.mtime)
+        if after and modified < after:
+            continue
+        if before and modified > before:
+            continue
+        score, matched = lexical_score_text(
+            f"{record.path}\n{record.text}",
+            tokens,
+        )
         if score > 0:
-            try:
-                rel = md.relative_to(vault)
-            except ValueError:
-                rel = md
-            results.append((str(rel), score, matched))
+            results.append(
+                QueryHit(
+                    path=record.path,
+                    score=score,
+                    chunk_text=record.text,
+                    tier=_derive_hit_tier(record.path, record.representation),
+                    mtime=record.mtime,
+                    source="local",
+                    scope=record.scope,
+                    representation=record.representation,
+                    matched_tokens=tuple(matched),
+                )
+            )
 
-    results.sort(key=lambda r: (-r[1], r[0]))
-    results = results[: args.top]
-
-    if args.format == "json":
-        payload = [
-            {"path": p, "score": round(s, 3), "matched_tokens": m}
-            for p, s, m in results
-        ]
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
-    else:
-        for p, s, m in results:
-            print(f"{p}\t{s:.3f}\t{','.join(m)}")
+    collapsed = _collapse_hits(
+        results,
+        top=args.top,
+        requested_scope=args.scope,
+    )
+    _emit_hits(
+        collapsed,
+        output_format=args.format,
+        context=args.context,
+        requested_scope=args.scope,
+    )
     return 0
 
 
@@ -512,7 +800,11 @@ def real_query(args: argparse.Namespace) -> int:
     # Resolve $OV early; fail fast before loading the embedder.
     default_path = str(vault_root())
 
-    sources = set(args.sources.split(","))
+    sources = {source.strip() for source in args.sources.split(",") if source.strip()}
+    unknown_sources = sources - {"local", "readwise"}
+    if unknown_sources:
+        warn(f"unknown --sources value(s): {', '.join(sorted(unknown_sources))}")
+        return 2
     retriever = _build_retriever(hybrid=getattr(args, "hybrid", False))
 
     # Optional cross-encoder rerank over the merged top-N candidate set.
@@ -532,7 +824,7 @@ def real_query(args: argparse.Namespace) -> int:
             cross_encoder = CrossEncoderReranker()
 
     # Build filters from CLI args
-    filters = {}
+    filters = {"scope": args.scope}
     paths = args.path or [default_path]
     if paths != [default_path]:
         # The index stores vault-relative paths, so prefix filters must be
@@ -540,15 +832,9 @@ def real_query(args: argparse.Namespace) -> int:
         # outside the vault loudly instead of silently matching nothing.
         rel_paths = []
         for p in paths:
-            pp = Path(p)
-            if pp.is_absolute():
-                try:
-                    rel_paths.append(str(pp.resolve().relative_to(vault_root())))
-                except ValueError:
-                    warn(f"--path {p} is outside the vault ({vault_root()}); ignoring")
-                    continue
-            else:
-                rel_paths.append(p)
+            normalized = _normalize_path_prefix(p, vault_root())
+            if normalized is not None:
+                rel_paths.append(normalized)
         if not rel_paths:
             warn("no usable --path filters remain; no results")
             return 0
@@ -562,21 +848,34 @@ def real_query(args: argparse.Namespace) -> int:
         filters["mtime_before"] = before_dt.timestamp()
 
     t0 = time.time()
-    results = []
+    results: list[QueryHit] = []
 
     # Local search. When the cross-encoder is enabled we pull a wider
     # candidate pool from the dense+hybrid layer so the cross-encoder has
     # enough material to reorder meaningfully.
     if "local" in sources:
-        candidate_k = max(args.top, 30) if cross_encoder else args.top
+        candidate_k = max(args.top, 30) if cross_encoder else max(args.top * 6, 50)
         local_results = retriever.query(
             args.query, top_k=candidate_k, filters=filters or None
         )
         if cross_encoder:
             local_results = cross_encoder.rerank(
-                args.query, local_results, top_k=args.top
+                args.query, local_results, top_k=candidate_k
             )
-        results.extend(local_results)
+        results.extend(
+            QueryHit(
+                path=result.path,
+                score=result.score,
+                chunk_id=result.chunk_id,
+                chunk_text=result.chunk_text,
+                tier=result.tier,
+                mtime=result.mtime,
+                source=result.source,
+                scope=result.scope,
+                representation=result.representation,
+            )
+            for result in local_results
+        )
         warn(f"local: {len(local_results)} results")
 
     # Readwise federated search
@@ -585,71 +884,299 @@ def real_query(args: argparse.Namespace) -> int:
 
         if ReadwiseSearcher.available():
             rw_results = ReadwiseSearcher.search(args.query, top_k=args.top)
-            results.extend(rw_results)
+            results.extend(
+                QueryHit(
+                    path=result.path,
+                    score=result.score,
+                    chunk_id=result.chunk_id,
+                    chunk_text=result.chunk_text,
+                    tier=result.tier,
+                    mtime=result.mtime,
+                    source=result.source,
+                    scope=result.scope,
+                    representation=result.representation,
+                )
+                for result in rw_results
+            )
             warn(f"readwise: {len(rw_results)} results")
         else:
             warn("readwise: CLI not installed, skipping")
 
-    # Merge by score, take top_k
-    results.sort(key=lambda r: -r.score)
-    results = results[: args.top]
+    results = _collapse_hits(
+        results,
+        top=args.top,
+        requested_scope=args.scope,
+    )
 
     elapsed = time.time() - t0
     warn(f"total: {len(results)} results in {elapsed:.2f}s")
 
-    if args.format == "json":
-        payload = [
-            {"path": r.path, "score": r.score, "source": r.source, "matched_tokens": []}
-            for r in results
-        ]
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
-    else:
-        for r in results:
-            print(f"{r.path}\t{r.score:.3f}\t{r.source}")
+    _emit_hits(
+        results,
+        output_format=args.format,
+        context=args.context,
+        requested_scope=args.scope,
+    )
 
     return 0
 
 
+def _record_manifest(
+    decisions: Sequence[Any],
+    locators: Sequence[CorpusRecord],
+) -> dict[str, dict[str, Any]]:
+    manifest = {
+        item.relative_path: {
+            "mtime": item.mtime,
+            "manifest_fingerprint": "",
+        }
+        for item in decisions
+        if item.included
+    }
+    manifest.update(
+        {
+            record.path: {
+                "mtime": record.mtime,
+                "manifest_fingerprint": record.manifest_fingerprint,
+            }
+            for record in locators
+        }
+    )
+    return manifest
+
+
+def _manifest_changed(
+    current: dict[str, Any],
+    indexed: dict[str, Any],
+) -> bool:
+    if abs(float(current.get("mtime", 0.0)) - float(indexed.get("mtime", 0.0))) > 1.0:
+        return True
+    fingerprint = str(current.get("manifest_fingerprint", "") or "")
+    return bool(fingerprint) and fingerprint != str(
+        indexed.get("manifest_fingerprint", "") or ""
+    )
+
+
+def _search_efficiency_report(
+    retriever: Any,
+    *,
+    audit: dict[str, Any],
+    update: dict[str, Any],
+) -> dict[str, Any]:
+    """Measure scope reduction, query latency, deduplication, and capsule size."""
+    probes = (
+        "current goals and active commitments",
+        "technical architecture and system design",
+        "health energy and recovery patterns",
+    )
+    latencies_ms: list[float] = []
+    candidate_rows = 0
+    unique_rows = 0
+    capsule_bytes = 0
+    capsule_count = 0
+
+    for query in probes:
+        started = time.perf_counter()
+        raw_results = retriever.query(
+            query,
+            top_k=30,
+            filters={"scope": ACTIVE_SCOPE},
+        )
+        latencies_ms.append((time.perf_counter() - started) * 1000)
+        hits = [
+            QueryHit(
+                path=result.path,
+                score=result.score,
+                chunk_id=result.chunk_id,
+                chunk_text=result.chunk_text,
+                tier=result.tier,
+                mtime=result.mtime,
+                source=result.source,
+                scope=result.scope,
+                representation=result.representation,
+            )
+            for result in raw_results
+        ]
+        collapsed = _collapse_hits(
+            hits,
+            top=10,
+            requested_scope=ACTIVE_SCOPE,
+        )
+        candidate_rows += len(hits)
+        unique_rows += len(collapsed)
+        for hit in collapsed:
+            capsule_bytes += len(
+                json.dumps(
+                    _capsule(hit, ACTIVE_SCOPE),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            capsule_count += 1
+
+    sorted_latency = sorted(latencies_ms)
+    active_records = int(audit["by_scope"][ACTIVE_SCOPE]["records"])
+    all_records = int(audit["by_scope"][ALL_SCOPE]["records"])
+    scope_reduction = 1.0 - active_records / all_records if all_records else 0.0
+    duplicate_reduction = 1.0 - unique_rows / candidate_rows if candidate_rows else 0.0
+    return {
+        "schema": 1,
+        "update": update,
+        "index": {
+            "chunks": retriever.stats().total_chunks,
+            "model": retriever.stats().model_name,
+        },
+        "corpus": {
+            "active_records": active_records,
+            "all_records": all_records,
+            "default_scope_reduction_pct": round(scope_reduction * 100, 2),
+            "excluded_files": int(audit["summary"]["excluded_files"]),
+            "raw_assets": int(audit["raw"]["assets"]),
+            "raw_locator_records": int(audit["raw"]["locator_records"]),
+            "readable_raw_files": int(audit["raw"]["readable_files"]),
+        },
+        "query_probe": {
+            "queries": len(probes),
+            "p50_ms": round(sorted_latency[len(sorted_latency) // 2], 2),
+            "max_ms": round(max(latencies_ms), 2),
+            "candidate_chunks": candidate_rows,
+            "unique_top_results": unique_rows,
+            "duplicate_chunk_reduction_pct": round(duplicate_reduction * 100, 2),
+            "average_capsule_bytes": (
+                round(capsule_bytes / capsule_count, 1) if capsule_count else 0.0
+            ),
+        },
+    }
+
+
 def real_index(args: argparse.Namespace) -> int:
-    from semantic_backends import Retriever
+    from semantic_backends import Retriever, chunk_markdown
 
     retriever = _build_retriever(with_reranker=False)
     # cmd_index never goes through the hybrid wrapper; narrow for index_* calls.
     assert isinstance(retriever, Retriever), "indexing requires base Retriever"
 
-    if args.rebuild:
+    schema_migration = not retriever.store.has_corpus_metadata()
+    rebuild = bool(args.rebuild or schema_migration)
+    if schema_migration and not args.rebuild:
+        warn("index schema lacks corpus metadata; forcing one derived-cache rebuild")
+    if rebuild:
         warn("--rebuild: clearing existing index...")
         retriever.store.clear()
 
     vault = vault_root()
-    warn(f"scanning markdown files under {vault}/ (excluding {INDEX_EXCLUDE})...")
-    files = []
-    for path in walk_markdown(
-        [str(vault)],
-        after=None,
-        before=None,
-        exclude=INDEX_EXCLUDE,
-    ):
-        try:
-            if path.stat().st_size > 0:
-                files.append(path)
-        except OSError:
-            continue
-    warn(f"found {len(files)} non-empty files to scan")
+    warn(f"classifying corpus under {vault}/ with semantic_corpus policy...")
+    decisions, files, locators = _corpus_snapshot(vault)
+    current_manifest = _record_manifest(decisions, locators)
+    locator_tuples = [
+        (
+            record.path,
+            record.text,
+            record.mtime,
+            record.manifest_fingerprint,
+            record.record_id,
+        )
+        for record in locators
+    ]
+    warn(
+        f"found {len(files)} physical text files and "
+        f"{len(locators)} generated raw locator records"
+    )
 
     t0 = time.time()
-    if args.rebuild:
-        total = retriever.index_files(files, vault, append_only=True)
-        warn(f"full rebuild: {total} chunks in {time.time() - t0:.1f}s")
-    else:
-        added, skipped, removed = retriever.index_incremental(files, vault)
+    update: dict[str, Any]
+    if rebuild:
+        physical_chunks = retriever.index_files(
+            files,
+            vault,
+            append_only=True,
+        )
+        locator_chunks = retriever.index_text_records(
+            locator_tuples,
+            append_only=True,
+        )
+        elapsed = time.time() - t0
+        update = {
+            "mode": "rebuild",
+            "added_chunks": physical_chunks + locator_chunks,
+            "changed_records": len(current_manifest),
+            "unchanged_records": 0,
+            "removed_records": 0,
+            "elapsed_s": round(elapsed, 2),
+        }
         warn(
-            f"incremental: {added} added, {skipped} unchanged, {removed} removed in {time.time() - t0:.1f}s"
+            f"full rebuild: {physical_chunks + locator_chunks} chunks in {elapsed:.1f}s"
+        )
+    else:
+        indexed_manifest = retriever.store.get_indexed_manifest()
+        current_paths = set(current_manifest)
+        indexed_paths = set(indexed_manifest)
+        changed_paths = {
+            path
+            for path in current_paths
+            if path not in indexed_manifest
+            or _manifest_changed(current_manifest[path], indexed_manifest[path])
+        }
+        removed_paths = sorted(indexed_paths - current_paths)
+        prior_changed = sorted(changed_paths & indexed_paths)
+        if removed_paths:
+            retriever.store.delete_by_path(removed_paths)
+        if prior_changed:
+            retriever.store.delete_by_path(prior_changed)
+
+        changed_files = [
+            item.absolute_path
+            for item in decisions
+            if item.included
+            and item.relative_path in changed_paths
+            and item.absolute_path is not None
+        ]
+        changed_locators = [
+            record for record in locators if record.path in changed_paths
+        ]
+        physical_chunks = retriever.index_files(changed_files, vault)
+        locator_chunks = retriever.index_text_records(
+            [
+                (
+                    record.path,
+                    record.text,
+                    record.mtime,
+                    record.manifest_fingerprint,
+                    record.record_id,
+                )
+                for record in changed_locators
+            ]
+        )
+        added = physical_chunks + locator_chunks
+        skipped = len(current_manifest) - len(changed_paths)
+        removed = len(removed_paths)
+        elapsed = time.time() - t0
+        update = {
+            "mode": "incremental",
+            "added_chunks": added,
+            "changed_records": len(changed_paths),
+            "unchanged_records": skipped,
+            "removed_records": removed,
+            "elapsed_s": round(elapsed, 2),
+        }
+        warn(
+            f"incremental: {added} chunks added, {skipped} records unchanged, "
+            f"{removed} records removed in {elapsed:.1f}s"
         )
 
     stats = retriever.stats()
     warn(
         f"index stats: {stats.total_documents} chunks, {stats.embedding_dimension}d, model={stats.model_name}"
+    )
+    corpus_audit = audit_corpus(vault, chunk_estimator=chunk_markdown)
+    report = _search_efficiency_report(
+        retriever,
+        audit=corpus_audit,
+        update=update,
+    )
+    warn(
+        "search_efficiency "
+        + json.dumps(report, ensure_ascii=False, separators=(",", ":"))
     )
     return 0
 
@@ -678,6 +1205,43 @@ def cmd_status(args: argparse.Namespace) -> int:
     else:
         print(_freshness_summary(result))
     return 2 if result.get("error") else 0
+
+
+def cmd_corpus(args: argparse.Namespace) -> int:
+    """Report corpus boundaries without loading an embedding model."""
+    from semantic_backends import chunk_markdown
+
+    result = audit_corpus(vault_root(), chunk_estimator=chunk_markdown)
+    if args.format == "json":
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    summary = result["summary"]
+    print(
+        "corpus: "
+        f"included={summary['included_files']} files, "
+        f"excluded={summary['excluded_files']} files, "
+        f"records={summary['records']}"
+    )
+    for scope in VALID_SCOPES:
+        row = result["by_scope"][scope]
+        print(
+            f"{scope}: files={row['files']}, records={row['records']}, "
+            f"estimated_chunks={row.get('estimated_chunks', 0)}"
+        )
+    raw = result["raw"]
+    print(
+        "raw: "
+        f"assets={raw['assets']}, clusters={raw['clusters']}, "
+        f"locators={raw['locator_records']}, readable={raw['readable_files']}"
+    )
+    duplicates = result["exact_duplicates"]
+    print(
+        "duplicates: "
+        f"groups={duplicates['groups']}, files={duplicates['files']}, "
+        f"redundant_bytes={duplicates['redundant_bytes']}"
+    )
+    return 0
 
 
 def cmd_index(args: argparse.Namespace) -> int:
@@ -765,10 +1329,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format. Default: tsv.",
     )
     q.add_argument(
+        "--scope",
+        choices=VALID_SCOPES,
+        default=ACTIVE_SCOPE,
+        help="Corpus scope. Default: active.",
+    )
+    q.add_argument(
+        "--context",
+        action="store_true",
+        help="Emit bounded section capsules in JSON output.",
+    )
+    q.add_argument(
         "--sources",
-        default="local,readwise",
+        default="local",
         help="Comma-separated search sources. Options: local, readwise. "
-        "Default: local,readwise (federated).",
+        "Default: local.",
     )
     q.add_argument(
         "--hybrid",
@@ -797,6 +1372,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format. Default: text.",
     )
     s.set_defaults(func=cmd_status)
+
+    c = sub.add_parser(
+        "corpus",
+        help="Audit corpus scopes, exclusions, raw locators, and duplicates without a model.",
+    )
+    c.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format. Default: text.",
+    )
+    c.set_defaults(func=cmd_corpus)
 
     i = sub.add_parser("index", help="Build or refresh the embedding index.")
     index_mode = i.add_mutually_exclusive_group()

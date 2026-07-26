@@ -13,9 +13,16 @@ Goal-aware content curation. Pulls from content sources, scores against your act
 
 ### 1. Load Context (orchestrator)
 
-Read these files (they should already be loaded in a reflection session):
-- `profile/directions.md` — current goals, directions, and era context
-- `profile/identity.md` — active life areas and themes
+Reuse the current `curate` context projection from `$hi`; for direct
+invocation, run:
+
+```bash
+uv run scripts/context_bundle.py --intent curate --format json
+```
+
+Use only the projected profile excerpts as goal and identity context. Retrieve
+a named profile section deliberately if the projection marks it truncated and
+that section is load-bearing for a score.
 
 ### 2. Dispatch Triage Agent (ad-hoc)
 

@@ -8,13 +8,30 @@ Each session should feel like a chapter in an ongoing conversation, not a standa
 
 ### Reading the Thread
 
-At the start of every session, load:
-1. **Last 3 reflection/review files** from `<paths.reflections>/`
-1b. **Last session log** from `<paths.sessions>/` (most recent file) — read the `## Anomalies` and `## Continuity` sections only, for process continuity (which agents worked, which searches succeeded, which gates passed). Do not load the full log to avoid context bloat.
-2. **Profile files** (identity.md, directions.md)
-3. **Today's daily note** (current context)
+Route the request before loading continuity context. Then build a bounded
+projection for the selected intent:
 
-This gives the session a "previously on..." anchor.
+```bash
+uv run scripts/context_bundle.py --intent "<intent>" --format json
+```
+
+The default projection contains only:
+
+1. Profile files named by the intent's `profile_reads` row in
+   `harness/intents.toml`.
+2. The latest session log's `## Anomalies` and `## Continuity` sections.
+3. Headings and high-signal closing sections from up to three recent
+   reflection or review files.
+
+Add `--component daily` only when the selected workflow explicitly needs
+current capture. Add route-specific sources with `--component sources
+--source "<vault-relative-path>[#Section]"`. Generic startup, capture, lint,
+sync, promotion, and meeting routes do not load a daily note by default.
+
+The complete serialized projection must fit 12 KB. A selected workflow may
+raise `--byte-budget` to at most 20 KB. Anything omitted is retrieved
+deliberately after routing. This gives the session a "previously on..." anchor
+without loading three complete reflections or unrelated profile material.
 
 ### Connecting Back
 
@@ -43,8 +60,8 @@ Sessions leave artifacts that future sessions can read:
 | `<paths.reflections>/YYYY-MM-DD-exploration.md` | Open threads | Next explore session |
 | `<paths.reflections>/YYYY-MM-DD-energy-audit.md` | Energy patterns | Next energy audit |
 | `<paths.sessions>/YYYY-MM-DD-<type>.md` | Session process log | Meta-reflection, Evolver, next session (excerpts) |
-| `profile/identity.md` | User profile | Every session |
-| `profile/directions.md` | Goals | Every goal-related session |
+| `profile/identity.md` | User profile | Intents that declare it in `profile_reads` |
+| `profile/directions.md` | Goals | Goal-related intents that declare it in `profile_reads` |
 
 ## Cadence Recommendations
 
@@ -84,7 +101,7 @@ Policies are swappable reflection habits — small commitments that can change w
 
 ## Continuity Anti-Patterns
 
-1. **Groundhog Day**: Every session starts from zero with no reference to previous sessions. Fix: Always read recent reflections first.
+1. **Groundhog Day**: Every session starts from zero with no reference to previous sessions. Fix: Load the route-specific continuity projection.
 2. **Nostalgia Trap**: Spending too long on what was discussed before and not enough on what's new. Fix: One callback, then move forward.
 3. **Orphaned Intentions**: Setting "next actions" that never get checked. Fix: Explicitly check last session's intention at the start.
 4. **Overloaded Sessions**: Trying to do reflect + review + weekly all at once. Fix: One command per session.

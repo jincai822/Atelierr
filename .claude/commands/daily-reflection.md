@@ -8,26 +8,41 @@ Run a reflection session grounded in your notes and goals.
 ## Prerequisites
 
 1. Check if `profile/identity.md` exists. If not, tell the user: "No profile found. Run `/introspect` first to build your self-model." and stop.
-2. Read `profile/identity.md`. Check the `Last built:` date. If older than 7 days, warn: "Your profile is stale (built on [date]). Consider running `/introspect` to refresh. Continuing with current profile."
+2. Read only the `Last built:` line from `profile/identity.md`. If older than 7 days, warn: "Your profile is stale (built on [date]). Consider running `/introspect` to refresh. Continuing with current profile." The bounded context projection below loads the declared profile content.
 
 **Protocols used in this session:** `protocols/session-continuity.md` (connecting sessions), `protocols/epistemic-hygiene.md` (write-first nudge in warm-up, provenance tagging in write-back).
 
 ## Context Loading
 
-1. **Read profile files:**
-   - `profile/identity.md` — your self-model and intellectual taste
-   - `profile/directions.md` — your goals and directions
+1. Determine the **effective date**: if current local time is before 03:00,
+   use yesterday's date; otherwise use today's. This is the user's day
+   boundary.
+2. If `$hi` did not already provide a current `reflection` projection, build
+   the selected workflow context:
 
-2. **Read recent reflections** (last 3 files from `<paths.reflections>/` directory, sorted by date). If none exist, this is the first session — note that.
+   ```bash
+   uv run scripts/context_bundle.py \
+     --intent reflection \
+     --component profile \
+     --component session \
+     --component reflections \
+     --component daily \
+     --effective-date YYYY-MM-DD \
+     --byte-budget 20480 \
+     --format json
+   ```
 
-3. **Pull fresh context from the vault:**
-   - Determine the **effective date**: if current local time is before 03:00, use yesterday's date; otherwise use today's. This is the user's day boundary (late-sleep rule). All subsequent "today" references in this session use the effective date.
-   - `Read <paths.daily_notes>/YYYY/MM/<effective-date>.md` (notes nest by year/month, e.g. `<paths.daily_notes>/2026/06/2026-06-13.md`) — what you've done today. If the file is missing or empty, note that and proceed; the user may not have captured anything yet.
-   - If effective date differs from the calendar date (late-sleep active), also read `<paths.daily_notes>/YYYY/MM/<calendar-date>.md` if it exists — the user may have captured something after midnight.
-   - `Read <paths.daily_notes>/YYYY/MM/<effective-date - 1>.md` — what you did the day before.
-   - For recent activity related to your themes, run `Bash: uv run scripts/semantic.py query "<theme>" --after "<7 days ago, YYYY-MM-DD>" --top 5` first — this is the primary content lookup. For structural follow-up (exact strings, known tags), list files modified in the last 7 days with `Bash: find "$OV"/daily-notes "$OV"/reflections -type f -name "*.md" -mtime -7 2>/dev/null | sort`, then `Grep` the theme keyword across those paths.
+   Reuse an existing current projection instead of running the helper twice.
+   This is the only preload. It includes the intent-declared profile files,
+   bounded reflection excerpts, the latest session's continuity sections, and
+   the explicitly requested current-capture component. If an omission is
+   relevant, retrieve that source or section deliberately.
+3. For recent activity related to the active themes, run
+   `Bash: uv run scripts/semantic.py query "<theme>" --after "<7 days ago, YYYY-MM-DD>" --top 5 --context --format json`.
+   For structural follow-up such as exact strings, known tags, or dates, use
+   `Grep` against the relevant paths.
 
-4. **Load open TODO state (silent — orchestrator working memory):**
+4. **Load open TODO state (silent, orchestrator working memory):**
    - `Bash: uv run scripts/todos.py list --json` — parse and hold the open list throughout the session. Source files (`source` field) are needed at session end for closure write-back.
    - Don't display this output to the user. It's context for the orchestrator's decisions in Step 0 (digest), mid-conversation (topic matching), and Step 7 (resurface vs generate).
    - **Fallback:** if the command exits non-zero, fails to parse as JSON, or returns `[]`, proceed with empty TODO context for this session and note "TODO context unavailable" under Anomalies in the wrap-up. The TODO Awareness rules below all degrade silently to no-op when the queue is empty.
@@ -99,7 +114,7 @@ Each question should:
 - Match the user's language (Chinese for Chinese goals)
 
 ### 3. Forgotten Connection (Semantic Discovery)
-Use `Bash: uv run scripts/semantic.py query "<concept>" --before "<3 months ago, YYYY-MM-DD>" --top 10` to find a semantically related note the user may have forgotten. Reframe and retry if thin.
+Use `Bash: uv run scripts/semantic.py query "<concept>" --before "<3 months ago, YYYY-MM-DD>" --top 10 --context --format json` to find a semantically related note the user may have forgotten. Reframe and retry if thin.
 - Search with a concept from the conversation, not just keywords
 - Go back at least 3 months for genuine surprise
 - Present as a provocation, not a summary:

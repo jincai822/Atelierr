@@ -17,6 +17,30 @@ When falling back to the full file, read its trigger phrases (`patterns`), dispa
 
 Each intent's `mode` field maps to a procedure: see the "Sub-mode procedures" table below for the canonical mapping (inline section names + paths to external command files). Detect the intent from `<context>`, skip the Step 1 menu, and route directly into the matching sub-mode. If no `<context>` is given, fall through to the Session-Start Cue Check, then the Step 1 menu.
 
+### Bounded context after routing
+
+After an intent is selected and before agent dispatch, build one route-specific
+context projection when the row declares `profile_reads` or the selected
+workflow is reflective or planning:
+
+```bash
+uv run scripts/context_bundle.py \
+  --route-json '<injected ATELIER_INTENT_ROUTE line or route JSON>' \
+  --format json
+```
+
+On the full-registry fallback path, use `--intent "<name>"` instead. The helper
+re-reads the selected registry row, so packet profile paths are never trusted
+as authority. Its default output contains only declared profile files, bounded
+recent reflection excerpts, and the latest session's `Continuity` and
+`Anomalies` sections. It must fit 12 KB.
+
+Skip generic continuity preload for capture, meeting, sync, forget, promote,
+lint, and other operational rows with empty `profile_reads`, unless their
+procedure explicitly requests a route-specific source. Daily capture is never
+implicit. A procedure that receives this projection reuses it and must not
+load the same profile or recent-reflection files again.
+
 ### Always-on Routing Announcement
 
 Before any agent dispatch under `/hi`, surface a one-line acknowledgment of the routing decision so the user can see the matched intent and the dispatch chain. This is in-band observability: the orchestrator never opts in or out, the user never has to ask. Drift becomes visible because the user reads the announcement on every turn.

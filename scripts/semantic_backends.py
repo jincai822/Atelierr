@@ -50,6 +50,9 @@ class Document:
     chunk_text: str  # the actual text (stored for re-embedding)
     tier: str  # L1-L5, derived from path prefix
     mtime: float  # file mtime at index time
+    scope: str = "active"
+    representation: str = "authored"
+    manifest_fingerprint: str = ""
 
 
 @dataclass
@@ -63,6 +66,8 @@ class SearchResult:
     tier: str = ""
     mtime: float = 0.0
     source: str = "local"  # "local" or "readwise"
+    scope: str = "active"
+    representation: str = "authored"
 
 
 @dataclass
@@ -121,7 +126,7 @@ class Store(Protocol):
         top_k: int = 10,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
-        """Find nearest neighbors. filters keys: path_prefix, tier, mtime_after, mtime_before."""
+        """Find neighbors. Filter keys include scope, path_prefix, tier, and mtime bounds."""
         ...
 
     def delete(self, ids: List[str]) -> int:
@@ -347,10 +352,28 @@ def _derive_tier(path: str) -> str:
     against vault-relative paths, the `zk` special-case can be removed.
     """
     parts = path.split("/")
+    if path.startswith("@raw-locator/") or "raw" in parts:
+        return "L1"
     if len(parts) < 2:
         return "L2"
     subdir = parts[1] if parts[0] == "zk" else parts[0]
     return _segment_tier_map().get(subdir, "L2")
+
+
+def _derive_corpus_metadata(path: str) -> Tuple[str, str]:
+    """Return the central corpus scope and representation for an index path."""
+    if path.startswith("@raw-locator/"):
+        return "active", "raw_locator"
+    try:
+        from semantic_corpus import scope_matches
+
+        for scope in ("archive", "inbox", "process", "raw", "active"):
+            if scope_matches(path, scope):
+                representation = "raw_text" if scope == "raw" else "authored"
+                return scope, representation
+    except Exception:
+        pass
+    return "active", "authored"
 
 
 # Knowledge level by registry *logical name* (stable; CLAUDE.md § Knowledge
@@ -360,6 +383,7 @@ _TIER_LEVEL_BY_NAME = {
     "wiki": "L4",
     "papers": "L3",
     "preprints": "L3",
+    "inbox": "L1",
     "cache": "L1",
 }
 
@@ -453,6 +477,7 @@ class Retriever:
                 rel = str(fpath)
 
             tier = _derive_tier(rel)
+            scope, representation = _derive_corpus_metadata(rel)
             mtime = fpath.stat().st_mtime
             chunks = chunk_markdown(text)
 
@@ -464,9 +489,14 @@ class Retriever:
                     chunk_text=chunk_text,
                     tier=tier,
                     mtime=mtime,
+                    scope=scope,
+                    representation=representation,
                 )
                 batch_docs.append(doc)
-                batch_texts.append(chunk_text)
+                # Include the vault-relative path in the embedding input so
+                # titles and directory context remain searchable. Keep the
+                # stored chunk text clean for excerpts and reindexing.
+                batch_texts.append(f"{rel}\n\n{chunk_text}")
 
             if len(batch_docs) >= batch_size:
                 vectors = self.embedder.encode(batch_texts)
@@ -489,6 +519,82 @@ class Retriever:
         if show_progress:
             print(
                 f"\r  [{n_files}/{n_files}] indexed {total} chunks",
+                file=sys.stderr,
+            )
+
+        return total
+
+    def index_text_records(
+        self,
+        records: Sequence[
+            Tuple[str, str, float]
+            | Tuple[str, str, float, str]
+            | Tuple[str, str, float, str, str]
+        ],
+        batch_size: int = 64,
+        show_progress: bool = True,
+        append_only: bool = False,
+    ) -> int:
+        """Chunk, embed, and index generated in-memory text records.
+
+        Each record is ``(vault_relative_path, text, mtime)`` with an optional
+        manifest fingerprint and stable record ID. This is used for derived
+        locator cards that must be searchable but must not be persisted inside
+        the authored vault.
+        """
+        import sys
+
+        write_fn = self.store.add if append_only else self.store.upsert
+        total = 0
+        batch_docs: List[Document] = []
+        batch_texts: List[str] = []
+        record_list = list(records)
+        n_records = len(record_list)
+
+        for i, record in enumerate(record_list):
+            rel, text, mtime = record[:3]
+            manifest_fingerprint = record[3] if len(record) >= 4 else ""
+            stable_record_id = record[4] if len(record) == 5 else rel
+            if not text.strip():
+                continue
+            tier = _derive_tier(rel)
+            scope, representation = _derive_corpus_metadata(rel)
+            for ci, chunk_text in enumerate(chunk_markdown(text)):
+                batch_docs.append(
+                    Document(
+                        id=f"{stable_record_id}:{ci}",
+                        path=rel,
+                        chunk_id=ci,
+                        chunk_text=chunk_text,
+                        tier=tier,
+                        mtime=mtime,
+                        scope=scope,
+                        representation=representation,
+                        manifest_fingerprint=manifest_fingerprint,
+                    )
+                )
+                batch_texts.append(f"{rel}\n\n{chunk_text}")
+
+            if len(batch_docs) >= batch_size:
+                vectors = self.embedder.encode(batch_texts)
+                total += write_fn(batch_docs, vectors)
+                if show_progress:
+                    print(
+                        f"\r  [{i + 1}/{n_records}] indexed {total} generated chunks",
+                        end="",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                batch_docs.clear()
+                batch_texts.clear()
+
+        if batch_docs:
+            vectors = self.embedder.encode(batch_texts)
+            total += write_fn(batch_docs, vectors)
+
+        if show_progress:
+            print(
+                f"\r  [{n_records}/{n_records}] indexed {total} generated chunks",
                 file=sys.stderr,
             )
 
@@ -641,26 +747,44 @@ class _BM25Index:
                 out.append(tok.lower())
         return out
 
-    def build(self, store: "LanceStore") -> None:
+    def build(self, store: "LanceStore", scope: str = "all") -> None:
         from rank_bm25 import BM25Okapi
 
         df = store._table.to_pandas()  # noqa: SLF001 (BM25 needs full corpus)
         corpus_tokens: List[List[str]] = []
         meta: List[Dict[str, Any]] = []
         for _, row in df.iterrows():
-            tokens = self._tokenize(row.get("chunk_text", ""))
+            path = row.get("path", "")
+            result_scope = row.get("scope", "active")
+            representation = row.get("representation", "authored")
+            probe = SearchResult(
+                path=path,
+                score=0.0,
+                scope=result_scope,
+                representation=representation,
+            )
+            if not _result_matches_scope(probe, scope):
+                continue
+            tokens = self._tokenize(f"{path}\n{row.get('chunk_text', '')}")
             if not tokens:
                 continue
             corpus_tokens.append(tokens)
             meta.append(
                 {
-                    "path": row.get("path", ""),
+                    "path": path,
                     "chunk_id": int(row.get("chunk_id", 0)),
                     "chunk_text": row.get("chunk_text", ""),
                     "tier": row.get("tier", ""),
                     "mtime": float(row.get("mtime", 0.0)),
+                    "scope": row.get("scope", "active"),
+                    "representation": row.get("representation", "authored"),
                 }
             )
+        if not corpus_tokens:
+            self._bm25 = None
+            self._meta = []
+            self._built = True
+            return
         self._bm25 = BM25Okapi(corpus_tokens)
         self._meta = meta
         self._built = True
@@ -693,21 +817,23 @@ class _BM25Index:
                     tier=m["tier"],
                     mtime=m["mtime"],
                     source="local",
+                    scope=m["scope"],
+                    representation=m["representation"],
                 )
             )
         return results
 
 
-_BM25_SINGLETON: Optional[_BM25Index] = None
+_BM25_SINGLETONS: Dict[Tuple[str, str, int], _BM25Index] = {}
 
 
-def _get_bm25(store: "LanceStore") -> _BM25Index:
-    global _BM25_SINGLETON
-    if _BM25_SINGLETON is None:
+def _get_bm25(store: "LanceStore", scope: str = "all") -> _BM25Index:
+    key = (store._db_path, scope, store.count())  # noqa: SLF001
+    if key not in _BM25_SINGLETONS:
         idx = _BM25Index()
-        idx.build(store)
-        _BM25_SINGLETON = idx
-    return _BM25_SINGLETON
+        idx.build(store, scope=scope)
+        _BM25_SINGLETONS[key] = idx
+    return _BM25_SINGLETONS[key]
 
 
 def _rrf_fuse(
@@ -743,6 +869,8 @@ def _rrf_fuse(
                 tier=r.tier,
                 mtime=r.mtime,
                 source=r.source,
+                scope=r.scope,
+                representation=r.representation,
             )
         )
     return out
@@ -790,9 +918,11 @@ class HybridRetriever:
         dense = self._base.store.search(
             vector, top_k=self._candidate_k, filters=filters
         )
-        # Sparse candidates (BM25 doesn't support `filters` yet — applies to whole corpus)
-        sparse = _get_bm25(self._base.store).search(text, top_k=self._candidate_k)
-        # Filter sparse hits through the same filter set if filters are present
+        scope = str((filters or {}).get("scope", "all"))
+        sparse = _get_bm25(self._base.store, scope=scope).search(
+            text, top_k=self._candidate_k
+        )
+        # Non-scope filters still apply after scoring the selected scope view.
         if filters:
             sparse = [r for r in sparse if _passes_filters(r, filters)]
         fused = _rrf_fuse(dense, sparse, k=self._rrf_k)
@@ -805,6 +935,8 @@ class HybridRetriever:
 
 
 def _passes_filters(r: SearchResult, filters: Dict[str, Any]) -> bool:
+    if "scope" in filters and not _result_matches_scope(r, str(filters["scope"])):
+        return False
     if "path_prefix" in filters:
         prefix = filters["path_prefix"]
         prefixes = prefix if isinstance(prefix, list) else [prefix]
@@ -820,6 +952,22 @@ def _passes_filters(r: SearchResult, filters: Dict[str, Any]) -> bool:
     if "mtime_before" in filters and r.mtime > filters["mtime_before"]:
         return False
     return True
+
+
+def _result_matches_scope(result: SearchResult, scope: str) -> bool:
+    """Apply the central scope policy to a materialized search result."""
+    if scope == "all":
+        return True
+    if result.representation == "raw_locator":
+        return scope in {"active", "raw"}
+    if result.scope and result.scope != "active":
+        return result.scope == scope
+    try:
+        from semantic_corpus import scope_matches
+
+        return scope_matches(result.path, scope)
+    except Exception:
+        return scope == "active"
 
 
 # ---------------------------------------------------------------------------
@@ -891,6 +1039,8 @@ class CrossEncoderReranker:
                     tier=c.tier,
                     mtime=c.mtime,
                     source=c.source,
+                    scope=c.scope,
+                    representation=c.representation,
                 )
             )
         return out
@@ -1139,6 +1289,61 @@ def read_lance_index_mtimes(
     return {str(path): float(mtime) for path, mtime in grouped.items()}
 
 
+def read_lance_index_manifest(
+    db_path: str,
+    table_name: str = "semantic_index",
+) -> Optional[Dict[str, Dict[str, Any]]]:
+    """Read per-path mtime and generated-record fingerprint without a model."""
+    import lancedb
+
+    db = lancedb.connect(db_path)
+    if table_name not in db.table_names():
+        return None
+    table = db.open_table(table_name)
+    row_count = table.count_rows()
+    if row_count == 0:
+        return {}
+    schema = table.schema
+    if callable(schema):
+        schema = schema()
+    columns = ["path", "mtime"]
+    has_fingerprint = "manifest_fingerprint" in set(schema.names)
+    if has_fingerprint:
+        columns.append("manifest_fingerprint")
+    frame = table.search().select(columns).limit(row_count).to_pandas()
+
+    manifest: Dict[str, Dict[str, Any]] = {}
+    for _, row in frame.iterrows():
+        path = str(row["path"])
+        current = manifest.setdefault(
+            path,
+            {"mtime": float(row["mtime"]), "manifest_fingerprint": ""},
+        )
+        current["mtime"] = max(float(current["mtime"]), float(row["mtime"]))
+        if has_fingerprint:
+            fingerprint = str(row.get("manifest_fingerprint", "") or "")
+            if fingerprint:
+                current["manifest_fingerprint"] = fingerprint
+    return manifest
+
+
+def read_lance_index_schema_columns(
+    db_path: str,
+    table_name: str = "semantic_index",
+) -> Optional[set[str]]:
+    """Return table column names without constructing an embedding model."""
+    import lancedb
+
+    db = lancedb.connect(db_path)
+    if table_name not in db.table_names():
+        return None
+    table = db.open_table(table_name)
+    schema = table.schema
+    if callable(schema):
+        schema = schema()
+    return set(schema.names)
+
+
 class LanceStore:
     """
     Store backed by LanceDB (embedded, Lance columnar format).
@@ -1148,6 +1353,11 @@ class LanceStore:
     """
 
     TABLE_NAME = "semantic_index"
+    CORPUS_METADATA_COLUMNS = {
+        "scope",
+        "representation",
+        "manifest_fingerprint",
+    }
 
     def __init__(self, db_path: str, embedding_dim: int, model_name: str = "") -> None:
         import lancedb
@@ -1159,6 +1369,16 @@ class LanceStore:
 
         # Ensure table exists
         self._table = self._ensure_table()
+
+    def has_corpus_metadata(self) -> bool:
+        """Whether the table carries the current scope metadata columns."""
+        try:
+            schema = self._table.schema
+            if callable(schema):
+                schema = schema()
+            return self.CORPUS_METADATA_COLUMNS.issubset(set(schema.names))
+        except Exception:
+            return False
 
     def _ensure_table(self) -> Any:
         """Create table if it doesn't exist, or open it."""
@@ -1176,6 +1396,9 @@ class LanceStore:
                 pa.field("chunk_text", pa.utf8()),
                 pa.field("tier", pa.utf8()),
                 pa.field("mtime", pa.float64()),
+                pa.field("scope", pa.utf8()),
+                pa.field("representation", pa.utf8()),
+                pa.field("manifest_fingerprint", pa.utf8()),
                 pa.field("vector", pa.list_(pa.float32(), self._embedding_dim)),
             ]
         )
@@ -1192,6 +1415,9 @@ class LanceStore:
                 "chunk_text": doc.chunk_text,
                 "tier": doc.tier,
                 "mtime": doc.mtime,
+                "scope": doc.scope,
+                "representation": doc.representation,
+                "manifest_fingerprint": doc.manifest_fingerprint,
                 "vector": vec.tolist(),
             }
             for doc, vec in zip(docs, vectors)
@@ -1243,7 +1469,14 @@ class LanceStore:
         top_k: int = 10,
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
-        query = self._table.search(vector.tolist()).metric("cosine").limit(top_k)
+        scope = str((filters or {}).get("scope", "all"))
+        metadata_scope = "scope" in (filters or {}) and self.has_corpus_metadata()
+        scan_k = top_k
+        if "scope" in (filters or {}) and not metadata_scope:
+            # Legacy tables have no scope columns. Retrieve a wider pool and
+            # apply the same central path classifier after materialization.
+            scan_k = max(200, top_k * 10)
+        query = self._table.search(vector.tolist()).metric("cosine").limit(scan_k)
 
         # Build filter string for LanceDB
         where_clauses = []
@@ -1269,6 +1502,13 @@ class LanceStore:
                 where_clauses.append(f"mtime >= {filters['mtime_after']}")
             if "mtime_before" in filters:
                 where_clauses.append(f"mtime <= {filters['mtime_before']}")
+            if "scope" in filters and metadata_scope:
+                try:
+                    from semantic_corpus import scope_sql
+
+                    where_clauses.append(scope_sql(scope))
+                except Exception as exc:
+                    self._warn("scope filter construction", exc)
 
         if where_clauses:
             query = query.where(" AND ".join(where_clauses))
@@ -1284,18 +1524,21 @@ class LanceStore:
             # cosine _distance: 0.0 = identical, 1.0 = orthogonal
             distance = row.get("_distance", 0.0)
             score = max(0.0, 1.0 - distance)
-            results.append(
-                SearchResult(
-                    path=row["path"],
-                    score=round(score, 4),
-                    chunk_id=int(row.get("chunk_id", 0)),
-                    chunk_text=row.get("chunk_text", ""),
-                    tier=row.get("tier", ""),
-                    mtime=float(row.get("mtime", 0.0)),
-                )
+            result = SearchResult(
+                path=row["path"],
+                score=round(score, 4),
+                chunk_id=int(row.get("chunk_id", 0)),
+                chunk_text=row.get("chunk_text", ""),
+                tier=row.get("tier", ""),
+                mtime=float(row.get("mtime", 0.0)),
+                scope=row.get("scope", "active"),
+                representation=row.get("representation", "authored"),
             )
+            if filters and not _passes_filters(result, filters):
+                continue
+            results.append(result)
 
-        return results
+        return results[:top_k]
 
     def delete(self, ids: List[str]) -> int:
         if not ids:
@@ -1325,6 +1568,26 @@ class LanceStore:
                 f"  warning: could not read indexed mtimes "
                 f"({type(exc).__name__}: {exc}); treating index as empty — "
                 "every file will be re-embedded and deleted-file cleanup is skipped",
+                file=sys.stderr,
+            )
+            return {}
+
+    def get_indexed_manifest(self) -> Dict[str, Dict[str, Any]]:
+        """Return per-path mtime and manifest fingerprint for incremental work."""
+        import sys
+
+        try:
+            return (
+                read_lance_index_manifest(
+                    self._db_path,
+                    self.TABLE_NAME,
+                )
+                or {}
+            )
+        except Exception as exc:
+            print(
+                f"  warning: could not read indexed manifest "
+                f"({type(exc).__name__}: {exc}); treating index as empty",
                 file=sys.stderr,
             )
             return {}
@@ -1427,6 +1690,8 @@ class ReadwiseSearcher:
                     chunk_text=f"[{title}] {chunk_text}" if title else chunk_text,
                     tier="L3",
                     source="readwise",
+                    scope="external",
+                    representation="readwise",
                 )
             )
 
