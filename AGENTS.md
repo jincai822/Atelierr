@@ -107,8 +107,10 @@ declared by the command skill and complete the workflow in the active thread.
 
 `/autoevo-nightly` is bot-invoked (headless `codex exec`, launchd at 05:00)
 and is not exposed as a Codex user skill. The shipped scheduler default is
-Codex, and unattended local routines are Codex-only so their sandbox and
-credential boundaries remain enforceable. `python3 scripts/atelier_runtime.py
+Codex, and unattended model-driven local routines are Codex-only so their
+sandbox and credential boundaries remain enforceable. Deterministic cache
+maintenance may run a reviewed script directly under launchd with the same
+owner gate. `python3 scripts/atelier_runtime.py
 use claude` changes the interactive external launcher only; `ATELIER_RUNTIME`
 is likewise an interactive one-process override. Claude `/autoevo-review` and Codex
 `$autoevo-review` are the morning triage surfaces for its pending queue.

@@ -386,9 +386,15 @@ def check_dining_audit() -> None:
 """,
             encoding="utf-8",
         )
-        valid = dining_audit.audit(vault)
+        valid = dining_audit.audit(vault, 2)
         expect(valid["ok"] is True, f"valid dining fixture failed: {valid}")
         expect(valid["stats"]["rows"] == 2, "dining row count drift")
+        expect(
+            len(valid["recent"]) == 2
+            and valid["per_person_trend"]["known"] == 2
+            and valid["per_person_trend"]["direction"] == "unknown",
+            f"dining recent view overclaimed a sparse trend: {valid}",
+        )
 
         dining_log.write_text(
             dining_log.read_text(encoding="utf-8")
@@ -406,6 +412,14 @@ def check_dining_audit() -> None:
             ),
             encoding="utf-8",
         )
+        (vault / mapped["Regional dining catalog"]).write_text(
+            "[broken](missing.md)\n[remote](readwise:fixture)\n",
+            encoding="utf-8",
+        )
+        (vault / mapped["Credit-perks catalog"]).write_text(
+            "## Cycle Tracking\n",
+            encoding="utf-8",
+        )
         invalid = dining_audit.audit(vault)
         error_codes = {finding["code"] for finding in invalid["errors"]}
         expect(invalid["ok"] is False, "invalid dining fixture passed")
@@ -417,6 +431,14 @@ def check_dining_audit() -> None:
         expect(
             "restaurant_pending" in error_codes,
             "dining audit accepted a placeholder restaurant",
+        )
+        expect(
+            "local_link_broken" in error_codes,
+            "dining audit missed a broken mapped-catalog link",
+        )
+        expect(
+            "live_state_in_eligibility_catalog" in error_codes,
+            "dining audit accepted live state in the eligibility catalog",
         )
 
 

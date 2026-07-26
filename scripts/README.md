@@ -13,7 +13,7 @@ Executable tooling for the Atelier knowledge layer. All scripts are stdlib-only 
 | `config.py` | Loads device-dependent semantic-index parameters from gitignored `semantic.toml`; safe defaults when the file is missing | B.5 | stdlib |
 | `_paths.py` | Shared path-resolution helpers — fail-loud `$OV` resolution plus logical-tier → physical-segment mapping from `harness/paths.toml` (+ gitignored local layer) | ops | stdlib |
 | `paper_cache.py` | Extracts an L3 paper PDF into a reusable L1 `<paths.cache>/<slug>/paper.txt` with source freshness metadata; refuses repo-local scratch and non-vault sources | ops | stdlib, `pdftotext` CLI |
-| `dining_audit.py` | Validates the private dining registry, canonical 14-column meal-history schema, event-date order, health taxonomy, and per-person arithmetic | ops | stdlib |
+| `dining_audit.py` | Validates the private dining registry, canonical 14-column meal-history schema, event-date order, local links, eligibility/live-state separation, health taxonomy, and per-person arithmetic; can render sourced recent trends | ops | stdlib |
 | `trust.py` | TrustRank for `$OV/wiki/` — Personalized PageRank with external anchor seeds, claim-level granularity, bi-temporal filtering, floor trust | B | stdlib |
 | `snapshot_anchors.py` | Saves `url:` / `gist:` wiki anchors to Readwise and backfills the `readwise:` document ID so anchor evidence stays durable | B | `readwise` CLI |
 | `lint.py` | Structural + corpus-level lint over `$OV/wiki/` — parse errors, duplicate titles, slug drift, orphan entries, graph topology | D | stdlib |

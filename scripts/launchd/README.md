@@ -29,7 +29,11 @@ export OV="/path/to/your/vault"
 EOF
 ```
 
-If `OV` is exported from `~/.zprofile` or `~/.profile` already (login-shell scopes), the wrappers pick it up from there — `env.local.sh` is the fallback for users whose `OV` lives only in `.zshrc` (interactive-only). A wrapper aborts loudly (`ERROR: OV not set ...`) if none of those sources work; the error surfaces in that job's `/tmp/com.atelier.*.err` log.
+If `OV` is exported from `~/.zprofile` or `~/.profile` already (login-shell
+scopes), the wrappers pick it up from there. `env.local.sh` is the fallback for
+users whose `OV` lives only in `.zshrc` (interactive-only). A wrapper aborts
+loudly (`ERROR: OV not set ...`) if none of those sources work; the error
+surfaces in that job's `/tmp/com.atelier.*.err` log.
 
 ### Step 2: claim this machine as the local-routine owner
 
@@ -152,15 +156,23 @@ The runner passes both `-a never` and the explicit
 connector profiles that retain user configuration; otherwise a personal
 approval reviewer can restore `on-request` and stall an unattended run.
 
-Audit all local jobs, fixed Codex availability, machine ownership, dependencies,
-plugins, plist mappings, and loaded launchd state:
+Audit all registered model-driven jobs, fixed Codex availability, machine
+ownership, dependencies, plugins, plist mappings, and loaded launchd state:
 
 ```bash
 python3 scripts/routine_audit.py audit --check-system --json
 ```
 
-Unattended local routines always use Codex. `atelier_runtime.py use claude` and
-`ATELIER_RUNTIME=claude` affect interactive launchers only.
+The deterministic semantic job is outside `routine_watch.toml` because it
+produces a machine-local derived cache, not a canonical vault artifact. Its
+plist and owner/offline runner contract are covered by
+`scripts/harness_smoke.py`; inspect live state with
+`launchctl print gui/$(id -u)/com.atelier.semantic-index`.
+
+Unattended model-driven routines always use Codex. Deterministic derived-cache
+jobs such as semantic maintenance run their reviewed script directly.
+`atelier_runtime.py use claude` and `ATELIER_RUNTIME=claude` affect interactive
+launchers only.
 
 ### Step 4: install and load the plist
 

@@ -7,12 +7,14 @@ import argparse
 import json
 import os
 import re
+import statistics
 import sys
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 REQUIRED_ROLES = (
     "Regional dining catalog",
@@ -41,6 +43,7 @@ UNKNOWN = {"", "—", "-"}
 DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 MONEY_RE = re.compile(r"^(~)?\$([0-9]+(?:\.[0-9]{1,2})?)$")
 PROFILE_ROLE_RE = re.compile(r"^[A-Za-z][A-Za-z -]+$")
+LINK_RE = re.compile(r"\[[^\]]+\]\((?:<([^>]+)>|([^)]+))\)")
 PENDING_MARKERS = ("待确认", "TBD", "UNKNOWN")
 
 
@@ -372,7 +375,8 @@ def _audit_meal_history(
                     line_number,
                 )
             )
-        if any(
+        capture_fields_missing = score_text in UNKNOWN or row["再去"] in UNKNOWN
+        if capture_fields_missing and any(
             marker.casefold() in row["必点·备注"].casefold()
             for marker in PENDING_MARKERS
         ):
@@ -529,7 +533,159 @@ def _audit_meal_history(
     return findings, stats
 
 
-def audit(vault: Path) -> dict[str, Any]:
+def _audit_local_links(paths: set[Path], vault: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for path in sorted(paths):
+        if not path.is_file():
+            continue
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            for match in LINK_RE.finditer(line):
+                raw_target = (match.group(1) or match.group(2)).strip()
+                if (
+                    not raw_target
+                    or raw_target.startswith(("http://", "https://", "mailto:", "#"))
+                    or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", raw_target)
+                ):
+                    continue
+                relative = unquote(raw_target.split("#", 1)[0])
+                target = (path.parent / relative).resolve()
+                if not target.exists():
+                    findings.append(
+                        Finding(
+                            "error",
+                            "local_link_broken",
+                            _display_path(path, vault),
+                            f"local Markdown target does not exist: {raw_target}",
+                            line_number,
+                        )
+                    )
+    return findings
+
+
+def _audit_eligibility_catalog(path: Path, vault: Path) -> list[Finding]:
+    if not path.is_file():
+        return []
+    text = path.read_text(encoding="utf-8")
+    if "## Cycle Tracking" not in text and "| Cycle |" not in text:
+        return []
+    return [
+        Finding(
+            "error",
+            "live_state_in_eligibility_catalog",
+            _display_path(path, vault),
+            "eligibility catalog still contains live benefit-cycle state",
+        )
+    ]
+
+
+def _plain_restaurant(value: str) -> str:
+    value = value.replace("**", "")
+    match = re.fullmatch(r"\[([^\]]+)\]\(.+\)", value)
+    return match.group(1) if match else value
+
+
+def _recent_meals(
+    path: Path, count: int
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    if count <= 0 or not path.is_file():
+        return [], {
+            "known": 0,
+            "coverage": 0.0,
+            "direction": "unknown",
+        }
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    header_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if tuple(_split_markdown_row(line)) == EXPECTED_COLUMNS
+        ),
+        None,
+    )
+    if header_index is None:
+        return [], {
+            "known": 0,
+            "coverage": 0.0,
+            "direction": "unknown",
+        }
+
+    parsed: list[tuple[date, int, dict[str, str]]] = []
+    for index in range(header_index + 2, len(lines)):
+        cells = _split_markdown_row(lines[index])
+        if not cells:
+            break
+        if len(cells) != len(EXPECTED_COLUMNS):
+            continue
+        row = dict(zip(EXPECTED_COLUMNS, cells, strict=True))
+        match = DATE_RE.search(row["Date"])
+        if not match:
+            continue
+        try:
+            event_date = date.fromisoformat(match.group(1))
+        except ValueError:
+            continue
+        parsed.append((event_date, index, row))
+
+    selected = sorted(parsed, key=lambda item: (item[0], item[1]), reverse=True)[:count]
+    recent: list[dict[str, str]] = []
+    sourced: list[tuple[date, Decimal]] = []
+    for event_date, _, row in selected:
+        recent.append(
+            {
+                "date": event_date.isoformat(),
+                "restaurant": _plain_restaurant(row["Restaurant"]),
+                "score": row["评分"].replace("**", ""),
+                "party": row["人数"],
+                "total": row["总额"],
+                "per_person": row["人均"],
+            }
+        )
+        try:
+            per_person, _ = _parse_money(row["人均"])
+        except ValueError:
+            per_person = None
+        if per_person is not None:
+            sourced.append((event_date, per_person))
+
+    trend: dict[str, Any] = {
+        "known": len(sourced),
+        "coverage": len(sourced) / len(recent) if recent else 0.0,
+        "direction": "unknown",
+    }
+    if sourced:
+        floats = [float(value) for _, value in sourced]
+        trend["average"] = round(statistics.fmean(floats), 2)
+        trend["median"] = round(statistics.median(floats), 2)
+    if len(sourced) >= 5 and trend["coverage"] >= 0.6:
+        chronological = [
+            float(value) for _, value in sorted(sourced, key=lambda item: item[0])
+        ]
+        midpoint = len(chronological) // 2
+        older = statistics.fmean(chronological[:midpoint])
+        newer = statistics.fmean(chronological[midpoint:])
+        change = newer - older
+        trend.update(
+            {
+                "older_average": round(older, 2),
+                "newer_average": round(newer, 2),
+                "change": round(change, 2),
+                "direction": (
+                    "flat" if abs(change) < 3 else ("up" if change > 0 else "down")
+                ),
+                "confidence": "low" if len(sourced) < 5 else "medium",
+            }
+        )
+    elif recent:
+        trend["reason"] = (
+            "direction requires at least 5 sourced values and 60% recent coverage"
+        )
+    return recent, trend
+
+
+def audit(vault: Path, recent_count: int = 0) -> dict[str, Any]:
     vault = vault.expanduser().resolve()
     profile_path = vault / "profile" / "diet.md"
     mappings, findings = _parse_catalog_paths(profile_path, vault)
@@ -546,6 +702,23 @@ def audit(vault: Path) -> dict[str, Any]:
         )
         findings.extend(table_findings)
         stats.update(table_stats)
+    findings.extend(
+        _audit_local_links(
+            {path for path in mappings.values() if path.is_file()}, vault
+        )
+    )
+    eligibility = mappings.get("Credit-perks catalog")
+    if eligibility is not None:
+        findings.extend(_audit_eligibility_catalog(eligibility, vault))
+
+    recent, per_person_trend = (
+        _recent_meals(meal_history, recent_count)
+        if meal_history is not None
+        else (
+            [],
+            {"known": 0, "coverage": 0.0, "direction": "unknown"},
+        )
+    )
 
     errors = [finding.as_dict() for finding in findings if finding.severity == "error"]
     warnings = [
@@ -557,6 +730,8 @@ def audit(vault: Path) -> dict[str, Any]:
         "stats": stats,
         "errors": errors,
         "warnings": warnings,
+        "recent": recent,
+        "per_person_trend": per_person_trend,
     }
 
 
@@ -573,9 +748,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vault", type=Path)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--recent",
+        type=int,
+        default=0,
+        metavar="N",
+        help="include the latest N meals and a sourced per-person trend",
+    )
     args = parser.parse_args()
+    if args.recent < 0:
+        parser.error("--recent must be non-negative")
     try:
-        payload = audit(_resolve_vault(args.vault))
+        payload = audit(_resolve_vault(args.vault), args.recent)
     except (OSError, UnicodeError, ValueError) as exc:
         print(f"dining_audit: {exc}", file=sys.stderr)
         return 2
@@ -594,6 +778,33 @@ def main() -> int:
                 f"{finding['severity']}: {finding['path']}{row}: "
                 f"{finding['code']}: {finding['detail']}"
             )
+        if payload["recent"]:
+            print()
+            print("| Date | Restaurant | Score | Party | Total | Per person |")
+            print("|---|---|---:|---:|---:|---:|")
+            for meal in payload["recent"]:
+                print(
+                    f"| {meal['date']} | {meal['restaurant']} | "
+                    f"{meal['score']} | {meal['party']} | {meal['total']} | "
+                    f"{meal['per_person']} |"
+                )
+            trend = payload["per_person_trend"]
+            print(
+                f"per-person coverage: {trend['known']}/{len(payload['recent'])}; "
+                f"direction: {trend['direction']}"
+            )
+            if "average" in trend:
+                print(
+                    f"known average: ${trend['average']:.2f}; "
+                    f"median: ${trend['median']:.2f}"
+                )
+            if "change" in trend:
+                print(
+                    "newer vs older sourced average: "
+                    f"${trend['newer_average']:.2f} vs "
+                    f"${trend['older_average']:.2f} "
+                    f"({trend['change']:+.2f}, {trend['confidence']} confidence)"
+                )
     return 0 if payload["ok"] else 1
 
 

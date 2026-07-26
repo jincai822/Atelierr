@@ -92,15 +92,24 @@ Every routine prompt MUST declare the following at the top of its instructions, 
 
 ## Local execution layer
 
-Some routines need local-only tools (semantic.py, git, lint.py) that remote cloud agents cannot access. These run locally via `launchd` plus headless Codex. The default coordination shape assigns all local routines to one explicitly claimed machine; DynamoDB remains available for intentional active-active scheduling. Claude remains supported for interactive Atelier workflows, but unattended local routines are Codex-only so the declared sandbox, sanitized environment, plugin loading, and approval policy are enforceable.
+Some routines need local-only tools (semantic.py, git, lint.py) that remote
+cloud agents cannot access. Judgment-heavy content routines run locally via
+`launchd` plus headless Codex. Deterministic derived-cache maintenance may
+invoke a reviewed script directly, without an LLM, while retaining the same
+machine-owner gate. The default coordination shape assigns all local work to
+one explicitly claimed machine; DynamoDB remains available for intentional
+active-active scheduling. Claude remains supported for interactive Atelier
+workflows, but unattended model-driven routines are Codex-only so their
+sandbox, sanitized environment, plugin loading, and approval policy are
+enforceable.
 
 ### Architecture
 
 | Concern | Mechanism |
 |---|---|
 | Scheduler | macOS `launchd` plist per routine, fires at configured time |
-| Wrapper | `scripts/routine_runner.sh` handles env, wake assertion, stagger, lock, claim, fixed Codex execution, and artifact validation |
-| Runtime | Headless Codex for unattended local routines; interactive selection remains in `harness/runtimes.toml` plus the gitignored local preference |
+| Wrapper | `scripts/routine_runner.sh` handles model-driven routines; reviewed deterministic jobs use a purpose-specific wrapper such as `scripts/semantic_index_runner.sh` |
+| Runtime | Headless Codex for model-driven local routines; deterministic derived-cache jobs run directly; interactive selection remains in `harness/runtimes.toml` plus the gitignored local preference |
 | Capability profile | `harness/routine_profiles.toml` plus each private routine's `local_profile` / `cloud_profile` mapping |
 | Machine ownership | Gitignored per-machine identity plus shared `$OV/_meta/routine_owner.toml`; enforced by `scripts/routine_owner.py` |
 | Optional cross-machine lock | DynamoDB conditional put (`attribute_not_exists(pk)`) via `scripts/routine_lock.py` |
