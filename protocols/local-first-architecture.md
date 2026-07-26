@@ -23,7 +23,7 @@ The model has **five layers (L1–L5), numbered by depth of crystallization.** H
           alloy by default            <paths.research>/, <paths.agent_findings>/,
                                       <paths.wip>/, <paths.gtd>/
     ────────────────────────────
-    L1 — Raw capture                  Readwise (cloud inbox; no local mirror),
+    L1: Raw capture                  Readwise, <paths.inbox>/, <domain>/raw/,
           fast, sloppy, ephemeral     <paths.cache>/
 ```
 
@@ -31,7 +31,7 @@ Promotion is **opportunistic and upward:** L1 capture crystallizes into an L2 dr
 
 ### L1 — Raw capture
 
-The fast, sloppy, ephemeral layer. Readwise's inbox (cloud-only, accessed via the `readwise` CLI; no local mirror) holds external content (articles, podcasts, papers); `<paths.cache>/` holds local web fetches and other transient artifacts. No guarantees about structure or durability. Promotion upward is opportunistic.
+The fast, sloppy, ephemeral layer. Readwise's inbox (cloud-only, accessed via the `readwise` CLI; no local mirror) holds external content. `<paths.inbox>/` holds pending local captures, `<domain>/raw/` holds durable source artifacts, and `<paths.cache>/` holds disposable fetches and derived files. No guarantees about structure across this layer. Promotion upward is opportunistic.
 
 ### L2 — Working / half-baked
 
@@ -68,7 +68,7 @@ Universally certified knowledge — textbook-level material that the user consid
 Two roots:
 
 - **System layer** — the `atelier/` repo (this directory). Orchestrator config, agents, protocols, scripts, source-handling teaching docs, and `sources/cite.py`. Version-controlled; no personal data.
-- **Vault layer** — the user's note root, addressed as `$OV/`. A flat set of tier-labeled directories: `wiki/` (L4), `papers/` / `preprints/` (L3), `daily-notes/` / `reflections/` / `research/` / `agent-findings/` / `wip/` / `gtd/` / `<domain>/` (L2 — see `harness/paths.toml` for the canonical list), `cache/` (L1), and `archive/` (parked notes). Readwise inbox is L1 but cloud-only — accessed via the `readwise` CLI; not mirrored to disk.
+- **Vault layer:** the user's note root, addressed as `$OV/`. A flat set of tier-labeled directories: `wiki/` (L4), `papers/` / `preprints/` (L3), `daily-notes/` / `reflections/` / `research/` / `agent-findings/` / `wip/` / `gtd/` / `<domain>/` (L2; see `harness/paths.toml` for the canonical list), `inbox/` and `<domain>/raw/` (L1 provenance), `cache/` (L1 derived and ephemeral), `sessions/` (process records), and `archive/` (parked notes). Readwise inbox is L1 but cloud-only and is queried explicitly.
 
 Vault paths use `$OV/` (e.g., `<paths.wiki>/`, `<paths.papers>/`); each user sets `$OV` to their note root (typical: `export OV="$HOME/notes"`). Repo-internal paths (`scripts/`, `protocols/`, `sources/cite.py`, `frameworks/`) stay project-relative and require no env var. The vault may live anywhere on disk (Google Drive, iCloud, a plain local folder); the system only needs `$OV` to point at it.
 
@@ -109,6 +109,25 @@ $OV/                                (vault root — set via env var)
 ```
 
 The trust engine and the wiki schema only see the `<paths.wiki>/` subtree. Everything else is alloy or receipts and the trust engine does not touch it.
+
+## Search Projections
+
+Storage layers and search scopes are related but not identical. The physical
+vault remains the source of truth; the semantic index is a machine-local
+projection with deliberate visibility boundaries:
+
+- `active` is the default. It includes current authored knowledge and compact
+  locator cards for raw clusters.
+- `raw`, `archive`, `inbox`, and `process` are explicit deep-search scopes.
+  `raw` includes readable raw text; `process` maps to `<paths.sessions>/`.
+- `all` is an audit or recall-maximizing union, not the agent default.
+- `<paths.cache>/` and operational metadata never enter semantic retrieval.
+- Readwise remains external and opt-in through `--sources local,readwise`.
+
+`scripts/semantic_corpus.py` owns classification, hard exclusions, locator
+generation, and duplicate accounting. Stub search, real indexing, freshness,
+audits, and tests must consume that policy rather than recreate directory
+rules. The CLI and operational details live in `sources/semantic.md`.
 
 ## Source of Truth
 
@@ -177,7 +196,7 @@ A deferred primitive — `scripts/handoff_backfill_check.py` — would scan exec
 
 | Agent | L1/L2 working layer | L4 wiki (`<paths.wiki>/`) | L3 receipts |
 |---|---|---|---|
-| **Researcher** | Local-only, semantic-primary. `Bash: uv run scripts/semantic.py query` for content queries; `Grep` + `Read` for structural queries. | Reads `<paths.wiki>/` with grep directly. | Reads `<paths.papers>/` and `<paths.preprints>/` directly. |
+| **Researcher** | Local `active` semantic search first, using context JSON with at most 10 capsules; selects `raw`, `archive`, `inbox`, or `process` only when required, then reads relevant sections from 3-5 files. `Grep` + `Read` remain structural. | Reads `<paths.wiki>/` directly when certified scope is required. | Reads selected `<paths.papers>/` and `<paths.preprints>/` receipts directly. |
 | **Curator** | Drafts note proposals (compactions, merges, new notes, rewrites); the orchestrator writes after user approval (Curator has no `Write` tool). | Drafts wiki entries with `target_path: <paths.wiki>/<slug>.md`. The orchestrator writes the file after approval, then runs `scripts/trust.py --note <path>` to verify structural integrity and report initial scores. | Unchanged. |
 | **Synthesizer** | Reads capture-layer briefs from Researcher; produces drafts the orchestrator writes to `<paths.reflections>/`. | Reads wiki trust scores when available to weight evidence. | Unchanged. |
 | **Reviewer** | Continues to gate write-backs. Gates wiki writes as well. A `@pass: reviewer | status: verified` marker is added to a claim only after Reviewer signs off. | Unchanged. |

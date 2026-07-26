@@ -35,6 +35,7 @@ import routine_result
 import semantic
 import semantic_backends
 import semantic_corpus
+import semantic_eval
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
@@ -702,6 +703,25 @@ def check_semantic_corpus_policy() -> None:
             fingerprint_drift["modified"] == 1 and fingerprint_drift["fresh"] is False,
             "raw locator fingerprint drift did not invalidate freshness",
         )
+        older_mtime_drift = semantic._freshness_from_manifest(
+            {
+                "active.md": {
+                    "mtime": 100.0,
+                    "manifest_fingerprint": "",
+                }
+            },
+            {
+                "active.md": {
+                    "mtime": 200.0,
+                    "manifest_fingerprint": "",
+                }
+            },
+            physical_count=1,
+        )
+        expect(
+            older_mtime_drift["modified"] == 1 and older_mtime_drift["fresh"] is False,
+            "restored older mtimes did not invalidate freshness",
+        )
 
     query_args = semantic.build_parser().parse_args(["query", "fixture"])
     expect(
@@ -709,6 +729,11 @@ def check_semantic_corpus_policy() -> None:
         and query_args.sources == "local"
         and query_args.context is False,
         "semantic query defaults are not local active bounded opt-in",
+    )
+    eval_args = semantic_eval.build_parser().parse_args(["run"])
+    expect(
+        eval_args.scope == "active" and semantic_eval.EVAL_SCOPES == ("active", "all"),
+        "semantic evaluation escaped its active/all gold-set contract",
     )
     hits = [
         semantic.QueryHit(
@@ -745,6 +770,78 @@ def check_semantic_corpus_policy() -> None:
     expect(
         len(capsule["snippet"]) <= 600 and capsule["truncated"] is True,
         "result capsule exceeded the 600-character source budget",
+    )
+    legacy_ranked = semantic._rank_hits(
+        hits,
+        top=2,
+        requested_scope="active",
+    )
+    active_ranked = semantic._rank_hits(
+        hits,
+        top=10,
+        requested_scope="active",
+    )
+    expect(
+        [hit.path for hit in legacy_ranked] == ["same.md", "same.md"]
+        and len([hit for hit in active_ranked if hit.representation == "raw_locator"])
+        == 2
+        and semantic._rank_hits(
+            hits,
+            top=0,
+            requested_scope="active",
+        )
+        == []
+        and semantic._collapse_hits(hits, top=0, requested_scope="active") == [],
+        "legacy chunk ranking or non-positive top handling drift",
+    )
+    expect(
+        semantic._local_candidate_count(
+            10,
+            cross_encoder=False,
+            collapse=False,
+        )
+        == 10
+        and semantic._local_candidate_count(
+            10,
+            cross_encoder=False,
+            collapse=True,
+        )
+        == 60
+        and semantic._local_candidate_count(
+            10,
+            cross_encoder=True,
+            collapse=False,
+        )
+        == 30,
+        "candidate widening escaped context, federation, or rerank modes",
+    )
+    external_capsule = semantic._capsule(
+        semantic.QueryHit(
+            path="readwise://fixture",
+            score=0.9,
+            chunk_text="external",
+            source="readwise",
+            scope="external",
+        ),
+        "active",
+    )
+    expect(
+        external_capsule["scope"] == "external",
+        "external capsule was mislabeled with the requested local scope",
+    )
+    legacy_stub_json = io.StringIO()
+    with contextlib.redirect_stdout(legacy_stub_json):
+        semantic._emit_hits(
+            [hits[0]],
+            output_format="json",
+            context=False,
+            requested_scope="active",
+            include_source=False,
+        )
+    expect(
+        set(json.loads(legacy_stub_json.getvalue())[0])
+        == {"path", "score", "matched_tokens"},
+        "non-context stub JSON gained fields outside the legacy contract",
     )
 
     class FakeStats:

@@ -259,7 +259,10 @@ def _freshness_from_manifest(
         current_row = current[path]
         indexed_row = indexed[path]
         mtime_changed = (
-            float(current_row.get("mtime", 0.0)) - float(indexed_row.get("mtime", 0.0))
+            abs(
+                float(current_row.get("mtime", 0.0))
+                - float(indexed_row.get("mtime", 0.0))
+            )
             > 1.0
         )
         fingerprint = str(current_row.get("manifest_fingerprint", "") or "")
@@ -569,6 +572,8 @@ def _collapse_hits(
     requested_scope: str,
 ) -> list[QueryHit]:
     """Keep the best chunk per path and cap active raw-locator competition."""
+    if top <= 0:
+        return []
     ordered = sorted(hits, key=lambda hit: (-hit.score, hit.path, hit.chunk_id))
     unique: list[QueryHit] = []
     seen: set[tuple[str, str]] = set()
@@ -591,6 +596,47 @@ def _collapse_hits(
     return unique
 
 
+def _rank_hits(
+    hits: Sequence[QueryHit],
+    *,
+    top: int,
+    requested_scope: str,
+) -> list[QueryHit]:
+    """Preserve chunk ranking while bounding raw cards in active search."""
+    if top <= 0:
+        return []
+    selected: list[QueryHit] = []
+    locator_count = 0
+    for hit in sorted(hits, key=lambda hit: (-hit.score, hit.path, hit.chunk_id)):
+        if (
+            requested_scope == ACTIVE_SCOPE
+            and hit.representation == RAW_LOCATOR_REPRESENTATION
+        ):
+            if locator_count >= 2:
+                continue
+            locator_count += 1
+        selected.append(hit)
+        if len(selected) >= top:
+            break
+    return selected
+
+
+def _local_candidate_count(
+    top: int,
+    *,
+    cross_encoder: bool,
+    collapse: bool,
+) -> int:
+    """Return the local candidate pool needed by the selected query mode."""
+    if top <= 0:
+        return 0
+    if cross_encoder:
+        return max(top, 30)
+    if collapse:
+        return max(top * 6, 50)
+    return top
+
+
 _CAPSULE_HEADING = re.compile(r"^#{1,6}[ \t]+(.+?)[ \t]*$", re.MULTILINE)
 _CAPSULE_LIMIT = 600
 
@@ -609,12 +655,15 @@ def _capsule(hit: QueryHit, requested_scope: str) -> dict[str, Any]:
         snippet = text[: _CAPSULE_LIMIT - len(marker)].rstrip() + marker
     else:
         snippet = text
+    result_scope = hit.scope
+    if hit.source == "local" and requested_scope != ALL_SCOPE:
+        result_scope = requested_scope
     return {
         "path": hit.path,
         "score": round(hit.score, 4),
         "source": hit.source,
         "tier": hit.tier,
-        "scope": requested_scope if requested_scope != ALL_SCOPE else hit.scope,
+        "scope": result_scope,
         "representation": hit.representation,
         "chunk_id": hit.chunk_id,
         "heading": heading,
@@ -629,20 +678,22 @@ def _emit_hits(
     output_format: str,
     context: bool,
     requested_scope: str,
+    include_source: bool,
 ) -> None:
     if output_format == "json":
         if context:
             payload = [_capsule(hit, requested_scope) for hit in hits]
         else:
-            payload = [
-                {
+            payload = []
+            for hit in hits:
+                row = {
                     "path": hit.path,
                     "score": round(hit.score, 4),
-                    "source": hit.source,
                     "matched_tokens": list(hit.matched_tokens),
                 }
-                for hit in hits
-            ]
+                if include_source:
+                    row["source"] = hit.source
+                payload.append(row)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
 
@@ -704,16 +755,21 @@ def stub_query(args: argparse.Namespace) -> int:
                 )
             )
 
-    collapsed = _collapse_hits(
-        results,
-        top=args.top,
-        requested_scope=args.scope,
+    selected = (
+        _collapse_hits(
+            results,
+            top=args.top,
+            requested_scope=args.scope,
+        )
+        if args.context
+        else _rank_hits(results, top=args.top, requested_scope=args.scope)
     )
     _emit_hits(
-        collapsed,
+        selected,
         output_format=args.format,
         context=args.context,
         requested_scope=args.scope,
+        include_source=False,
     )
     return 0
 
@@ -806,6 +862,15 @@ def real_query(args: argparse.Namespace) -> int:
     if unknown_sources:
         warn(f"unknown --sources value(s): {', '.join(sorted(unknown_sources))}")
         return 2
+    if args.top <= 0:
+        _emit_hits(
+            [],
+            output_format=args.format,
+            context=args.context,
+            requested_scope=args.scope,
+            include_source=True,
+        )
+        return 0
     retriever = _build_retriever(hybrid=getattr(args, "hybrid", False))
 
     # Optional cross-encoder rerank over the merged top-N candidate set.
@@ -850,12 +915,17 @@ def real_query(args: argparse.Namespace) -> int:
 
     t0 = time.time()
     results: list[QueryHit] = []
+    collapse_results = args.context or len(sources) > 1
 
     # Local search. When the cross-encoder is enabled we pull a wider
     # candidate pool from the dense+hybrid layer so the cross-encoder has
     # enough material to reorder meaningfully.
     if "local" in sources:
-        candidate_k = max(args.top, 30) if cross_encoder else max(args.top * 6, 50)
+        candidate_k = _local_candidate_count(
+            args.top,
+            cross_encoder=cross_encoder is not None,
+            collapse=collapse_results,
+        )
         local_results = retriever.query(
             args.query, top_k=candidate_k, filters=filters or None
         )
@@ -903,10 +973,14 @@ def real_query(args: argparse.Namespace) -> int:
         else:
             warn("readwise: CLI not installed, skipping")
 
-    results = _collapse_hits(
-        results,
-        top=args.top,
-        requested_scope=args.scope,
+    results = (
+        _collapse_hits(
+            results,
+            top=args.top,
+            requested_scope=args.scope,
+        )
+        if collapse_results
+        else _rank_hits(results, top=args.top, requested_scope=args.scope)
     )
 
     elapsed = time.time() - t0
@@ -917,6 +991,7 @@ def real_query(args: argparse.Namespace) -> int:
         output_format=args.format,
         context=args.context,
         requested_scope=args.scope,
+        include_source=True,
     )
 
     return 0

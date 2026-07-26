@@ -46,11 +46,26 @@ No-branching contract: `pattern` is documentation. No code path in `scripts/`, n
 
 ## Session Startup Checks
 
-Before launching agents, the orchestrator performs these checks at session start:
+Route before loading personal context. After selecting the intent, run
+`scripts/context_bundle.py` with the intent key or injected route packet. Use
+that projection as the shared startup context; do not separately reread the
+same profile, reflection, or session files.
 
-1. **Era state:** Read `profile/directions.md` → `## Era` section. Know the current era, primary/secondary directions, and quarterly focus. Pass this context to Synthesizer and Challenger.
-2. **Focus Lock:** Check the declared focus (e.g., "Mastery through Career"). Researcher prioritizes notes in the focus domain. Challenger leans questions toward the focus direction. Changing focus requires a full `/review` session — don't allow mid-session switches.
-3. **Profile freshness:** Check `Last built:` timestamp in profile files. If older than 7 days, warn the user: "Your profile is stale. Consider running `/introspect` to refresh."
+1. **Era state:** Only when the route declares `directions.md` in
+   `profile_reads`, use its projected `## Current era` material for the era,
+   directions, and quarterly focus. Pass the excerpt to Synthesizer and
+   Challenger.
+2. **Focus Lock:** Only goal-related routes apply the declared focus.
+   Researcher prioritizes its domain and Challenger leans questions toward it.
+   Changing focus requires a full `/review` session.
+3. **Profile freshness:** Check `Last built:` only for profile files selected
+   by the route. If one is older than 7 days, suggest `/introspect`. Routes
+   with empty `profile_reads` do not inspect profile freshness.
+
+The default bundle is capped at 12 KB; a selected workflow may raise it to at
+most 20 KB. Daily capture and full source files are explicit additions, not
+generic startup context. The complete contract is in
+`protocols/session-continuity.md`.
 
 ## Criteria-First Dispatch
 
@@ -215,9 +230,9 @@ The user can request these actions during or after any session:
 ### Research Operations (→ Researcher)
 | User Says | Action | Agent |
 |-----------|--------|-------|
-| "Find notes about X" | `Bash: uv run scripts/semantic.py query "X" --top 10` (semantic-primary for content queries) then `Grep` for exact-string follow-ups | Researcher |
+| "Find notes about X" | `Bash: uv run scripts/semantic.py query "X" --top 10 --context --format json` (bounded local `active` search) then `Grep` for exact-string follow-ups | Researcher |
 | "What did I write about X last year?" | Filename-date filter on `<paths.daily_notes>/` + `Grep`. Report the gap if a date range is missing locally. | Researcher |
-| "Are there related notes I'm forgetting?" | `Bash: uv run scripts/semantic.py query "<concept>" --top 10` — stub lexical-falls-through today, embedding-backed once the real-mode sentinel lands. Reframe and retry if thin. | Researcher |
+| "Are there related notes I'm forgetting?" | `Bash: uv run scripts/semantic.py query "<concept>" --top 10 --context --format json`; reframe once if thin, then select a deeper scope only when the intent requires it. | Researcher |
 | "Show me everything tagged #X" | `Grep "#X"` over `$OV/` | Researcher |
 
 ### Meeting Operations (→ Meeting)

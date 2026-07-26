@@ -280,6 +280,11 @@ uv run scripts/semantic.py status --format json
 tail -f /tmp/com.atelier.semantic-index.out /tmp/com.atelier.semantic-index.err
 ```
 
+An actual index update writes one `search_efficiency` JSON report to the
+`.out` log. It includes scope reduction, raw coverage, chunk count,
+representative query latency, deduplication, and capsule size. A fresh no-op
+does not rerun the probes or emit a report.
+
 The audit log for the run itself (what the bot did to the vault) lives at `$OV/agent-findings/autoevo-applied-<YYYY-MM-DD>.md`; the `/tmp/` files capture aggregate wrapper and Codex CLI output. Each acquired attempt also records a private event journal under `$OV/cache/` in its claim. The claim file at `$OV/_meta/routine_runs/autoevo-nightly/<date>.toml` records status, timing, journal path, and verification evidence.
 
 Verify that a cycle performed real Forgetter work rather than only completing

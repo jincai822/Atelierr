@@ -21,7 +21,12 @@ Before dispatching the reading agent, apply the auto-promotion check from `proto
 
 If the source is a paper or an external URL (arXiv, conference PDF, a paper named by title), check local material FIRST and only hit the web on a miss. The cached copy is often already on disk; a web round-trip before checking it is wasted latency.
 
-1. Surface prior local material (related notes, not the PDF). Run `uv run scripts/semantic.py query "<title or distinctive keywords>" --top 5`. The index covers `*.md` only (`scripts/semantic.py` walks `rglob("*.md")`), so this finds reading reflections, wiki entries, and any `<slug>-notes.md` artifacts about the paper. It does NOT find the cached PDF itself; treat hits as related-reading context to fold into the session, not as the cache hit-test.
+1. Surface prior local material. Run `uv run scripts/semantic.py query "<title
+   or distinctive keywords>" --top 5 --context --format json`. The central
+   corpus policy returns current authored notes and may return compact
+   locators for assets under a `raw/` cluster. It does not extract a binary PDF
+   or index `<paths.cache>/`, so treat these hits as related context or a raw
+   location hint, not as proof that the paper PDF is cached.
 
 2. Test for an already-cached PDF. Glob the flat paper store for a file matching the author or title: `ls "$OV"/papers/ "$OV"/preprints/ 2>/dev/null | grep -i "<firstauthor-or-distinctive-keyword>"` (resolve `papers` / `preprints` via `harness/paths.toml`). If a match exists, pass that local path to the reading agent and skip the web fetch entirely.
 

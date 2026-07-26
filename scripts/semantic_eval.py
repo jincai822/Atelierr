@@ -40,8 +40,15 @@ from typing import Dict, List, Tuple
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from _paths import vault_root  # type: ignore[import-not-found]  # noqa: E402
+from semantic_corpus import (  # type: ignore[import-not-found]  # noqa: E402
+    ACTIVE_SCOPE,
+    ALL_SCOPE,
+    AUTHORED_REPRESENTATION,
+    iter_corpus_files,
+)
 
 GOLD_PATH = REPO_ROOT / "scripts" / "_evalset.json"
+EVAL_SCOPES = (ACTIVE_SCOPE, ALL_SCOPE)
 
 # Wikilinks of the form [[Target]] or [[Target|Display]] or [[Target#Section]]
 _WIKILINK = re.compile(r"\[\[([^\]\|#\n]+)(?:#[^\]\|\n]+)?(?:\|([^\]\n]+))?\]\]")
@@ -53,16 +60,33 @@ _SENT_SPLIT = re.compile(r"(?<=[\.\!\?。！？])[\s\n]+")
 _FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)
 # Patterns that indicate a "query" is really markup / metadata, not a sentence
 _REJECT_PREFIXES = (
-    "date:", "type:", "source notes:", "id:", "subject:", "cached:",
-    "tags:", "status:", "freshness:", "last built:", "---",
+    "date:",
+    "type:",
+    "source notes:",
+    "id:",
+    "subject:",
+    "cached:",
+    "tags:",
+    "status:",
+    "freshness:",
+    "last built:",
+    "---",
 )
 # Pattern: line is mostly bullet/checkbox/dash markup
 _MOSTLY_MARKUP = re.compile(r"^[\s\-\*\+\d\.\)\(\[\]]+$")
 
 # Anchor titles we treat as templates / not a real semantic target
 _PLACEHOLDER_TITLES = {
-    "note title", "note title 1", "title", "source note", "backlinks",
-    "template", "your name", "concept", "x", "y",
+    "note title",
+    "note title 1",
+    "title",
+    "source note",
+    "backlinks",
+    "template",
+    "your name",
+    "concept",
+    "x",
+    "y",
 }
 
 # Limit gold-set size for quick eval cycles
@@ -72,10 +96,10 @@ RANDOM_SEED = 42
 
 @dataclass
 class GoldQuery:
-    query: str        # the masked sentence containing the link
-    anchor: str       # the anchor / display text alone (alt query)
-    target: str       # vault-relative path of the linked file
-    source: str       # vault-relative path of the file the link was found in
+    query: str  # the masked sentence containing the link
+    anchor: str  # the anchor / display text alone (alt query)
+    target: str  # vault-relative path of the linked file
+    source: str  # vault-relative path of the file the link was found in
 
 
 @dataclass
@@ -94,7 +118,8 @@ class EvalRun:
 # Gold-set construction
 # ---------------------------------------------------------------------------
 
-def _title_to_path_map(vault: Path) -> Dict[str, str]:
+
+def _title_to_path_map(vault: Path, files: List[Path]) -> Dict[str, str]:
     """Map note title (filename stem, lowercased) -> vault-relative path.
 
     Wikilinks reference titles, not paths. We pick the first match if the
@@ -102,7 +127,7 @@ def _title_to_path_map(vault: Path) -> Dict[str, str]:
     skip below since they have date stems, not title stems).
     """
     out: Dict[str, str] = {}
-    for md in vault.rglob("*.md"):
+    for md in files:
         try:
             rel = str(md.relative_to(vault))
         except ValueError:
@@ -132,10 +157,10 @@ def _sentence_around(text: str, span: Tuple[int, int]) -> str:
 
 
 _ORPHAN_LINKS = [
-    re.compile(r"\[\[\s*[#^][^\]]*\]\]"),       # [[#^c1]] / [[#section]] residue
-    re.compile(r"\[\[\s*\]\]"),                  # [[]] after anchor removal
-    re.compile(r"\[\s*\]\(<?[^)>]*\.md>?\)"),    # [ ](path.md) residue
-    re.compile(r"`\s*\[\[\s*[^\]]*\]\]\s*`"),    # `[[...]]` quoted skeletons
+    re.compile(r"\[\[\s*[#^][^\]]*\]\]"),  # [[#^c1]] / [[#section]] residue
+    re.compile(r"\[\[\s*\]\]"),  # [[]] after anchor removal
+    re.compile(r"\[\s*\]\(<?[^)>]*\.md>?\)"),  # [ ](path.md) residue
+    re.compile(r"`\s*\[\[\s*[^\]]*\]\]\s*`"),  # `[[...]]` quoted skeletons
 ]
 
 
@@ -194,14 +219,18 @@ def build_gold(
     seed: int = RANDOM_SEED,
 ) -> List[GoldQuery]:
     vault = vault_root()
-    title_map = _title_to_path_map(vault)
+    active_files = [
+        item.absolute_path
+        for item in iter_corpus_files(vault, scope=ACTIVE_SCOPE)
+        if item.representation == AUTHORED_REPRESENTATION
+        and item.absolute_path is not None
+    ]
+    active_paths = {str(path.relative_to(vault)) for path in active_files}
+    title_map = _title_to_path_map(vault, active_files)
     pool: List[GoldQuery] = []
 
-    for md in vault.rglob("*.md"):
-        # Skip caches / template / archive folders to keep the gold set focused
+    for md in active_files:
         rel = str(md.relative_to(vault))
-        if rel.startswith(("cache/", "archive/", "templates/")):
-            continue
         try:
             text = md.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -221,12 +250,14 @@ def build_gold(
             query = _mask(sent, display)
             if not _is_useful(query, target_title, target_path):
                 continue
-            pool.append(GoldQuery(
-                query=query[:400],
-                anchor=target_title,
-                target=target_path,
-                source=rel,
-            ))
+            pool.append(
+                GoldQuery(
+                    query=query[:400],
+                    anchor=target_title,
+                    target=target_path,
+                    source=rel,
+                )
+            )
 
         for m in _MDLINK.finditer(text):
             display = m.group(1).strip()
@@ -237,7 +268,7 @@ def build_gold(
                 target_path = str(tgt.relative_to(vault))
             except (ValueError, OSError):
                 continue
-            if not (vault / target_path).exists():
+            if target_path not in active_paths:
                 continue
             if target_path == rel:
                 continue
@@ -245,12 +276,14 @@ def build_gold(
             query = _mask(sent, display)
             if not _is_useful(query, display, target_path):
                 continue
-            pool.append(GoldQuery(
-                query=query[:400],
-                anchor=display,
-                target=target_path,
-                source=rel,
-            ))
+            pool.append(
+                GoldQuery(
+                    query=query[:400],
+                    anchor=display,
+                    target=target_path,
+                    source=rel,
+                )
+            )
 
     # Deduplicate by (query, target)
     seen = set()
@@ -280,6 +313,7 @@ def build_gold(
 # Eval execution
 # ---------------------------------------------------------------------------
 
+
 def _dcg(rels: List[int]) -> float:
     return sum(r / math.log2(i + 2) for i, r in enumerate(rels))
 
@@ -297,9 +331,15 @@ def evaluate(
     hybrid: bool,
     rerank: bool,
     cross_encoder: bool,
+    scope: str,
     top_k_retrieve: int = 50,
 ) -> EvalRun:
-    from semantic_backends import LanceStore, Retriever, TierRecencyReranker, make_embedder
+    from semantic_backends import (
+        LanceStore,
+        Retriever,
+        TierRecencyReranker,
+        make_embedder,
+    )
     from semantic import _resolve_lance_dir  # type: ignore
 
     # _resolve_lance_dir already encapsulates the per-embedder path + legacy
@@ -318,6 +358,7 @@ def evaluate(
         trust: Dict[str, float] = {}
         try:
             from semantic import _load_trust_scores as _lt
+
             trust = _lt()
         except Exception:
             pass
@@ -326,12 +367,14 @@ def evaluate(
     ce = None
     if cross_encoder:
         from semantic_backends import CrossEncoderReranker  # added later
+
         ce = CrossEncoderReranker()
 
     retriever = Retriever(embedder=embedder, store=store, reranker=reranker)
 
     if hybrid:
         from semantic_backends import HybridRetriever
+
         retriever = HybridRetriever(base=retriever)
 
     rec5 = 0
@@ -342,7 +385,11 @@ def evaluate(
 
     t0 = time.time()
     for g in gold:
-        hits = retriever.query(g.query, top_k=top_k_retrieve)
+        hits = retriever.query(
+            g.query,
+            top_k=top_k_retrieve,
+            filters={"scope": scope},
+        )
         if ce:
             hits = ce.rerank(g.query, hits, top_k=10)
         paths = [r.path for r in hits]
@@ -356,17 +403,27 @@ def evaluate(
             rank = paths[:10].index(g.target) + 1
             rr_sum += 1.0 / rank
         ndcg_sum += _ndcg_at_k(paths, g.target, 10)
-        per_query.append({
-            "query": g.query[:80],
-            "target": g.target,
-            "top1": paths[0] if paths else "",
-            "rank": (paths[:10].index(g.target) + 1) if g.target in paths[:10] else None,
-        })
+        per_query.append(
+            {
+                "query": g.query[:80],
+                "target": g.target,
+                "top1": paths[0] if paths else "",
+                "rank": (paths[:10].index(g.target) + 1)
+                if g.target in paths[:10]
+                else None,
+            }
+        )
 
     elapsed = time.time() - t0
     n = max(1, len(gold))
     return EvalRun(
-        config={"hybrid": hybrid, "rerank": rerank, "cross_encoder": cross_encoder, "top_k_retrieve": top_k_retrieve},
+        config={
+            "hybrid": hybrid,
+            "rerank": rerank,
+            "cross_encoder": cross_encoder,
+            "scope": scope,
+            "top_k_retrieve": top_k_retrieve,
+        },
         n_queries=len(gold),
         recall_at_5=rec5 / n,
         recall_at_10=rec10 / n,
@@ -381,9 +438,12 @@ def evaluate(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def cmd_build(args: argparse.Namespace) -> int:
     gold = build_gold(max_queries=args.max_queries, seed=args.seed)
-    GOLD_PATH.write_text(json.dumps([asdict(g) for g in gold], ensure_ascii=False, indent=2))
+    GOLD_PATH.write_text(
+        json.dumps([asdict(g) for g in gold], ensure_ascii=False, indent=2)
+    )
     print(f"wrote {len(gold)} queries to {GOLD_PATH}", file=sys.stderr)
     return 0
 
@@ -394,13 +454,25 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
     raw = json.loads(GOLD_PATH.read_text())
     gold = [GoldQuery(**g) for g in raw]
+    visible_paths = {
+        item.relative_path for item in iter_corpus_files(vault_root(), scope=args.scope)
+    }
+    gold = [query for query in gold if query.target in visible_paths]
     if args.limit:
         gold = gold[: args.limit]
+    if not gold:
+        print(
+            f"gold set has no queries visible in scope {args.scope!r}; "
+            "rebuild it or choose active/all",
+            file=sys.stderr,
+        )
+        return 2
     run = evaluate(
         gold,
         hybrid=args.hybrid,
         rerank=not args.no_rerank,
         cross_encoder=args.cross_encoder,
+        scope=args.scope,
         top_k_retrieve=args.top_k_retrieve,
     )
     summary = {
@@ -437,11 +509,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     r = sub.add_parser("run", help="Evaluate current retriever against the gold set")
     r.add_argument("--hybrid", action="store_true", help="Enable BM25+dense hybrid")
-    r.add_argument("--cross-encoder", action="store_true", help="Enable cross-encoder reranker")
-    r.add_argument("--no-rerank", action="store_true", help="Disable TierRecencyReranker")
+    r.add_argument(
+        "--cross-encoder", action="store_true", help="Enable cross-encoder reranker"
+    )
+    r.add_argument(
+        "--no-rerank", action="store_true", help="Disable TierRecencyReranker"
+    )
+    r.add_argument(
+        "--scope",
+        choices=EVAL_SCOPES,
+        default=ACTIVE_SCOPE,
+        help="Evaluate active knowledge or the all-scope union (default: active)",
+    )
     r.add_argument("--top-k-retrieve", type=int, default=50)
     r.add_argument("--limit", type=int, default=0)
-    r.add_argument("--misses", type=int, default=0, help="Print first N misses to stderr")
+    r.add_argument(
+        "--misses", type=int, default=0, help="Print first N misses to stderr"
+    )
     r.set_defaults(func=cmd_run)
     return p
 

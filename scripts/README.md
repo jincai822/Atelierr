@@ -6,7 +6,7 @@ Executable tooling for the Atelier knowledge layer. All scripts are stdlib-only 
 
 | Script | Purpose | Phase | Deps |
 |---|---|---|---|
-| `semantic.py` | Scoped local semantic search over `$OV/` with bounded context capsules, model-free freshness inspection, drift-gated incremental indexing, raw locator cards, BGE-M3 embeddings, LanceDB, and tier-aware reranking; lexical fallback when index is absent | B.5 | `lancedb`, `sentence-transformers` (optional; falls back to lexical) |
+| `semantic.py` | Scoped local semantic search over `$OV/` with bounded context capsules, model-free freshness inspection, drift-gated incremental indexing, raw locator cards, and an automatic search-efficiency report after every real update; lexical fallback when the index is absent | B.5 | `lancedb`, `sentence-transformers` (optional; falls back to lexical) |
 | `semantic_backends.py` | Backend implementations for semantic.py (LanceDB embedding backend, lexical fallback) | B.5 | `lancedb`, `sentence-transformers` (optional) |
 | `semantic_corpus.py` | Deterministic semantic corpus policy: scope classification, exclusions, raw locator generation, duplicate accounting, and read-only audits | B.5 | stdlib |
 | `semantic_eval.py` | Offline evaluation harness for semantic.py — builds a wikilink-derived gold set from the vault and computes retrieval metrics | B.5 | `lancedb`, `sentence-transformers` |
