@@ -25,6 +25,7 @@ import autoevo_preflight
 import autoevo_quarantine
 import autoevo_verify
 import command_timeout
+import dining_audit
 import intent_coverage
 import privacy_check
 import routine_audit
@@ -330,6 +331,83 @@ def check_paper_cache() -> None:
         )
         expect(
             rejected.returncode == 2, "paper cache accepted a PDF outside the L3 store"
+        )
+
+
+def check_dining_audit() -> None:
+    with tempfile.TemporaryDirectory(prefix="atelier-dining-audit-") as temp_dir:
+        vault = Path(temp_dir)
+        profile = vault / "profile" / "diet.md"
+        profile.parent.mkdir(parents=True)
+        mapped = {
+            "Regional dining catalog": "travel/regional-catalog.md",
+            "Meal-history tracker": "travel/meal-history.md",
+            "Credit-perks catalog": "travel/credit-eligibility.md",
+            "Benefits tracker": "finance/benefits-tracker.md",
+            "Prepaid-balance tracker": "finance/prepaid-balances.md",
+        }
+        for relative in mapped.values():
+            target = vault / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("# Fixture\n", encoding="utf-8")
+        profile.write_text(
+            """# Personal Diet Policy
+
+## Catalog files
+
+| Role | Path | Write owner |
+|---|---|---|
+| Regional dining catalog | `travel/regional-catalog.md` | fixture |
+| Meal-history tracker | `travel/meal-history.md` | fixture |
+| Credit-perks catalog | `travel/credit-eligibility.md` | fixture |
+| Benefits tracker | `finance/benefits-tracker.md` | fixture |
+| Prepaid-balance tracker | `finance/prepaid-balances.md` | fixture |
+
+## Full health-flag taxonomy
+
+- `flag-a` - fixture
+- `flag-b` - fixture
+""",
+            encoding="utf-8",
+        )
+        dining_log = vault / mapped["Meal-history tracker"]
+        dining_log.write_text(
+            """# Meal History Fixture
+
+## Visits
+
+| Date | Restaurant | City | 类型 | ⭐ | 评分 | 再去 | 健康 | 人数 | 总额 | 人均 | Platform | Credit | 必点·备注 |
+|---|---|---|---|---|---|---|---|---:|---:|---:|---|---|---|
+| 2026-01-01 | A | X | Test | — | 8 | Y | flag-a | 2 | $20.00 | $10.00 | W | — | good |
+| 2026-01-02 | B | X | Test | — | 7 | Maybe | flag-b | 3 | ~$30.00 | ~$10.00 | W | — | okay |
+
+## Derived views
+""",
+            encoding="utf-8",
+        )
+        valid = dining_audit.audit(vault)
+        expect(valid["ok"] is True, f"valid dining fixture failed: {valid}")
+        expect(valid["stats"]["rows"] == 2, "dining row count drift")
+
+        dining_log.write_text(
+            dining_log.read_text(encoding="utf-8")
+            .replace(
+                "| 2026-01-02 | B |",
+                "| 2025-12-31 | B |",
+            )
+            .replace(
+                "| ~$30.00 | ~$10.00 |",
+                "| ~$30.00 | ~$12.00 |",
+            ),
+            encoding="utf-8",
+        )
+        invalid = dining_audit.audit(vault)
+        error_codes = {finding["code"] for finding in invalid["errors"]}
+        expect(invalid["ok"] is False, "invalid dining fixture passed")
+        expect("date_order" in error_codes, "dining audit missed event-date drift")
+        expect(
+            "per_person_mismatch" in error_codes,
+            "dining audit missed per-person arithmetic drift",
         )
 
 
@@ -3268,6 +3346,7 @@ def main() -> int:
         ("Codex command skills", check_codex_command_skills),
         ("Codex native agents", check_codex_native_agents),
         ("paper cache", check_paper_cache),
+        ("dining audit", check_dining_audit),
         ("semantic cache-first", check_semantic_cache_first),
         ("autoevo reliability", check_autoevo_reliability),
         ("runtime selector", check_runtime_selector),

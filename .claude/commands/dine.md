@@ -5,7 +5,7 @@ description: Restaurant recommendation flow using local context and credit-burn 
 
 Three intents (auto-detected from args):
 - **A. Restaurant Recommendation** (default): pick 3 restaurant candidates based on user-supplied context, historical preferences, and credit-burn opportunities. Read-only on catalog docs under this intent.
-- **B. Workplace Catering Tracker**: parse a weekly catering PDF dropped into `$OV/<slug>/catering/`, choose health-aware picks for the user's attendance days, and surface a confirmed table for the user to record themselves (the system does not write to daily notes).
+- **B. Workplace Catering Tracker**: parse a weekly catering PDF from the folder mapped to a workplace slug in `profile/diet.md`, choose health-aware picks for the user's attendance days, and surface a confirmed table for the user to record themselves (the system does not write to daily notes).
 - **C. Meal Log Capture** (ad-hoc): log a meal the user just ate. Parses receipt images (HEIC/JPG/PNG/PDF) when provided, cross-references catalogs for missing slots, asks ONE compact question for what cannot be derived, shows a draft row + side-effect plan, and appends to the private meal-history tracker on confirm. Co-equal capture path with `/hi` Dining Pulse.
 
 ## Quick start
@@ -16,8 +16,8 @@ Intent A examples:
 - `/dine 朋友 4 人 川菜 dinner` → use as filters, ask remaining
 - `/dine <city> burn credit` → location hint + flag credit-burn priority
 
-Intent B examples (first arg = workplace slug; the folder `$OV/<slug>/catering/` must exist; personal policy lives in gitignored `profile/diet.md`):
-- `/dine <slug>` → find latest PDF in `$OV/<slug>/catering/` covering this week, pick per `profile/diet.md` attendance pattern
+Intent B examples (first arg = workplace slug mapped in gitignored `profile/diet.md`):
+- `/dine <slug>` → find the latest PDF in the mapped catering folder covering this week, pick per `profile/diet.md` attendance pattern
 - `/dine <slug> <pdf-path>` → explicit PDF
 - `/dine <slug> all` → all 5 weekdays (override)
 - `/dine <slug> <day-codes>` → custom attendance set (override; any day-code combination works)
@@ -34,9 +34,11 @@ If args present, parse them as initial filters; only ask for slots not derivable
 
 Parse args. Precedence: **B → C → A** (most specific match wins; ambiguous → ask user one line before routing).
 
+Read `profile/diet.md` once, if present, to resolve workplace slugs, catering folders, and `## Catalog files`. Do not assume the private mappings from examples in this command.
+
 Route to **Intent B** if any of:
-- First arg matches an existing folder `$OV/<arg>/catering/` (workplace slug)
-- Any arg is a `.pdf` path under a `$OV/*/catering/` folder
+- First arg matches a workplace `Slug` declared in `profile/diet.md`
+- Any arg is a `.pdf` path under a catering `Folder` declared in `profile/diet.md`
 - Args contain the literal token `catering`
 
 Else route to **Intent C** if any of:
@@ -70,16 +72,18 @@ For missing slots, ask via `AskUserQuestion` or sequential 1-line prompts (which
 
 ## Step 2: Load data (parallel)
 
-The user's vault holds these catalogs under `<paths.travel>/` and `<paths.finance>/`. Discover the actual filenames via `Grep` on those directories at runtime; do not hardcode private filenames here.
+Resolve the following roles through `profile/diet.md § Catalog files`. Paths are relative to `$OV` unless absolute. If the profile or a mapping is absent, use structural discovery under `<paths.travel>/` and `<paths.finance>/` as a fallback and disclose the gap.
 
 - Regional dining catalog (rotation + Michelin wishlist + 场景索引), under `<paths.travel>/`
 - Meal-history tracker (history with 评分 + 再去 + recency), under `<paths.travel>/`
-- Credit-perks dining catalog (Cycle Tracking + city catalogs), under `<paths.travel>/`
+- Credit-perks dining catalog (eligibility + city catalogs), under `<paths.travel>/`
 - Benefits tracker (current cycle credit status, for burn signal), under `<paths.finance>/`
 - Prepaid-balance tracker (balances per restaurant, for a soft "use it" signal), under `<paths.finance>/`
 - For travel destinations: use the matching city section plus the corresponding local guide under `<paths.archive>/practical/travel/`
 
 **Missing-file fallback:** if any of these is absent, skip it silently and note the gap in the closing line ("scored without [missing source]"). The recommendation still produces; the user can decide whether to recreate the catalog.
+
+**Integrity preflight:** when running from the Atelier repo, execute `python3 scripts/dining_audit.py --json`. If it reports errors, exclude the affected rows or source from scoring and disclose the degraded input. Warnings such as missing legacy values do not block recommendations.
 
 ## Step 3: Filter + score
 
@@ -141,9 +145,9 @@ Do NOT auto-book; just surface candidates.
 ### B.1 Resolve PDF
 
 - If an arg is a `.pdf` path → use it directly.
-- Else: list `"$OV"/<slug>/catering/*.pdf`, pick the one whose filename date range covers the current calendar week. Typical filename pattern: `<Workplace> Catering_<Mon> <DD>-<Mon> <DD>.pdf`. If multiple match (e.g., manual override), prefer the most recent `mtime`.
+- Else: resolve the slug's `Folder` from `profile/diet.md`, list `<Folder>/*.pdf`, and pick the one whose filename date range covers the current calendar week. Typical filename pattern: `<Workplace> Catering_<Mon> <DD>-<Mon> <DD>.pdf`. If multiple match (e.g., manual override), prefer the most recent `mtime`.
 - Optional date arg `YYYY-MM-DD` shifts the target week (Mon of that week).
-- 0 matches: report `本周菜单还没传到 $OV/<slug>/catering/` and exit cleanly.
+- 0 matches: report `本周菜单还没传到 <configured folder>` and exit cleanly.
 
 ### B.2 Parse menu
 
@@ -206,10 +210,12 @@ For images / PDFs, extract: restaurant name, items + spicy markers, subtotal / t
 
 ### C.2 Cross-check catalogs (parallel reads)
 
-Read `profile/diet.md` § Catalog files first to resolve the three filenames below; if `profile/diet.md` is missing or the section is empty, skip the catalog lookups and note that in the closing line.
+Read `profile/diet.md` § Catalog files first to resolve the five roles below; if `profile/diet.md` is missing or the section is empty, use structural discovery and note that in the closing line.
 
 - `Grep` the city catalog file under `<paths.travel>/` for the restaurant → derive `类型`, `City`, `⭐` if listed.
 - `Grep` the meal-history file under `<paths.travel>/` for the restaurant → first-time-or-not flag (used in 必点·备注 line if first time).
+- Read the credit-perks catalog only for restaurant eligibility; never treat it as live cycle state.
+- Read the benefits tracker for current availability, completed visits, and confirmed/reconciliation claim state.
 - `Grep` the prepaid-balance file under `<paths.finance>/` for the restaurant → if listed, expect the profile-defined prepaid payment label unless the receipt says otherwise.
 - If any catalog file is missing, skip silently and note in the closing line.
 
@@ -221,14 +227,17 @@ Read `profile/diet.md` § Catalog files first to resolve the three filenames bel
 | **City** | Catalog match → use; else infer from restaurant address on receipt; else ask. |
 | **类型** | Catalog match → use; else infer from restaurant name (湘菜/川菜/etc.); else ask. |
 | **⭐** | Catalog match only; else blank. |
+| **人数** | User report or receipt party-size field only; else `—`. |
+| **总额** | Receipt final total or explicit user report, including tip when the source says so; else `—`. |
+| **人均** | If 人数 and 总额 are known, compute `总额 ÷ 人数` to cents. If only a sourced per-person amount exists, preserve it and leave 总额 blank. |
 | **Platform** | Infer dine-in, pickup, delivery, or a visible booking source; preserve the source label when present; else ask. |
 | **Credit** | Map the visible payment method through the private benefit profile. If no mapping exists, record the method without inferring a card or rewards program. |
 | **健康 flags** | Apply the taxonomy and dish mappings in `profile/diet.md`. If the profile is absent, use only generic visible attributes and label them as inferred. Always show the derivation in the confirm prompt so the user can correct it. |
 
-Required slots that cannot be derived: ask the user in **ONE compact prompt** (not a 6-question waterfall). Required = 评分 (1-10), 再去 (Y/N/Maybe), and any of {City / 类型 / Platform} that the auto-derive could not fill. Optional 1-line note at the end.
+Required slots that cannot be derived: ask the user in **ONE compact prompt** (not a 6-question waterfall). Required = 评分 (1-10), 再去 (Y/N/Maybe), and any of {City / 类型 / Platform} that the auto-derive could not fill. 人数 and 总额 are optional but ask in the same prompt when neither receipt nor text provides them. Optional 1-line note at the end.
 
 Example compact prompt:
-> `City? · 评分 1-10? · 再去 Y/N/Maybe? · Platform? · 1 句备注?`
+> `City? · 评分 1-10? · 再去 Y/N/Maybe? · 人数/总额? · Platform? · 1 句备注?`
 
 ### C.4 Side-effect plan
 
@@ -248,7 +257,7 @@ Show the user in this exact shape:
 
 ```
 Draft row (meal log):
-| <Date> | <Restaurant> | <City> | <类型> | <⭐> | <评分> | <再去> | <健康> | <Platform> | <Credit> | <必点·备注> |
+| <Date> | <Restaurant> | <City> | <类型> | <⭐> | <评分> | <再去> | <健康> | <人数> | <总额> | <人均> | <Platform> | <Credit> | <必点·备注> |
 
 Side effects:
   1. Append row to meal log + bump Last updated
@@ -263,7 +272,9 @@ User says `yes` → apply all. Partial → apply only the listed numbers. `no` �
 
 ### C.6 Write
 
-For the meal log: use `Edit` to insert the new row at the correct date position (the table is roughly chronological; insert before the next-newer-date row, or append at the end if today is the newest). Bump `Last updated:` line. For the gift-card catalog: same `Edit` pattern.
+For the meal log: use `Edit` to insert the new row in ascending event-date order. Insert before the next-newer-date row, or append after the last row when it is newest. Never append a backfill at the end merely because it was captured today. Bump `Last updated:` line. For the gift-card catalog: same `Edit` pattern.
+
+After writing, run `python3 scripts/dining_audit.py --json` when available. If the audit fails, repair only the row or invariant introduced by this capture before reporting success.
 
 For the benefits tracker: do NOT write; surface the one-liner only.
 

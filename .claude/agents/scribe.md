@@ -67,7 +67,7 @@ For multi-turn input, merge chronologically using event-time signals in the cont
 
 Inputs: `target_file`, structured row fields (the orchestrator passes whichever columns the schema requires; their names and order come from the file's own schema header), `raw_content` for any free-text column, `insertion_anchor` (optional: the section heading or last-row text that bounds the append position).
 
-Read the target file. Locate the schema header / table column row. Format the new row with **exactly** the columns present, in the same order, using the same separators and emphasis markers the existing rows use. Append immediately after the last existing data row (or at the position `insertion_anchor` names).
+Read the target file. Locate the schema header / table column row. Format the new row with **exactly** the columns present, in the same order, using the same separators and emphasis markers the existing rows use. If the table has a Date column, insert in ascending event-date order. Append after the last data row only when the new event is the newest; a backfill must be inserted before the next-newer row. Otherwise use the position `insertion_anchor` names.
 
 Verbatim rule applies to user free-text portions; structured columns use orchestrator-parsed values.
 

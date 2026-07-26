@@ -152,11 +152,12 @@ Lightweight capture of dining experiences for personal preference learning + fut
 - 评分 1-10 (8+ = top, 6-7 = good, 4-5 = ok, ≤3 = avoid)
 - 再去? (Y / N / Maybe)
 - **健康 flags** (per-visit, 依赖所点菜): use the taxonomy enumerated in `profile/diet.md` ("Full health-flag taxonomy" section). Multiple flags joined by `·`, blank = unobserved. Restaurant ordering 是健康管理重要部分, 不能省
+- 人数 / 总额 (如可得); 人均由总额 ÷ 人数计算, 不凭同行名单或价位推断金额
 - 1-2 句话: 必点菜, 服务/ambiance, 同行
 - 推断 from context (else 1-line confirm): City / 类型 / booking platform / payment benefit used
 
 **Accumulate as a pending Scribe operation** (do NOT `Edit` directly from the orchestrator):
-- Pending op: `dining_row` with `target_file: <user's dining-log file under <paths.travel>/>`, structured row fields (date, restaurant, city, type, score, 再去, health flags, platform, credit), `raw_content` for the 必点·备注 free-text column. 评分 + 再去 mandatory; dash placeholder only for missing data the user can't recall. Dispatch happens at Pre-Output. The Scribe reads the file's schema header at dispatch time and formats the row to match exactly.
+- Pending op: `dining_row` with `target_file` resolved from `profile/diet.md § Catalog files`, structured row fields (date, restaurant, city, type, score, 再去, health flags, party size, total, per-person, platform, credit), `raw_content` for the 必点·备注 free-text column. 评分 + 再去 mandatory; dash placeholder only for missing data the user can't recall. Dispatch happens at Pre-Output. The Scribe reads the file's schema header at dispatch time and formats the row to match exactly.
 
 **Cross-doc sync triggers** (silent unless flagged for user):
 - If 评分 ≥ 8 AND 再去 = Y AND restaurant NOT in the regional catalog rotation → flag user: "Add to rotation?"
@@ -239,9 +240,9 @@ After the interactive session, write a reflection file:
 - Observation: [one-line pattern note for longitudinal tracking]
 
 ## Dining
-| Restaurant | Score (/10) | 再去 | 健康 flags | 必点·备注 |
-|---|---|---|---|---|
-| [Name] | [1-10] | Y/N/Maybe | [flag(s) per profile/diet.md taxonomy] | [必点 + 1 line] |
+| Restaurant | Score (/10) | 再去 | 健康 flags | 人数 | 总额 | 人均 | 必点·备注 |
+|---|---|---|---|---:|---:|---:|---|
+| [Name] | [1-10] | Y/N/Maybe | [flag(s) per profile/diet.md taxonomy] | [N/—] | [$N/—] | [$N/—] | [必点 + 1 line] |
 
 - Captured to: the meal-history tracker (count of new rows appended)
 - Cross-doc updates triggered: [regional rotation add? benefits tracker update? benefit-program ✓?]

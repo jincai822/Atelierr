@@ -66,7 +66,7 @@ Bash: for d in $(seq 0 6); do date_str=$(date -v-${d}d +%Y-%m-%d); ls "$OV"/refl
 Read the daily notes for any missing days (`<paths.daily_notes>/YYYY/MM/<date>.md`) so context is loaded, then prompt the user with 3 light **week-level** questions (do not force per-day reconstruction):
 
 1. **Support pulse (week)**: 这 7 天里, 有哪些有意义的互动 (1:1 / 家人 / 朋友 / 同事) 没记到 daily reflection 里? 谁? 什么类型 (E / I / Inf / A)? 有没有新连接?
-2. **Dining (week)**: 这 7 天有去新餐厅 / 重访旧餐厅没记到 meal-history tracker 的吗? (餐厅 + **就餐日期 YYYY-MM-DD** + 评分 + **再去? Y/N/Maybe** + 健康 flag + 必点 + Credit used). Backfill spans multiple days, so the Date column must hold the actual visit date — not the session date — otherwise the date-keyed meal history and credit-cycle tracking break. 评分 + 再去 are mandatory per the `/hi` Dining Pulse rule; do not append a row without both.
+2. **Dining (week)**: 这 7 天有去新餐厅 / 重访旧餐厅没记到 meal-history tracker 的吗? (餐厅 + **就餐日期 YYYY-MM-DD** + 评分 + **再去? Y/N/Maybe** + 健康 flag + 人数 + 总额 + 必点 + Credit used). Backfill spans multiple days, so the Date column must hold the actual visit date, not the session date. 人均仅在人数和总额都有来源时计算。评分 + 再去 are mandatory per the `/hi` Dining Pulse rule; do not append a row without both.
 3. **Signals**: 这 7 天有哪些值得标记的事 (wins / drains / health observations / 决策 / 突发) 没进入 reflection 流?
 
 Captured items fold into `## Missed-Day Backfill` (Support pulse / Dining / Signals sub-bullets); significant drains or wins may also surface in `## Energy Map`. Dining items additionally append to the meal-history tracker per the `/hi` Dining Pulse rule.
@@ -142,7 +142,7 @@ Based on the review:
 ## Missed-Day Backfill
 - Days without `/hi`: <list of YYYY-MM-DD>
 - **Support pulse (week)**: <people / type / new connection / direction>
-- **Dining (week)**: <restaurants / scores / 健康 flags / 必点>
+- **Dining (week)**: <restaurants / scores / 健康 flags / 人数 / 总额 / 人均 / 必点>
 - **Signals**: <wins / drains / health obs / decisions surfaced retroactively>
 - (omit if user surfaced nothing)
 
