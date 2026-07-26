@@ -61,8 +61,8 @@
 reasoning_tier = "deep"
 
 [models.sonnet]
-# Anthropic Sonnet — mid-tier Anthropic leg used by cross-validation roles.
-reasoning_tier = "balanced"
+# Anthropic Sonnet execution and retrieval leg.
+reasoning_tier = "xdeep"
 
 [models.haiku]
 # Anthropic Haiku — cheap Anthropic leg used by mechanical-capture roles.

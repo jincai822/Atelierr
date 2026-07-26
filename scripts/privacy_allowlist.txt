@@ -2,8 +2,9 @@
 #
 # Each line is an exact private-title candidate that is intentionally public
 # in this repository. Use this only for generic standards, product names,
-# schema keys, or illustrative concepts. Personal names, places, preferences,
-# and account labels belong in `profile/private_terms.txt`, never here.
+# schema keys, illustrative concepts, or user-approved infrastructure examples.
+# Personal names, places, preferences, account labels, and secrets belong in
+# `profile/private_terms.txt`, never here.
 # Matching is case-insensitive. Comments start with `#`; blank lines are
 # ignored.
 #
@@ -39,3 +40,6 @@ reader_persona
 research-profile
 signal sweep
 signal-sweep
+
+# Public sample infrastructure identifiers explicitly approved by the user.
+atelier-mbp

@@ -1,6 +1,12 @@
 ## Purpose
 
-Nightly autonomous quality pass over `$OV`. The bot fires at 5:00 local, sweeps the working tiers for decay using Forgetter heuristics, auto-applies the high-confidence band, logs uncertain findings to a pending queue, and commits every destructive operation to git so `git revert` is the recovery path. Surfaces unresolved items at the next `/hi` via `scripts/cues.py`.
+Nightly autonomous quality pass over `$OV`. The primary attempt fires at 5:00
+local, with hourly lightweight checks and wake/login catch-up for a missed
+calendar event or deferred attempt. It sweeps the working tiers for decay using Forgetter
+heuristics, auto-applies the high-confidence band, logs uncertain findings to
+a pending queue, and commits every destructive operation to git so `git
+revert` is the recovery path. Surfaces unresolved items at the next `/hi` via
+`scripts/cues.py`.
 
 Companion docs:
 - `.claude/agents/forgetter.md` — the four decay categories + firing heuristics this protocol acts on.
@@ -16,11 +22,22 @@ Companion docs:
 
 ## Schedule
 
-macOS `launchd`, 5:00 local, daily.
+macOS `launchd`, daily.
 
 - Plist: `~/Library/LaunchAgents/com.atelier.autoevo-nightly.plist`
+- Primary attempt: 05:00 local.
+- Recovery checks: every hour at minute 0. A completed, failed, running, or
+  completion-uncertain cycle exits before capability probes or model work. A
+  `deferred` claim records `retry_after_epoch`; checks before that time also
+  exit cheaply, and the first check at or after it may reacquire the cycle.
+- Wake from sleep: `StartCalendarInterval` delivers a missed calendar event
+  when the Mac wakes.
+- Login or agent reload: `RunAtLoad = true`. Before 05:00, the runner maps a
+  catch-up to yesterday only when yesterday did not complete; otherwise it
+  waits for today's primary event. At or after 05:00, an absent current claim
+  is a missed primary attempt and runs immediately.
 - Wake-from-sleep: `pmset repeat wakeorpoweron MTWRFSU 04:55:00`
-- Invocation: see the plist's `ProgramArguments` block, which delegates to `scripts/routine_runner.sh`. The wrapper sources `~/.zprofile` / `~/.profile` / `~/atelier/harness/env.local.sh` for `OV`, ensures `$OV/cache` and `$OV/_meta/routine_runs/<routine>/` exist, resolves the runtime through `scripts/atelier_runtime.py`, then runs the registered command source. Codex is the committed default; gitignored `harness/runtime.local.toml` or `ATELIER_RUNTIME` can select Claude. Launchd captures stdout/stderr to `/tmp/com.atelier.autoevo-nightly.out` and `.err` (configured via the plist's `StandardOutPath` / `StandardErrorPath`).
+- Invocation: see the plist's `ProgramArguments` block, which delegates to `scripts/routine_runner.sh`. The wrapper sources `~/.zprofile` / `~/.profile` / `~/atelier/harness/env.local.sh` for `OV`, ensures `$OV/cache` and `$OV/_meta/routine_runs/<routine>/` exist, then runs the registered command source with headless Codex. Interactive runtime preferences do not affect launchd routines. Launchd captures aggregate stdout/stderr to `/tmp/com.atelier.autoevo-nightly.out` and `.err`. Each acquired autoevo attempt also gets a claim-owned event journal under `$OV/cache/autoevo-runner-<cycle>.log.<suffix>`, so completion evidence cannot be confused with an earlier attempt in the aggregate log.
 - The bot's own audit log (what the autoevo did to the vault) is separate: `$OV/agent-findings/autoevo-applied-<YYYY-MM-DD>.md`. The `/tmp/` files capture only the shell wrapper and headless runtime output, useful for debugging launchd-level failures.
 
 ### Headless Codex boundary
@@ -31,6 +48,9 @@ user config ignored, and interactive approvals disabled. It uses
 read-only, while autoevo's recovery contract requires one Git commit per
 destructive operation. This is a deliberate high-trust exception for this
 local bot, not the default permission profile for interactive Atelier work.
+The maintenance profile gives the complete sequential sweep a two-hour
+wall-clock ceiling. `scripts/command_timeout.py` measures epoch time, so sleep
+does not pause or extend that ceiling.
 
 Before launching Codex, the runner rebuilds its environment from an empty base
 and passes only the local path, vault routing, hook guards, the dry-run flag,
@@ -43,30 +63,124 @@ recoverable per-operation commits. Project hooks remain enabled. The runner
 passes `ATELIER_SKIP_LOCK_TOUCH=1` so its own SessionStart and UserPromptSubmit
 hooks do not refresh the session-active lock immediately before pre-flight.
 
-When Claude is selected, the same wrapper invokes the native `/autoevo-nightly`
-surface through `claude -p`. The command's semantic boundary, lock behavior,
-and audit contract are unchanged; Claude Code applies its own configured
-permission policy.
+Interactive Claude selection does not affect this scheduled workflow. The
+wrapper always uses headless Codex so the declared sandbox, environment, and
+approval contract remain mechanically consistent.
 
 Reversible: `launchctl unload <plist>` + `pmset repeat cancel`.
 
+### Deterministic preflight boundary
+
+`scripts/autoevo_preflight.py` runs after the cycle claim and before Codex.
+This separates invariant checks from judgment-heavy decay work:
+
+1. Recover an unchanged checksum-owned audit left by a prior Git blocker.
+2. Verify `$OV` is a Git worktree.
+3. Diagnose a missing Git index or existing `index.lock` before invoking
+   `git status`.
+4. Inspect worktree cleanliness, zettelm cleanliness, branch divergence, Git
+   LFS push state, the session lock, and the privacy gate.
+5. Run one semantic query through the production `uv` environment with
+   `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` to prove the cached local
+   model snapshot and Lance index are usable without a download.
+6. If blocked, write the canonical audit artifact, attempt a path-limited
+   audit commit only when Git permits it, return an attested `noop`, and mark
+   the claim `deferred` with `retry_after_epoch`.
+7. If ready, start Codex. The command repeats the mutation gates before the
+   sweep as defense in depth.
+
+A `deferred` claim means the model and mutation phase never started, so the
+first hourly calendar or RunAtLoad trigger at or after `retry_after_epoch` may
+safely retry without an operator effects review. Earlier checks exit before
+capability probes, lock acquisition, or model work. This is distinct from
+`retry-approved`, which remains the manual recovery state for a failed or
+uncertain cycle.
+
+Before 05:00, catch-up selects the previous cycle. Quarantine filtering and
+state updates both evaluate expiry against that selected cycle date, not the
+wall date, through `scripts/autoevo_quarantine.py`. The wrapper validates that
+cycle, passes it to deterministic preflight as `--run-date`, and exposes it to
+the sanitized model process as `ATELIER_ROUTINE_CYCLE`. The command fails
+closed if an unattended invocation omits it. Preflight independently requires
+its run date and cycle to be the same real canonical calendar date before it
+can construct an audit path.
+
+The session-active blocker sets `retry_after_epoch` to the exact six-hour lock
+expiry. Other deterministic blockers use a one-hour retry delay, aligned with
+the calendar check, so a repaired Git index, committed user work, restored
+semantic cache, or cleared privacy finding is noticed at the next hour without
+starting a model while the blocker remains.
+
+An hourly retry that sees the same blocker and detail for the same cycle reuses
+the already committed blocker audit. It advances only the deferred claim's
+retry time and does not append an identical section or create another Git
+commit. A changed blocker or detail gets a new audit section.
+
+If Git cannot commit the blocker audit, the helper stores its path and SHA-256
+under `<paths.cache>/`. A later preflight may commit only that exact unchanged
+audit. A checksum mismatch is a hard stop; the helper never absorbs a user
+edit.
+
+Before appending a new blocker section, the helper checks the target audit path
+itself. If that path already has staged, unstaged, or untracked content, the
+helper leaves it unchanged and defers the audit commit. This path-level guard
+applies even when unrelated worktree dirtiness is the blocker.
+
+### Completion verification
+
+`python3 scripts/autoevo_verify.py --cycle <YYYY-MM-DD> --json` is the
+authoritative clean-cycle verifier. The runner invokes it automatically after
+delivery and lock release. During this check the claim is
+`completion-uncertain` with `verification = "pending"`; only a passing result
+is promoted atomically to `completed` with `verification = "passed"`. A failed
+check remains `completion-uncertain` and requires effects review. The verifier
+rejects a wrapper-level `noop`. A passing cycle must have:
+
+- `status = "completed"`, `verification = "passed"`, and
+  `outcome = "delivered"` in the canonical claim;
+- at least three `envelope_returned` entries in the latest Sweep coverage
+  section;
+- one non-empty `agent-findings/decay-<run-id>-*.md` report per returned
+  envelope, all committed in the same Git commit as the audit;
+- an outcomes sidecar whose exact scope map matches that audit section;
+- a lint sidecar whose counts match the audit;
+- empty Skipped and Errors sections;
+- a committed audit and clean vault worktree;
+- a claim-owned cache event journal with ordered markers proving deterministic
+  preflight passed before Codex started, delivery was validated, and the lock
+  was released;
+- final `verified_sweeps` and `verification_commit` fields that match the
+  audit and Git evidence.
+
 ## Pre-flight gates
 
-The bot bails (writes a one-line entry to the audit log and exits 0) if any of these hold. Each abort surfaces as a cue at next `/hi` so the user knows the night was skipped.
+The deterministic preflight defers before model launch if any gate holds. The
+command repeats the gates after launch to close races between readiness and
+the first mutation. Each abort surfaces as a cue at next `/hi`.
 
 | Gate | Check | Rationale |
 |---|---|---|
+| Git worktree | `git rev-parse --is-inside-work-tree` succeeds | Every mutation requires a Git recovery surface. |
+| Git index | resolved Git index exists | A missing index makes `git status` resemble mass deletion plus untracked recreation. Do not misclassify it as ordinary dirtiness. |
+| Git index lock | resolved `index.lock` is absent | Never delete or replace a possibly live lock. |
 | Session-active lock | `<paths.cache>/atelier-session-lock` exists AND mtime < 6h | User may be mid-session; avoid collision. |
 | Dirty `$OV` working tree | `git -C "$OV" status --porcelain` non-empty | Don't compound user intent into bot commits. |
 | Dirty zettelm submodule | same check inside `<paths.zettelm>/` | User is mid mobile-capture digest. |
-| Privacy gate | `uv run scripts/privacy_check.py --json` returns `hit_count > 0` | Hard veto; never commit a leak. |
+| Privacy gate | `python3 scripts/privacy_check.py --json` returns `hit_count > 0` | Hard veto; never commit a leak. |
+| Semantic readiness | Offline real query exits 0 and returns JSON | Forgetter depends on semantic retrieval; fail before model launch if the cached model, environment, or Lance index is unavailable. |
 
-Every abort still writes the cue-visible audit file. Its Git commit is
-path-limited with `git commit --only -- <audit-path>` so an already-dirty index
-cannot be swept into the audit commit. The bot never deletes a stale
-`index.lock`, resets the index, or stages unrelated paths. If the path-limited
-audit commit fails during an abort, the file remains on disk for
-`check_autoevo_ran` and the runtime log records the Git error.
+Every abort attempts to write the cue-visible audit file. A pre-existing dirty
+audit path is left unchanged and reported through the routine result and
+runtime log. Otherwise, its Git commit is path-limited with
+`git commit --only -- <audit-path>` so an already-dirty index cannot be swept
+into the audit commit. The bot never deletes a stale `index.lock`, resets the
+index, or stages unrelated paths. If the path-limited audit commit fails during
+an abort, the file remains on disk for `check_autoevo_ran` and the runtime log
+records the Git error.
+
+When an early attempt is blocked and a later same-day retry completes cleanly,
+`check_autoevo_ran` evaluates the latest attempt in the daily audit. The
+earlier skip remains in history without preserving a stale warning.
 
 ## Trust bands
 
@@ -179,6 +293,11 @@ One file per night the bot ran. Format:
 - time-stale-A: 1 entry
 - contradicted: 1 entry (Challenger confirmed)
 
+### Sweep reports (3)
+- agent-findings/decay-20260522-050143-wip.md
+- agent-findings/decay-20260522-050143-research.md
+- agent-findings/decay-20260522-050143-reflections.md
+
 ### Skipped (reason)
 - Dirty $OV working tree at 04:59:58 (3 unstaged files in <paths.research>/)
 
@@ -255,7 +374,7 @@ The auto-detection check above takes precedence; explicit tombstones are an addi
 
 ## Related
 
-- `protocols/remote-routines.md` — for routines that run in claude.ai cloud. Autoevo does **not** use that path; it runs locally because the entire decay stack (`scripts/semantic.py`, `scripts/lint.py`, `scripts/trust.py`, Forgetter, Curator) is local-only.
+- `protocols/remote-routines.md`: shared scheduler, ownership, capability-profile, claim, and recovery contract. Autoevo uses its local Codex path because the decay stack (`scripts/semantic.py`, `scripts/lint.py`, `scripts/trust.py`, Forgetter, Curator) is local-only.
 - `protocols/repo-conventions.md` § "$OV git push policy" — the policy this carve-out partially overrides.
 - `protocols/local-first-architecture.md` — tier model the trust bands key off.
 - `.claude/agents/forgetter.md` — heuristic source.

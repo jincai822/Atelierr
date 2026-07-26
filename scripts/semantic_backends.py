@@ -858,6 +858,70 @@ class CrossEncoderReranker:
 # Concrete: BGE-M3 Embedder
 # ---------------------------------------------------------------------------
 
+def _local_model_snapshot(model_id: str) -> Optional[str]:
+    """Resolve a complete Hugging Face snapshot without importing hub code."""
+    import os
+    from pathlib import Path
+
+    direct = Path(model_id).expanduser()
+    if direct.is_dir():
+        return str(direct.resolve())
+    cache_override = os.environ.get("HF_HUB_CACHE")
+    if cache_override:
+        hub = Path(cache_override).expanduser()
+    else:
+        hf_home = os.environ.get("HF_HOME")
+        if hf_home:
+            hub = Path(hf_home).expanduser() / "hub"
+        else:
+            xdg_cache = os.environ.get("XDG_CACHE_HOME")
+            cache_root = (
+                Path(xdg_cache).expanduser()
+                if xdg_cache
+                else Path.home() / ".cache"
+            )
+            hub = cache_root / "huggingface" / "hub"
+    repository = hub / f"models--{model_id.replace('/', '--')}"
+    snapshots = repository / "snapshots"
+    candidates: list[Path] = []
+    main_ref = repository / "refs" / "main"
+    try:
+        revision = main_ref.read_text(encoding="utf-8").strip()
+    except OSError:
+        revision = ""
+    if revision and "/" not in revision and ".." not in revision:
+        candidates.append(snapshots / revision)
+    if snapshots.is_dir():
+        try:
+            discovered = sorted(
+                (path for path in snapshots.iterdir() if path.is_dir()),
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError:
+            discovered = []
+        candidates.extend(path for path in discovered if path not in candidates)
+    required = ("config.json", "modules.json")
+    for snapshot in candidates:
+        if all((snapshot / filename).is_file() for filename in required):
+            return str(snapshot.resolve())
+    return None
+
+
+def _sentence_transformer_source(model_id: str) -> tuple[str, bool]:
+    """Return a local snapshot when available, else the download-capable ID."""
+    import os
+
+    snapshot = _local_model_snapshot(model_id)
+    if snapshot is not None:
+        return snapshot, True
+    offline = (
+        os.environ.get("HF_HUB_OFFLINE") == "1"
+        or os.environ.get("TRANSFORMERS_OFFLINE") == "1"
+    )
+    return model_id, offline
+
+
 class BGEM3Embedder:
     """
     Embedder backed by BAAI/bge-m3 via sentence-transformers.
@@ -881,7 +945,12 @@ class BGEM3Embedder:
         self._max_tokens = max_tokens or cfg["max_tokens"]
         self._batch_size = batch_size or cfg["encode_batch_size"]
         self._device = resolved_device
-        self._model = SentenceTransformer(self.MODEL_ID, device=resolved_device)
+        model_source, local_only = _sentence_transformer_source(self.MODEL_ID)
+        self._model = SentenceTransformer(
+            model_source,
+            device=resolved_device,
+            local_files_only=local_only,
+        )
         self._model.max_seq_length = self._max_tokens
 
     def encode(self, texts: List[str]) -> NDArray[np.float32]:
@@ -940,7 +1009,12 @@ class Qwen3Embedder:
         self._max_tokens = max_tokens or cfg["max_tokens"]
         self._batch_size = batch_size or cfg["encode_batch_size"]
         self._device = resolved_device
-        self._model = SentenceTransformer(model_id, device=resolved_device)
+        model_source, local_only = _sentence_transformer_source(model_id)
+        self._model = SentenceTransformer(
+            model_source,
+            device=resolved_device,
+            local_files_only=local_only,
+        )
         self._model.max_seq_length = self._max_tokens
 
     def encode(self, texts: List[str]) -> NDArray[np.float32]:

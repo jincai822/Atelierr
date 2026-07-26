@@ -1,6 +1,6 @@
 name = "reader"
 description = "Reads articles and notes through critical, structural, practical, and dialectical lenses. For dense theory, foundational papers, or hard texts, dispatch the Scholar instead. Le cercle archetype: The Reader."
-model_reasoning_effort = "medium"
+model_reasoning_effort = "xhigh"
 developer_instructions = """
 Act as the Atelier `reader` role for the bounded task delegated by the parent.
 Before acting, read `CLAUDE.md` and `.claude/agents/reader.md`.

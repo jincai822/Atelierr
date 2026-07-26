@@ -64,15 +64,16 @@ Claude Code.
 Resolution order is:
 
 1. `--runtime codex|claude` for one selector invocation.
-2. `ATELIER_RUNTIME=codex|claude` for one process and for automation.
+2. `ATELIER_RUNTIME=codex|claude` for one interactive launcher process.
 3. Gitignored `harness/runtime.local.toml`, written by
    `python3 scripts/atelier_runtime.py use <runtime>`.
 4. The committed Codex default in `harness/runtimes.toml`.
 
-Direct CLI invocation always remains valid. The selector exists so interactive
-launches and local scheduled routines can share a durable preference. The
-launchd wrapper uses the same resolution chain unless `ATELIER_RUNTIME` is
-explicitly present in its environment.
+Direct CLI invocation always remains valid. The selector exists for interactive
+launches. Unattended local routines intentionally do not use this resolution
+chain: `scripts/routine_runner.sh` fixes them to Codex because their sandbox,
+plugin loading, sanitized environment, and approval policy are implemented and
+tested at that runtime edge.
 
 ## Provider-Neutral Rules
 
@@ -105,7 +106,10 @@ lives in `harness/agents.toml` as a `voices` keyed inline table per agent
 the selected runtime's project-agent surface, not Claude specifically. Claude
 resolves its concrete model from agent frontmatter; Codex agents inherit the
 selected Codex model unless their project adapter pins a model. The shared
-`reasoning_tier` maps to Codex `model_reasoning_effort` at the adapter edge.
+`reasoning_tier` maps to Codex `model_reasoning_effort` at the adapter edge:
+`light → low`, `balanced → medium`, `deep → high`, and `xdeep → xhigh`.
+Sonnet execution and retrieval roles use `xdeep`; they never silently inherit
+a lower Codex effort.
 External provider bindings remain in gitignored `profile/models.toml`.
 Shadow telemetry resolves native identity through
 `scripts/shadow.py native-model`: Claude uses the role binding, while Codex
@@ -127,6 +131,15 @@ Capabilities describe what an agent needs, independent of the runtime:
 - `ask_user`
 
 The concrete tool mapping is in `harness/capabilities.toml`.
+
+Routine profiles in `harness/routine_profiles.toml` are a separate execution
+envelope, not additions to this role-capability vocabulary. Their permission
+strings are action allowlists for archived scheduled procedures, while fields
+such as `sandbox`, `atelier_access`, and `allowed_commands` are enforced by the
+Codex-only local runner. Cloud rows describe connector requirements for manual
+ChatGPT Scheduled handoff. Do not add those action strings to
+`harness/capabilities.toml` unless an interactive agent role begins depending
+on a new provider-neutral capability.
 
 ## Codex Command Execution
 

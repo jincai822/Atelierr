@@ -4,6 +4,34 @@ Feedback loop for the shared hi intent router, invoked as `/hi` in Claude Code
 and `$hi` in Codex. It captures inputs the router was uncertain about so we can
 extend `harness/intents.toml` based on real usage instead of guesswork.
 
+## Live route projection
+
+For every explicit contextual `/hi`, `/reflect`, `$hi`, or `$reflect`
+invocation, the shared `UserPromptSubmit` hook runs the deterministic matcher
+once and injects its result as:
+
+```text
+ATELIER_INTENT_ROUTE {"schema":1,"source":"harness/intents.toml",...}
+```
+
+The packet projects only fields needed by the live command: `name`, `mode`,
+`agents`, `profile_reads`, `priority`, `matched_pattern`, `parallel`,
+`fallback`, and `ambiguous`. An ambiguous result also carries
+`tied_candidates` with the same route fields. It contains registry data only:
+never the raw user input, session ID, transcript path, or resolved filesystem
+paths.
+
+`harness/intents.toml` remains canonical. The packet is computed from the live
+file at prompt-submit time and is bounded by
+`INTENT_ROUTE_MAX_CONTEXT_BYTES` (currently 1 KiB). If matching fails or the
+packet would exceed that bound, the hook emits nothing and the command reads
+the full registry. Shape-based and low-confidence overrides remain model
+judgment; `.claude/commands/hi.md` defines when they require the full file.
+
+This reuses work the hook already performs. The normal route adds no model or
+tool call and replaces an unconditional full-registry read with at most 1 KiB
+of projected context on each contextual invocation.
+
 ## What gets logged
 
 A miss is any Claude `/hi <text>` or Codex `$hi <text>` invocation where the
@@ -46,22 +74,27 @@ Schema:
 
 Field key for `ambiguity_candidates[].matched_pattern` deliberately matches the key produced by `scripts/intent_coverage.py intent --json` (the matcher returns `matched_pattern`, never `pattern`); the orchestrator passes candidates straight through without renaming. `ambiguity_candidates`, `ambiguity_candidates_raw`, `clarified_to`, `final_dispatch`, and `notes` are all optional. `initial_match.name/priority/matched_pattern` may be null when the orchestrator didn't have a clean initial match to attribute (rare; usually present even for fallback). `priority` is dropped to null silently when `--initial-priority` fails to parse as int.
 
-## Producer side — dual path
+## Producer side: route plus dual-path logging
 
 Two producers feed the same JSONL, partitioned by `match_kind`:
 
 | Producer | Surface | Captures | Token cost into orchestrator |
 |---|---|---|---|
-| `intent-hook` | `UserPromptSubmit` hook (`.claude/settings.json` and `.codex/hooks.json`) | `fallback`, `ambiguous`: mechanically derivable from the raw input via `match_intents()` | **0**; runs before the orchestrator responds, and stdout never feeds back |
+| `intent-hook` | `UserPromptSubmit` hook (`.claude/settings.json` and `.codex/hooks.json`) | Compact route for every contextual invocation; logs `fallback` and `ambiguous` via `match_intents()` | At most 1 KiB of high-signal route context; no extra model or tool call |
 | `intent-log` | In-band `Bash:` call by the orchestrator | `low_confidence` — heuristic LLM judgment over message shape (see `.claude/commands/hi.md` § Clarify before dispatching) | ~200-300 tokens per call (Bash command + result) |
 
-The hook captures the bulk of misses (fallback is purely "no patterns matched"; ambiguous is purely "2+ tied at top priority" — both deterministic). The orchestrator's in-band call covers only the LLM-judged `low_confidence` branch + any clarification-time enrichment that the hook cannot observe.
+The hook projects every deterministic route and captures the bulk of misses
+(fallback is purely "no patterns matched"; ambiguous is purely "2+ tied at
+top priority" — both deterministic). The orchestrator's in-band call covers
+only the LLM-judged `low_confidence` branch plus any clarification-time
+enrichment that the hook cannot observe.
 
 Codex uses its native `UserPromptSubmit` hook for explicit `$hi` and `$reflect`
-skill invocations. Both runtimes therefore hook-log `fallback` and `ambiguous`;
-only `low_confidence` remains an in-band orchestrator call. Hook-produced rows
-carry `"logged_by": "user_prompt_submit_hook"`; orchestrator-produced rows omit
-that field, which preserves producer attribution in the report.
+skill invocations. Both runtimes therefore receive the same route packet and
+hook-log `fallback` and `ambiguous`; only `low_confidence` remains an in-band
+orchestrator call. Hook-produced rows carry
+`"logged_by": "user_prompt_submit_hook"`; orchestrator-produced rows omit that
+field, which preserves producer attribution in the report.
 
 The shape of the in-band call is documented in `.claude/commands/hi.md` § Miss Logging. The shared hook entry is wired with the runtime label appropriate to each edge:
 
@@ -77,7 +110,7 @@ The shape of the in-band call is documented in `.claude/commands/hi.md` § Miss 
 
 The first lives in `.claude/settings.json`; the second lives in `.codex/hooks.json`.
 
-The write is best-effort — `scripts/intent_coverage.py intent-log` always returns exit code 0 (orchestrator Bash calls can ignore the exit code with confidence):
+Route injection and miss-log writes fail independently. The write is best-effort — `scripts/intent_coverage.py intent-log` always returns exit code 0 (orchestrator Bash calls can ignore the exit code with confidence):
 
 - An empty `--input`, a malformed `--candidates` JSON, or a non-int `--initial-priority` each degrade silently (warning to stderr) without aborting the call. Malformed candidates are preserved verbatim under `ambiguity_candidates_raw` so a later batch-review can still see the orchestrator's intent.
 - The script silently no-ops on OSError so a slow or unmounted `$OV` never blocks a live hi invocation.

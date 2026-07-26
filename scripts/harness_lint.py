@@ -354,13 +354,13 @@ def check_models(agents: dict[str, dict[str, str]]) -> tuple[list[Finding], dict
                 )
             )
         reasoning_tier = entry.get("reasoning_tier")
-        if reasoning_tier not in {"light", "balanced", "deep"}:
+        if reasoning_tier not in {"light", "balanced", "deep", "xdeep"}:
             findings.append(
                 Finding(
                     "ERROR",
                     "models-reasoning-tier",
                     "harness/models.toml",
-                    f"model `{model_name}` reasoning_tier must be light, balanced, or deep",
+                    f"model `{model_name}` reasoning_tier must be light, balanced, deep, or xdeep",
                 )
             )
 
@@ -836,6 +836,47 @@ def check_agent_registry(
                     f"agent `{name}` Codex prompt does not mention `{source}`",
                 )
             )
+        if name == "forgetter":
+            canonical_marker = "---forgetter-result---"
+            legacy_marker = "---begin-result---"
+            contract_paths = (
+                ROOT / str(source),
+                ROOT / "protocols" / "agent-handoff.md",
+                ROOT / "protocols" / "orchestrator.md",
+                ROOT / ".claude" / "commands" / "hi.md",
+                ROOT / ".claude" / "commands" / "autoevo-nightly.md",
+            )
+            if canonical_marker not in prompt or legacy_marker in prompt:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "forgetter-envelope-registry",
+                        "harness/agents.toml",
+                        "Forgetter Codex prompt must use only `---forgetter-result---` as its opening marker",
+                    )
+                )
+            for contract_path in contract_paths:
+                try:
+                    contract = contract_path.read_text(encoding="utf-8")
+                except OSError as exc:
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            "forgetter-envelope-read",
+                            rel(contract_path),
+                            f"cannot read Forgetter contract: {exc}",
+                        )
+                    )
+                    continue
+                if canonical_marker not in contract or legacy_marker in contract:
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            "forgetter-envelope-drift",
+                            rel(contract_path),
+                            "Forgetter contract must use only `---forgetter-result---` as its opening marker",
+                        )
+                    )
 
     for name, entry in sorted(registry.items()):
         if not isinstance(entry, dict):
@@ -983,7 +1024,12 @@ def check_codex_agent_adapters(models: dict[str, Any]) -> list[Finding]:
                     f"adapter description differs from harness/agents.toml for `{name}`",
                 )
             )
-        effort_by_tier = {"light": "low", "balanced": "medium", "deep": "high"}
+        effort_by_tier = {
+            "light": "low",
+            "balanced": "medium",
+            "deep": "high",
+            "xdeep": "xhigh",
+        }
         voices = entry.get("voices")
         native_identity = voices.get("native") if isinstance(voices, dict) else None
         model_entry = models.get(native_identity) if isinstance(native_identity, str) else None
@@ -1020,6 +1066,18 @@ def check_codex_agent_adapters(models: dict[str, Any]) -> list[Finding]:
                         f"developer_instructions must reference `{needle}`",
                     )
                 )
+        if name == "forgetter" and (
+            "---forgetter-result---" not in instructions
+            or "---begin-result---" in instructions
+        ):
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "codex-forgetter-envelope-drift",
+                    rel(path),
+                    "native Forgetter adapter must use only `---forgetter-result---` as its opening marker",
+                )
+            )
 
     for name, path in sorted(actual.items()):
         if name not in expected:

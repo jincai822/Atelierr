@@ -66,8 +66,8 @@ Routine prompts implement this by calling Google Drive MCP `create_file` with a 
 **Enforcement.** Three cues in `scripts/cues.py`:
 
 1. `check_routine_policy`: fires a soft cue listing routines that declare neither `drive_write_enforced = true` nor `needs_drive_write_update = true`. Surfaces non-compliance at session start.
-2. `check_routine_staleness`: fires a hard cue when a routine's latest output file is older than its expected cadence + tolerance. Catches total outages: the routine fires on claude.ai but produces no file in `$OV`. Cadence is estimated from the `cron` field in the TOML entry. Tolerance = `max(2, cadence_days)`.
-3. `check_routine_hitrate`: fires a soft cue when a routine's output count over a lookback window falls below 70% of expected. Catches intermittent failures (e.g., daily routine succeeding every other day). Only evaluates routines with cadence <= 7 days; longer-cadence routines rely on staleness detection. Lookback capped to oldest file date so new routines aren't penalized.
+2. `check_routine_staleness`: fires a hard cue when a routine's latest output file is older than its expected cadence + tolerance. For local routines it also catches a completed claim newer than the latest declared artifact. Newly transferred owners receive cadence-aware grace for routines that have not yet become due. Cadence is estimated from the `cron` field. Tolerance = `max(2, cadence_days)`.
+3. `check_routine_hitrate`: fires a soft cue when a routine's output count over a lookback window falls below 70% of scheduled occurrences. Local denominators begin at the current owner transfer date, and output dates are counted once. Only routines with cadence <= 7 days participate; longer-cadence routines rely on staleness detection.
 
 ## Halt conditions
 
@@ -92,24 +92,29 @@ Every routine prompt MUST declare the following at the top of its instructions, 
 
 ## Local execution layer
 
-Some routines need local-only tools (semantic.py, git, lint.py) that remote cloud agents cannot access. These run locally via `launchd` plus the selected headless runtime, coordinated across multiple machines via DynamoDB. Codex is the shipped default; Claude is a supported persistent or per-process selection.
+Some routines need local-only tools (semantic.py, git, lint.py) that remote cloud agents cannot access. These run locally via `launchd` plus headless Codex. The default coordination shape assigns all local routines to one explicitly claimed machine; DynamoDB remains available for intentional active-active scheduling. Claude remains supported for interactive Atelier workflows, but unattended local routines are Codex-only so the declared sandbox, sanitized environment, plugin loading, and approval policy are enforceable.
 
 ### Architecture
 
 | Concern | Mechanism |
 |---|---|
 | Scheduler | macOS `launchd` plist per routine, fires at configured time |
-| Wrapper | `scripts/routine_runner.sh` handles env, stagger, lock, claim, runtime selection, execution |
-| Runtime | `harness/runtimes.toml` default plus gitignored local preference; `ATELIER_RUNTIME` is the one-process override |
-| Cross-machine lock | DynamoDB conditional put (`attribute_not_exists(pk)`) via `scripts/routine_lock.py` |
+| Wrapper | `scripts/routine_runner.sh` handles env, wake assertion, stagger, lock, claim, fixed Codex execution, and artifact validation |
+| Runtime | Headless Codex for unattended local routines; interactive selection remains in `harness/runtimes.toml` plus the gitignored local preference |
+| Capability profile | `harness/routine_profiles.toml` plus each private routine's `local_profile` / `cloud_profile` mapping |
+| Machine ownership | Gitignored per-machine identity plus shared `$OV/_meta/routine_owner.toml`; enforced by `scripts/routine_owner.py` |
+| Optional cross-machine lock | DynamoDB conditional put (`attribute_not_exists(pk)`) via `scripts/routine_lock.py` |
 | Local audit trail | `$OV/_meta/routine_runs/<routine>/<cycle_id>.toml` claim files |
-| Missed-run detection | `check_local_routine_missed` cue in `scripts/cues.py` |
+| Missed-run detection | `check_local_routine_missed` computes the latest due cron occurrence after the current owner transfer |
 
 ### routine_watch.toml: local routine entry
 
 ```toml
 [[routine]]
 name = "<routine-name>"
+support = "hybrid"                    # "local-only" | "hybrid" | "cloud-only"
+local_profile = "local-research"      # from harness/routine_profiles.toml
+cloud_profile = "cloud-drive-research"
 execution = "local"                     # "remote" (default) | "local"
 cron = "<cron expr (local time)>"
 output_dir = "<relative path under $OV>"
@@ -119,18 +124,140 @@ label = "<short human label>"
 # No drive_write_enforced (local routines write to $OV directly)
 ```
 
+### Capability and permission boundary
+
+`support` describes where the routine can run, while `execution` selects the
+active scheduler. A supported surface must name its profile and an unsupported
+surface must not. Public profiles in `harness/routine_profiles.toml` declare
+the sandbox, Atelier read boundary, allowed command, native live-web policy, shell-network policy, user-config policy, CLIs, plugins or cloud
+connectors, hard timeout, and human-readable permissions. Private policy only
+maps routine names to those generic profiles.
+
+Ordinary profiles set `atelier_access = "read"`; Codex starts in a fresh
+disposable neutral directory and adds `$OV` as a writable root. This prevents
+vault-level project instructions from persisting into a later higher-capability
+run while the Atelier checkout stays outside writable roots. The maintenance profile alone declares `atelier_access =
+"read-write"`. Each local profile also declares `allowed_commands`, and the
+runner binds the requested command to that allowlist before a cycle is claimed.
+This prevents a private routine mapping from borrowing the maintenance profile
+to gain repository writes.
+
+The profile's `permissions` array is passed into the bot adapter as the strict
+model-level action allowlist. Installed connectors and CLIs remain unavailable
+to the procedure unless their action appears there. This is explicit prompt
+enforcement, not a shell or connector ACL; profiles avoid loading optional
+plugins in the public profile registry, but a user-configured plugin is not
+authorized merely because it is installed or loaded.
+
+`web_search` and `shell_network` are separate permissions. The former governs
+Codex's native web-search surface. The latter governs network access from shell
+commands inside the local sandbox. A research-oriented capability row can therefore use live
+web search while keeping arbitrary CLIs offline. `shell_network = "enabled"`
+maps to Codex's narrow `sandbox_workspace_write.network_access=true` override;
+`"disabled"` passes the explicit false override. A `danger-full-access`
+maintenance profile must declare `"unrestricted"`, because that sandbox cannot
+honestly promise shell-network isolation.
+
+Audit the declarations and this machine's readiness before enabling jobs:
+
+```bash
+python3 scripts/routine_audit.py audit --check-system --json
+```
+
+For a background runtime check that must not execute the real routine, run
+`scripts/routine_profile_smoke.sh <routine>` through launchd. It uses the
+routine's exact local sandbox, web, reasoning, and user-config envelope, but
+forbids content access and mutations. Its claim proves the Codex runtime
+envelope only; `connector_access = "not-exercised"` deliberately does not claim
+Gmail or other connector authentication. The system audit reports those
+separately under `external_permissions_unverified`; runtime readiness must not
+be interpreted as approval or proof of external content access.
+
+After explicit user authorization, `scripts/routine_permission_smoke.sh` can
+exercise `gmail:read` or `readwise:create-document` through a dedicated launchd
+job and the routine's exact profile. The Gmail probe reads account metadata
+only. The Readwise probe idempotently upserts a pre-existing synthetic test
+URL containing no user content. Successful evidence expires after 30 days;
+the audit separates required, exercised, and unexercised external permissions.
+The connector result is model-reported, not an independent shell attestation.
+
+Runtime-envelope claim contract v2 also records `approval_policy = "never"`.
+This is required evidence for unattended execution; loading user configuration
+must not silently restore an interactive approval policy.
+The helper accepts only a dedicated `com.atelier.profile-smoke.*` launchd
+service, requires launchd to be its direct parent, and records that launcher.
+An interactive shell run therefore cannot create new background evidence.
+
+Cloud connector authentication is scheduler-managed, so the local audit can
+validate the requested connector set but reports its authentication as
+unverified. Local readiness is enforced before a cycle is claimed.
+
+Prepare private prompts and a manifest for ChatGPT Scheduled without enabling
+a second scheduler:
+
+```bash
+python3 scripts/routine_cloud_bundle.py \
+  --output "$OV/cache/routine-cloud-bundles/<bundle-name>" --json
+```
+
+The helper resolves the output path and refuses targets outside `$OV`, including
+the public Atelier checkout. The generated bundle is migration input, not an activation mechanism. Test the
+prompt and connectors in ChatGPT web or mobile, create the Scheduled task there, verify its
+first canonical Drive artifact, and only then disable the old cloud trigger or
+local plist. The local owner fence does not govern cloud tasks.
+
+The Scheduled management page is a ChatGPT web/mobile surface. It is not
+currently exposed by the Codex CLI or the Codex desktop app, so bundle
+generation and audit are automated locally while creation, first-run review,
+and pausing the old cloud trigger remain explicit account-UI handoff steps.
+
+The generated adapter makes the selected cloud profile's permission list an
+explicit allowlist that overrides legacy procedure text. A connected optional
+plugin is capability, not authorization: local shell steps and unlisted Gmail,
+Readwise, or other secondary-service actions are skipped and disclosed in the
+manifest's `adaptations` field.
+
 ### Coordination config
 
 Optional `[coordination]` table in `routine_watch.toml`:
 
 ```toml
 [coordination]
-backend = "dynamodb"    # "dynamodb" | "none" (default)
+backend = "owner"    # "owner" (recommended) | "dynamodb" | "none"
 ```
 
-When `backend = "none"` (or absent), `routine_lock.py` is a no-op: all lock operations return success. Single-machine setups work without AWS.
+`owner` is the recommended single-machine mode. Each machine has a random ID in gitignored `harness/routine_owner.local.toml`; the active ID and monotonic generation are stored in shared `$OV/_meta/routine_owner.toml`. A non-owner machine exits before preflight, stagger, or claim-file writes, even if its launchd plist remains loaded.
 
-Override per-session: `export ATELIER_COORDINATION=none` (or `dynamodb`).
+Claim the current machine:
+
+```bash
+uv run scripts/routine_owner.py claim
+uv run scripts/routine_owner.py status
+```
+
+Transfer later from the destination machine:
+
+```bash
+uv run scripts/routine_owner.py claim --force --source-stopped
+```
+
+Before transferring, unload the old machine's routine plists and let any active
+cycle finish. `--source-stopped` is an explicit operator assertion of that
+precondition. The command also refuses any synchronized shared claim still
+marked `running`, but Google Drive synchronization is not an atomic lock and
+cannot independently prove remote quiescence. On transfer the generation
+advances, and a starting runner records and rechecks it immediately before
+model execution. Use DynamoDB coordination when several machines must remain
+active concurrently. The shared `owner` fence cannot be downgraded with
+`ATELIER_COORDINATION=none`; ownership is a scheduler safety boundary, not an
+authorization system.
+
+When `backend = "none"` (or absent), `routine_lock.py` atomically reserves the
+cycle claim on the current machine but does not coordinate separate machines.
+Use it only for a truly machine-local vault. A failed or uncertain claim still
+requires explicit recovery before same-cycle retry. `dynamodb` is the
+active-active alternative when several machines are intentionally eligible and
+exactly one should win each cycle.
 
 ### DynamoDB table
 
@@ -140,10 +267,11 @@ Table `atelier-routine-locks`, provisioned 1 WCU / 1 RCU (always-free tier):
 |---|---|---|
 | `pk` (hash key) | String | `<routine>#<cycle_id>` |
 | `machine` | String | hostname of claiming machine |
-| `status` | String | `running` / `completed` / `failed` |
-| `ttl` | Number | Unix epoch; DynamoDB TTL auto-deletes stale locks |
+| `status` | String | `running` / `recovery-in-progress` / `retry-approved` / `completed` |
+| `lease_expires_at` | Number | Diagnostic lease horizon; does not permit automatic takeover |
+| `ttl` | Number | Added only after completion; garbage-collects the completed marker after seven days |
 
-Setup: `aws-vault exec atelier -- python3 scripts/routine_lock.py setup-table`
+Setup: `AWS_PROFILE=atelier-lock uv run scripts/routine_lock.py setup-table`
 
 ### Claim files
 
@@ -153,46 +281,122 @@ Written by `routine_runner.sh` to `$OV/_meta/routine_runs/<routine>/<cycle_id>.t
 routine = "autoevo-nightly"
 cycle_id = "2026-05-26"
 machine = "atelier-mbp"
+contract_version = 2
+profile = "local-maintenance"
+profile_fingerprint = "<sha256-of-enforced-profile>"
+runtime = "codex"
+atelier_access = "read-write"
+owner_generation = 3
 claimed_at = "2026-05-26T05:01:23-07:00"
 status = "completed"
 completed_at = "2026-05-26T05:08:45-07:00"
 duration_seconds = 445
+outcome = "delivered"
+output_file = "<declared-output-dir>/<fresh-artifact>.md"
 ```
 
 These are gitignored; they sync across machines via Drive's filesystem sync. The cue system reads them locally.
+`owner_generation` is an integer. `0` means owner fencing is not active for
+the selected coordination backend; a positive value is the synchronized owner
+generation checked before execution.
+`scripts/routine_claim.py` exposes `validate_claim()` as the shared field
+validator for claim writers, schedulers, cycle selection, and system-audit
+evidence. Its `--validate-cycle` path is the calendar-date gate used before a
+selected scheduled cycle enters preflight or the model environment.
+Writers accept only integer generations. Read paths normalize digit-only
+strings from earlier contract-v2 claims in memory; they do not rewrite the
+claim. Nonnumeric strings remain invalid.
+Claim status may also be `failed`, `completion-uncertain`, `deferred`, or the
+operator-created `retry-approved`. `deferred` is reserved for a deterministic
+preflight that produced its declared audit artifact before any model or
+mutation phase began. A later trigger may reacquire that state automatically.
+Owner-mode acquire atomically writes a minimal `running` reservation before
+returning, so concurrent invocations on the owner cannot both pass the
+same-cycle check. A failed or uncertain cycle does not become retryable merely
+because launchd fires again.
 
 ### Execution flow
 
 ```
 launchd fires at scheduled time
   -> routine_runner.sh <routine> <command>
+     -> routine_owner.py check
+        -> if another machine owns local routines: exit 0 without shared writes
+        -> if owner state is missing or malformed: fail closed
+     -> routine_audit.py resolve --check-system
+        -> fail before a cycle claim if support, permissions, CLIs, plugins, or launchd state are invalid
+     -> start caffeinate assertion for the lifetime of the runner
      -> sleep hash(hostname) % 120 (stagger)
-     -> routine_lock.py acquire (DynamoDB conditional put)
+     -> routine_lock.py acquire (atomic owner claim reservation, or DynamoDB conditional put)
         -> if held: exit 0 (skip)
-        -> if error: write failed claim and exit (unknown lock state)
+        -> if error: write a machine-specific failure diagnostic and exit
      -> write claim file (status=running)
-     -> selected headless runtime executes the registered command source
-     -> update claim file (status=completed|failed)
-     -> routine_lock.py release
+     -> recheck the owner generation immediately before execution
+     -> command-specific deterministic preflight, when declared
+        -> no-effect blocker: write attested audit, status=deferred, release
+        -> ready: continue
+     -> headless Codex executes the registered command source and returns structured JSON
+     -> routine_result.py validates a fresh nonempty artifact against routine_watch.toml
+     -> on success, routine_lock.py release must attest released=true
+     -> update claim file (status=completed|failed|completion-uncertain)
 ```
 
 ### Failure modes
 
 | Scenario | Behavior |
 |---|---|
-| Two machines race | DynamoDB atomic lock: exactly one wins. Loser skips. |
+| Non-owner machine fires | Owner gate exits 0 before runtime startup or claim-file writes. |
+| Deterministic no-effect preflight blocks | Write the declared audit artifact, release coordination, record `deferred`, and permit the next scheduled trigger to reacquire the cycle. |
+| Ownership changes during startup | The source scheduler must be stopped before transfer; the acquire-time check and generation recheck fence a transfer already synchronized locally. |
+| Two active-active machines race | With `dynamodb`, the atomic lock lets exactly one win. |
 | No machine awake | `check_local_routine_missed` cue fires at next session start |
-| Machine crashes mid-run | DynamoDB TTL (1h default) auto-expires the lock; claim file stays `status=running` |
-| AWS credentials missing | With coordination enabled, write a failed claim and exit. Set coordination to `none` explicitly for single-machine mode. |
-| DynamoDB unreachable | Write a failed claim and exit; unknown lock state fails closed. |
+| Machine sleeps after the runner starts | The runner holds `caffeinate -i -w <pid>` until cleanup. This does not wake a machine that was already asleep at schedule time. |
+| Machine crashes mid-run | The claim stays `status=running`; owner reservation or the running DynamoDB item blocks automatic retry. After six hours the missed-run cue marks it stale and points to explicit effects review and recovery. |
+| Owner record missing or malformed | Fail closed before the runtime starts. |
+| AWS credentials missing | In `dynamodb` mode, write a machine-specific failure diagnostic and exit. |
+| DynamoDB unreachable | Write a machine-specific failure diagnostic and exit; unknown lock state fails closed. |
+| Model exits successfully without a fresh declared artifact | Record `failed`, retain the cycle lock or reservation, and require explicit effects review before retry. |
+| Model succeeds but release is uncertain | Record `completion-uncertain`, exit nonzero, and leave the insert-only DynamoDB lock in place for explicit operator resolution. |
 
-### Vendor lock-in
+### Explicit cycle recovery
 
-This section presumes Anthropic Routines remains available. Routines launched in 2026 with no published SLA. If Routines becomes unavailable or substantially changes its contract, every declared routine stops firing and the user must migrate to an alternative scheduler (macOS launchd, GitHub Actions, etc.). The atelier's only commitment is the per-routine prompt contract above; the underlying cron is the user's choice.
+Before recovery, stop or confirm the original process has exited and inspect
+the routine's external effects. If those effects completed, preserve the cycle
+as completed:
 
-A second vendor risk: **routine prompts live on claude.ai, not in this repository.** A prompt edited via the routines UI is not version-controlled by atelier and Anthropic does not currently expose an export API for routine prompt history. If the claude.ai routines surface changes its storage or auth model, the prompts can become unreadable without manual re-fetch.
+```bash
+uv run scripts/routine_lock.py recover <routine> --cycle <id> \
+  --outcome completed --confirm-effects-reviewed
+```
 
-Mitigation: after each `/schedule update <routine>`, copy the current prompt text into a private archive note (e.g. `<paths.personal>/_routine_prompts/<name>.md` or equivalent under the user's structural conventions). The atelier does not run a periodic prompt-archive cue; the user maintains the cadence manually (a calendar reminder is sufficient; no harness mechanism is required).
+Only when review confirms that repeating the routine is safe, approve one
+same-cycle retry:
+
+```bash
+uv run scripts/routine_lock.py recover <routine> --cycle <id> \
+  --outcome safe-to-retry --confirm-effects-reviewed
+```
+
+Recovery updates the synchronized local claim for both coordination backends.
+`safe-to-retry` records `retry-approved`; owner acquire consumes that state by
+atomically replacing it with `running`. In DynamoDB mode the helper first
+fences the remote item as `recovery-in-progress`, updates the local claim, and
+then publishes central `retry-approved` state. Dynamo acquire atomically
+consumes that state and tells the runner it may replace a stale synchronized
+claim. An interrupted recovery therefore stays closed until the same command
+is resumed.
+
+### Scheduler and vendor risks
+
+Routine policy is scheduler-neutral, but execution is not. Local routines
+depend on macOS launchd and the Codex CLI. Cloud routines depend on the selected
+account scheduler, currently claude.ai or ChatGPT Scheduled, plus its connected
+services. An outage on one surface does not stop routines hosted on another.
+
+Cloud scheduler prompts are not version-controlled by Atelier. Keep the current
+private prompt body at `$OV/_routine_prompts/<name>.md` after each scheduler UI
+edit. The Atelier does not automate prompt-history export, scheduler creation,
+or connector reauthentication.
 
 ## How the cues fire
 
@@ -228,7 +432,7 @@ Remote cron routines 有新 output 待 review: <label1> (<filename1>); <label2> 
 When `check_routine_staleness` fires:
 
 ```
-N routine(s) with missing/stale output: <label> (<reason>). Check routine session logs on claude.ai for silent Drive-write failures or missing MCP connections.
+N routine(s) with missing/stale output: <label> (<reason>). Check the active scheduler from routine_watch.toml, then inspect its local claim/diagnostic or cloud session log.
 ```
 
 ## Privacy boundary
@@ -239,26 +443,33 @@ Atelier-side code MUST NOT:
 - Reference a domain-specific filename pattern.
 - Embed trigger IDs.
 
-The single touchpoint is `check_routine_outputs` reading `$OV/_meta/routine_watch.toml`. If you need to add a new routine, append to that file under `$OV/_meta/`, not to atelier source.
+Routine identity, output policy, and acknowledgement state have two private touchpoints: `routine_watch.toml` and `routine_acks.json` under `$OV/_meta/`. Prompt bodies live separately under `$OV/_routine_prompts/`. If you need to add a new routine, append its policy to the private watch file, not to Atelier source.
 
 ## Adding a new routine
 
-1. **Create the remote routine** via `/schedule` skill or the routines UI on claude.ai.
-   - Under "MCP connections": attach Google-Drive (required for `$OV` persistence) and any other MCPs the routine needs (e.g., Gmail for email delivery).
-   - After saving, re-open the routine and confirm `mcp_connections` is non-empty. A routine with empty MCP connections will fire on schedule but cannot write to `$OV`, and `check_routine_staleness` will eventually flag the missing output.
-2. **Routine prompt must include** a Drive-write step: `create_file` under `$OV/<your output_dir>/<filename pattern>.md` as the canonical archive. Other channels (email, draft) are optional notification.
-3. **Append to `$OV/_meta/routine_watch.toml`**:
+1. Choose `support` and the active `execution` surface. For local execution,
+   select a public local profile, archive a validated local-adapter prompt, and
+   install its launchd plist on the owner machine. For cloud execution, select
+   a cloud profile, generate a private bundle, then create and first-run-test
+   the task in the account scheduler UI.
+2. Ensure the canonical output is written under the declared `$OV` path.
+   Cloud tasks require Google Drive write access on their hosting surface;
+   local tasks write the synchronized filesystem directly.
+3. Append the private policy to `$OV/_meta/routine_watch.toml`:
    ```toml
    [[routine]]
    name = "<short-name>"
-   trigger_id = "trig_<...>"
+   support = "hybrid"
+   local_profile = "<public-local-profile>"
+   cloud_profile = "<public-cloud-profile>"
+   execution = "local"
    cron = "<expression UTC + local note>"
    output_dir = "<relative path under $OV>"
    file_pattern = "<glob>"
    label = "<human label>"
-   drive_write_enforced = true
    ```
-4. **Test the cue** locally: `uv run scripts/cues.py --verbose` should show the routine in the debug line. After first cron fire, the cue will fire on next `/hi`.
+4. Run the routine audit and test the cue locally. Never leave both the local
+   and cloud schedulers active during a migration.
 
 ## Migration: legacy email-only routines
 
@@ -274,7 +485,7 @@ The policy is "all NEW routines and all UPDATED routines"; existing routines sho
 
 When a routine is no longer wanted:
 
-1. Disable or delete the cron in claude.ai (`/schedule` or the routines UI).
+1. Disable the active scheduler: unload the local plist, or pause/delete the task in its cloud scheduler UI.
 2. Remove its `[[routine]]` block from `$OV/_meta/routine_watch.toml`. The cue stops firing.
 3. Decide what to do with the existing output files in `$OV/<output_dir>/`:
    - Keep as historical archive: no action.
@@ -291,7 +502,7 @@ The output directory itself is left in place (rmdir manually if empty and unwant
 | Cue never fires | `$OV/_meta/routine_watch.toml` missing or unparseable. Run `uv run scripts/cues.py --verbose` and look at the `routine_outputs` debug line. |
 | Cue fires for already-read files | `routine_acks.json` not updated. Update `{<output_dir>: <latest filename>}`. |
 | Cue fires for routine that doesn't exist anymore | Remove the `[[routine]]` block from `routine_watch.toml`. |
-| Routine fires but no file appears in $OV | `check_routine_staleness` cue fires after `cadence + tolerance` days. Root cause: Drive MCP `create_file` failed silently (missing MCP connection, auth expired, or target dir not creatable). Check routine session log on claude.ai. The prompt should print full content as fallback. |
+| Routine fires but no file appears in $OV | Check `execution` and `scheduler` in the private watch row. For local runs, inspect the canonical claim plus machine-specific failure diagnostics and launchd logs. For cloud runs, inspect the hosting scheduler's session log and connector state. |
 | Filename sort gives wrong "latest" | Use `YYYY-MM-DD-...` filename prefix so lexicographic sort matches chronological sort. |
 
 ## Related

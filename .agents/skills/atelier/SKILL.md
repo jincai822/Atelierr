@@ -24,6 +24,14 @@ agents, or harness portability.
 8. For external launches, `scripts/atelier_runtime.py` resolves the committed
    Codex default, the gitignored local preference, and one-process overrides.
    It sends the workflow name directly to the selected native CLI surface.
+9. For local scheduled routines, inspect ownership with
+   `uv run scripts/routine_owner.py status`; transfer all local routines to the
+   current machine only after unloading the source scheduler, using
+   `uv run scripts/routine_owner.py claim --force --source-stopped`.
+10. Keep private routine support/profile mappings under `$OV`, keep generic
+    profiles in `harness/routine_profiles.toml`, and run
+    `python3 scripts/routine_audit.py audit --check-system --json` before
+    enabling or handing off launchd jobs.
 
 ## Command Execution
 

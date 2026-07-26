@@ -69,7 +69,7 @@ Dispatch **both legs in parallel in one message: one native project-agent call a
 
 **Leg A - native project agent (`subagent_type: privacy-reviewer`):**
 
-> Privacy review the uncommitted bundle. Walk `git status --short` and `git diff HEAD --` yourself; for untracked-but-not-ignored files, `Read` them in full. Cross-reference `profile/` files (canonical config home; gitignored but on disk) to detect taxonomy mirroring and value coincidences with what's about to be committed. Apply all leak categories from your agent definition. Return verdict per the format in your spec. You are instance `A` (native leg); do not coordinate with the direct-api leg.
+> Privacy review the uncommitted bundle. Walk `git status --short` and `git diff HEAD --` yourself; for untracked-but-not-ignored files, `Read` them in full. Read `scripts/privacy_allowlist.txt` and honor its exact case-insensitive entries as deliberate public opt-outs; the opt-out covers only the literal, not separately sensitive surrounding context. Cross-reference `profile/` files (canonical config home; gitignored but on disk) to detect taxonomy mirroring and value coincidences with what's about to be committed. Apply all leak categories from your agent definition. Return verdict per the format in your spec. You are instance `A` (native leg); do not coordinate with the direct-api leg.
 
 **Leg B - direct-api side (single shell call):**
 
@@ -78,16 +78,19 @@ Resolve the direct-leg model identity from the canonical voices binding (so this
 ```bash
 DIRECT_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('privacy-reviewer',{}).get('voices',{}).get('direct',''))")
 {
-  echo 'Privacy review the uncommitted bundle. Identify semantic leaks: real names, restaurants, $-amount + deadline pairs, demographic phrases, personal taxonomies, employer slugs that the mechanical filename-stem scanner misses. You are instance B (direct-api leg); do not coordinate with the native leg. Output one of: CLEAN | NEEDS_REVISION (with SHOULD-FIX list) | BLOCKER (with leak descriptions and file:line pointers).'
+  echo 'Privacy review the uncommitted bundle. Identify semantic leaks: real names, restaurants, $-amount + deadline pairs, demographic phrases, personal taxonomies, employer slugs that the mechanical filename-stem scanner misses. Honor exact case-insensitive entries in the supplied privacy allowlist as deliberate public opt-outs; each opt-out covers only the literal, not separately sensitive surrounding context. You are instance B (direct-api leg); do not coordinate with the native leg. Output one of: CLEAN | NEEDS_REVISION (with SHOULD-FIX list) | BLOCKER (with leak descriptions and file:line pointers).'
+  echo
+  echo '--- PRIVACY ALLOWLIST ---'
+  cat scripts/privacy_allowlist.txt
   echo
   echo '--- DIFF ---'
   git diff HEAD --
   echo
   echo '--- UNTRACKED FILES ---'
-  for f in $(git ls-files --others --exclude-standard); do
+  while IFS= read -r -d '' f; do
     echo "=== $f ==="
-    cat "$f"
-  done
+    cat "./$f"
+  done < <(git ls-files --others --exclude-standard -z)
 } | uv run scripts/chat_completion.py --model "$DIRECT_MODEL" --max-tokens 0 --shadow-group "<SHADOW_UUID>" --task-type privacy-review --prompt -
 ```
 

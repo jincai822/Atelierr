@@ -132,7 +132,7 @@ Reviewer-side detection of violations: `protocols/antipatterns.md` § 8 (Scope c
 
 ## Lint enforcement
 
-Atelier-side lint runs via `uv run scripts/harness_lint.py` (registered names, path-literal templating, doc-indirection cycles, etc.) and `uv run scripts/privacy_check.py` (public-bound pathnames and content checked against private titles, wikilinks, local exact terms, and divergent staged blobs). Both fire in `/lint` and `/system-review`. Personal exact terms live only in gitignored `profile/private_terms.txt`; the committed allowlist is reserved for deliberately public vocabulary.
+Atelier-side lint runs via `uv run scripts/harness_lint.py` (registered names, path-literal templating, doc-indirection cycles, etc.) and `uv run scripts/privacy_check.py` (public-bound pathnames and content checked against private titles, wikilinks, local exact terms, and divergent staged blobs). Both fire in `/lint` and `/system-review`. Personal exact terms live only in gitignored `profile/private_terms.txt`; the committed allowlist is reserved for deliberately public literals and is honored by both mechanical and semantic privacy gates.
 
 Vault-side lint for the conventions in this doc (folder fission, image placement, image naming, ISO date strings) is currently manual. A consolidated `scripts/vault_lint.py` is deferred until two distinct conventions need automated enforcement at once; until then, the fission rule is enforced by `scripts/aggregate_freshness.py` only for self-declaring aggregates, and image / date conventions are honored by hand.
 

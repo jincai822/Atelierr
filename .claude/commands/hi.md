@@ -9,7 +9,11 @@ Your reflection system. Uses a two-step decision tree with `AskUserQuestion` on 
 
 ### Intent Routing (Claude `/hi <context>`, Codex `$hi <context>`)
 
-Routing rules live in `harness/intents.toml` (canonical). Read that file at session start to know the dispatch shape per intent: trigger phrases (`patterns`), the dispatch sub-mode (`mode`), the agents the orchestrator is expected to dispatch (`agents`), and the matching priority. Do not duplicate those fields here; when adding or changing a routing rule, edit the TOML and let this file reference it.
+Routing rules live in `harness/intents.toml` (canonical). For a contextual invocation, first look for an injected context line beginning `ATELIER_INTENT_ROUTE `. The `UserPromptSubmit` hook derives this compact JSON packet from the live registry and includes the matched row's `name`, `mode`, `agents`, `profile_reads`, `priority`, `matched_pattern`, and `parallel` fields plus `fallback` and `ambiguous` state. When `schema = 1`, `source = "harness/intents.toml"`, and the required fields are well-formed, use the packet as the normal routing input. It is a projection of the canonical registry, not a second source of truth.
+
+Read the full registry only when the packet is absent, malformed, or insufficient for a semantic or low-confidence override. The hook stays silent on an oversized projection, so absence always degrades safely to the canonical file. An ambiguous packet includes `tied_candidates`; clarify among those rows without rereading the registry unless another plausible intent is needed. A shape-based route such as a date-prefixed factual narrative remains orchestrator judgment and may override the deterministic packet. With no `<context>`, do not load the registry for the Step 1 menu; load a selected row only if the later action needs its dispatch fields.
+
+When falling back to the full file, read its trigger phrases (`patterns`), dispatch sub-mode (`mode`), expected agents (`agents`), profile reads, parallel flag, and matching priority. Do not duplicate those fields here; when adding or changing a routing rule, edit the TOML and let this file reference it.
 
 Each intent's `mode` field maps to a procedure: see the "Sub-mode procedures" table below for the canonical mapping (inline section names + paths to external command files). Detect the intent from `<context>`, skip the Step 1 menu, and route directly into the matching sub-mode. If no `<context>` is given, fall through to the Session-Start Cue Check, then the Step 1 menu.
 
@@ -17,13 +21,13 @@ Each intent's `mode` field maps to a procedure: see the "Sub-mode procedures" ta
 
 Before any agent dispatch under `/hi`, surface a one-line acknowledgment of the routing decision so the user can see the matched intent and the dispatch chain. This is in-band observability: the orchestrator never opts in or out, the user never has to ask. Drift becomes visible because the user reads the announcement on every turn.
 
-Format: `Routing as intents.<name> → <comma-separated agent list>` (use the `agents` list from the matched row in `harness/intents.toml`).
+Format: `Routing as intents.<name> → <comma-separated agent list>` (use the `agents` list from the injected route packet, or from the matched row in `harness/intents.toml` on the fallback path).
 
 Fallback case. The `intents.reflection` row (priority 0, empty `patterns`) is the catch-all. When it matches because nothing more specific did, mark that explicitly so a "deliberate reflection" (the user said "let's reflect") and a "nothing matched, falling back to reflection" look different to the user:
 
 `No specific intent matched; routing as default reflection → <agents from intents.reflection>`
 
-(Read the agent list from `intents.reflection.agents` — never hardcode it here, or this file drifts from the canonical TOML.)
+(Read the agent list from the route packet or `intents.reflection.agents`; never hardcode it here.)
 
 When the user explicitly invoked the reflection mode (e.g., chose Reflect from the Step 1 menu, or said "let's reflect"), use the standard form (`Routing as intents.reflection → ...`) instead. The fallback marker is only for the implicit-match case.
 
@@ -42,13 +46,14 @@ Substring matching can produce **low-confidence wins** that the user did not int
 
 The bar: **never silently route to a sub-mode that opens a file, calls an external API, or starts a multi-agent chain when the user's input could have meant something materially different.** Capture (single Scribe write), Read (Reader+Researcher), Decision (Researcher+Thinker), and the big chains (Sync, Weekly, Review, Promote) all qualify. Reflection-as-default does NOT qualify; it's the safe degradation.
 
-The Codex `$hi` skill reads this specification plus `harness/intents.toml` and
-applies the same routing and confidence rules directly. It uses the active
-surface's native choice UI when available, otherwise a numbered prompt.
+The Codex `$hi` skill reads this specification and consumes the same injected
+route packet. It reads `harness/intents.toml` only on the fallback paths above
+and applies the same confidence rules directly. It uses the active surface's
+native choice UI when available, otherwise a numbered prompt.
 
 ### Miss Logging
 
-Dual-path. The mechanically-derivable branches are captured out-of-band by a `UserPromptSubmit` hook (`scripts/intent_coverage.py intent-hook`, registered in `.claude/settings.json` and `.codex/hooks.json`); the orchestrator covers only the LLM-judgment branch in-band.
+Dual-path. The `UserPromptSubmit` hook (`scripts/intent_coverage.py intent-hook`, registered in `.claude/settings.json` and `.codex/hooks.json`) supplies the compact route packet on every contextual `hi` or `reflect` invocation. It also captures mechanically derivable miss branches out of band; the orchestrator covers only the LLM-judgment branch in band.
 
 - **Fallback** (no patterns matched) — **HOOK-LOGGED**. The hook runs the same matcher at prompt-submit time. Do NOT call `intent-log` from the orchestrator.
 - **Ambiguous** (2+ non-fallback intents tied at top priority) — **HOOK-LOGGED**. Same hook path; ambiguity candidates captured deterministically.
@@ -73,13 +78,13 @@ Bash: uv run scripts/intent_coverage.py intent-log \
 
 The script is best-effort and always returns exit code 0 — malformed args and filesystem errors each degrade silently. The orchestrator can dispatch the Bash call without `|| true` or other exit-code guards.
 
-Codex parity: `.codex/hooks.json` runs `intent-hook --runtime codex` for explicit `$hi` and `$reflect` prompts. Fallback and ambiguous misses are therefore hook-logged on both runtimes. Codex only runs the in-band `intent-log --runtime codex` call for the low-confidence LLM-judgment branch.
+Codex parity: `.codex/hooks.json` runs `intent-hook --runtime codex` for explicit `$hi` and `$reflect` prompts. Both runtimes receive the same route schema, and fallback and ambiguous misses are hook-logged on both. Codex only runs the in-band `intent-log --runtime codex` call for the low-confidence LLM-judgment branch.
 
 The log file lands at `$OV/_meta/intent_misses/YYYY-MM-DD.jsonl` (one line per miss, regardless of producer). Hook-produced rows carry `"logged_by": "user_prompt_submit_hook"` for attribution; orchestrator-produced rows omit that field. Batch review: `uv run scripts/intent_coverage.py intent-misses [--since YYYY-MM-DD] [--match-kind <kind>]`. Recurrence threshold = `INTENT_MISS_DISTINCT_DAYS_THRESHOLD` (currently 3) distinct file-dates. Full workflow + dual-path producer contract: `protocols/intent-coverage.md`.
 
 ### Parallel-dispatch guarantee
 
-When `harness/intents.toml` declares `parallel = true` for a matched intent, the orchestrator MUST dispatch the listed agents in a **single message containing multiple tool calls** (Claude Code) or **a single native project-agent batch** from `.codex/agents/` (Codex). Sequential dispatch (one agent per turn) for a parallel-marked intent is a latency regression and a contract violation.
+When the injected route packet, or `harness/intents.toml` on the fallback path, declares `parallel = true` for a matched intent, the orchestrator MUST dispatch the listed agents in a **single message containing multiple tool calls** (Claude Code) or **a single native project-agent batch** from `.codex/agents/` (Codex). Sequential dispatch (one agent per turn) for a parallel-marked intent is a latency regression and a contract violation.
 
 This applies to:
 - `intents.reading` (Reader + Researcher)
@@ -106,7 +111,7 @@ Once an intent matches, the orchestrator's next step is to read and follow the p
 | `transcript-read` | `.claude/commands/read.md` (Reader auto-preprocesses transcripts) |
 | `meeting-process` | inline: "If Act" / "Process Meeting" section below |
 | `daily-reflection` | `.claude/commands/daily-reflection.md` |
-| `decay-scan` | dispatch the Forgetter agent (`.claude/agents/forgetter.md`) with the user-specified `scope_path`; default scope is `<paths.wip>/`. Forgetter returns findings inline via the `---begin-result---` / `---end-result---` envelope; the orchestrator persists them to `<paths.agent_findings>/decay-<RUN_TS>-<scope-slug>.md`. |
+| `decay-scan` | dispatch the Forgetter agent (`.claude/agents/forgetter.md`) with the user-specified `scope_path`; default scope is `<paths.wip>/`. Forgetter returns findings inline via the `---forgetter-result---` / `---end-result---` envelope; the orchestrator persists them to `<paths.agent_findings>/decay-<RUN_TS>-<scope-slug>.md`. |
 | `weekly-review` | `.claude/commands/weekly.md` |
 | `goal-review` | `.claude/commands/review.md` |
 | `decision-journal` | `.claude/commands/decision.md` |

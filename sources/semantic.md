@@ -10,6 +10,14 @@ Teaching doc for the `semantic.py` CLI. Agents and command files call this scrip
 
 **Real mode** (embedding-backed): active when `~/.cache/atelier/lance/` exists (sentinel). Current stack: dense embedder (BGE-M3 default, Qwen3-Embedding-0.6B / 4B / 8B opt-in via `SEMANTIC_EMBEDDER`) + LanceDB (embedded columnar store, cosine distance) + BM25 sparse retrieval fused via Reciprocal Rank Fusion + optional BGE-reranker-v2-m3 cross-encoder rerank. Documents are chunked at markdown heading boundaries (~2K chars per chunk). Index is machine-local per embedder (`~/.cache/atelier/lance/`, `~/.cache/atelier/lance-qwen3-0.6b/`, ...); rebuild with `uv run scripts/semantic.py index` (~10 min on MPS for 5K-file vault with BGE-M3 / Qwen3-0.6B, ~60 min for Qwen3-4B). No caller code changes across the swap.
 
+Model loading is cache-first. When the Hugging Face cache contains a snapshot
+with both the model config and Sentence Transformers modules manifest, the
+backend passes that local snapshot directory directly to Sentence Transformers
+with `local_files_only=True`. This avoids remote metadata and background model
+conversion requests. An uncached model may still download during interactive
+setup. `HF_HUB_OFFLINE=1` or `TRANSFORMERS_OFFLINE=1` forces local-only loading
+even when no complete snapshot can be resolved.
+
 ## CLI
 
 ```

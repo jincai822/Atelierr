@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Deterministic intent matching and coverage logging for Atelier hooks.
+"""Deterministic intent matching, routing projection, and coverage logging.
 
-Interactive workflows do not use this script. Claude invokes command specs
-with ``/command`` and Codex invokes repo skills with ``$command``.
+Claude invokes command specs with ``/command`` and Codex invokes repo skills
+with ``$command``. Their shared ``UserPromptSubmit`` hook projects the matched
+``harness/intents.toml`` row into compact context for the live ``hi`` flow.
 """
 
 from __future__ import annotations
@@ -27,7 +28,9 @@ INTENT_MISS_KINDS = ("fallback", "ambiguous", "low_confidence")
 INTENT_MISS_RUNTIMES = ("claude-code", "codex")
 INTENT_MISS_DISTINCT_DAYS_THRESHOLD = 3
 INTENT_MISS_KINDS_COL_WIDTH = len(",".join(sorted(INTENT_MISS_KINDS)))
-
+INTENT_ROUTE_SCHEMA_VERSION = 1
+INTENT_ROUTE_CONTEXT_PREFIX = "ATELIER_INTENT_ROUTE "
+INTENT_ROUTE_MAX_CONTEXT_BYTES = 1024
 
 
 def load_intents() -> dict[str, dict[str, Any]]:
@@ -37,7 +40,9 @@ def load_intents() -> dict[str, dict[str, Any]]:
     return intents
 
 
-def match_intents(text: str, intents: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def match_intents(
+    text: str, intents: dict[str, dict[str, Any]]
+) -> list[dict[str, Any]]:
     """Match user text against intents.toml patterns.
 
     Substring match, case-insensitive. Returns matched intents sorted by
@@ -68,7 +73,9 @@ def match_intents(text: str, intents: dict[str, dict[str, Any]]) -> list[dict[st
             continue
         if not isinstance(patterns, list):
             continue
-        hit = next((p for p in patterns if isinstance(p, str) and p.lower() in text_lc), None)
+        hit = next(
+            (p for p in patterns if isinstance(p, str) and p.lower() in text_lc), None
+        )
         if hit:
             entry["matched_pattern"] = hit
             matched.append(entry)
@@ -77,6 +84,69 @@ def match_intents(text: str, intents: dict[str, dict[str, Any]]) -> list[dict[st
         fallback["matched_pattern"] = "<fallback: no patterns matched>"
         matched.append(fallback)
     return matched
+
+
+def build_intent_route_projection(
+    matches: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Project matcher output into the fields needed by the live ``hi`` flow.
+
+    The projection contains registry data only. It never includes the raw user
+    input, session metadata, or filesystem paths. Ambiguous top-priority rows
+    are preserved so the orchestrator can clarify instead of trusting the
+    stable-sort winner.
+    """
+    if not matches:
+        return None
+
+    def route_fields(match: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "name": str(match.get("name", "")),
+            "mode": str(match.get("mode", "")),
+            "agents": list(match.get("agents") or []),
+            "profile_reads": list(match.get("profile_reads") or []),
+            "priority": int(match.get("priority", 0)),
+            "matched_pattern": str(match.get("matched_pattern", "")),
+            "parallel": bool(match.get("parallel", False)),
+        }
+
+    first = matches[0]
+    top_priority = int(first.get("priority", 0))
+    is_fallback = str(first.get("matched_pattern", "")).startswith("<fallback")
+    top_matches = [
+        match
+        for match in matches
+        if int(match.get("priority", 0)) == top_priority
+        and not str(match.get("matched_pattern", "")).startswith("<fallback")
+    ]
+    projection: dict[str, Any] = {
+        "schema": INTENT_ROUTE_SCHEMA_VERSION,
+        "source": "harness/intents.toml",
+        **route_fields(first),
+        "fallback": is_fallback,
+        "ambiguous": len(top_matches) > 1,
+    }
+    if projection["ambiguous"]:
+        projection["tied_candidates"] = [route_fields(match) for match in top_matches]
+    return projection
+
+
+def _emit_intent_route_projection(projection: dict[str, Any]) -> None:
+    """Inject one bounded route packet through the shared hook protocol."""
+    context = INTENT_ROUTE_CONTEXT_PREFIX + json.dumps(
+        projection,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    if len(context.encode("utf-8")) > INTENT_ROUTE_MAX_CONTEXT_BYTES:
+        return
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": context,
+        }
+    }
+    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 
 
 def load_table(path: Path, table: str) -> dict[str, Any]:
@@ -89,7 +159,6 @@ def load_table(path: Path, table: str) -> dict[str, Any]:
     return value
 
 
-
 def cmd_intent(args: argparse.Namespace) -> int:
     """Match user text against the shared intent router for diagnostics.
 
@@ -100,13 +169,20 @@ def cmd_intent(args: argparse.Namespace) -> int:
     """
     text = " ".join(args.text).strip()
     if not text:
-        raise SystemExit("atelier: intent requires a text argument. Example: intent 'review my goals'")
+        raise SystemExit(
+            "atelier: intent requires a text argument. Example: intent 'review my goals'"
+        )
     intents = load_intents()
     matches = match_intents(text, intents)
 
     if not matches:
         # Shouldn't happen since fallback is included on empty, but defend.
-        payload: dict[str, Any] = {"input": text, "matched": [], "ambiguous": False, "fallback": True}
+        payload: dict[str, Any] = {
+            "input": text,
+            "matched": [],
+            "ambiguous": False,
+            "fallback": True,
+        }
         if args.json:
             print(json.dumps(payload, indent=2))
         else:
@@ -115,7 +191,12 @@ def cmd_intent(args: argparse.Namespace) -> int:
 
     is_fallback = matches[0].get("matched_pattern", "").startswith("<fallback")
     top_priority = int(matches[0]["priority"])
-    top_matches = [m for m in matches if int(m["priority"]) == top_priority and not m.get("matched_pattern", "").startswith("<fallback")]
+    top_matches = [
+        m
+        for m in matches
+        if int(m["priority"]) == top_priority
+        and not m.get("matched_pattern", "").startswith("<fallback")
+    ]
     ambiguous = len(top_matches) > 1
 
     payload = {
@@ -147,7 +228,9 @@ def cmd_intent(args: argparse.Namespace) -> int:
         return 0
 
     print(f"input:    {text}")
-    print(f"winner:   intents.{payload['winner']}  (priority {top_priority}, mode {payload['mode']})")
+    print(
+        f"winner:   intents.{payload['winner']}  (priority {top_priority}, mode {payload['mode']})"
+    )
     if payload["matched_pattern"]:
         print(f"matched:  {payload['matched_pattern']}")
     if payload["agents"]:
@@ -164,9 +247,13 @@ def cmd_intent(args: argparse.Namespace) -> int:
         print("      consider asking the user for confirmation before dispatching.")
     if ambiguous:
         print()
-        print(f"AMBIGUOUS: {len(top_matches)} intents at priority {top_priority} match this input:")
+        print(
+            f"AMBIGUOUS: {len(top_matches)} intents at priority {top_priority} match this input:"
+        )
         for m in top_matches:
-            print(f"  - intents.{m['name']}  (pattern: {m.get('matched_pattern', '')}, mode: {m['mode']})")
+            print(
+                f"  - intents.{m['name']}  (pattern: {m.get('matched_pattern', '')}, mode: {m['mode']})"
+            )
         print("ask the user which intent they meant before dispatching.")
     return 0
 
@@ -254,7 +341,9 @@ def cmd_intent_log(args: argparse.Namespace) -> int:
 
     path = write_intent_miss(payload)
     if path is None:
-        sys.stderr.write("atelier: intent-log write failed; skipped (best-effort, never blocks hi)\n")
+        sys.stderr.write(
+            "atelier: intent-log write failed; skipped (best-effort, never blocks hi)\n"
+        )
         return 0
     if not args.quiet:
         print(f"intent-log: {path}")
@@ -282,12 +371,12 @@ def _intent_text_from_hook_prompt(prompt: str, runtime: str) -> str | None:
 
 
 def cmd_intent_hook(args: argparse.Namespace) -> int:
-    """`UserPromptSubmit` hook entry: out-of-band intent-miss capture.
+    """`UserPromptSubmit` hook entry: route projection plus miss capture.
 
     Reads the hook's stdin JSON (`prompt`, `session_id`, `transcript_path`,
-    etc), detects the runtime's native Atelier entry shape, and auto-logs
-    mechanically identifiable fallback or ambiguous branches. Silent on
-    success so hook output never feeds back into the orchestrator's context.
+    etc), detects the runtime's native Atelier entry shape, and injects a
+    bounded projection of the deterministic registry match. It also auto-logs
+    mechanically identifiable fallback or ambiguous branches.
 
     Cases the hook CANNOT classify (intentional carve-out — the orchestrator
     retains the in-band `intent-log` path for these):
@@ -296,8 +385,9 @@ def cmd_intent_hook(args: argparse.Namespace) -> int:
       - Post-clarification enrichment (`clarified_to`, `final_dispatch`):
         only known after `AskUserQuestion` resolves.
 
-    Best-effort throughout: every failure path returns 0 silently. A broken
-    hook must never block a live command invocation.
+    Best-effort throughout: every failure path returns 0. Oversize route
+    projections stay silent so the command can fall back to reading the full
+    registry. A broken hook must never block a live command invocation.
     """
     try:
         data = json.loads(sys.stdin.read())
@@ -316,40 +406,44 @@ def cmd_intent_hook(args: argparse.Namespace) -> int:
         return 0
     if not matches:
         return 0
+    projection = build_intent_route_projection(matches)
+    if projection is None:
+        return 0
     is_fallback = matches[0].get("matched_pattern", "").startswith("<fallback")
     top_priority = int(matches[0]["priority"])
     top_matches = [
-        m for m in matches
+        m
+        for m in matches
         if int(m["priority"]) == top_priority
         and not m.get("matched_pattern", "").startswith("<fallback")
     ]
     is_ambiguous = len(top_matches) > 1
-    if not (is_fallback or is_ambiguous):
-        return 0
-    payload: dict[str, Any] = {
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "runtime": args.runtime,
-        "raw_input": user_text,
-        "match_kind": "fallback" if is_fallback else "ambiguous",
-        "initial_match": {
-            "name": matches[0]["name"],
-            "priority": top_priority,
-            "matched_pattern": matches[0].get("matched_pattern", ""),
-        },
-        "logged_by": "user_prompt_submit_hook",
-    }
-    if is_ambiguous:
-        payload["ambiguity_candidates"] = [
-            {
-                "name": m["name"],
-                "priority": int(m["priority"]),
-                "matched_pattern": m.get("matched_pattern", ""),
-            }
-            for m in top_matches
-        ]
-    if data.get("session_id"):
-        payload["session_id"] = str(data["session_id"])
-    write_intent_miss(payload)
+    if is_fallback or is_ambiguous:
+        payload: dict[str, Any] = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "runtime": args.runtime,
+            "raw_input": user_text,
+            "match_kind": "fallback" if is_fallback else "ambiguous",
+            "initial_match": {
+                "name": matches[0]["name"],
+                "priority": top_priority,
+                "matched_pattern": matches[0].get("matched_pattern", ""),
+            },
+            "logged_by": "user_prompt_submit_hook",
+        }
+        if is_ambiguous:
+            payload["ambiguity_candidates"] = [
+                {
+                    "name": m["name"],
+                    "priority": int(m["priority"]),
+                    "matched_pattern": m.get("matched_pattern", ""),
+                }
+                for m in top_matches
+            ]
+        if data.get("session_id"):
+            payload["session_id"] = str(data["session_id"])
+        write_intent_miss(payload)
+    _emit_intent_route_projection(projection)
     return 0
 
 
@@ -383,7 +477,11 @@ def cmd_intent_misses(args: argparse.Namespace) -> int:
     miss_dir = resolve_intent_miss_dir()
     if not miss_dir.is_dir():
         if args.json:
-            print(json.dumps({"events": [], "since": args.since, "miss_dir": str(miss_dir)}))
+            print(
+                json.dumps(
+                    {"events": [], "since": args.since, "miss_dir": str(miss_dir)}
+                )
+            )
         else:
             print(f"intent-misses: no log directory at {miss_dir}")
             print("Nothing logged yet. Directory is created on first miss.")
@@ -432,7 +530,13 @@ def cmd_intent_misses(args: argparse.Namespace) -> int:
             continue
         entry = phrase_stats.setdefault(
             phrase,
-            {"count": 0, "first_seen": None, "last_seen": None, "kinds": set(), "days": set()},
+            {
+                "count": 0,
+                "first_seen": None,
+                "last_seen": None,
+                "kinds": set(),
+                "days": set(),
+            },
         )
         entry["count"] += 1
         entry["kinds"].add(kind)
@@ -469,7 +573,10 @@ def cmd_intent_misses(args: argparse.Namespace) -> int:
         return 0
 
     print(f"Intent miss log: {miss_dir}")
-    print(f"Total events: {len(events)}" + (f"  (since {args.since})" if args.since else ""))
+    print(
+        f"Total events: {len(events)}"
+        + (f"  (since {args.since})" if args.since else "")
+    )
     print()
     print("By match kind:")
     if not kind_counts:
@@ -480,9 +587,13 @@ def cmd_intent_misses(args: argparse.Namespace) -> int:
     if not phrase_stats:
         print("No phrases logged.")
         return 0
-    sorted_phrases = sorted(phrase_stats.items(), key=lambda kv: (-kv[1]["count"], kv[0]))
+    sorted_phrases = sorted(
+        phrase_stats.items(), key=lambda kv: (-kv[1]["count"], kv[0])
+    )
     if empty_phrase_count:
-        print(f"({empty_phrase_count} event(s) had empty raw_input — counted in by-kind totals, omitted from the phrase table below.)")
+        print(
+            f"({empty_phrase_count} event(s) had empty raw_input — counted in by-kind totals, omitted from the phrase table below.)"
+        )
     print(f"Top phrases (showing up to {args.top}):")
     col_w = INTENT_MISS_KINDS_COL_WIDTH
     print(f"  count  days  {'kinds'.ljust(col_w)}  phrase")
@@ -492,7 +603,8 @@ def cmd_intent_misses(args: argparse.Namespace) -> int:
         count_str = f"{pc['count']:>5}"
         print(f"  {count_str}  {days_str}  {kinds_str}  {phrase}")
     repeaters = [
-        (phrase, pc) for phrase, pc in sorted_phrases
+        (phrase, pc)
+        for phrase, pc in sorted_phrases
         if len(pc["days"]) >= INTENT_MISS_DISTINCT_DAYS_THRESHOLD
     ]
     if repeaters:
@@ -503,7 +615,6 @@ def cmd_intent_misses(args: argparse.Namespace) -> int:
         )
         print("Consider adding a trigger to harness/intents.toml for these.")
     return 0
-
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -537,7 +648,9 @@ def build_parser() -> argparse.ArgumentParser:
             "does not use this utility."
         ),
     )
-    intent.add_argument("text", nargs="+", help="User text to match against intent patterns.")
+    intent.add_argument(
+        "text", nargs="+", help="User text to match against intent patterns."
+    )
     intent.add_argument("--json", action="store_true", help="Emit JSON.")
     intent.set_defaults(func=cmd_intent)
 
@@ -558,28 +671,57 @@ def build_parser() -> argparse.ArgumentParser:
         help="Raw text following Claude /hi or Codex $hi.",
     )
     intent_log.add_argument(
-        "--match-kind", required=True, choices=INTENT_MISS_KINDS,
+        "--match-kind",
+        required=True,
+        choices=INTENT_MISS_KINDS,
         help="Why this counted as a miss.",
     )
     intent_log.add_argument(
-        "--runtime", required=True, choices=INTENT_MISS_RUNTIMES,
+        "--runtime",
+        required=True,
+        choices=INTENT_MISS_RUNTIMES,
         help="Which orchestrator runtime logged the miss.",
     )
-    intent_log.add_argument("--initial-name", default=None, help="Name of the initial matched intent (e.g., 'reflection' for fallback).")
-    intent_log.add_argument("--initial-priority", default=None, help="Priority of the initial match.")
-    intent_log.add_argument("--initial-pattern", default=None, help="Pattern that matched (or '<fallback>' for the fallback case).")
     intent_log.add_argument(
-        "--candidates", default=None,
+        "--initial-name",
+        default=None,
+        help="Name of the initial matched intent (e.g., 'reflection' for fallback).",
+    )
+    intent_log.add_argument(
+        "--initial-priority", default=None, help="Priority of the initial match."
+    )
+    intent_log.add_argument(
+        "--initial-pattern",
+        default=None,
+        help="Pattern that matched (or '<fallback>' for the fallback case).",
+    )
+    intent_log.add_argument(
+        "--candidates",
+        default=None,
         help=(
             "For ambiguous: JSON array of {name, priority, matched_pattern}. "
             "Key name matches `intent --json` output verbatim — pass the matcher's "
             "objects straight through without renaming."
         ),
     )
-    intent_log.add_argument("--clarified-to", default=None, help="Intent name the user picked from the clarification menu.")
-    intent_log.add_argument("--final-dispatch", default=None, help="What was actually dispatched (intent name, or free-text label like 'engineering-task').")
-    intent_log.add_argument("--notes", default=None, help="Free-text orchestrator note about why this was a miss.")
-    intent_log.add_argument("--quiet", action="store_true", help="Don't print the appended path on success.")
+    intent_log.add_argument(
+        "--clarified-to",
+        default=None,
+        help="Intent name the user picked from the clarification menu.",
+    )
+    intent_log.add_argument(
+        "--final-dispatch",
+        default=None,
+        help="What was actually dispatched (intent name, or free-text label like 'engineering-task').",
+    )
+    intent_log.add_argument(
+        "--notes",
+        default=None,
+        help="Free-text orchestrator note about why this was a miss.",
+    )
+    intent_log.add_argument(
+        "--quiet", action="store_true", help="Don't print the appended path on success."
+    )
     intent_log.set_defaults(func=cmd_intent_log)
 
     intent_misses = sub.add_parser(
@@ -601,28 +743,38 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     intent_misses.add_argument(
-        "--match-kind", choices=INTENT_MISS_KINDS,
+        "--match-kind",
+        choices=INTENT_MISS_KINDS,
         help="Filter to one match_kind (vocabulary matches intent-log --match-kind).",
     )
-    intent_misses.add_argument("--runtime", choices=INTENT_MISS_RUNTIMES, help="Filter to one runtime.")
-    intent_misses.add_argument("--top", type=int, default=20, help="Top-N distinct phrases to display (default 20).")
+    intent_misses.add_argument(
+        "--runtime", choices=INTENT_MISS_RUNTIMES, help="Filter to one runtime."
+    )
+    intent_misses.add_argument(
+        "--top",
+        type=int,
+        default=20,
+        help="Top-N distinct phrases to display (default 20).",
+    )
     intent_misses.add_argument("--json", action="store_true", help="Emit JSON.")
     intent_misses.set_defaults(func=cmd_intent_misses)
 
     intent_hook = sub.add_parser(
         "intent-hook",
-        help="UserPromptSubmit hook entry — out-of-band intent-miss capture (silent).",
+        help="UserPromptSubmit hook entry: compact route projection plus miss capture.",
         description=(
             "Wire as a Claude Code or Codex UserPromptSubmit hook command. Reads the "
             "hook's stdin JSON, detects the runtime's hi/reflect entry shape, runs the deterministic "
-            "matcher, and auto-logs fallback/ambiguous to "
-            "$OV/_meta/intent_misses/YYYY-MM-DD.jsonl. Silent on success — no "
-            "stdout — so the orchestrator's context stays clean. "
+            "matcher, injects a bounded registry projection for the live command, "
+            "and auto-logs fallback/ambiguous to "
+            "$OV/_meta/intent_misses/YYYY-MM-DD.jsonl. "
             "Best-effort: every failure returns 0."
         ),
     )
     intent_hook.add_argument(
-        "--runtime", required=True, choices=INTENT_MISS_RUNTIMES,
+        "--runtime",
+        required=True,
+        choices=INTENT_MISS_RUNTIMES,
         help="Which orchestrator runtime is firing this hook.",
     )
     intent_hook.set_defaults(func=cmd_intent_hook)

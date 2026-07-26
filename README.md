@@ -76,6 +76,74 @@ source ~/.zshrc
 
 All personal content under `$OV/` is gitignored. Only system configuration (protocols, agents, commands, scripts) is committed.
 
+### Permissions, plugins, and feature coverage
+
+Atelier's canonical write path is local:
+
+```text
+Codex -> local files under $OV -> Google Drive or another filesystem sync client
+```
+
+A Google Drive connector does not grant Codex permission to write local files.
+When `$OV/` is outside the repository workspace, add it as a writable root while
+keeping Codex in `workspace-write` mode:
+
+```bash
+codex -C . \
+  --add-dir "$OV" \
+  --sandbox workspace-write \
+  --ask-for-approval on-request \
+  '$hi'
+```
+
+This makes local writes technically possible; it does not bypass Atelier's
+domain rules. Ordinary writes under `$OV/` still require user approval, and
+daily notes remain user-authored except for verbatim Scribe capture.
+
+For a separate personal Codex home, the maintainer uses this optional alias:
+
+```bash
+alias mycodex='CODEX_HOME="$HOME/.codex-personal" codex --add-dir "$OV"'
+```
+
+| Capability or permission | Required? | What it enables |
+|---|---|---|
+| Read access to the repository and `$OV/` | Yes | Local notes, profiles, semantic search, dashboards, and command specifications |
+| Write access to `$OV/` via `--add-dir "$OV"` | For write-capable workflows | Reflections, cache files, wiki promotion, approved captures, and local routine output |
+| Local shell commands | Yes | `uv`, `rg`, `git`, `jq`, lint, trust scoring, and deterministic project scripts |
+| Project trust and reviewed hooks | Recommended | Session cues, intent coverage, and cleanup through `.codex/hooks.json` |
+| Live web search | Optional | External research for Scout, Reader, Scholar, Librarian, and Thinker; enable with `--search` |
+| Outbound shell network | Optional | Readwise CLI and API-backed scripts; this is separate from live web search and may require approval |
+
+The local-first Atelier has no required Codex plugin. Plugins add access to
+cloud data that is not already represented by local files:
+
+| Integration | Core requirement | Authorization | Supported Atelier use |
+|---|---|---|---|
+| Gmail plugin | Optional | Install and enable the plugin, then complete Google OAuth | Search or read mail for user-requested Codex context; scheduled routines need Gmail attached on their hosting surface |
+| Google Drive plugin | Optional locally; a Drive connector is required on whichever runtime hosts a Drive-writing routine | Install and enable the plugin, then complete Google OAuth | Search or operate on cloud-only Drive files; remote persistence uses the hosting runtime's Drive connection |
+| Readwise CLI | Used by reading and curation flows; no Codex plugin required | `readwise login` or token authentication | Search Reader, fetch saved documents and transcripts, curate the inbox, and snapshot external anchors |
+| GitHub plugin | Optional | Connector authentication | Remote issues, pull requests, and repository context; local `git` works without it |
+| Google Calendar plugin | Optional | Google OAuth | Calendar-aware workflows added by a fork; no current core command depends on it |
+
+Plugin readiness has four separate gates: installed, enabled, connector OAuth
+completed, and tools loaded in a new Codex session. Tool actions then remain
+subject to connector permissions and Codex approvals. Claude Code and
+Claude.ai routines manage their own MCP connections, so authorizing a service
+there does not configure the Codex plugin. Conversely, a Codex connection does
+not repair a Claude.ai routine with a missing MCP connection.
+
+Unattended local routines use a stricter Codex-only envelope. Ordinary routine
+profiles make `$OV` writable while keeping this repository read-only;
+maintenance is the only profile allowed to write both. Each profile also binds
+an exact bot command, records a fingerprint in its evidence, and runs with a
+sanitized environment plus non-interactive approvals. Interactive Claude Code
+support is unchanged and does not control the launchd runtime.
+
+References: [Codex plugins](https://learn.chatgpt.com/docs/plugins.md),
+[sandbox and approvals](https://learn.chatgpt.com/docs/agent-approvals-security.md),
+and [MCP configuration](https://learn.chatgpt.com/docs/extend/mcp).
+
 ### First run
 
 Atelier ships with Codex as its selected runtime. The selector is optional; it
@@ -87,22 +155,23 @@ python3 scripts/atelier_runtime.py run hi
 python3 scripts/atelier_runtime.py run --non-interactive lint
 ```
 
-To make Claude Code the persistent local default, including for launchd:
+To make Claude Code the persistent interactive launcher default:
 
 ```bash
 python3 scripts/atelier_runtime.py use claude
 python3 scripts/atelier_runtime.py run hi
 ```
 
-`ATELIER_RUNTIME=codex|claude` overrides one process. Direct native invocation
-always remains available.
+`ATELIER_RUNTIME=codex|claude` overrides one interactive launcher process.
+Direct native invocation always remains available; unattended launchd routines
+remain Codex-only.
 
 Codex:
 
 ```bash
-codex -C . '$hi'                     # fresh Codex TUI on the hi workflow
-codex exec -C . '$lint'              # one-shot, no TUI
-codex resume --last '$promote'        # continue most recent session
+codex -C . --add-dir "$OV" '$hi'              # fresh Codex TUI with vault write access
+codex --add-dir "$OV" exec -C . '$lint'       # one-shot, no TUI
+codex --add-dir "$OV" resume --last '$promote' # continue most recent session
 ```
 
 Claude Code:
@@ -201,7 +270,7 @@ Capture sources                  Local data layer ($OV/)
 
 **Session output.** The orchestrator dispatches agents, gathers findings, runs a quality gate, and writes session output to `$OV/reflections/`. Daily notes are user-authored — the system reads them; the sole write path is the Scribe agent recording user-dictated content verbatim. All personal data under `$OV/` is gitignored; only system configuration is committed.
 
-**Harness engineering.** `CLAUDE.md` is kept under 8KB because it is inherited by every Claude subagent; each line costs N tokens times N agents per session. `AGENTS.md` and `.agents/skills/` give Codex the root contract and native `$command` surface. `harness/models.toml`, `harness/capabilities.toml`, `harness/commands.toml`, `harness/agents.toml`, and `protocols/runtime-adapters.md` keep provider and runtime assumptions explicit. Critical rules live at the top (primacy effect); detailed specifications load on demand from protocols and agent definitions. The Master of the Atelier (Evolver) has a "subtract before adding" principle and a root-instruction budget gate. `/lint` Phase 0 checks harness health alongside the wiki structural pass.
+**Harness engineering.** `CLAUDE.md` stays a bounded routing map because every unconditional line consumes recurring context. `AGENTS.md` and `.agents/skills/` give Codex the root contract and native `$command` surface. `harness/models.toml`, `harness/capabilities.toml`, `harness/commands.toml`, `harness/agents.toml`, and `protocols/runtime-adapters.md` keep provider and runtime assumptions explicit. Critical rules live at the top; detailed specifications load on demand from protocols and agent definitions. The Master of the Atelier (Evolver) has a "subtract before adding" principle and a root-instruction budget gate. `/lint` Phase 0 checks harness health alongside the wiki structural pass.
 
 Key design choices:
 

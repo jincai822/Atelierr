@@ -1,6 +1,6 @@
 name = "librarian"
 description = "Recommends readings, resources, and thinkers relevant to the painter's interests and goals. Le cercle archetype: The Cataloguer."
-model_reasoning_effort = "medium"
+model_reasoning_effort = "xhigh"
 developer_instructions = """
 Act as the Atelier `librarian` role for the bounded task delegated by the parent.
 Before acting, read `CLAUDE.md` and `.claude/agents/librarian.md`.

@@ -70,6 +70,7 @@ High-frequency operations. Lift these directly instead of re-deriving from `prot
 | Wiki entry by title | `rg -l "<title>" "$OV/wiki/"` |
 | Privacy gate | `uv run scripts/privacy_check.py --json` |
 | Harness state / lint | `python3 scripts/harness_lint.py --json` |
+| Reusable paper text | `python3 scripts/paper_cache.py "$OV/papers/<file>.pdf"` |
 | Run a command in Codex | Invoke `$<name>` (for example, `$weekly`) |
 | Launch a fresh Codex workflow | `codex -C . '$<name>'` |
 | Run a one-shot Codex workflow | `codex exec -C . '$<name>'` |
@@ -105,9 +106,10 @@ declared by the command skill and complete the workflow in the active thread.
 
 `/autoevo-nightly` is bot-invoked (headless `codex exec`, launchd at 05:00)
 and is not exposed as a Codex user skill. The shipped scheduler default is
-Codex. `python3 scripts/atelier_runtime.py use claude` makes Claude the local
-default for both the external launcher and launchd; `ATELIER_RUNTIME` remains
-the one-process override. Claude `/autoevo-review` and Codex
+Codex, and unattended local routines are Codex-only so their sandbox and
+credential boundaries remain enforceable. `python3 scripts/atelier_runtime.py
+use claude` changes the interactive external launcher only; `ATELIER_RUNTIME`
+is likewise an interactive one-process override. Claude `/autoevo-review` and Codex
 `$autoevo-review` are the morning triage surfaces for its pending queue.
 Both workflows are defined by `protocols/autoevo.md` and registered with
 `direct_only = true` in `harness/commands.toml`.

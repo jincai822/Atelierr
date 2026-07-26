@@ -116,7 +116,10 @@ CLAUDE.md is the costliest file: loaded into every conversation and every subage
 6. User is final judge. Propose significant changes, don't silently deploy.
 7. No personal details in tracked files. Examples in commands, protocols, and agent definitions must be generic. Rich personal examples go in `profile/examples.md` (gitignored).
 8. Subtract before adding. The system's default failure mode is monotonic growth. Before adding any rule: (a) is this already covered by an agent definition, command file, or protocol? (b) can an existing rule be generalized to cover this case? (c) will removing something else make this addition unnecessary? Pruning trigger: if `ls protocols/ | wc -l` exceeds 3x `ls <paths.sessions>/ | wc -l`, the Evolver's first action must be a pruning review, not new work, because complexity that outpaces usage is dead weight.
-9. CLAUDE.md is the costliest file: inherited by every subagent. Every line costs N tokens times N agents per session. Rules belong in the most specific location: agent-specific rules in agent definitions, command-specific in command files, domain knowledge in protocols. CLAUDE.md holds only rules that every agent needs on every turn. Target: under 8KB.
+9. CLAUDE.md is recurring context. Rules belong in the most specific location:
+agent-specific rules in agent definitions, command-specific rules in command
+files, and domain knowledge in protocols. CLAUDE.md holds only universal rules
+and stays within the root-instruction budget enforced by harness lint.
 10. Position over formatting. Put critical rules at the top of files (primacy effect) and explain why they matter. Bold and ALL CAPS have no semantic weight for the model; they add tokens without improving instruction adherence. Use clear natural language and headers for structure.
 11. Explain why, not just what. Claude generalizes from reasoning better than from imperatives. "Don't write to daily notes because they are the user's capture stream" is more durable than "NEVER write to daily notes."
 

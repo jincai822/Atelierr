@@ -266,7 +266,7 @@ The user can request these actions during or after any session:
 | "Change how [command] works" | Modify command | Evolver |
 
 ### Decay Operations (→ Forgetter)
-Bounded decay sweeps over `$OV/`. Forgetter never deletes and has no Write tool; it returns categorized findings inline via the `---begin-result---` / `---end-result---` envelope, and the orchestrator persists them as a decay report at `<paths.agent_findings>/decay-<RUN_TS>-<scope-slug>.md`, then surfaces the report path; the user reads it and decides. Every dispatch must specify `scope_path` (one directory under `$OV/`); `max_candidates` defaults to 15 and `time_budget_s` defaults to 300. The role spec is `.claude/agents/forgetter.md`.
+Bounded decay sweeps over `$OV/`. Forgetter never deletes and has no Write tool; it returns categorized findings inline via the `---forgetter-result---` / `---end-result---` envelope, and the orchestrator persists them as a decay report at `<paths.agent_findings>/decay-<RUN_TS>-<scope-slug>.md`, then surfaces the report path; the user reads it and decides. Every dispatch must specify `scope_path` (one directory under `$OV/`); `max_candidates` defaults to 15 and `time_budget_s` defaults to 300. The role spec is `.claude/agents/forgetter.md`.
 
 | User Says | Action | Agent |
 |-----------|--------|-------|

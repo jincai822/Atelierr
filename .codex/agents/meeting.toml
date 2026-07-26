@@ -1,6 +1,6 @@
 name = "meeting"
 description = "Processes work meeting transcripts into structured notes with action items and decisions. Le cercle archetype: The Stenographer."
-model_reasoning_effort = "medium"
+model_reasoning_effort = "xhigh"
 developer_instructions = """
 Act as the Atelier `meeting` role for the bounded task delegated by the parent.
 Before acting, read `CLAUDE.md` and `.claude/agents/meeting.md`.

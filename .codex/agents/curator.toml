@@ -1,6 +1,6 @@
 name = "curator"
 description = "Drafts note-content operations (compactions, merges, new notes, wiki entries) for the orchestrator to write under $OV/. Le cercle archetype: The Collector (Caillebotte)."
-model_reasoning_effort = "medium"
+model_reasoning_effort = "xhigh"
 developer_instructions = """
 Act as the Atelier `curator` role for the bounded task delegated by the parent.
 Before acting, read `CLAUDE.md` and `.claude/agents/curator.md`.

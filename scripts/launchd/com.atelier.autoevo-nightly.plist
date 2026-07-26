@@ -14,25 +14,28 @@
              - hostname-based stagger for multi-machine coordination
              - DynamoDB lock acquire/release (when coordination enabled)
              - local claim file write for cue system
-             - selected headless runtime invocation and status tracking -->
+             - fixed headless Codex invocation and status tracking -->
         <string>"$HOME/atelier/scripts/routine_runner.sh" autoevo-nightly /autoevo-nightly</string>
     </array>
 
+    <!-- Missing Hour is a launchd wildcard, so this fires at the top of every
+         hour. The runner exits cheaply for completed, fenced, and not-yet-due
+         deferred claims. Missed calendar events are coalesced on wake. -->
     <key>StartCalendarInterval</key>
     <dict>
-        <key>Hour</key>
-        <integer>5</integer>
         <key>Minute</key>
         <integer>0</integer>
     </dict>
 
+    <!-- Covers login or LaunchAgent reload after a scheduled event was missed.
+         The runner maps pre-05:00 catch-up to yesterday and rejects duplicates. -->
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
 
     <!-- launchd captures stdout/stderr to user-readable log paths.
          The autoevo-nightly script's audit log lives separately under
          $OV/agent-findings/autoevo-applied-<date>.md; these capture only
-         the shell wrapper + selected runtime's stdout/stderr. -->
+         the shell wrapper + Codex stdout/stderr. -->
     <key>StandardOutPath</key>
     <string>/tmp/com.atelier.autoevo-nightly.out</string>
 

@@ -150,7 +150,7 @@ kinds = ["app"]
 dispatch_rationale = ["context-isolation", "tool-isolation"]
 status = "portable-adapted"
 description = "Active decay scanner over $OV/: redundant / time-stale / contradicted / low-signal. Proposes; never deletes. Returns findings inline via envelope; the orchestrator persists them to $OV/agent-findings/. Le cercle archetype: The Conservator."
-codex_prompt = "Run the Forgetter role through native Codex agent `forgetter`; `.claude/agents/forgetter.md` remains authoritative. Hard contract: propose, never delete; return findings inline via the `---begin-result---` / `---end-result---` envelope. The orchestrator persists them; do not write the report yourself."
+codex_prompt = "Run the Forgetter role through native Codex agent `forgetter`; `.claude/agents/forgetter.md` remains authoritative. Hard contract: propose, never delete; return findings inline via the `---forgetter-result---` / `---end-result---` envelope. The orchestrator persists them; do not write the report yourself."
 pattern = "generator-verifier"
 used_by = [
     "commands.autoevo-nightly",

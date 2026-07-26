@@ -14,6 +14,7 @@ These rules apply to every turn, every agent. Violations are bugs.
 - **Never fabricate quantitative or factual claims.** Headcount, valuation, val/employee, paper counts, citation counts, venue claims (ICML/ICLR/NeurIPS Oral/Best Paper), publication acceptance (Nature/Science), benchmark numbers, dates, affiliations: all require a source. If not sourced, write `unverified` (in YAML) or `[unverified]` (in prose). Verdicts derived from `unverified` inputs collapse to `unknown`; do not guess to fill a band. Agent fetch results (e.g. Scout web research) are `unverified-scout` until the orchestrator hits the primary source (arXiv abstract, lab blog, primary press release); promote tier explicitly when verified.
 - Never commit private names, repository URLs, employers, organizations, preferences, or `$OV` filename stems. Run `scripts/privacy_check.py` and the semantic privacy guard before public commits.
 - **Path placeholders.** Docs use `<paths.<name>>` defined in `harness/paths.toml` + `paths.local.toml`; resolve via the canonical table. Localized shadow wikis use `<paths.wiki_localized.<lang>>`. Renames edit the registry; `scripts/rewrite_paths.py` handles renames + templatize. Resolve to concrete paths in user-facing output.
+- **Scratch.** Never write repo-relative `tmp/`; use `mktemp -d` or `scripts/paper_cache.py` for paper text.
 
 ## Knowledge Layers
 
@@ -29,7 +30,7 @@ Five-tier model. Directory is the tier; location carries the certification level
 
 `$OV/` is the source of truth. Daily notes are user-authored locally. `<paths.cache>/` holds ephemeral fetches. Readwise inbox is a cloud-only L1 surface — accessed through the `readwise` CLI when needed, never mirrored to disk. `<paths.zettelm>/` is a transient mobile-capture submodule; `/sync` digests it into L2 then clears.
 
-**Tooling layout** (`protocols/repo-conventions.md`): vault-agnostic tools in atelier `scripts/`; domain-specific tools under `$OV/<domain>/_tools/`. Script names encoding private content stay under `$OV/`.
+**Tooling layout:** Shared tools live in `scripts/`; private tools stay under `$OV/`.
 
 **Remote-routine layer** (`protocols/remote-routines.md`): `/schedule` cron agents write canonical output to declared `$OV` paths; cue-check is vault-agnostic via `$OV/_meta/routine_watch.toml`.
 

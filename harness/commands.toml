@@ -166,8 +166,17 @@ category = "ops"
 status = "portable-adapted"
 direct_only = true
 user_facing = false
-description = "Autonomous nightly decay sweep with auto-commit; fired by macOS launchd at 05:00 local."
+description = "Autonomous nightly decay sweep with auto-commit; primary macOS launchd attempt at 05:00 local with hourly deferred recovery and wake catch-up."
 codex_prompt = "Execute the bot-only autoevo-nightly workflow under headless Codex; `.claude/commands/autoevo-nightly.md` is authoritative and no user-facing Codex skill is exposed."
+
+[commands.run-routine]
+source = ".claude/commands/run-routine.md"
+category = "ops"
+status = "portable-adapted"
+direct_only = true
+user_facing = false
+description = "Bot-only adapter for one archived private local-routine prompt."
+codex_prompt = "Execute the bot-only adapter in `.claude/commands/run-routine.md` for the named archived private prompt."
 
 [commands.autoevo-review]
 source = ".claude/commands/autoevo-review.md"

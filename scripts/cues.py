@@ -46,13 +46,14 @@ import os
 import sys
 import tomllib
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
 # Allow running as `uv run scripts/cues.py` from atelier root.
 sys.path.insert(0, str(Path(__file__).parent))
 from _paths import tier, vault_root  # type: ignore[import-not-found]  # noqa: E402
+from routine_claim import validate_claim  # noqa: E402
 
 
 @dataclass
@@ -102,9 +103,7 @@ def _format_runtime_message(message: str, runtime: str) -> str:
         if not isinstance(entry, dict):
             continue
         replacement = (
-            f"`${name}`"
-            if entry.get("user_facing", True) is not False
-            else f"`{name}`"
+            f"`${name}`" if entry.get("user_facing", True) is not False else f"`{name}`"
         )
         message = message.replace(f"`/{name}`", replacement)
     return message
@@ -468,6 +467,148 @@ def check_routine_policy(ov: Path, today: date) -> tuple[Cue | None, str]:
     )
 
 
+def _local_owner_start_date(ov: Path, config: dict) -> date | None:
+    """Return the current local-routine ownership epoch, when configured."""
+    coordination = config.get("coordination", {})
+    if not isinstance(coordination, dict) or coordination.get("backend") != "owner":
+        return None
+    owner_path = ov / "_meta" / "routine_owner.toml"
+    try:
+        owner = tomllib.loads(owner_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    transferred = owner.get("transferred_at")
+    if isinstance(transferred, datetime):
+        value = transferred
+    elif isinstance(transferred, str):
+        try:
+            value = datetime.fromisoformat(transferred)
+        except ValueError:
+            return None
+    else:
+        return None
+    if value.tzinfo is not None:
+        value = value.astimezone()
+    return value.date()
+
+
+def _latest_local_claim(
+    ov: Path,
+    routine: str,
+    *,
+    not_before: date | None = None,
+) -> tuple[date, dict, Path] | None:
+    """Load the latest dated claim for one local routine."""
+    routine_dir = ov / "_meta" / "routine_runs" / routine
+    if not routine_dir.is_dir():
+        return None
+    candidates: list[tuple[date, Path]] = []
+    for path in routine_dir.glob("*.toml"):
+        try:
+            claim_date = date.fromisoformat(path.stem)
+        except ValueError:
+            continue
+        if not_before is None or claim_date >= not_before:
+            candidates.append((claim_date, path))
+    for claim_date, path in sorted(candidates, reverse=True):
+        try:
+            claim = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+        if claim.get("contract_version") == 2:
+            try:
+                validate_claim(
+                    claim,
+                    routine=routine,
+                    cycle=path.stem,
+                    allow_legacy_owner_generation=True,
+                )
+            except ValueError:
+                continue
+        return claim_date, claim, path
+    return None
+
+
+def _cron_fields(cron: str) -> tuple[str, str, str, str, str] | None:
+    """Extract the five scheduling fields from an annotated cron string."""
+    import re as _re
+
+    cron_clean = _re.split(r"\s+UTC\b|\s+\(", cron, maxsplit=1)[0].strip()
+    parts = cron_clean.split()
+    if len(parts) < 5:
+        return None
+    return tuple(parts[:5])  # type: ignore[return-value]
+
+
+def _cron_field_matches(
+    value: int, field: str, *, one_based_step: bool = False
+) -> bool:
+    if field == "*":
+        return True
+    if field.startswith("*/"):
+        try:
+            step = int(field[2:])
+        except ValueError:
+            return False
+        origin = 1 if one_based_step else 0
+        return step > 0 and (value - origin) % step == 0
+    values: set[int] = set()
+    try:
+        for item in field.split(","):
+            values.add(int(item))
+    except ValueError:
+        return False
+    return value in values
+
+
+def _scheduled_dates(
+    cron: str,
+    start: date,
+    now: datetime,
+) -> list[date]:
+    """Return local dates whose declared cron occurrence is already due."""
+    fields = _cron_fields(cron)
+    if fields is None:
+        return []
+    minute_field, hour_field, dom, month, dow = fields
+    try:
+        minute = int(minute_field)
+        hour = int(hour_field)
+    except ValueError:
+        return []
+
+    local_now = now.astimezone()
+    local_zone = local_now.tzinfo
+    schedule_zone = timezone.utc if " UTC" in cron else local_zone
+    schedule_now = local_now.astimezone(schedule_zone)
+    earliest = start - timedelta(days=1)
+    results: set[date] = set()
+    cursor = schedule_now.date()
+
+    while cursor >= earliest:
+        candidate = datetime(
+            cursor.year,
+            cursor.month,
+            cursor.day,
+            hour,
+            minute,
+            tzinfo=schedule_zone,
+        )
+        cron_dow = (cursor.weekday() + 1) % 7
+        if (
+            candidate <= schedule_now
+            and _cron_field_matches(cursor.day, dom, one_based_step=True)
+            and _cron_field_matches(cursor.month, month)
+            and _cron_field_matches(cron_dow, dow)
+        ):
+            local_date = candidate.astimezone(local_zone).date()
+            if local_date >= start:
+                results.add(local_date)
+        cursor -= timedelta(days=1)
+
+    return sorted(results)
+
+
 def check_routine_staleness(ov: Path, today: date) -> tuple[Cue | None, str]:
     """Detect routines that fire but produce no output.
 
@@ -491,14 +632,17 @@ def check_routine_staleness(ov: Path, today: date) -> tuple[Cue | None, str]:
     if not routines:
         return None, "no routines declared"
 
+    owner_start = _local_owner_start_date(ov, config)
     stale: list[str] = []
     debug_parts: list[str] = []
 
     for r in routines:
+        name = r.get("name", "?")
         label = r.get("label", r.get("name", "?"))
         output_dir = r.get("output_dir")
         pattern = r.get("file_pattern", "*")
         cron = r.get("cron", "")
+        is_local = r.get("execution") == "local"
         if not output_dir or not cron:
             debug_parts.append(f"{label}: missing output_dir or cron")
             continue
@@ -510,15 +654,40 @@ def check_routine_staleness(ov: Path, today: date) -> tuple[Cue | None, str]:
 
         tolerance = max(2, cadence_days)
         threshold = cadence_days + tolerance
+        latest_claim = (
+            _latest_local_claim(ov, str(name), not_before=owner_start)
+            if is_local
+            else None
+        )
 
         d = ov / output_dir
         if not d.is_dir():
+            if (
+                is_local
+                and owner_start is not None
+                and latest_claim is None
+                and (today - owner_start).days <= threshold
+            ):
+                debug_parts.append(
+                    f"{label}: dir missing inside owner grace ({owner_start})"
+                )
+                continue
             stale.append(f"{label} (output dir missing)")
             debug_parts.append(f"{label}: dir missing; cadence={cadence_days}d")
             continue
 
         files = sorted(d.glob(pattern), key=lambda p: p.name)
         if not files:
+            if (
+                is_local
+                and owner_start is not None
+                and latest_claim is None
+                and (today - owner_start).days <= threshold
+            ):
+                debug_parts.append(
+                    f"{label}: no files inside owner grace ({owner_start})"
+                )
+                continue
             stale.append(f"{label} (no output files)")
             debug_parts.append(f"{label}: no files; cadence={cadence_days}d")
             continue
@@ -529,9 +698,22 @@ def check_routine_staleness(ov: Path, today: date) -> tuple[Cue | None, str]:
             debug_parts.append(f"{label}: can't parse date from {latest_name}")
             continue
 
+        if latest_claim is not None:
+            claim_date, claim, _claim_path = latest_claim
+            if claim.get("status") == "completed" and claim_date > latest_date:
+                stale.append(
+                    f"{label} (completed claim {claim_date} newer than output {latest_date})"
+                )
+                debug_parts.append(
+                    f"{label}: completed claim={claim_date} > output={latest_date}"
+                )
+                continue
+
         age = (today - latest_date).days
         if age > threshold:
-            stale.append(f"{label} (last output {age}d ago, expected every {cadence_days}d)")
+            stale.append(
+                f"{label} (last output {age}d ago, expected every {cadence_days}d)"
+            )
             debug_parts.append(f"{label}: age={age}d > threshold={threshold}d")
         else:
             debug_parts.append(f"{label}: age={age}d <= threshold={threshold}d; ok")
@@ -551,15 +733,20 @@ def check_routine_staleness(ov: Path, today: date) -> tuple[Cue | None, str]:
             command_path="_meta/routine_watch.toml",
             message=(
                 f"{len(stale)} routine(s) with missing/stale output: {listing}. "
-                f"Check routine session logs on claude.ai for silent Drive-write failures "
-                f"or missing MCP connections."
+                f"Check the active scheduler in routine_watch.toml, then inspect its "
+                f"local claim/diagnostic or cloud session and connector logs."
             ),
         ),
         f"stale={len(stale)}; {debug}",
     )
 
 
-def check_routine_hitrate(ov: Path, today: date) -> tuple[Cue | None, str]:
+def check_routine_hitrate(
+    ov: Path,
+    today: date,
+    *,
+    now: datetime | None = None,
+) -> tuple[Cue | None, str]:
     """Detect routines with intermittent output failures.
 
     Complements check_routine_staleness (which catches total outages) by
@@ -590,6 +777,8 @@ def check_routine_hitrate(ov: Path, today: date) -> tuple[Cue | None, str]:
     if not routines:
         return None, "no routines declared"
 
+    now = now or datetime.now().astimezone()
+    owner_start = _local_owner_start_date(ov, config)
     degraded: list[str] = []
     debug_parts: list[str] = []
 
@@ -611,7 +800,7 @@ def check_routine_hitrate(ov: Path, today: date) -> tuple[Cue | None, str]:
             continue  # staleness cue handles this
 
         max_lookback = max(14, 3 * cadence_days)
-        cutoff = today - __import__("datetime").timedelta(days=max_lookback)
+        cutoff = today - timedelta(days=max_lookback - 1)
 
         files = sorted(d.glob(pattern), key=lambda p: p.name)
         dated_files: list[date] = []
@@ -624,22 +813,25 @@ def check_routine_hitrate(ov: Path, today: date) -> tuple[Cue | None, str]:
             continue  # staleness cue handles this
 
         # Cap lookback to oldest file date so new routines aren't penalized
-        # for not existing before their first output.
+        # for not existing before their first output. Local routines also start
+        # at the current owner's transfer epoch.
         oldest_file = min(dated_files)
         effective_start = max(cutoff, oldest_file)
-        effective_lookback = (today - effective_start).days
-        if effective_lookback < 1:
-            effective_lookback = 1
+        if r.get("execution") == "local" and owner_start is not None:
+            effective_start = max(effective_start, owner_start)
+        effective_lookback = (today - effective_start).days + 1
 
-        recent = [fd for fd in dated_files if fd >= effective_start]
-        expected = effective_lookback // cadence_days
+        scheduled = _scheduled_dates(cron, effective_start, now)
+        expected_dates = set(scheduled)
+        recent_dates = {fd for fd in dated_files if effective_start <= fd <= today}
+        expected = len(expected_dates)
         if expected < 3:
             debug_parts.append(
                 f"{label}: expected={expected} in {effective_lookback}d; too few samples"
             )
             continue
 
-        actual = len(recent)
+        actual = len(recent_dates & expected_dates)
         rate = actual / expected if expected > 0 else 1.0
 
         if rate < 0.70:
@@ -669,8 +861,8 @@ def check_routine_hitrate(ov: Path, today: date) -> tuple[Cue | None, str]:
             command_path="_meta/routine_watch.toml",
             message=(
                 f"{len(degraded)} routine(s) with degraded output rate: {listing}. "
-                f"Routines are firing but Drive writes fail intermittently. "
-                f"Check routine session logs on claude.ai."
+                f"The active scheduler is firing but output is intermittent. "
+                f"Inspect local claim/diagnostic or cloud session and connector logs."
             ),
         ),
         f"degraded={len(degraded)}; {debug}",
@@ -820,9 +1012,7 @@ def check_autoevo_pending(ov: Path, today: date) -> tuple[Cue | None, str]:
     # Escalate to `hard` on age (>14d), corrupt dates (parsability lost), OR
     # repeat-skip entries (3+ skips reach auto-dismiss next /autoevo-review).
     severity: Literal["hard", "soft"] = (
-        "hard"
-        if (oldest_age > 14 or corrupt_dates > 0 or repeat_skips > 0)
-        else "soft"
+        "hard" if (oldest_age > 14 or corrupt_dates > 0 or repeat_skips > 0) else "soft"
     )
     age_note = f"oldest {oldest_age}d" if oldest_age > 0 else "fresh"
     corrupt_note = f"; {corrupt_dates} corrupt dates" if corrupt_dates > 0 else ""
@@ -841,7 +1031,12 @@ def check_autoevo_pending(ov: Path, today: date) -> tuple[Cue | None, str]:
     )
 
 
-def check_autoevo_ran(ov: Path, today: date) -> tuple[Cue | None, str]:
+def check_autoevo_ran(
+    ov: Path,
+    today: date,
+    *,
+    now: datetime | None = None,
+) -> tuple[Cue | None, str]:
     """Catches silent nightly-bot failures AND surfaces skipped runs.
 
     `/autoevo-nightly` writes `<paths.agent_findings>/autoevo-applied-<RUN_DATE>.md`
@@ -853,9 +1048,9 @@ def check_autoevo_ran(ov: Path, today: date) -> tuple[Cue | None, str]:
     1. **Audit file missing.** The bot did not run at all (launchd auth
        failed, $OV unset, claude CLI missing, etc.). Soft cue pointing at
        the launchd README.
-    2. **Audit file exists with non-empty Skipped / Errors section.** The
-       bot ran but a pre-flight gate aborted, OR an error occurred during
-       a step. Soft cue pointing at the file so the user can read details.
+    2. **Latest attempt has a non-empty Skipped / Errors section.** The bot
+       ran but its latest pre-flight or sweep attempt did not complete.
+       Earlier same-day skips are superseded by a later clean retry.
 
     Stays silent when:
     - The agent-findings dir doesn't exist yet (fresh vault, bot never ran).
@@ -865,10 +1060,9 @@ def check_autoevo_ran(ov: Path, today: date) -> tuple[Cue | None, str]:
 
     Soft cue by default.
     """
-    from datetime import datetime
-
     # Don't fire before 06:00 local — bot is given a full hour to complete.
-    if datetime.now().hour < 6:
+    now = now or datetime.now()
+    if now.hour < 6:
         return None, "before 06:00 local; skip"
 
     findings_dir = tier("agent_findings")
@@ -897,30 +1091,32 @@ def check_autoevo_ran(ov: Path, today: date) -> tuple[Cue | None, str]:
                     f"Nightly autoevo did not run today ({today.isoformat()}). "
                     f"Check `/tmp/com.atelier.autoevo-nightly.err` and "
                     f"`~/Library/LaunchAgents/com.atelier.autoevo-nightly.plist`. "
-                    f"Common causes: $OV unset in launchd shell, expired selected-runtime credentials, "
-                    f"machine asleep at 05:00."
+                    f"Common causes: $OV unset in launchd shell, expired Codex credentials, "
+                    f"or an unloaded LaunchAgent. A sleeping Mac should catch up on wake."
                 ),
             ),
             f"expected {expected_name} missing",
         )
 
-    # Branch 2: audit file exists — inspect Skipped/Errors sections for
-    # content. A populated Skipped section means a pre-flight gate fired;
-    # a populated Errors section means a mid-run failure happened.
+    # Branch 2: inspect only the latest attempt. The wake/retry schedule may
+    # produce an early blocked run followed by a successful same-day sweep.
+    # Keeping the whole-day "any skip" rule would preserve a stale warning
+    # after the later attempt had already recovered.
     try:
         body = expected_path.read_text()
     except OSError as exc:
         return None, f"audit file unreadable: {exc!r}"
 
-    # Parse "### Skipped (reason)" and "### Errors" sections. The audit log
-    # may contain MULTIPLE `## Run` sections in the same day (manual re-runs),
-    # each with its own Skipped / Errors subsections. A single populated
-    # section in any run is enough to fire the cue, so scan all matches.
-    # Stop at the NEXT heading of any level (### or ##) so a Skipped section
-    # body does not accidentally include the immediately-following ### Errors
-    # heading and produce a false "populated" verdict on clean runs.
+    import re
+
+    attempt_starts = list(
+        re.finditer(r"^##\s+(?:Autoevo Run|Run)\b", body, re.MULTILINE)
+    )
+    latest_body = body[attempt_starts[-1].start() :] if attempt_starts else body
+
+    # Stop at the next heading so a Skipped section body does not accidentally
+    # include the immediately following Errors heading.
     def section_populated(text: str, heading: str) -> bool:
-        import re
         pat = rf"^###\s+{re.escape(heading)}.*?\n(.*?)(?=^###|^##|\Z)"
         for m in re.finditer(pat, text, re.MULTILINE | re.DOTALL):
             for raw in m.group(1).splitlines():
@@ -930,8 +1126,8 @@ def check_autoevo_ran(ov: Path, today: date) -> tuple[Cue | None, str]:
                 return True
         return False
 
-    skipped = section_populated(body, "Skipped")
-    errored = section_populated(body, "Errors")
+    skipped = section_populated(latest_body, "Skipped")
+    errored = section_populated(latest_body, "Errors")
 
     if not skipped and not errored:
         return None, f"today's audit log clean ({expected_name})"
@@ -948,7 +1144,7 @@ def check_autoevo_ran(ov: Path, today: date) -> tuple[Cue | None, str]:
             severity="soft",
             command_path=str(expected_path.relative_to(ov)),
             message=(
-                f"Today's nightly autoevo ran with issues: {listing}. "
+                f"Today's latest autoevo attempt has issues: {listing}. "
                 f"Read `{expected_path.relative_to(ov)}` for the audit details."
             ),
         ),
@@ -985,6 +1181,16 @@ def _recap_local_runs(ov: Path, today: date, verbose: bool = False) -> list[str]
                 data = tomllib.loads(claim.read_text())
             except Exception:
                 continue
+            if data.get("contract_version") == 2:
+                try:
+                    validate_claim(
+                        data,
+                        routine=routine_name,
+                        cycle=check_date.isoformat(),
+                        allow_legacy_owner_generation=True,
+                    )
+                except ValueError:
+                    continue
 
             status = data.get("status", "unknown")
             machine = data.get("machine", "?")
@@ -1058,13 +1264,19 @@ def _extract_audit_summary(ov: Path, routine_name: str, run_date: date) -> str:
     return ", ".join(parts)
 
 
-def check_local_routine_missed(ov: Path, today: date) -> tuple[Cue | None, str]:
+def check_local_routine_missed(
+    ov: Path,
+    today: date,
+    *,
+    now: datetime | None = None,
+) -> tuple[Cue | None, str]:
     """Detect local routines that missed their scheduled run.
 
     Reads `$OV/_meta/routine_watch.toml` for routines with `execution = "local"`.
-    For each, checks `$OV/_meta/routine_runs/<name>/<cycle_id>.toml` for a
-    claim file with `status = "completed"`. Fires when today's (or yesterday's,
-    for early-morning sessions) claim is missing or failed.
+    For each, computes the latest cron occurrence that is already due, then
+    checks the corresponding local claim. Ownership transfer time is the
+    earliest eligible schedule date, so a newly assigned machine is not
+    blamed for historical cycles.
 
     Gated to fire after 06:00 local so the routine has time to complete.
     Stays silent when no local routines are declared or `routine_runs/` is absent
@@ -1072,7 +1284,8 @@ def check_local_routine_missed(ov: Path, today: date) -> tuple[Cue | None, str]:
     """
     import tomllib
 
-    if datetime.now().hour < 6:
+    now = now or datetime.now().astimezone()
+    if now.hour < 6:
         return None, "before 06:00 local; skip"
 
     config_path = ov / "_meta" / "routine_watch.toml"
@@ -1088,14 +1301,10 @@ def check_local_routine_missed(ov: Path, today: date) -> tuple[Cue | None, str]:
     if not routines:
         return None, "no local routines declared"
 
+    owner_start = _local_owner_start_date(ov, config)
     runs_dir = ov / "_meta" / "routine_runs"
     if not runs_dir.is_dir():
-        # Never installed on any machine; stay silent until first run.
-        any_local_ever = any(
-            (runs_dir / r.get("name", "")).is_dir() for r in routines
-        )
-        if not any_local_ever:
-            return None, "routine_runs/ absent; never installed"
+        return None, "routine_runs/ absent; never installed"
 
     missed: list[str] = []
     debug_parts: list[str] = []
@@ -1103,47 +1312,87 @@ def check_local_routine_missed(ov: Path, today: date) -> tuple[Cue | None, str]:
     for r in routines:
         name = r.get("name", "?")
         label = r.get("label", name)
+        cron = r.get("cron", "")
         routine_dir = runs_dir / name
-
-        if not routine_dir.is_dir():
-            # Check if this routine has ever run on any machine.
-            # If not, skip (not installed yet).
-            debug_parts.append(f"{label}: no runs dir")
+        cadence_days = _estimate_cadence_days(cron)
+        if cadence_days is None:
+            debug_parts.append(f"{label}: unparseable cron")
             continue
 
-        # Check today's claim, fall back to yesterday for early-morning edge.
-        claim_found = False
-        for check_date in [today, today - __import__("datetime").timedelta(days=1)]:
-            claim = routine_dir / f"{check_date.isoformat()}.toml"
-            if claim.is_file():
-                try:
-                    claim_data = tomllib.loads(claim.read_text())
-                    status = claim_data.get("status", "unknown")
-                    if status == "completed":
-                        claim_found = True
-                        debug_parts.append(f"{label}: {check_date} completed")
-                        break
-                    elif status == "running":
-                        claim_found = True
-                        debug_parts.append(f"{label}: {check_date} still running")
-                        break
-                    elif status == "failed":
-                        missed.append(f"{label} (failed on {check_date})")
-                        debug_parts.append(f"{label}: {check_date} failed")
-                        claim_found = True
-                        break
-                except (tomllib.TOMLDecodeError, OSError):
-                    debug_parts.append(f"{label}: {check_date} claim unreadable")
-                    continue
+        schedule_start = owner_start or (
+            today - timedelta(days=max(366, 3 * cadence_days))
+        )
+        due_dates = _scheduled_dates(cron, schedule_start, now)
+        if not due_dates:
+            debug_parts.append(
+                f"{label}: no scheduled occurrence due since {schedule_start}"
+            )
+            continue
+        expected_date = due_dates[-1]
 
-        if not claim_found:
-            # Check if this routine has EVER run (any .toml in the dir).
+        if not routine_dir.is_dir():
+            if owner_start is not None:
+                missed.append(f"{label} (no claim for {expected_date})")
+                debug_parts.append(f"{label}: no runs dir; expected={expected_date}")
+            else:
+                debug_parts.append(f"{label}: no runs dir; installation unknown")
+            continue
+
+        latest = _latest_local_claim(ov, str(name), not_before=owner_start)
+        if latest is None:
             any_past = list(routine_dir.glob("*.toml"))
-            if any_past:
-                missed.append(f"{label} (no run today)")
-                debug_parts.append(f"{label}: missed today; {len(any_past)} past runs exist")
+            if any_past or owner_start is not None:
+                missed.append(f"{label} (no claim for {expected_date})")
+                debug_parts.append(
+                    f"{label}: expected={expected_date}; no eligible claim"
+                )
             else:
                 debug_parts.append(f"{label}: never ran; skip")
+            continue
+
+        claim_date, claim_data, claim_path = latest
+        if claim_date < expected_date:
+            missed.append(f"{label} (no claim for {expected_date})")
+            debug_parts.append(
+                f"{label}: latest={claim_date}; expected={expected_date}"
+            )
+            continue
+
+        status = claim_data.get("status", "unknown")
+        if status == "completed":
+            debug_parts.append(f"{label}: {claim_date} completed")
+        elif status == "running":
+            claimed_value = claim_data.get("claimed_at")
+            try:
+                claimed_at = datetime.fromisoformat(str(claimed_value))
+            except ValueError:
+                claimed_at = datetime.fromtimestamp(claim_path.stat().st_mtime)
+            comparison_now = (
+                now.astimezone(claimed_at.tzinfo)
+                if claimed_at.tzinfo is not None
+                else now.replace(tzinfo=None)
+            )
+            age_hours = (comparison_now - claimed_at).total_seconds() / 3600
+            if age_hours >= 6:
+                missed.append(
+                    f"{label} (running stale {int(age_hours)}h on {claim_date})"
+                )
+                debug_parts.append(
+                    f"{label}: {claim_date} running stale {age_hours:.1f}h"
+                )
+            else:
+                debug_parts.append(
+                    f"{label}: {claim_date} still running {age_hours:.1f}h"
+                )
+        elif status == "deferred":
+            missed.append(f"{label} (deferred on {claim_date}; retry scheduled)")
+            debug_parts.append(f"{label}: {claim_date} deferred")
+        elif status in {"failed", "completion-uncertain", "retry-approved"}:
+            missed.append(f"{label} ({status} on {claim_date})")
+            debug_parts.append(f"{label}: {claim_date} {status}")
+        else:
+            missed.append(f"{label} (unknown claim status on {claim_date})")
+            debug_parts.append(f"{label}: {claim_date} unknown status={status}")
 
     debug = "; ".join(debug_parts)
     if not missed:
@@ -1161,7 +1410,10 @@ def check_local_routine_missed(ov: Path, today: date) -> tuple[Cue | None, str]:
             message=(
                 f"{len(missed)} local routine(s) missed: {listing}. "
                 f"Common causes: machine asleep, launchd not loaded, expired credentials. "
-                f"Run the routine manually or check `scripts/launchd/README.md`."
+                f"Deferred routines retry at their next trigger. For failed or uncertain "
+                f"cycles, check `scripts/launchd/README.md`, review effects, and use guarded "
+                f"cycle recovery before retrying an existing failed, uncertain, or "
+                f"stale-running claim."
             ),
         ),
         f"missed={len(missed)}; {debug}",
@@ -1276,7 +1528,9 @@ def _load_snoozes(ov: Path) -> dict[str, str]:
         return {}
     try:
         data = json.loads(p.read_text())
-        return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
+        return {
+            k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)
+        }
     except (json.JSONDecodeError, OSError):
         return {}
 
@@ -1296,7 +1550,9 @@ def snooze_cue(ov: Path, key: str, until: date) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     snoozes = _load_snoozes(ov)
     snoozes[key] = until.isoformat()
-    p.write_text(json.dumps(snoozes, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    p.write_text(
+        json.dumps(snoozes, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    )
 
 
 # --- main -----------------------------------------------------------------
@@ -1359,7 +1615,10 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         key = argv_list[1]
         if key not in {name for name, _ in CHECKS}:
-            print(f"ERROR: unknown cue `{key}`; valid: {sorted({n for n,_ in CHECKS})}", file=sys.stderr)
+            print(
+                f"ERROR: unknown cue `{key}`; valid: {sorted({n for n, _ in CHECKS})}",
+                file=sys.stderr,
+            )
             return 2
         days = 1
         if "--days" in argv_list:
@@ -1397,7 +1656,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.touch_lock:
         if os.environ.get("ATELIER_SKIP_LOCK_TOUCH"):
             if args.verbose:
-                print("# debug: lock touch skipped (ATELIER_SKIP_LOCK_TOUCH set)", file=sys.stderr)
+                print(
+                    "# debug: lock touch skipped (ATELIER_SKIP_LOCK_TOUCH set)",
+                    file=sys.stderr,
+                )
             return 0
         try:
             cache_dir = tier("cache")
@@ -1424,7 +1686,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.hook:
         if os.environ.get("ATELIER_SKIP_LOCK_TOUCH"):
             if args.verbose:
-                print("# debug: SessionStart lock touch skipped (ATELIER_SKIP_LOCK_TOUCH set)", file=sys.stderr)
+                print(
+                    "# debug: SessionStart lock touch skipped (ATELIER_SKIP_LOCK_TOUCH set)",
+                    file=sys.stderr,
+                )
         else:
             try:
                 cache_dir = tier("cache")
@@ -1432,7 +1697,9 @@ def main(argv: list[str] | None = None) -> int:
                 (cache_dir / "atelier-session-lock").touch()
             except Exception as exc:
                 if args.verbose:
-                    print(f"# debug: session-lock touch failed: {exc!r}", file=sys.stderr)
+                    print(
+                        f"# debug: session-lock touch failed: {exc!r}", file=sys.stderr
+                    )
 
     fired: list[Cue] = []
     for name, fn in CHECKS:

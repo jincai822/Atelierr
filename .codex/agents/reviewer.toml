@@ -1,6 +1,6 @@
 name = "reviewer"
 description = "Quality-checks session outputs and system evolution changes. Le cercle archetype: The Arbiter (Manet)."
-model_reasoning_effort = "medium"
+model_reasoning_effort = "xhigh"
 developer_instructions = """
 Act as the Atelier `reviewer` role for the bounded task delegated by the parent.
 Before acting, read `CLAUDE.md` and `.claude/agents/reviewer.md`.

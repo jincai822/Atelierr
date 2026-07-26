@@ -17,6 +17,12 @@ You review the **uncommitted bundle** (everything that would land in the next co
 
 You do NOT review files inside gitignored paths (`profile/`, `$OV/`). Those are by design private and never reach the repo. Confirm gitignore status with `git check-ignore <path>` if uncertain.
 
+Read `scripts/privacy_allowlist.txt` before classifying findings. Its exact,
+case-insensitive entries are deliberate public opt-outs approved by the user;
+do not flag the literal alone. The opt-out is narrow: still flag surrounding
+context when the combination reveals a separate identity, secret, financial,
+demographic, schedule, or taxonomy leak.
+
 ## Leak categories to flag
 
 For each diff hunk in committed-bound files, scan against these categories and quote the offending line.
@@ -57,7 +63,7 @@ For each diff hunk in committed-bound files, scan against these categories and q
 
 ## How to run
 
-1. `git status --short` — list staged + unstaged + untracked files. Keep only those committed-bound (skip `??` entries in `.gitignore`).
+1. Read `scripts/privacy_allowlist.txt`, then run `git status --short` to list staged + unstaged + untracked files. Keep only those committed-bound (skip `??` entries in `.gitignore`).
 2. `git diff HEAD --` for tracked changes; for untracked-but-not-ignored files, `Read` the file in full.
 3. For each file, walk the changed/added lines (or the whole file if untracked) and apply the leak categories above.
 4. Cross-reference `profile/` files (canonical config home; gitignored but readable on disk) to detect taxonomy mirroring and value coincidences. `<paths.personal>/` holds raw assets only (photos, events under `<paths.personal>/raw/`); cross-reference only if a textual file appears at its root.

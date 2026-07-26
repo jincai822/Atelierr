@@ -1,18 +1,24 @@
 ---
-description: Autonomous nightly decay sweep with auto-commit; fired by macOS launchd at 05:00 local.
+description: Autonomous nightly decay sweep with auto-commit; primary macOS launchd attempt at 05:00 local with hourly deferred recovery and wake catch-up.
 ---
 # /autoevo-nightly — Autonomous decay sweep + auto-commit
 
-Fired by macOS `launchd` at 5:00 local. Contract: `protocols/autoevo.md`.
+Fired by macOS `launchd` at 05:00 local, with hourly lightweight checks for a
+missed or deferred cycle and wake/login catch-up. Contract:
+`protocols/autoevo.md`.
 
-This command is intended for **headless invocation** through `scripts/routine_runner.sh`, which uses the selected local runtime. Codex is the shipped default; Claude can be selected persistently with `python3 scripts/atelier_runtime.py use claude` or for one process with `ATELIER_RUNTIME=claude`. It runs unattended, auto-applies the high-confidence Forgetter band, logs the rest to a pending queue for next /hi, and commits every destructive op to `$OV`. It never pushes. It never touches `<paths.wiki>/`, `<paths.daily_notes>/`, or anything outside the three working-tier sweep scopes (`<paths.wip>/`, `<paths.research>/`, `<paths.reflections>/`). `<paths.agent_findings>/` is a write target for the audit log only, never a sweep scope.
+This command is intended for **headless invocation** through `scripts/routine_runner.sh`, which always uses Codex so its unattended sandbox, sanitized environment, and approval policy are enforceable. Interactive Claude and Codex selection remains separate. It runs unattended, auto-applies the high-confidence Forgetter band, logs the rest to a pending queue for next /hi, and commits every destructive op to `$OV`. It never pushes. It never touches `<paths.wiki>/`, `<paths.daily_notes>/`, or anything outside the three working-tier sweep scopes (`<paths.wip>/`, `<paths.research>/`, `<paths.reflections>/`). `<paths.agent_findings>/` is a write target for the audit log only, never a sweep scope.
 
 If invoked interactively, the same contract holds — the bot does not wait for human approval. To review what it does before it does it, set the `DRY_RUN=1` env var (see step 8).
 
 ## Run shape
 
 ```
-launchd 05:00 -> routine_runner.sh -> selected headless runtime -> orchestrator runs this file
+launchd hourly calendar check or RunAtLoad
+  -> routine_runner.sh
+  -> deterministic autoevo_preflight.py
+     -> blocked: audit + deferred claim, no model
+     -> ready: headless Codex -> orchestrator runs this file
 ```
 
 The orchestrator MUST execute this command verbatim, sequentially. No parallel agent dispatches (each commit must complete before the next op begins). On any unrecoverable error, abort the run, write the partial audit log, and exit. Failures surface as cues at next /hi via the pre-flight gates section.
@@ -35,7 +41,8 @@ Refuses to start the run. Implementation: step 1 gates. Triggers on any of:
 - `zettelm/` submodule dirty
 - `privacy_check.py --json` returns `hit_count > 0`
 
-Exit: 0, audit log § Skipped with gate name + detail. The next nightly fires a fresh cycle.
+Exit: 0, audit log § Skipped with gate name + detail. The claim records the
+earliest safe retry time; an hourly calendar check retries that cycle when due.
 
 ### Condition 2: Per-step budget exhaustion
 
@@ -71,13 +78,20 @@ expires_at = '<YYYY-MM-DD>'   # Auto-recovery date. Step 7 sets this to
                               # expires_at <= RUN_DATE.
 ```
 
-TOML literal strings (single-quoted) are used throughout for filesystem paths and dates; they need no escaping and survive any bash heredoc quoting unchanged. If a future failure mode introduces a path containing a single quote, switch that field to a multi-line literal string (`'''...'''`) or to a basic string with proper escaping.
+`scripts/autoevo_quarantine.py` emits escaped TOML basic strings for filesystem
+paths and dates, including paths that contain quotes or backslashes.
 
 The 30-day expiry default is deliberately short: the failure modes that trigger condition 3 (corrupt file, renamed path, permission glitch) are static, not transient. A 30-day cooldown gets the scope back into the dispatch set fast enough that a stale quarantine is visible to the user within a normal operating month.
 
 ### Implementation logic
 
-Three pieces of bash + Python land in three existing steps. The OUTCOMES hand-off between step 2a and step 7 uses a sidecar JSON file (not an env var) so each piece is self-contained and debuggable. All Python heredocs are quoted (`<<'EOF'`) and receive runtime paths via `os.environ`; bash performs no substitution inside the heredoc body. The heredoc `EOF` terminators must sit at column 0 in the bash file when extracted from this markdown.
+Three pieces land in three existing steps. The OUTCOMES hand-off between step
+2a and step 7 uses a sidecar JSON file so each piece is self-contained and
+debuggable. The inline Python heredoc in step 2a is quoted (`<<'EOF'`) and
+receives runtime paths via `os.environ`; bash performs no substitution inside
+it. Steps 2.0 and 7 delegate quarantine reads and mutations to
+`scripts/autoevo_quarantine.py`, using the selected cycle's `RUN_DATE` as their
+single expiry authority.
 
 **Path normalization invariant**: step 2.0 strips trailing slashes from all three dispatch scopes (`RESEARCH_TONIGHT`, `WIP_DIR`, `REFLECTIONS_DIR`) once, into `_STRIPPED` variants. Every downstream consumer (step 2a's SCOPE_PATH, step 7's TOML key, the quarantine sidecar lines) uses the stripped variant. The unstripped originals must not be referenced downstream; they would produce a different key from the TOML's canonical no-trailing-slash form, and the quarantine match would silently never fire.
 
@@ -128,18 +142,10 @@ QUARANTINE_TMP="$PATHS_CACHE/autoevo-${RUN_TS}-quarantined.txt"
 QUARANTINE_SKIPPED="$PATHS_CACHE/autoevo-${RUN_TS}-quarantine-skipped.txt"
 : > "$QUARANTINE_SKIPPED"   # truncate; step 7 reads this later
 
-OV="$OV" \
-  uv run --quiet python3 - <<'EOF' > "$QUARANTINE_TMP"
-import os, sys, tomllib, datetime, pathlib
-p = pathlib.Path(os.environ["OV"]) / "_meta" / "autoevo_quarantine.toml"
-if not p.exists():
-    sys.exit(0)
-data = tomllib.loads(p.read_text())
-today = datetime.date.today().isoformat()
-for q in data.get("quarantine", []):
-    if q.get("consecutive_failures", 0) >= 3 and q.get("expires_at", "") > today:
-        print(q["scope"])
-EOF
+uv run --quiet python3 scripts/autoevo_quarantine.py active-scopes \
+  --state "$OV/_meta/autoevo_quarantine.toml" \
+  --today "$RUN_DATE" \
+  > "$QUARANTINE_TMP"
 
 # Filter the research-subdir list. Strip trailing slashes from each
 # entry; use while-read (not for-in) to survive paths with spaces.
@@ -191,107 +197,36 @@ RESEARCH_TONIGHT_STRIPPED="${RESEARCH_TONIGHT%/}"
 
 #### Step 7: update quarantine TOML and emit quarantine entries into audit log § Skipped
 
-The Python heredoc is quoted (`<<'EOF'`). Bash performs no substitution inside; runtime paths arrive via env vars. Filesystem paths are written as TOML literal strings, which require no escaping.
+Use the deterministic helper so expiry pruning, counter transitions, TOML
+escaping, and audit-section placement stay executable and testable outside the
+model context.
 
 ```bash
-OV="$OV" OUTCOMES_FILE="$OUTCOMES_FILE" PATHS_CACHE="$PATHS_CACHE" \
-RUN_TS="$RUN_TS" \
-  uv run --quiet python3 - <<'EOF'
-import json, os, tomllib, datetime, pathlib
-
-QUARANTINE_EXPIRY_DAYS = 30
-
-OV = pathlib.Path(os.environ["OV"])
-p_toml = OV / "_meta" / "autoevo_quarantine.toml"
-p_outcomes = pathlib.Path(os.environ["OUTCOMES_FILE"])
-
-today = datetime.date.today()
-today_str = today.isoformat()
-
-data = tomllib.loads(p_toml.read_text()) if p_toml.exists() else {"quarantine": []}
-by_scope = {q["scope"]: q for q in data.get("quarantine", [])}
-
-crossed_or_created = 0
-
-outcomes = json.loads(p_outcomes.read_text()) if p_outcomes.exists() else {}
-for scope, outcome in outcomes.items():
-    if outcome == "envelope_returned":
-        by_scope.pop(scope, None)
-    elif outcome == "forgetter_no_envelope":
-        prior_count = by_scope.get(scope, {}).get("consecutive_failures", 0)
-        entry = by_scope.setdefault(scope, {
-            "scope": scope,
-            "first_failed": today_str,
-            "consecutive_failures": 0,
-            "reason": "forgetter_no_envelope",
-            "expires_at": (today + datetime.timedelta(days=QUARANTINE_EXPIRY_DAYS)).isoformat(),
-        })
-        # Invariant: each increment represents one attempt on a distinct
-        # rotation slot. <paths.research>/ subdirs are dispatched at
-        # most once per run by step 2.0's modulo. If step 2.0 ever
-        # batch-dispatches multiple subdirs in one run, re-establish
-        # this invariant by keying the counter on (scope, RUN_TS) and
-        # deduping per run.
-        entry["consecutive_failures"] += 1
-        new_count = entry["consecutive_failures"]
-        # <Q> counts only threshold transitions (prior < 3, new >= 3).
-        if prior_count < 3 and new_count >= 3:
-            crossed_or_created += 1
-
-by_scope = {s: e for s, e in by_scope.items() if e.get("expires_at", "") > today_str}
-
-# Hand-roll TOML emission using literal strings (single-quoted).
-lines = []
-for entry in by_scope.values():
-    lines.append("[[quarantine]]")
-    for k in ("scope", "first_failed", "reason", "expires_at"):
-        lines.append(f"{k} = '{entry[k]}'")
-    lines.append(f"consecutive_failures = {int(entry['consecutive_failures'])}")
-    lines.append("")
-body = "\n".join(lines) + "\n"
-
-# Atomic write: sibling tmpfile + os.replace.
-tmp = p_toml.with_suffix(".toml.tmp")
-tmp.write_text(body)
-tmp.replace(p_toml)
-
-# Emit the <Q> count to a sidecar so the orchestrator can substitute
-# into the commit-message heredoc.
-cache = pathlib.Path(os.environ["PATHS_CACHE"])
-ts = os.environ["RUN_TS"]
-(cache / f"autoevo-{ts}-quarantine-count.txt").write_text(str(crossed_or_created))
-EOF
+QUARANTINE_COUNT_FILE="$PATHS_CACHE/autoevo-${RUN_TS}-quarantine-count.txt"
+uv run --quiet python3 scripts/autoevo_quarantine.py update \
+  --outcomes "$OUTCOMES_FILE" \
+  --state "$OV/_meta/autoevo_quarantine.toml" \
+  --count-file "$QUARANTINE_COUNT_FILE" \
+  --today "$RUN_DATE"
 ```
 
-Audit-log integration. The existing step 7 writes the audit log directly to its final path. Bind the path explicitly so the quarantine append is unambiguous:
+After Step 7 writes the complete audit section, insert the generated quarantine
+lines into the latest `### Skipped (reason)` section before staging:
 
 ```bash
 AUDIT_LOG_PATH="$OV/${FINDINGS_REL}/autoevo-applied-${RUN_DATE}.md"
-
-# After the existing step 7 has constructed and written the audit log
-# (with its § Skipped section already containing any pre-flight gate
-# aborts), append the quarantine-skipped lines:
-if [ -s "$QUARANTINE_SKIPPED" ]; then
-    cat "$QUARANTINE_SKIPPED" >> "$AUDIT_LOG_PATH"
-fi
+uv run --quiet python3 scripts/autoevo_quarantine.py insert-skipped \
+  --audit "$AUDIT_LOG_PATH" \
+  --skipped-lines "$QUARANTINE_SKIPPED"
 ```
 
-Audit-log commit. Matches the existing step 7 convention exactly: `<<'EOF'` heredoc with `<RUN_DATE>`, `<N>`, `<M>`, `<K>` as orchestrator-substituted placeholders, plus the new `<Q>` placeholder which the orchestrator reads from `$PATHS_CACHE/autoevo-${RUN_TS}-quarantine-count.txt`.
+Do not commit quarantine state in this subsection. Step 7 owns the single final
+path-limited commit for the audit, all decay reports, and quarantine state.
+Because the vault is whitelist-ignored, Step 7 uses `git add -f` when the
+quarantine TOML is first created.
 
-```bash
-git -C "$OV" add -- "_meta/autoevo_quarantine.toml"
-git -C "$OV" add -- "${FINDINGS_REL}/autoevo-applied-${RUN_DATE}.md"
-git -C "$OV" commit -m "$(cat <<'EOF'
-[autoevo:audit] agent-findings: record nightly run <RUN_DATE>
-
-Auto-applied: <N>, Pending: <M>, Errors: <K>, Quarantined: <Q>
-
-Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
-EOF
-)"
-```
-
-The orchestrator substitutes `<RUN_DATE>`, `<N>`, `<M>`, `<K>` from the values it already computes in the existing step 7, and substitutes `<Q>` from the count sidecar file. No bash bindings required; same idiom as the existing commits.
+The orchestrator substitutes `<Q>` in Step 7 from
+`$QUARANTINE_COUNT_FILE`.
 
 `<Q>` counts only threshold transitions (prior_count < 3 AND new_count >= 3). New entries with counter=1 or counter=2 do not contribute. Entries that increment beyond 3 also do not contribute.
 
@@ -319,7 +254,7 @@ Fatal errors not covered by any condition (snapshot cp failed, commit aborted by
 | Step 2.0 | normalize `WIP_DIR_STRIPPED` / `REFLECTIONS_DIR_STRIPPED` / `RESEARCH_TONIGHT_STRIPPED` (after rotation); parse quarantine TOML into tempfile; filter dispatch list after sort, before empty-list guard; write `$QUARANTINE_SKIPPED` for step 7 to consume; set `SKIP_WIP` / `SKIP_REFLECTIONS` flags for step 2.1; add all-research-subdirs-quarantined guard |
 | Step 2.1 | dispatch with `_STRIPPED` paths (not the originals). Honor `SKIP_WIP` / `SKIP_REFLECTIONS` flags by bypassing the corresponding Forgetter dispatch. Concrete pattern: `if [ $SKIP_WIP -eq 0 ]; then ...existing wip dispatch with WIP_DIR_STRIPPED... ; fi`. Same for reflections; research uses `RESEARCH_TONIGHT_STRIPPED`. |
 | Step 2a | use the `_STRIPPED` scope path as both the dispatch target AND the SCOPE_PATH key in the OUTCOMES sidecar write |
-| Step 7 | bind `AUDIT_LOG_PATH`; apply quarantine update logic; append `$QUARANTINE_SKIPPED` into `$AUDIT_LOG_PATH` after the existing § Skipped emission; orchestrator reads count sidecar and substitutes `<Q>` into the commit-message heredoc alongside the existing `<RUN_DATE>`, `<N>`, `<M>`, `<K>` substitutions; `git add` the quarantine TOML alongside the audit log |
+| Step 7 | bind `AUDIT_LOG_PATH`; render Sweep coverage from the exact `$OUTCOMES_FILE` scope map; run `scripts/autoevo_quarantine.py update`; run its `insert-skipped` command before staging; read the count sidecar and substitute `<Q>` into the commit-message heredoc; `git add` the quarantine TOML alongside the audit log |
 
 ### Deferred (not blocking, tracked for future iteration)
 
@@ -327,13 +262,22 @@ Fatal errors not covered by any condition (snapshot cp failed, commit aborted by
 - Early-warning cue at consecutive_failures 1 or 2.
 - `/autoevo-review` surface for inspecting and resetting quarantine state.
 - Vault-rename hook to update quarantine TOML keys.
-- Eventual extraction of step 7's Python heredoc into `scripts/autoevo_quarantine_update.py` (removes the inline-pseudocode coupling between the contract section and the implementation detail).
 
 ## Step 0: Acquire run identity and resolve registry paths
 
 ```bash
 RUN_TS=$(date +%Y%m%d-%H%M%S)
-RUN_DATE=$(date +%Y-%m-%d)
+if [ -n "${ATELIER_ROUTINE_PROFILE:-}" ] && [ -z "${ATELIER_ROUTINE_CYCLE:-}" ]; then
+  echo "abort: unattended invocation omitted ATELIER_ROUTINE_CYCLE"
+  exit 1
+fi
+if [ -n "${ATELIER_ROUTINE_CYCLE:-}" ]; then
+  RUN_DATE=$(python3 scripts/routine_claim.py autoevo-nightly \
+    --validate-cycle "$ATELIER_ROUTINE_CYCLE")
+else
+  # Current-date fallback is only for an explicit interactive invocation.
+  RUN_DATE=$(date +%Y-%m-%d)
+fi
 echo "autoevo-nightly run started $RUN_TS"
 
 # Resolve registry-defined paths once, bind shell variables for the rest of the run.
@@ -342,14 +286,28 @@ echo "autoevo-nightly run started $RUN_TS"
 PATHS_CACHE=$(uv run --quiet python3 -c "from scripts._paths import tier; print(tier('cache'))")
 PATHS_ARCHIVE=$(uv run --quiet python3 -c "from scripts._paths import tier; print(tier('archive'))")
 PATHS_FINDINGS=$(uv run --quiet python3 -c "from scripts._paths import tier; print(tier('agent_findings'))")
+FINDINGS_REL="${PATHS_FINDINGS#$OV/}"
+DECAY_REPORT_RELS=()
 LOCK="$PATHS_CACHE/atelier-session-lock"
 ```
 
-Bind `<RUN_TS>` and `<RUN_DATE>` for the rest of the run. Subsequent steps use `$PATHS_CACHE`, `$PATHS_ARCHIVE`, `$PATHS_FINDINGS` instead of hardcoded segments, so a registry rename does not silently break the bot.
+Bind `<RUN_TS>` and `<RUN_DATE>` for the rest of the run. Scheduled execution
+uses the wrapper-selected cycle; only an explicit interactive invocation may
+fall back to the current date. Subsequent steps use `$PATHS_CACHE`,
+`$PATHS_ARCHIVE`, `$PATHS_FINDINGS` instead of hardcoded segments, so a
+registry rename does not silently break the bot.
 
 ## Step 1: Pre-flight gates
 
-Each gate writes a one-line entry to the audit log if it trips, then exits 0. The audit log entry surfaces as the next /hi cue.
+The runner has already executed `scripts/autoevo_preflight.py` before starting
+this process. Repeat the mutation gates here as defense in depth because Git or
+session state can change between the runner check and the first write. A gate
+that trips here writes the audit log and returns `noop`; the wrapper-level
+`deferred` retry is available only when the deterministic preflight blocked
+before the model started.
+
+Each gate writes a one-line entry to the audit log if it trips, then exits 0.
+The audit log entry surfaces as the next /hi cue.
 
 ### 1a. Session-active lock
 
@@ -375,6 +333,21 @@ Six hours is the bound per `protocols/autoevo.md`. An absent lock file is treate
 # old check would happily pass and let the bot run on a non-git vault.
 if ! git -C "$OV" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "abort: \$OV is not a git work tree (no recovery surface)"
+  # write audit log § Skipped, exit
+fi
+
+# Resolve and validate the real Git index before calling status. A missing
+# index otherwise looks like every tracked path was deleted and recreated.
+GIT_INDEX=$(git -C "$OV" rev-parse --git-path index)
+GIT_INDEX_LOCK=$(git -C "$OV" rev-parse --git-path index.lock)
+case "$GIT_INDEX" in /*) ;; *) GIT_INDEX="$OV/$GIT_INDEX" ;; esac
+case "$GIT_INDEX_LOCK" in /*) ;; *) GIT_INDEX_LOCK="$OV/$GIT_INDEX_LOCK" ;; esac
+if [ ! -f "$GIT_INDEX" ]; then
+  echo "abort: Git index missing; refuse status-based classification"
+  # write audit log § Skipped, exit
+fi
+if [ -e "$GIT_INDEX_LOCK" ]; then
+  echo "abort: Git index.lock present; never delete or replace it"
   # write audit log § Skipped, exit
 fi
 
@@ -514,7 +487,16 @@ For each Forgetter dispatch return:
    $PATHS_FINDINGS/decay-${RUN_TS}-<scope-slug>.md
    ```
 
-   Use the `Write` tool. The orchestrator HAS write capability; Forgetter does not. The persisted report is human-readable + grep-able + survives across runs as a historical decay record.
+   Use the `Write` tool. The orchestrator HAS write capability; Forgetter does not. Register every written report for the final path-limited commit:
+
+   ```bash
+   REPORT_REL="${FINDINGS_REL}/decay-${RUN_TS}-<scope-slug>.md"
+   DECAY_REPORT_RELS+=("$REPORT_REL")
+   ```
+
+   The persisted report is human-readable, grep-able, and survives across runs
+   as a historical decay record. A report is not considered persisted until
+   Step 7 commits it with the audit log.
 
 3. **Parse `findings_inline`** for routing in step 3. Read `mode`, `summary`, and the per-category arrays. Note the mode: `full` (complete sweep) or `partial` (budget-exhausted) — both have valid findings; `partial` triggers an audit-log § Errors row like `forgetter_partial: scope=<scope>, candidates_evaluated=<n>, reason=<budget | maxTurns-self-stop>` for transparency.
 
@@ -709,6 +691,7 @@ Curator with `mode: auto-apply` runs its scope guards (curator.md § Auto-apply 
 5. **Stage explicit paths.** Do NOT use `git add -A`. Explicit staging keeps the pre-existing "abort on unexpected paths" check in step 4c meaningful:
 
 ```bash
+OP_PATHS=("$TARGET_REL" "${SOURCES[@]}")
 git -C "$OV" add -- "$TARGET_REL"
 for SRC in "${SOURCES[@]}"; do
   [ "$SRC" = "$TARGET_REL" ] && continue   # the survivor stays
@@ -720,7 +703,7 @@ STAGED=$(git -C "$OV" diff --cached --name-only | sort)
 EXPECTED=$(printf '%s\n' "$TARGET_REL" "${SOURCES[@]}" | grep -v "^$TARGET_REL$" | sort -u; echo "$TARGET_REL")
 if [ "$STAGED" != "$(echo "$EXPECTED" | sort -u)" ]; then
   echo "abort op: staged paths diverged from expected"
-  git -C "$OV" restore --staged .
+  git -C "$OV" restore --staged -- "${OP_PATHS[@]}" 2>/dev/null || true
   # Restore the survivor target FIRST — Write already overwrote it with the
   # merged body. `git restore` returns it to HEAD's content (pre-op state).
   # Without this, the survivor stays mutated and the next pre-flight gate
@@ -746,7 +729,7 @@ fi
 # Compute cluster_hash for the tombstone mechanism (protocols/autoevo.md § Revert tombstones).
 CLUSTER_HASH=$(printf '%s\n' "${SOURCES[@]}" | sort -u | shasum -a 1 | cut -c1-12)
 
-git -C "$OV" commit -m "$(cat <<EOF
+git -C "$OV" commit --only -m "$(cat <<EOF
 [autoevo:redundant] <relative dir under \$OV>: merge <N> notes into <target slug>
 
 Source notes:
@@ -760,7 +743,7 @@ Revert: git revert <future sha>
 
 Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
 EOF
-)"
+)" -- "${OP_PATHS[@]}"
 COMMIT_SHA=$(git -C "$OV" rev-parse HEAD)
 ```
 
@@ -811,8 +794,9 @@ mkdir -p "$OV/$ARCHIVE_REL_DIR"
 4. **Move and commit** (use `git mv` so git records this as a rename, not delete+add):
 
 ```bash
-git -C "$OV" mv -- "<source relative path under $OV>" "$TARGET_REL"
-git -C "$OV" commit -m "$(cat <<'EOF'
+OP_PATHS=("$SOURCE_REL" "$TARGET_REL")
+git -C "$OV" mv -- "$SOURCE_REL" "$TARGET_REL"
+git -C "$OV" commit --only -m "$(cat <<'EOF'
 [autoevo:low-signal] archive: <slug> after <N> days inactive
 
 words: <N>, links_in: 0, tags: 0, mtime: <YYYY-MM-DD>
@@ -822,7 +806,7 @@ Auto-band: low-signal-high (all 5 Forgetter conditions + >365d cold)
 
 Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
 EOF
-)"
+)" -- "${OP_PATHS[@]}"
 COMMIT_SHA=$(git -C "$OV" rev-parse HEAD)
 ```
 
@@ -836,24 +820,18 @@ If any commit fails (hook error, permission, disk full, GPG signing prompt):
 2. **Roll back the failed op's staged state** so the working tree returns to a clean baseline. The merge wrote a file and deleted sources; the archive moved a file. Both must be reversed:
 
 ```bash
-# Unstage any partial work the failed op produced.
-git -C "$OV" restore --staged .
-
-# Restore the working tree to HEAD so deleted sources reappear and the merged
-# target reverts to its pre-op content. Snapshots are still in $PATHS_CACHE
-# if a deeper recovery is needed, but `git restore .` is the cheapest correct undo.
-git -C "$OV" restore .
-
-# Archive ops create a freshly-untracked file at $TARGET_REL via `git mv` —
-# `git restore .` does not touch untracked files, so the archive target
-# lingers as untracked dirt and the next pre-flight `git status --porcelain`
-# gate aborts forever. Detect by checking if $TARGET_REL is tracked at HEAD;
-# if not (i.e., this was an archive op), remove the orphan file.
-if [ -n "$TARGET_REL" ] && [ -f "$OV/$TARGET_REL" ]; then
-  if ! git -C "$OV" ls-files --error-unmatch -- "$TARGET_REL" >/dev/null 2>&1; then
-    rm -f "$OV/$TARGET_REL"
+# Unstage and restore only this operation's declared paths. Never use
+# `git restore .`: an external edit can land after preflight, and broad restore
+# would destroy it.
+git -C "$OV" restore --staged -- "${OP_PATHS[@]}" 2>/dev/null || true
+for OP_PATH in "${OP_PATHS[@]}"; do
+  if git -C "$OV" cat-file -e "HEAD:${OP_PATH}" 2>/dev/null; then
+    git -C "$OV" restore --worktree -- "$OP_PATH" 2>/dev/null || true
+  elif [ -f "$OV/$OP_PATH" ]; then
+    # This path did not exist at HEAD and was created by the failed operation.
+    rm -f -- "$OV/$OP_PATH"
   fi
-fi
+done
 ```
 
 3. Run `git -C "$OV" status` and write its output verbatim to audit log § "Errors". The dirty-tree pre-flight gate at next run will catch any residue.
@@ -912,15 +890,15 @@ Append the rendered block(s) to the existing file content, write to `autoevo_pen
 Commit the queue update (this is a `_meta/` config change, not a destructive op, but still belongs in git history for queue-state audit):
 
 ```bash
-git -C "$OV" add _meta/autoevo_pending.toml
-git -C "$OV" commit -m "$(cat <<'EOF'
+git -C "$OV" add -- _meta/autoevo_pending.toml
+git -C "$OV" commit --only -m "$(cat <<'EOF'
 [autoevo:queue] _meta: append <N> pending findings from <RUN_DATE> sweep
 
 Categories: redundant=<n>, time-stale-A=<n>, time-stale-B=<n>, contradicted=<n>, low-signal=<n>
 
 Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
 EOF
-)"
+)" -- _meta/autoevo_pending.toml
 ```
 
 ## Step 6: Run /lint and report
@@ -935,12 +913,22 @@ If lint reports ERROR-level findings that look caused by this run's ops (parse e
 
 ## Step 7: Write audit log
 
-Path: `<paths.agent_findings>/autoevo-applied-<RUN_DATE>.md` (resolve via `$PATHS_FINDINGS` bound in step 0). If a file exists for `<RUN_DATE>` (rare — multiple runs same day), append a new `## Run` section to it. **Always write this file, even when a pre-flight gate aborted the run** — the Skipped / Errors sections are what surface the abort to the user at next /hi via `check_autoevo_ran` in `scripts/cues.py`. Format:
+Path: `<paths.agent_findings>/autoevo-applied-<RUN_DATE>.md` (resolve via `$PATHS_FINDINGS` bound in step 0). If a file exists for `<RUN_DATE>` (rare, because multiple attempts can occur on one day), append a new `## Autoevo Run` section to it. **Always write this file, even when a pre-flight gate aborted the run**. The Skipped / Errors sections are what surface the abort to the user at next /hi via `check_autoevo_ran` in `scripts/cues.py`. On a real sweep, read `$OUTCOMES_FILE`, count every recorded dispatch, and render one coverage line per scope. Do not shorten absolute scopes in this private audit; exact keys let the verifier match dispatch evidence. Format:
 
 ```markdown
 ## Autoevo Run: <RUN_DATE> <HH:MM>
 
 Run ID: <RUN_TS>
+
+### Sweep coverage (<S>)
+- <absolute scope>: envelope_returned
+- <absolute scope>: envelope_returned
+- <absolute scope>: envelope_returned
+
+### Sweep reports (<S>)
+- agent-findings/decay-<RUN_TS>-wip.md
+- agent-findings/decay-<RUN_TS>-<research-scope-slug>.md
+- agent-findings/decay-<RUN_TS>-reflections.md
 
 ### Auto-applied (<N>)
 - [autoevo:redundant] <scope>: merge <N> notes into <slug> — sha <abbrev sha>
@@ -968,22 +956,37 @@ Run ID: <RUN_TS>
 - (none) | <error description>
 ```
 
-Commit the audit log with a path-limited commit. This is load-bearing on
-pre-flight aborts: the gate may have detected an already-dirty index, and a
-plain `git commit` would absorb unrelated staged work. The path resolves via
-the registry-bound `$PATHS_FINDINGS` from step 0:
+Commit the audit log, every registered decay report, and quarantine state in
+one path-limited commit. This is load-bearing: the verifier requires every
+historical report named by the latest run to exist in the same commit as the
+audit. A plain `git commit` could absorb unrelated staged work. The paths
+resolve from the registry bindings in Step 0:
 
 ```bash
-FINDINGS_REL="${PATHS_FINDINGS#$OV/}"   # portable shell strip; macOS realpath has no --relative-to
-git -C "$OV" add -- "${FINDINGS_REL}/autoevo-applied-${RUN_DATE}.md"
+AUDIT_REL="${FINDINGS_REL}/autoevo-applied-${RUN_DATE}.md"
+FINAL_COMMIT_PATHS=("$AUDIT_REL")
+git -C "$OV" add -- "$AUDIT_REL"
+
+if [ ${#DECAY_REPORT_RELS[@]} -gt 0 ]; then
+  git -C "$OV" add -- "${DECAY_REPORT_RELS[@]}"
+  FINAL_COMMIT_PATHS+=("${DECAY_REPORT_RELS[@]}")
+fi
+
+if [ -f "$OV/_meta/autoevo_quarantine.toml" ]; then
+  # The vault whitelist ignores new TOML files. Force-add only this declared
+  # bot-owned state file; never broaden the force-add path.
+  git -C "$OV" add -f -- "_meta/autoevo_quarantine.toml"
+  FINAL_COMMIT_PATHS+=("_meta/autoevo_quarantine.toml")
+fi
+
 git -C "$OV" commit --only -m "$(cat <<'EOF'
 [autoevo:audit] agent-findings: record nightly run <RUN_DATE>
 
-Auto-applied: <N>, Pending: <M>, Errors: <K>
+Auto-applied: <N>, Pending: <M>, Errors: <K>, Quarantined: <Q>
 
 Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
 EOF
-)" -- "${FINDINGS_REL}/autoevo-applied-${RUN_DATE}.md"
+)" -- "${FINAL_COMMIT_PATHS[@]}"
 ```
 
 Never remove an existing `index.lock`, reset the index, or otherwise repair Git
@@ -993,7 +996,7 @@ log, and exit 0. `check_autoevo_ran` reads the file directly, so the skip still
 surfaces next session. On a normal run that passed the clean-tree gate, an audit
 commit failure remains fatal.
 
-The audit log itself being committed means `git log --grep='\[autoevo:audit\]'` gives a chronological index of every successful audit commit.
+The audit log itself being committed means `git log --grep='\[autoevo:audit\]'` gives a chronological index of every successful audit commit. After delivery and lock release, the runner automatically calls `scripts/autoevo_verify.py --cycle <RUN_DATE> --json`. It requires a claim-owned event journal, at least three `envelope_returned` coverage entries, one committed decay report per returned envelope, actual lint output, empty Skipped and Errors sections, matching sidecars, and a committed clean worktree. The claim remains `completion-uncertain` with `verification = "pending"` until this check passes, then becomes `completed` with `verification = "passed"`.
 
 ## Step 8: Dry-run override
 
@@ -1008,10 +1011,18 @@ Use during initial deployment or after band-threshold tuning, then unset to resu
 
 ## Step 9: Exit cleanly
 
-Print one summary line to stdout (captured to `/tmp/com.atelier.autoevo-nightly.out` via the plist's `StandardOutPath`):
+Return the wrapper's structured result object. A normal run uses `delivered`; a
+pre-flight gate that still wrote its audit log uses `noop`; a fatal error uses
+`failed`.
 
-```
-autoevo-nightly <RUN_DATE>: auto=<N>, pending=<M>, dismissed=<K>, errors=<E>, lint_errors=<L>
+```json
+{
+  "routine": "autoevo-nightly",
+  "outcome": "delivered",
+  "output_file": "agent-findings/autoevo-applied-<RUN_DATE>.md",
+  "summary": "sweeps=<S>, auto=<N>, pending=<M>, dismissed=<K>, errors=<E>, lint_errors=<L>",
+  "skipped_inputs": []
+}
 ```
 
 Exit code:

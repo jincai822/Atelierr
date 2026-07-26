@@ -56,6 +56,10 @@ harness/paths.local.toml
 harness/runtime.local.toml
 harness/.runtime.local.*.tmp
 
+# Per-machine identity for single-owner local routine scheduling.
+harness/routine_owner.local.toml
+harness/.routine_owner.local.toml.*
+
 # Per-user environment overrides for headless launchd invocations (export OV=..., etc.).
 # Sourced by scripts/launchd/com.atelier.autoevo-nightly.plist. Contains the user's
 # absolute vault path; should never be committed.
@@ -67,6 +71,10 @@ harness/env.local.sh
 # the canonical home for Readwise snapshots and review reports.
 cache/
 .cache/
+
+# Last-resort containment for accidental repo-relative scratch. Agents must
+# use mktemp for disposable artifacts and $OV/cache for reusable derivatives.
+/tmp/
 
 # One-off / migration scripts that hardcode private vault content
 # (TOPIC_MAPs, lab lists, wiki entry titles). The steady-state generic

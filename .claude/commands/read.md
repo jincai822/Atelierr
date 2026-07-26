@@ -27,6 +27,8 @@ If the source is a paper or an external URL (arXiv, conference PDF, a paper name
 
 3. Fetch from the web only if both the note query (step 1) and the PDF glob (step 2) miss. After a web fetch, cache the PDF into `<paths.papers>/` so the next read is a local hit (naming convention in `sources/local-papers.md`).
 
+4. If the resolved source is a local PDF, materialize or reuse the paper text cache before dispatch. Run `python3 scripts/paper_cache.py "<resolved-pdf-path>"`; it returns `<paths.cache>/<paper-slug>/`. Pass that directory as `cache_path` to every Reader or Scholar. For a normal URL or a non-PDF source, skip this cache step and use the source directly. Follow the shared scratch rule in `CLAUDE.md`; one-session page renders use `mktemp -d` and are removed when reading finishes.
+
 ## Prefetch Step (Readwise podcasts, videos, articles; applies to all three Read modes)
 
 If the source is a Readwise podcast, video, or article (user provides a Readwise URL, `document_id`, or names a podcast), **cache the transcript once before dispatching any reading agent (Reader or Scholar)**. Independent fetches across parallel reading-agent instances are the failure mode this step exists to avoid (same reasoning as the paper cache).

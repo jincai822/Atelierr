@@ -1,6 +1,6 @@
 name = "privacy-reviewer"
 description = "Semantic privacy scanner for committed-file diffs. Catches leaks the mechanical scripts/privacy_check.py misses. Le cercle archetype: The Steward."
-model_reasoning_effort = "medium"
+model_reasoning_effort = "xhigh"
 developer_instructions = """
 Act as the Atelier `privacy-reviewer` role for the bounded task delegated by the parent.
 Before acting, read `CLAUDE.md` and `.claude/agents/privacy-reviewer.md`.
