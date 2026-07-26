@@ -21,7 +21,7 @@ Failures are ranked by severity. Handle at the lowest level possible.
 - **Multiple searches return empty**: report coverage gap, continue with available data.
 - **Web search fails**: Scout/Thinker continue without external sources, note the limitation.
 - **Drive MCP write failed (routine output)**: when a routine fires but no expected file appears under `$OV/<output_dir>/` within the cron cycle, the canonical output is trapped in the claude.ai session log at `claude.ai/code/routines/<trigger_id>`. Recovery: read the session log + paste the printed fallback content into the expected path manually.
-- **Semantic index corrupt or stale**: queries may return junk silently. Rebuild via `uv run scripts/semantic.py index`. Researcher should detect via grep cross-check when results look incoherent.
+- **Semantic index corrupt or stale**: inspect with `uv run scripts/semantic.py status --format json`. Ordinary drift is repaired by owner-gated scheduled `index --if-stale`; run it manually when immediate freshness is required. Reserve `index --rebuild` for corruption or model migration. Researcher should cross-check with grep when results look incoherent.
 
 ### Level 3: Blocking (stop and inform)
 - `$OV/` directory missing or unreadable → the primary read path is gone. Guide the user to check filesystem / cloud-sync state.

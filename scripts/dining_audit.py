@@ -41,6 +41,7 @@ UNKNOWN = {"", "—", "-"}
 DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 MONEY_RE = re.compile(r"^(~)?\$([0-9]+(?:\.[0-9]{1,2})?)$")
 PROFILE_ROLE_RE = re.compile(r"^[A-Za-z][A-Za-z -]+$")
+PENDING_MARKERS = ("待确认", "TBD", "UNKNOWN")
 
 
 @dataclass(frozen=True)
@@ -332,6 +333,58 @@ def _audit_meal_history(
             continue
 
         row = dict(zip(EXPECTED_COLUMNS, cells, strict=True))
+        if any(
+            marker.casefold() in row["Restaurant"].casefold()
+            for marker in PENDING_MARKERS
+        ):
+            findings.append(
+                Finding(
+                    "error",
+                    "restaurant_pending",
+                    display,
+                    f"canonical row still has a placeholder restaurant: {row['Restaurant']!r}",
+                    line_number,
+                )
+            )
+        score_text = row["评分"].replace("*", "").strip()
+        if score_text not in UNKNOWN:
+            try:
+                score = int(score_text)
+            except ValueError:
+                score = 0
+            if not 1 <= score <= 10:
+                findings.append(
+                    Finding(
+                        "error",
+                        "score_invalid",
+                        display,
+                        f"score must be an integer from 1 to 10 or dash: {row['评分']!r}",
+                        line_number,
+                    )
+                )
+        if row["再去"] not in {*UNKNOWN, "Y", "N", "Maybe"}:
+            findings.append(
+                Finding(
+                    "error",
+                    "revisit_invalid",
+                    display,
+                    f"revisit must be Y, N, Maybe, or dash: {row['再去']!r}",
+                    line_number,
+                )
+            )
+        if any(
+            marker.casefold() in row["必点·备注"].casefold()
+            for marker in PENDING_MARKERS
+        ):
+            findings.append(
+                Finding(
+                    "error",
+                    "capture_pending",
+                    display,
+                    "canonical row explicitly records unresolved capture fields",
+                    line_number,
+                )
+            )
         date_match = DATE_RE.search(row["Date"])
         if not date_match:
             findings.append(

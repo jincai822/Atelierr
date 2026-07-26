@@ -1,6 +1,8 @@
 # launchd — macOS scheduled jobs
 
-Atelier-managed `launchd` plists for local scheduled work. Contract per `protocols/autoevo.md`.
+Atelier-managed `launchd` plists for local scheduled work. Model-driven
+autoevo behavior is governed by `protocols/autoevo.md`; deterministic semantic
+cache maintenance is governed by `sources/semantic.md`.
 
 These are user-installable artifacts: copy to `~/Library/LaunchAgents/` and load with `launchctl`. Public, vault-agnostic plists live here. Private routine-specific plists may live under `$OV/_meta/launchd/`; what gets loaded into launchd is always a machine-local copy.
 
@@ -9,6 +11,7 @@ These are user-installable artifacts: copy to `~/Library/LaunchAgents/` and load
 | File | Schedule | Contract |
 |---|---|---|
 | `com.atelier.autoevo-nightly.plist` | 05:00 primary, hourly deferred recovery, wake/login catch-up | `protocols/autoevo.md` + `.claude/commands/autoevo-nightly.md` |
+| `com.atelier.semantic-index.plist` | 07:30 and 19:30 local, plus load/login catch-up | Owner-gated, offline, timeout-bounded `scripts/semantic.py index --if-stale` |
 
 ## Install
 
@@ -26,7 +29,7 @@ export OV="/path/to/your/vault"
 EOF
 ```
 
-If `OV` is exported from `~/.zprofile` or `~/.profile` already (login-shell scopes), the wrapper picks it up from there — `env.local.sh` is the fallback for users whose `OV` lives only in `.zshrc` (interactive-only). The wrapper aborts loudly (`ERROR: OV not set ...`) if none of those sources work, which surfaces in `/tmp/com.atelier.autoevo-nightly.err`.
+If `OV` is exported from `~/.zprofile` or `~/.profile` already (login-shell scopes), the wrappers pick it up from there — `env.local.sh` is the fallback for users whose `OV` lives only in `.zshrc` (interactive-only). A wrapper aborts loudly (`ERROR: OV not set ...`) if none of those sources work; the error surfaces in that job's `/tmp/com.atelier.*.err` log.
 
 ### Step 2: claim this machine as the local-routine owner
 
@@ -165,6 +168,10 @@ Unattended local routines always use Codex. `atelier_runtime.py use claude` and
 PLIST=com.atelier.autoevo-nightly.plist
 cp "scripts/launchd/${PLIST}" "$HOME/Library/LaunchAgents/${PLIST}"
 launchctl load "$HOME/Library/LaunchAgents/${PLIST}"
+
+PLIST=com.atelier.semantic-index.plist
+cp "scripts/launchd/${PLIST}" "$HOME/Library/LaunchAgents/${PLIST}"
+launchctl load "$HOME/Library/LaunchAgents/${PLIST}"
 ```
 
 Install private local-routine plists from the shared vault on the owner machine:
@@ -230,6 +237,8 @@ sudo pmset repeat cancel
 ```bash
 launchctl unload "$HOME/Library/LaunchAgents/com.atelier.autoevo-nightly.plist"
 rm "$HOME/Library/LaunchAgents/com.atelier.autoevo-nightly.plist"
+launchctl unload "$HOME/Library/LaunchAgents/com.atelier.semantic-index.plist"
+rm "$HOME/Library/LaunchAgents/com.atelier.semantic-index.plist"
 sudo pmset repeat cancel
 ```
 
@@ -248,6 +257,15 @@ Or run the Codex wrapper directly, skipping the stagger:
 ```bash
 ATELIER_SKIP_STAGGER=1 \
   scripts/routine_runner.sh autoevo-nightly /autoevo-nightly
+```
+
+Test semantic maintenance separately. It is deterministic, owner-gated, and
+offline; it skips model loading when the index is current:
+
+```bash
+scripts/semantic_index_runner.sh
+uv run scripts/semantic.py status --format json
+tail -f /tmp/com.atelier.semantic-index.out /tmp/com.atelier.semantic-index.err
 ```
 
 The audit log for the run itself (what the bot did to the vault) lives at `$OV/agent-findings/autoevo-applied-<YYYY-MM-DD>.md`; the `/tmp/` files capture aggregate wrapper and Codex CLI output. Each acquired attempt also records a private event journal under `$OV/cache/` in its claim. The claim file at `$OV/_meta/routine_runs/autoevo-nightly/<date>.toml` records status, timing, journal path, and verification evidence.
@@ -320,7 +338,8 @@ approved retry even before its local Drive copy converges.
 
 ## Path assumptions
 
-The plist delegates to `scripts/routine_runner.sh`, which assumes:
+The plists delegate to `scripts/routine_runner.sh` or
+`scripts/semantic_index_runner.sh`. They assume:
 
 - Atelier checked out at `~/atelier/`. Edit the plist's `ProgramArguments` path if elsewhere.
 - `codex` on `PATH` via `/opt/homebrew/bin`, `/usr/local/bin`, or `~/.local/bin`. The plist and wrapper populate these locations because `launchd` does not inherit an interactive shell's `PATH`.

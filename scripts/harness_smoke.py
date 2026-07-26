@@ -32,6 +32,7 @@ import routine_audit
 import routine_claim
 import routine_lock
 import routine_result
+import semantic
 import semantic_backends
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -398,6 +399,10 @@ def check_dining_audit() -> None:
             .replace(
                 "| ~$30.00 | ~$10.00 |",
                 "| ~$30.00 | ~$12.00 |",
+            )
+            .replace(
+                "| 2026-01-01 | A |",
+                "| 2026-01-01 | TBD |",
             ),
             encoding="utf-8",
         )
@@ -408,6 +413,10 @@ def check_dining_audit() -> None:
         expect(
             "per_person_mismatch" in error_codes,
             "dining audit missed per-person arithmetic drift",
+        )
+        expect(
+            "restaurant_pending" in error_codes,
+            "dining audit accepted a placeholder restaurant",
         )
 
 
@@ -448,6 +457,103 @@ def check_semantic_cache_first() -> None:
                 os.environ.pop("HF_HUB_CACHE", None)
             else:
                 os.environ["HF_HUB_CACHE"] = original_cache
+
+
+def check_semantic_maintenance() -> None:
+    with tempfile.TemporaryDirectory(prefix="atelier-semantic-freshness-") as temp_dir:
+        vault = Path(temp_dir)
+        stable = vault / "stable.md"
+        modified = vault / "modified.md"
+        added = vault / "added.md"
+        empty = vault / "empty.md"
+        whitespace = vault / "whitespace.md"
+        stable.write_text("stable\n", encoding="utf-8")
+        modified.write_text("modified\n", encoding="utf-8")
+        added.write_text("added\n", encoding="utf-8")
+        empty.write_text("", encoding="utf-8")
+        whitespace.write_text(" \n\t", encoding="utf-8")
+
+        baseline = 1_700_000_000.0
+        os.utime(stable, (baseline, baseline))
+        os.utime(modified, (baseline + 10, baseline + 10))
+        os.utime(added, (baseline + 20, baseline + 20))
+        indexed = {
+            "stable.md": baseline,
+            "modified.md": baseline,
+            "removed.md": baseline,
+        }
+        files = list(vault.glob("*.md"))
+        stale = semantic._freshness_from_files(files, vault, indexed)
+        expect(
+            stale["fresh"] is False
+            and stale["current_files"] == 3
+            and stale["new"] == 1
+            and stale["modified"] == 1
+            and stale["removed"] == 1
+            and stale["unreadable"] == 0,
+            f"semantic freshness drift classification failed: {stale}",
+        )
+
+        current = {
+            "stable.md": stable.stat().st_mtime,
+            "modified.md": modified.stat().st_mtime,
+            "added.md": added.stat().st_mtime,
+        }
+        fresh = semantic._freshness_from_files(files, vault, current)
+        expect(
+            fresh["fresh"] is True,
+            f"semantic freshness rejected a current index: {fresh}",
+        )
+
+    args = semantic.build_parser().parse_args(["index", "--if-stale"])
+    expect(
+        args.if_stale is True and args.rebuild is False,
+        "semantic index parser lost the drift-gated maintenance mode",
+    )
+
+    runner = (ROOT / "scripts" / "semantic_index_runner.sh").read_text(encoding="utf-8")
+    for fragment in (
+        'routine_owner.py" check --json',
+        "HF_HUB_OFFLINE=1",
+        "TRANSFORMERS_OFFLINE=1",
+        "command_timeout.py",
+        "/usr/bin/caffeinate",
+        "uv run --offline --frozen scripts/semantic.py index --if-stale",
+    ):
+        expect(
+            fragment in runner,
+            f"semantic maintenance runner missing contract fragment: {fragment}",
+        )
+    expect(
+        "codex" not in runner.lower(), "deterministic index maintenance invokes Codex"
+    )
+
+    plist_path = ROOT / "scripts" / "launchd" / "com.atelier.semantic-index.plist"
+    plist = plistlib.loads(plist_path.read_bytes())
+    expect(
+        plist.get("Label") == "com.atelier.semantic-index"
+        and plist.get("RunAtLoad") is True
+        and plist.get("StartCalendarInterval")
+        == [
+            {"Hour": 7, "Minute": 30},
+            {"Hour": 19, "Minute": 30},
+        ],
+        "semantic maintenance launchd schedule drift",
+    )
+    arguments = plist.get("ProgramArguments", [])
+    expect(
+        any("semantic_index_runner.sh" in str(value) for value in arguments),
+        "semantic maintenance plist does not invoke its deterministic runner",
+    )
+
+    for path in (
+        ROOT / ".claude" / "commands" / "autoevo-nightly.md",
+        ROOT / "protocols" / "autoevo.md",
+    ):
+        expect(
+            "lazy rebuild" not in path.read_text(encoding="utf-8").lower(),
+            f"{path.relative_to(ROOT)} still claims query refreshes the index",
+        )
 
 
 def check_autoevo_reliability() -> None:
@@ -3348,6 +3454,7 @@ def main() -> int:
         ("paper cache", check_paper_cache),
         ("dining audit", check_dining_audit),
         ("semantic cache-first", check_semantic_cache_first),
+        ("semantic maintenance", check_semantic_maintenance),
         ("autoevo reliability", check_autoevo_reliability),
         ("runtime selector", check_runtime_selector),
         ("runtime cue syntax", check_runtime_cue_syntax),

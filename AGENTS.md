@@ -66,6 +66,7 @@ High-frequency operations. Lift these directly instead of re-deriving from `prot
 | Need | Command |
 |---|---|
 | Semantic vault search | `uv run scripts/semantic.py query "<concept>" --top 10` |
+| Semantic index freshness | `uv run scripts/semantic.py status --format json` |
 | Today's daily note | `cat "$OV/daily-notes/$(date +%Y/%m/%Y-%m-%d).md"` (before 03:00 local also read previous day) |
 | Wiki entry by title | `rg -l "<title>" "$OV/wiki/"` |
 | Privacy gate | `uv run scripts/privacy_check.py --json` |

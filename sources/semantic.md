@@ -22,7 +22,8 @@ even when no complete snapshot can be resolved.
 
 ```
 scripts/semantic.py query "<text>" [OPTIONS]
-scripts/semantic.py index [--rebuild]
+scripts/semantic.py status [--format text|json]
+scripts/semantic.py index [--rebuild | --if-stale]
 scripts/semantic.py --help
 ```
 
@@ -37,6 +38,15 @@ scripts/semantic.py --help
 | `--lang {zh,en,auto}` | Query language hint. No-op in stub mode. | `auto` |
 | `--format {tsv,json}` | Output format. | `tsv` |
 | `--sources LIST` | Comma-separated sources: `local`, `readwise`. Readwise is a federated cloud search via the `readwise` CLI (real mode only; stub mode is local-only and ignores this flag); if the CLI is not installed, that source is skipped with a "CLI not installed, skipping" stderr warning. | `local,readwise` (federated) |
+
+### Freshness and indexing
+
+| Call | Meaning |
+|---|---|
+| `semantic.py status --format json` | Compare current nonempty Markdown paths and mtimes with the stored index without loading the embedding model. |
+| `semantic.py index` | Incrementally update changed paths and remove deleted paths. |
+| `semantic.py index --if-stale` | Run the lightweight freshness check first; load the embedding model only when drift exists. Used by scheduled maintenance. |
+| `semantic.py index --rebuild` | Clear and rebuild the complete index. Keep this manual. |
 
 ### Output
 
@@ -58,7 +68,9 @@ JSON (`--format json`): a list of objects with `path`, `score`, `matched_tokens`
 ### Exit codes
 
 - `0` — success (including zero results).
+- `0` — `status` completed, whether the index is fresh or stale.
 - `2` — usage error (bad flag, unparseable date).
+- `2` — `status` could not inspect an existing index.
 
 ### Streams
 
@@ -132,6 +144,13 @@ uv sync                                    # install deps (venv at ~/.cache/atel
 uv run python scripts/semantic.py index    # build index (~5K files, ~10 min on MPS)
 uv run python scripts/semantic.py query "curiosity vectors"  # search
 ```
+
+On the active local-routine owner, `com.atelier.semantic-index` runs at 07:30
+and 19:30 local time plus `RunAtLoad`. Its deterministic runner is
+owner-gated, offline, and invokes `index --if-stale`; no model is loaded when
+the corpus is already current. A writer lock prevents overlapping refreshes,
+and `caffeinate` plus an epoch timeout bound a real rebuild across macOS sleep.
+The index remains a machine-local derived cache.
 
 ## Quality stack
 

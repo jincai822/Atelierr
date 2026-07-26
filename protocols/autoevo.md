@@ -370,7 +370,10 @@ The auto-detection check above takes precedence; explicit tombstones are an addi
 - **Push.** Bot never pushes to `origin`; push remains user-driven per the `$OV` git push convention.
 - **Daily notes.** Bot never reads them as autoevo targets. CLAUDE.md § Writing Rules forbids system writes to daily notes (sole exception: Scribe `daily_note` verbatim capture); this protocol upholds that.
 - **Wiki rewrites.** Contradicted findings against L4 are always pending-queue, never auto-applied. The Curator wiki-edit path requires human approval.
-- **Re-indexing decisions.** If the semantic index needs rebuild after a Curator delete/move, this protocol defers to whatever `scripts/semantic.py` does at next query (lazy rebuild assumed unless verified otherwise).
+- **Re-indexing decisions.** Autoevo does not mutate the semantic index inline.
+  The owner-gated `com.atelier.semantic-index` launchd job detects corpus drift
+  and runs `scripts/semantic.py index --if-stale`. Query remains read-only; a
+  full `--rebuild` remains a manual recovery action.
 
 ## Related
 

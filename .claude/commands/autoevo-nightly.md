@@ -1048,7 +1048,9 @@ The cue at next /hi surfaces the audit log's Skipped / Errors sections regardles
 - Does not edit daily notes.
 - Does not auto-apply on `<paths.wiki>/`.
 - Does not run synthesis, reflection, or any user-facing output beyond the audit log.
-- Does not re-index the semantic store. Lazy rebuild at next `scripts/semantic.py query` is assumed.
+- Does not re-index the semantic store inline. The owner-gated
+  `com.atelier.semantic-index` launchd job runs
+  `scripts/semantic.py index --if-stale`; query remains read-only.
 
 ## Related
 

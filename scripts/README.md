@@ -6,9 +6,10 @@ Executable tooling for the Atelier knowledge layer. All scripts are stdlib-only 
 
 | Script | Purpose | Phase | Deps |
 |---|---|---|---|
-| `semantic.py` | Local semantic search over `$OV/` — BGE-M3 embeddings + LanceDB with tier-aware reranking; lexical fallback when index is absent | B.5 | `lancedb`, `sentence-transformers` (optional; falls back to lexical) |
+| `semantic.py` | Local semantic search over `$OV/` with model-free freshness inspection, drift-gated incremental indexing, BGE-M3 embeddings, LanceDB, and tier-aware reranking; lexical fallback when index is absent | B.5 | `lancedb`, `sentence-transformers` (optional; falls back to lexical) |
 | `semantic_backends.py` | Backend implementations for semantic.py (LanceDB embedding backend, lexical fallback) | B.5 | `lancedb`, `sentence-transformers` (optional) |
 | `semantic_eval.py` | Offline evaluation harness for semantic.py — builds a wikilink-derived gold set from the vault and computes retrieval metrics | B.5 | `lancedb`, `sentence-transformers` |
+| `semantic_index_runner.sh` | Owner-gated, offline, timeout-bounded launchd wrapper for `semantic.py index --if-stale`; loads no embedding model when the corpus is current | ops | `uv`, `caffeinate`, `routine_owner.py` |
 | `config.py` | Loads device-dependent semantic-index parameters from gitignored `semantic.toml`; safe defaults when the file is missing | B.5 | stdlib |
 | `_paths.py` | Shared path-resolution helpers — fail-loud `$OV` resolution plus logical-tier → physical-segment mapping from `harness/paths.toml` (+ gitignored local layer) | ops | stdlib |
 | `paper_cache.py` | Extracts an L3 paper PDF into a reusable L1 `<paths.cache>/<slug>/paper.txt` with source freshness metadata; refuses repo-local scratch and non-vault sources | ops | stdlib, `pdftotext` CLI |

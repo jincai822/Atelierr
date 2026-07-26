@@ -91,7 +91,7 @@ Voice band vocabulary used in this file:
 
 | Rule | Location | Current Value | Re-test When |
 |------|----------|--------------|-------------|
-| semantic.py is primary for content queries | CLAUDE.md | Real embedding mode | Index is machine-local at `~/.cache/atelier/lance/`; rebuild with `uv run scripts/semantic.py index` |
+| semantic.py is primary for content queries | CLAUDE.md | Real embedding mode | Index is machine-local at `~/.cache/atelier/lance/`; inspect with `uv run scripts/semantic.py status`; owner-gated launchd maintenance runs incremental `index --if-stale`; full rebuild stays manual |
 | Grep for structural queries only | CLAUDE.md | Always | semantic.py covers structural queries too |
 | Retry with synonyms on empty results | error-handling.md | Manual retry | semantic.py handles synonyms natively |
 

@@ -20,7 +20,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple, runtime_checkable
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    runtime_checkable,
+)
 
 import numpy as np
 from numpy.typing import NDArray
@@ -30,22 +39,25 @@ from numpy.typing import NDArray
 # Data types shared across all backends
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Document:
     """A unit of indexable content."""
-    id: str            # "{path}:{chunk_id}"
-    path: str          # relative to repo root
-    chunk_id: int      # 0 = whole file, 1..N for chunks
-    chunk_text: str    # the actual text (stored for re-embedding)
-    tier: str          # L1-L5, derived from path prefix
-    mtime: float       # file mtime at index time
+
+    id: str  # "{path}:{chunk_id}"
+    path: str  # relative to repo root
+    chunk_id: int  # 0 = whole file, 1..N for chunks
+    chunk_text: str  # the actual text (stored for re-embedding)
+    tier: str  # L1-L5, derived from path prefix
+    mtime: float  # file mtime at index time
 
 
 @dataclass
 class SearchResult:
     """A single search hit."""
+
     path: str
-    score: float       # higher is better, [0.0, 1.0] for cosine
+    score: float  # higher is better, [0.0, 1.0] for cosine
     chunk_id: int = 0
     chunk_text: str = ""
     tier: str = ""
@@ -56,6 +68,7 @@ class SearchResult:
 @dataclass
 class IndexStats:
     """Summary of what's in the index."""
+
     total_documents: int
     total_chunks: int
     embedding_dimension: int
@@ -66,6 +79,7 @@ class IndexStats:
 # ---------------------------------------------------------------------------
 # Protocol: Embedder
 # ---------------------------------------------------------------------------
+
 
 @runtime_checkable
 class Embedder(Protocol):
@@ -87,6 +101,7 @@ class Embedder(Protocol):
 # ---------------------------------------------------------------------------
 # Protocol: Store
 # ---------------------------------------------------------------------------
+
 
 @runtime_checkable
 class Store(Protocol):
@@ -130,6 +145,7 @@ class Store(Protocol):
 # Protocol: Reranker (future seam, not implemented day-one)
 # ---------------------------------------------------------------------------
 
+
 @runtime_checkable
 class Reranker(Protocol):
     """Reorders search candidates. Optional pipeline stage."""
@@ -139,8 +155,7 @@ class Reranker(Protocol):
         query: str,
         candidates: List[SearchResult],
         top_k: int = 10,
-    ) -> List[SearchResult]:
-        ...
+    ) -> List[SearchResult]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -153,10 +168,10 @@ class Reranker(Protocol):
 # eval queries; the magnitudes here are calibrated so the boost acts as a
 # tie-breaker, not a dominant ranking signal.
 TIER_BOOST = {
-    "L4": 1.08,   # wiki: certified knowledge
-    "L3": 1.04,   # papers / readwise: externally certified
-    "L2": 1.00,   # working notes: baseline
-    "L1": 0.92,   # raw capture / cache: low signal but still searchable
+    "L4": 1.08,  # wiki: certified knowledge
+    "L3": 1.04,  # papers / readwise: externally certified
+    "L2": 1.00,  # working notes: baseline
+    "L1": 0.92,  # raw capture / cache: low signal but still searchable
 }
 
 # Recency half-life in days, by tier. None = no decay (knowledge is durable).
@@ -165,8 +180,8 @@ TIER_BOOST = {
 TIER_HALF_LIFE = {
     "L4": None,
     "L3": None,
-    "L2": None,    # working notes do not decay; user controls staleness via /forget
-    "L1": 180,     # raw capture decays slowly
+    "L2": None,  # working notes do not decay; user controls staleness via /forget
+    "L1": 180,  # raw capture decays slowly
 }
 
 
@@ -210,7 +225,9 @@ class TierRecencyReranker:
             tier = r.tier or "L2"
             boost = TIER_BOOST.get(tier, 1.0)
             recency = self._recency_factor(r.mtime, tier)
-            trust_bonus = self._trust_scores.get(r.path, 0.0) * 0.1  # scale trust to ~0-0.1
+            trust_bonus = (
+                self._trust_scores.get(r.path, 0.0) * 0.1
+            )  # scale trust to ~0-0.1
             final = r.score * boost * recency + trust_bonus
             scored.append((final, r))
 
@@ -218,8 +235,7 @@ class TierRecencyReranker:
         # replace() keeps every other field (mtime, source, ...) intact;
         # rebuilding by hand silently dropped fields as the dataclass grew.
         return [
-            replace(r, score=round(final_score, 4))
-            for final_score, r in scored[:top_k]
+            replace(r, score=round(final_score, 4)) for final_score, r in scored[:top_k]
         ]
 
 
@@ -232,9 +248,11 @@ class TierRecencyReranker:
 # ---------------------------------------------------------------------------
 
 _HEADING_RE = re.compile(r"^(#{1,4})\s", re.MULTILINE)
-CHUNK_TARGET = 2000   # chars; BGE-M3 handles up to ~8K tokens but shorter chunks retrieve better
-CHUNK_MAX = 4000      # hard cap; chunks above this are split on paragraph boundaries
-CHUNK_MIN = 200       # don't create tiny fragments
+CHUNK_TARGET = (
+    2000  # chars; BGE-M3 handles up to ~8K tokens but shorter chunks retrieve better
+)
+CHUNK_MAX = 4000  # hard cap; chunks above this are split on paragraph boundaries
+CHUNK_MIN = 200  # don't create tiny fragments
 
 
 def _split_long(text: str, limit: int) -> List[str]:
@@ -259,7 +277,7 @@ def _split_long(text: str, limit: int) -> List[str]:
 
     # Hard truncation: split any still-oversized chunks by character
     final: List[str] = []
-    for chunk in (chunks or [text]):
+    for chunk in chunks or [text]:
         while len(chunk) > limit:
             final.append(chunk[:limit])
             chunk = chunk[limit:]
@@ -284,7 +302,7 @@ def chunk_markdown(text: str) -> List[str]:
     last = 0
     for m in _HEADING_RE.finditer(text):
         if m.start() > last:
-            splits.append(text[last:m.start()])
+            splits.append(text[last : m.start()])
         last = m.start()
     if last < len(text):
         splits.append(text[last:])
@@ -316,6 +334,7 @@ def chunk_markdown(text: str) -> List[str]:
 # ---------------------------------------------------------------------------
 # Tier derivation
 # ---------------------------------------------------------------------------
+
 
 def _derive_tier(path: str) -> str:
     """Derive knowledge tier from path prefix.
@@ -520,7 +539,10 @@ class Retriever:
         skipped = len(file_list) - len(to_index)
         if not to_index:
             if show_progress:
-                print(f"  index is up to date ({skipped} files unchanged)", file=sys.stderr)
+                print(
+                    f"  index is up to date ({skipped} files unchanged)",
+                    file=sys.stderr,
+                )
             return 0, skipped, removed
 
         if show_progress:
@@ -614,13 +636,14 @@ class _BM25Index:
                     for i in range(len(tok)):
                         out.append(tok[i])
                         if i + 1 < len(tok):
-                            out.append(tok[i:i+2])
+                            out.append(tok[i : i + 2])
             else:
                 out.append(tok.lower())
         return out
 
     def build(self, store: "LanceStore") -> None:
         from rank_bm25 import BM25Okapi
+
         df = store._table.to_pandas()  # noqa: SLF001 (BM25 needs full corpus)
         corpus_tokens: List[List[str]] = []
         meta: List[Dict[str, Any]] = []
@@ -629,13 +652,15 @@ class _BM25Index:
             if not tokens:
                 continue
             corpus_tokens.append(tokens)
-            meta.append({
-                "path": row.get("path", ""),
-                "chunk_id": int(row.get("chunk_id", 0)),
-                "chunk_text": row.get("chunk_text", ""),
-                "tier": row.get("tier", ""),
-                "mtime": float(row.get("mtime", 0.0)),
-            })
+            meta.append(
+                {
+                    "path": row.get("path", ""),
+                    "chunk_id": int(row.get("chunk_id", 0)),
+                    "chunk_text": row.get("chunk_text", ""),
+                    "tier": row.get("tier", ""),
+                    "mtime": float(row.get("mtime", 0.0)),
+                }
+            )
         self._bm25 = BM25Okapi(corpus_tokens)
         self._meta = meta
         self._built = True
@@ -659,15 +684,17 @@ class _BM25Index:
             if s <= 0:
                 continue
             m = self._meta[i]
-            results.append(SearchResult(
-                path=m["path"],
-                score=s,
-                chunk_id=m["chunk_id"],
-                chunk_text=m["chunk_text"],
-                tier=m["tier"],
-                mtime=m["mtime"],
-                source="local",
-            ))
+            results.append(
+                SearchResult(
+                    path=m["path"],
+                    score=s,
+                    chunk_id=m["chunk_id"],
+                    chunk_text=m["chunk_text"],
+                    tier=m["tier"],
+                    mtime=m["mtime"],
+                    source="local",
+                )
+            )
         return results
 
 
@@ -707,15 +734,17 @@ def _rrf_fuse(
     out: List[SearchResult] = []
     for key, score in ordered:
         r = keep[key]
-        out.append(SearchResult(
-            path=r.path,
-            score=round(score, 6),
-            chunk_id=r.chunk_id,
-            chunk_text=r.chunk_text,
-            tier=r.tier,
-            mtime=r.mtime,
-            source=r.source,
-        ))
+        out.append(
+            SearchResult(
+                path=r.path,
+                score=round(score, 6),
+                chunk_id=r.chunk_id,
+                chunk_text=r.chunk_text,
+                tier=r.tier,
+                mtime=r.mtime,
+                source=r.source,
+            )
+        )
     return out
 
 
@@ -758,7 +787,9 @@ class HybridRetriever:
         encode_query = getattr(self._base.embedder, "encode_query", None)
         encoder = encode_query if callable(encode_query) else self._base.embedder.encode
         vector = encoder([text])[0]
-        dense = self._base.store.search(vector, top_k=self._candidate_k, filters=filters)
+        dense = self._base.store.search(
+            vector, top_k=self._candidate_k, filters=filters
+        )
         # Sparse candidates (BM25 doesn't support `filters` yet — applies to whole corpus)
         sparse = _get_bm25(self._base.store).search(text, top_k=self._candidate_k)
         # Filter sparse hits through the same filter set if filters are present
@@ -795,6 +826,7 @@ def _passes_filters(r: SearchResult, filters: Dict[str, Any]) -> bool:
 # Cross-encoder reranker (BGE-reranker-v2-m3)
 # ---------------------------------------------------------------------------
 
+
 class CrossEncoderReranker:
     """
     Reranks candidates by scoring each (query, chunk_text) pair with a
@@ -811,18 +843,26 @@ class CrossEncoderReranker:
     _cached_model: Optional[Any] = None
     _cached_device: Optional[str] = None
 
-    def __init__(self, model_id: Optional[str] = None, device: Optional[str] = None) -> None:
+    def __init__(
+        self, model_id: Optional[str] = None, device: Optional[str] = None
+    ) -> None:
         from config import resolve_device
+
         self._model_id = model_id or self.MODEL_ID
         self._device = device or resolve_device("auto")
         self._max_length = 1024
 
     def _model(self) -> Any:
-        if CrossEncoderReranker._cached_model is not None and \
-                CrossEncoderReranker._cached_device == self._device:
+        if (
+            CrossEncoderReranker._cached_model is not None
+            and CrossEncoderReranker._cached_device == self._device
+        ):
             return CrossEncoderReranker._cached_model
         from sentence_transformers import CrossEncoder
-        model = CrossEncoder(self._model_id, max_length=self._max_length, device=self._device)
+
+        model = CrossEncoder(
+            self._model_id, max_length=self._max_length, device=self._device
+        )
         CrossEncoderReranker._cached_model = model
         CrossEncoderReranker._cached_device = self._device
         return model
@@ -842,21 +882,24 @@ class CrossEncoderReranker:
         scored.sort(key=lambda x: -float(x[1]))
         out: List[SearchResult] = []
         for c, s in scored[:top_k]:
-            out.append(SearchResult(
-                path=c.path,
-                score=float(s),
-                chunk_id=c.chunk_id,
-                chunk_text=c.chunk_text,
-                tier=c.tier,
-                mtime=c.mtime,
-                source=c.source,
-            ))
+            out.append(
+                SearchResult(
+                    path=c.path,
+                    score=float(s),
+                    chunk_id=c.chunk_id,
+                    chunk_text=c.chunk_text,
+                    tier=c.tier,
+                    mtime=c.mtime,
+                    source=c.source,
+                )
+            )
         return out
 
 
 # ---------------------------------------------------------------------------
 # Concrete: BGE-M3 Embedder
 # ---------------------------------------------------------------------------
+
 
 def _local_model_snapshot(model_id: str) -> Optional[str]:
     """Resolve a complete Hugging Face snapshot without importing hub code."""
@@ -876,9 +919,7 @@ def _local_model_snapshot(model_id: str) -> Optional[str]:
         else:
             xdg_cache = os.environ.get("XDG_CACHE_HOME")
             cache_root = (
-                Path(xdg_cache).expanduser()
-                if xdg_cache
-                else Path.home() / ".cache"
+                Path(xdg_cache).expanduser() if xdg_cache else Path.home() / ".cache"
             )
             hub = cache_root / "huggingface" / "hub"
     repository = hub / f"models--{model_id.replace('/', '--')}"
@@ -936,7 +977,12 @@ class BGEM3Embedder:
     MODEL_ID = "BAAI/bge-m3"
     DIMENSION = 1024
 
-    def __init__(self, device: Optional[str] = None, max_tokens: Optional[int] = None, batch_size: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        device: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        batch_size: Optional[int] = None,
+    ) -> None:
         from sentence_transformers import SentenceTransformer
         from config import load, resolve_device
 
@@ -1051,6 +1097,7 @@ def make_embedder(name: Optional[str] = None):
     default 'bge-m3'.
     """
     import os
+
     sel = (name or os.environ.get("SEMANTIC_EMBEDDER") or "bge-m3").lower()
     if sel in ("bge-m3", "bgem3", ""):
         return BGEM3Embedder()
@@ -1066,6 +1113,31 @@ def make_embedder(name: Optional[str] = None):
 # ---------------------------------------------------------------------------
 # Concrete: LanceDB Store
 # ---------------------------------------------------------------------------
+
+
+def read_lance_index_mtimes(
+    db_path: str,
+    table_name: str = "semantic_index",
+) -> Optional[Dict[str, float]]:
+    """Read indexed path mtimes without constructing an embedding model.
+
+    Returns ``None`` when the database exists but the semantic table does not.
+    Other read failures are raised so callers can distinguish an unavailable or
+    corrupt index from a legitimately empty table.
+    """
+    import lancedb
+
+    db = lancedb.connect(db_path)
+    if table_name not in db.table_names():
+        return None
+    table = db.open_table(table_name)
+    row_count = table.count_rows()
+    if row_count == 0:
+        return {}
+    frame = table.search().select(["path", "mtime"]).limit(row_count).to_pandas()
+    grouped = frame.groupby("path")["mtime"].max()
+    return {str(path): float(mtime) for path, mtime in grouped.items()}
+
 
 class LanceStore:
     """
@@ -1096,18 +1168,22 @@ class LanceStore:
         if self.TABLE_NAME in existing:
             return self._db.open_table(self.TABLE_NAME)
 
-        schema = pa.schema([
-            pa.field("id", pa.utf8()),
-            pa.field("path", pa.utf8()),
-            pa.field("chunk_id", pa.int32()),
-            pa.field("chunk_text", pa.utf8()),
-            pa.field("tier", pa.utf8()),
-            pa.field("mtime", pa.float64()),
-            pa.field("vector", pa.list_(pa.float32(), self._embedding_dim)),
-        ])
+        schema = pa.schema(
+            [
+                pa.field("id", pa.utf8()),
+                pa.field("path", pa.utf8()),
+                pa.field("chunk_id", pa.int32()),
+                pa.field("chunk_text", pa.utf8()),
+                pa.field("tier", pa.utf8()),
+                pa.field("mtime", pa.float64()),
+                pa.field("vector", pa.list_(pa.float32(), self._embedding_dim)),
+            ]
+        )
         return self._db.create_table(self.TABLE_NAME, schema=schema)
 
-    def _to_rows(self, docs: List[Document], vectors: NDArray[np.float32]) -> List[Dict[str, Any]]:
+    def _to_rows(
+        self, docs: List[Document], vectors: NDArray[np.float32]
+    ) -> List[Dict[str, Any]]:
         return [
             {
                 "id": doc.id,
@@ -1133,8 +1209,7 @@ class LanceStore:
         if not docs:
             return 0
         (
-            self._table
-            .merge_insert("id")
+            self._table.merge_insert("id")
             .when_matched_update_all()
             .when_not_matched_insert_all()
             .execute(self._to_rows(docs, vectors))
@@ -1209,14 +1284,16 @@ class LanceStore:
             # cosine _distance: 0.0 = identical, 1.0 = orthogonal
             distance = row.get("_distance", 0.0)
             score = max(0.0, 1.0 - distance)
-            results.append(SearchResult(
-                path=row["path"],
-                score=round(score, 4),
-                chunk_id=int(row.get("chunk_id", 0)),
-                chunk_text=row.get("chunk_text", ""),
-                tier=row.get("tier", ""),
-                mtime=float(row.get("mtime", 0.0)),
-            ))
+            results.append(
+                SearchResult(
+                    path=row["path"],
+                    score=round(score, 4),
+                    chunk_id=int(row.get("chunk_id", 0)),
+                    chunk_text=row.get("chunk_text", ""),
+                    tier=row.get("tier", ""),
+                    mtime=float(row.get("mtime", 0.0)),
+                )
+            )
 
         return results
 
@@ -1236,13 +1313,13 @@ class LanceStore:
         import sys
 
         try:
-            n = self._table.count_rows()
-            if n == 0:
-                return {}
-            # LanceTable.to_pandas() takes no projection args; use the query
-            # builder so vectors are never materialized.
-            df = self._table.search().select(["path", "mtime"]).limit(n).to_pandas()
-            return dict(df.groupby("path")["mtime"].max())
+            return (
+                read_lance_index_mtimes(
+                    self._db_path,
+                    self.TABLE_NAME,
+                )
+                or {}
+            )
         except Exception as exc:
             print(
                 f"  warning: could not read indexed mtimes "
@@ -1293,6 +1370,7 @@ class LanceStore:
 # Concrete: Readwise Searcher (federated query source)
 # ---------------------------------------------------------------------------
 
+
 class ReadwiseSearcher:
     """
     Searches the user's Readwise library via CLI.
@@ -1305,6 +1383,7 @@ class ReadwiseSearcher:
     def available() -> bool:
         """Check if the readwise CLI is installed."""
         import shutil
+
         return shutil.which("readwise") is not None
 
     @staticmethod
@@ -1316,7 +1395,9 @@ class ReadwiseSearcher:
         try:
             proc = subprocess.run(
                 ["readwise", "reader-search-documents", "--query", query, "--json"],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             if proc.returncode != 0:
                 return []
@@ -1338,13 +1419,15 @@ class ReadwiseSearcher:
             title = doc.get("title", "")
             path = f"readwise://{doc.get('document_id', '')}"
 
-            results.append(SearchResult(
-                path=path,
-                score=round(score, 4),
-                chunk_id=0,
-                chunk_text=f"[{title}] {chunk_text}" if title else chunk_text,
-                tier="L3",
-                source="readwise",
-            ))
+            results.append(
+                SearchResult(
+                    path=path,
+                    score=round(score, 4),
+                    chunk_id=0,
+                    chunk_text=f"[{title}] {chunk_text}" if title else chunk_text,
+                    tier="L3",
+                    source="readwise",
+                )
+            )
 
         return results

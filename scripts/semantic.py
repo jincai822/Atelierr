@@ -23,7 +23,8 @@ See also:
 
 Usage:
     scripts/semantic.py query "<text>" [OPTIONS]
-    scripts/semantic.py index [--rebuild]
+    scripts/semantic.py status [--format text|json]
+    scripts/semantic.py index [--rebuild | --if-stale]
     scripts/semantic.py --help
 
 Stdlib only in stub mode. Real mode requires: sentence-transformers, lancedb.
@@ -32,13 +33,14 @@ Stdlib only in stub mode. Real mode requires: sentence-transformers, lancedb.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import re
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator, List, Optional, Tuple
+from typing import Any, Iterator, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
@@ -71,6 +73,7 @@ _EMBEDDER_ALIAS = {
 
 def _active_embedder_key() -> str:
     import os
+
     raw = (os.environ.get("SEMANTIC_EMBEDDER") or "bge-m3").lower()
     return _EMBEDDER_ALIAS.get(raw, raw)
 
@@ -104,6 +107,8 @@ LANCE_DIR = _resolve_lance_dir()
 # $OV set; only commands that actually walk the vault (query, index)
 # require $OV.
 DEFAULT_PATH: str | None = None
+
+
 # Subdirectories under the vault excluded from indexing (ephemeral caches,
 # not worth embedding). Trailing slash constrains matching to directories
 # (e.g., excludes `$OV/cache/**` but not `$OV/cached_*.md` siblings).
@@ -111,6 +116,7 @@ DEFAULT_PATH: str | None = None
 def _index_exclude() -> set:
     try:
         from _paths import tier_segments
+
         return {tier_segments().get("cache", "cache") + "/"}
     except Exception:
         return {"cache/"}
@@ -131,6 +137,165 @@ def mode_label() -> str:
 def warn(msg: str) -> None:
     """Emit a warning to stderr. Never to stdout (which carries results)."""
     print(f"[semantic.py] {msg}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def _exclusive_index_lock() -> Iterator[bool]:
+    """Prevent scheduled and interactive writers from mutating one index together."""
+    try:
+        import fcntl
+    except ImportError:
+        yield True
+        return
+
+    lock_dir = Path.home() / ".cache" / "atelier"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / f"semantic-{_active_embedder_key()}.lock"
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _has_non_whitespace(path: Path) -> Optional[bool]:
+    """Return whether a file contains indexable text, or None if unreadable."""
+    try:
+        if path.stat().st_size == 0:
+            return False
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            while chunk := handle.read(4096):
+                if chunk.strip():
+                    return True
+        return False
+    except OSError:
+        return None
+
+
+def _freshness_from_files(
+    files: List[Path],
+    vault: Path,
+    indexed_mtimes: dict[str, float],
+) -> dict[str, Any]:
+    """Compare the Markdown corpus with the index manifest.
+
+    Only new or mtime-changed files need a content probe. This keeps the
+    scheduled no-op check cheap while excluding empty and whitespace-only
+    Markdown files that the indexer deliberately skips.
+    """
+    current_mtimes: dict[str, float] = {}
+    unreadable: list[str] = []
+    for path in files:
+        try:
+            relative = str(path.relative_to(vault))
+        except ValueError:
+            relative = str(path)
+        try:
+            stat = path.stat()
+        except OSError:
+            unreadable.append(relative)
+            continue
+        if stat.st_size == 0:
+            continue
+
+        indexed_mtime = indexed_mtimes.get(relative)
+        changed = indexed_mtime is None or stat.st_mtime - indexed_mtime > 1.0
+        if changed:
+            has_text = _has_non_whitespace(path)
+            if has_text is None:
+                unreadable.append(relative)
+                continue
+            if not has_text:
+                continue
+        current_mtimes[relative] = stat.st_mtime
+
+    current_paths = set(current_mtimes)
+    indexed_paths = set(indexed_mtimes)
+    new_paths = sorted(current_paths - indexed_paths)
+    modified_paths = sorted(
+        path
+        for path in current_paths & indexed_paths
+        if current_mtimes[path] - indexed_mtimes[path] > 1.0
+    )
+    removed_paths = sorted(indexed_paths - current_paths)
+    unreadable.sort()
+    return {
+        "fresh": not (new_paths or modified_paths or removed_paths or unreadable),
+        "current_files": len(current_paths),
+        "indexed_files": len(indexed_paths),
+        "new": len(new_paths),
+        "modified": len(modified_paths),
+        "removed": len(removed_paths),
+        "unreadable": len(unreadable),
+        "samples": {
+            "new": new_paths[:20],
+            "modified": modified_paths[:20],
+            "removed": removed_paths[:20],
+            "unreadable": unreadable[:20],
+        },
+    }
+
+
+def inspect_index_freshness(
+    *,
+    vault: Optional[Path] = None,
+    index_dir: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Inspect index drift without loading the embedding model."""
+    from semantic_backends import read_lance_index_mtimes
+
+    active_vault = vault or vault_root()
+    active_index = index_dir or LANCE_DIR
+    files = list(
+        walk_markdown(
+            [str(active_vault)],
+            after=None,
+            before=None,
+            exclude=INDEX_EXCLUDE,
+        )
+    )
+
+    indexed_mtimes: dict[str, float] = {}
+    index_present = False
+    error: Optional[str] = None
+    if active_index.exists():
+        try:
+            stored = read_lance_index_mtimes(str(active_index))
+            if stored is not None:
+                indexed_mtimes = stored
+                index_present = True
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+
+    result = _freshness_from_files(files, active_vault, indexed_mtimes)
+    result.update(
+        {
+            "index_path": str(active_index),
+            "index_present": index_present,
+            "error": error,
+        }
+    )
+    if not index_present or error is not None:
+        result["fresh"] = False
+    return result
+
+
+def _freshness_summary(result: dict[str, Any]) -> str:
+    state = "fresh" if result["fresh"] else "stale"
+    summary = (
+        f"{state}: current={result['current_files']}, "
+        f"indexed={result['indexed_files']}, new={result['new']}, "
+        f"modified={result['modified']}, removed={result['removed']}, "
+        f"unreadable={result['unreadable']}"
+    )
+    if result.get("error"):
+        summary += f", error={result['error']}"
+    return summary
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +433,7 @@ def stub_query(args: argparse.Namespace) -> int:
 # Real mode (embedding-backed search)
 # ---------------------------------------------------------------------------
 
+
 def _load_trust_scores() -> dict:
     """Load wiki trust scores from trust.py. Returns {relative_path: score}."""
     try:
@@ -296,10 +462,17 @@ def _build_retriever(with_reranker: bool = True, hybrid: bool = False):
     `hybrid=True` wraps the dense Retriever in a HybridRetriever that fuses
     BM25 (sparse) results with dense cosine via Reciprocal Rank Fusion.
     """
-    from semantic_backends import LanceStore, Retriever, TierRecencyReranker, make_embedder
+    from semantic_backends import (
+        LanceStore,
+        Retriever,
+        TierRecencyReranker,
+        make_embedder,
+    )
 
     embedder = make_embedder()
-    warn(f"embedder: {embedder.model_name()} (device: {embedder._device}, dim: {embedder.dimension()}, max_tokens: {embedder._max_tokens})")
+    warn(
+        f"embedder: {embedder.model_name()} (device: {embedder._device}, dim: {embedder.dimension()}, max_tokens: {embedder._max_tokens})"
+    )
 
     store = LanceStore(
         db_path=str(LANCE_DIR),
@@ -323,6 +496,7 @@ def _build_retriever(with_reranker: bool = True, hybrid: bool = False):
     retriever = Retriever(embedder=embedder, store=store, reranker=reranker)
     if hybrid:
         from semantic_backends import HybridRetriever
+
         warn("hybrid: BM25 + dense (RRF)")
         retriever = HybridRetriever(base=retriever)
     return retriever
@@ -343,12 +517,17 @@ def real_query(args: argparse.Namespace) -> int:
 
     # Optional cross-encoder rerank over the merged top-N candidate set.
     cross_encoder = None
-    if getattr(args, "rerank", "auto") == "ce" or getattr(args, "rerank", "auto") == "auto":
+    if (
+        getattr(args, "rerank", "auto") == "ce"
+        or getattr(args, "rerank", "auto") == "auto"
+    ):
         # In `auto` mode the cross-encoder is opt-in via env to avoid a model
         # download on first use; explicit `ce` always loads it.
         import os
+
         if args.rerank == "ce" or os.environ.get("SEMANTIC_RERANK_CE") == "1":
             from semantic_backends import CrossEncoderReranker
+
             warn("cross-encoder rerank: BAAI/bge-reranker-v2-m3")
             cross_encoder = CrossEncoderReranker()
 
@@ -390,15 +569,20 @@ def real_query(args: argparse.Namespace) -> int:
     # enough material to reorder meaningfully.
     if "local" in sources:
         candidate_k = max(args.top, 30) if cross_encoder else args.top
-        local_results = retriever.query(args.query, top_k=candidate_k, filters=filters or None)
+        local_results = retriever.query(
+            args.query, top_k=candidate_k, filters=filters or None
+        )
         if cross_encoder:
-            local_results = cross_encoder.rerank(args.query, local_results, top_k=args.top)
+            local_results = cross_encoder.rerank(
+                args.query, local_results, top_k=args.top
+            )
         results.extend(local_results)
         warn(f"local: {len(local_results)} results")
 
     # Readwise federated search
     if "readwise" in sources:
         from semantic_backends import ReadwiseSearcher
+
         if ReadwiseSearcher.available():
             rw_results = ReadwiseSearcher.search(args.query, top_k=args.top)
             results.extend(rw_results)
@@ -408,7 +592,7 @@ def real_query(args: argparse.Namespace) -> int:
 
     # Merge by score, take top_k
     results.sort(key=lambda r: -r.score)
-    results = results[:args.top]
+    results = results[: args.top]
 
     elapsed = time.time() - t0
     warn(f"total: {len(results)} results in {elapsed:.2f}s")
@@ -428,6 +612,7 @@ def real_query(args: argparse.Namespace) -> int:
 
 def real_index(args: argparse.Namespace) -> int:
     from semantic_backends import Retriever
+
     retriever = _build_retriever(with_reranker=False)
     # cmd_index never goes through the hybrid wrapper; narrow for index_* calls.
     assert isinstance(retriever, Retriever), "indexing requires base Retriever"
@@ -438,8 +623,19 @@ def real_index(args: argparse.Namespace) -> int:
 
     vault = vault_root()
     warn(f"scanning markdown files under {vault}/ (excluding {INDEX_EXCLUDE})...")
-    files = list(walk_markdown([str(vault)], after=None, before=None, exclude=INDEX_EXCLUDE))
-    warn(f"found {len(files)} files to scan")
+    files = []
+    for path in walk_markdown(
+        [str(vault)],
+        after=None,
+        before=None,
+        exclude=INDEX_EXCLUDE,
+    ):
+        try:
+            if path.stat().st_size > 0:
+                files.append(path)
+        except OSError:
+            continue
+    warn(f"found {len(files)} non-empty files to scan")
 
     t0 = time.time()
     if args.rebuild:
@@ -447,16 +643,21 @@ def real_index(args: argparse.Namespace) -> int:
         warn(f"full rebuild: {total} chunks in {time.time() - t0:.1f}s")
     else:
         added, skipped, removed = retriever.index_incremental(files, vault)
-        warn(f"incremental: {added} added, {skipped} unchanged, {removed} removed in {time.time() - t0:.1f}s")
+        warn(
+            f"incremental: {added} added, {skipped} unchanged, {removed} removed in {time.time() - t0:.1f}s"
+        )
 
     stats = retriever.stats()
-    warn(f"index stats: {stats.total_documents} chunks, {stats.embedding_dimension}d, model={stats.model_name}")
+    warn(
+        f"index stats: {stats.total_documents} chunks, {stats.embedding_dimension}d, model={stats.model_name}"
+    )
     return 0
 
 
 # ---------------------------------------------------------------------------
 # Command dispatch
 # ---------------------------------------------------------------------------
+
 
 def cmd_query(args: argparse.Namespace) -> int:
     if in_real_mode() and LANCE_DIR == _LANCE_OLD:
@@ -470,22 +671,44 @@ def cmd_query(args: argparse.Namespace) -> int:
     return stub_query(args)
 
 
+def cmd_status(args: argparse.Namespace) -> int:
+    result = inspect_index_freshness()
+    if args.format == "json":
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(_freshness_summary(result))
+    return 2 if result.get("error") else 0
+
+
 def cmd_index(args: argparse.Namespace) -> int:
     # Index always writes to the new path. If a legacy ~/.cache/reflectl/lance/
     # exists, we deliberately do NOT rebuild into it — that would silently keep
     # the user on the old location forever. Force migration here.
     global LANCE_DIR
     LANCE_DIR = _resolve_lance_dir(prefer_new=True)
-    if _LANCE_OLD.exists() and not _LANCE_NEW.exists():
-        warn(
-            "legacy index exists at ~/.cache/reflectl/lance/; rebuilding at "
-            "~/.cache/atelier/lance/ to migrate. The old path can be deleted "
-            "after this run completes."
-        )
-    elif not LANCE_DIR.exists():
-        warn("no existing index found; creating ~/.cache/atelier/lance/ and building index...")
-    LANCE_DIR.mkdir(parents=True, exist_ok=True)
-    return real_index(args)
+    with _exclusive_index_lock() as acquired:
+        if not acquired:
+            warn("another semantic index writer is active; skipping this refresh")
+            return 0
+        if _LANCE_OLD.exists() and not _LANCE_NEW.exists():
+            warn(
+                "legacy index exists at ~/.cache/reflectl/lance/; rebuilding at "
+                "~/.cache/atelier/lance/ to migrate. The old path can be deleted "
+                "after this run completes."
+            )
+        elif not LANCE_DIR.exists():
+            warn(
+                "no existing index found; creating ~/.cache/atelier/lance/ "
+                "and building index..."
+            )
+        LANCE_DIR.mkdir(parents=True, exist_ok=True)
+        if args.if_stale:
+            freshness = inspect_index_freshness(index_dir=LANCE_DIR)
+            warn(f"freshness check: {_freshness_summary(freshness)}")
+            if freshness["fresh"]:
+                warn("index refresh skipped: no corpus drift")
+                return 0
+        return real_index(args)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -563,11 +786,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     q.set_defaults(func=cmd_query)
 
+    s = sub.add_parser(
+        "status",
+        help="Inspect index freshness without loading the embedding model.",
+    )
+    s.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format. Default: text.",
+    )
+    s.set_defaults(func=cmd_status)
+
     i = sub.add_parser("index", help="Build or refresh the embedding index.")
-    i.add_argument(
+    index_mode = i.add_mutually_exclusive_group()
+    index_mode.add_argument(
         "--rebuild",
         action="store_true",
         help="Force full rebuild.",
+    )
+    index_mode.add_argument(
+        "--if-stale",
+        action="store_true",
+        help="Run incremental indexing only when a lightweight drift check finds changes.",
     )
     i.set_defaults(func=cmd_index)
 
