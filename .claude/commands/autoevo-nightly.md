@@ -48,6 +48,14 @@ earliest safe retry time; an hourly calendar check retries that cycle when due.
 
 Demotes the dispatch. Implementation: per-dispatch caps in step 2 (`max_candidates: 12-15`, `time_budget_s: 240`) and the agent-level `maxTurns: 60` ceiling declared in `.claude/agents/forgetter.md`. A dispatch that hits any cap returns `mode: partial`; the orchestrator accepts the partial findings and continues to the next scope.
 
+A returned partial envelope is a bounded successful outcome, not skipped work
+or an execution error. Record it in audit log § Notes as
+`forgetter_partial: scope=<scope>, candidates_evaluated=<n>, reason=<budget | max_candidates | maxTurns-self-stop>`.
+Keep § Skipped and § Errors empty unless a separate condition actually
+qualifies for those sections. This distinction is load-bearing because the
+post-run verifier accepts `envelope_returned` for both full and partial
+envelopes while rejecting genuine skips and errors.
+
 A dispatch that returns no envelope at all is **not** a demote: it is the input signal for condition 3. Per `.claude/agents/forgetter.md` ("If you do not emit the envelope, the orchestrator's parser cannot recover any findings from your output — the sweep is lost"), envelope emission is mandatory on completion. Absence of the envelope therefore unambiguously signals truncation, crash, or runtime interruption; never "ran fine, nothing to say."
 
 ### Condition 3: Per-scope quarantine (cross-run)
@@ -241,7 +249,7 @@ Caveat for the audit-log mapping table below: "halt" applies at three different 
 | Condition | Action | Audit log section | Exit code |
 |---|---|---|---|
 | 1: External blocker | refuse to start | Skipped (`<gate>: <detail>`) | 0 |
-| 2: Per-step budget | demote dispatch | Errors (`forgetter_partial: ...`) | run continues |
+| 2: Per-step budget | demote dispatch | Notes (`forgetter_partial: ...`) | run continues |
 | 3: Per-scope quarantine | scope skip | Skipped (`scope_quarantined: ...`) | run continues to next scope |
 
 Fatal errors not covered by any condition (snapshot cp failed, commit aborted by hook, queue TOML corrupted) follow the existing step 4c, step 7, and "Edge cases" handling and exit 1.
@@ -387,7 +395,7 @@ If any gate trips, write the audit log section "Skipped (reason: <gate>)" per st
 
 ## Step 2: Forgetter sweep + persist reports
 
-For each working-tier scope, dispatch Forgetter **synchronous, sequential** (the orchestrator awaits each Agent call before issuing the next). Sequential is mandatory: it (a) avoids subagent-runtime turn-cap contention, (b) keeps audit-log Errors entries in scope-order, (c) preserves per-dispatch determinism for the cluster_hash machinery downstream. The orchestrator pre-resolves placeholder paths to absolute paths before dispatch so Forgetter does not spend budget re-resolving the path registry.
+For each working-tier scope, dispatch Forgetter **synchronous, sequential** (the orchestrator awaits each Agent call before issuing the next). Sequential is mandatory: it (a) avoids subagent-runtime turn-cap contention, (b) keeps audit-log coverage and Notes entries in scope-order, (c) preserves per-dispatch determinism for the cluster_hash machinery downstream. The orchestrator pre-resolves placeholder paths to absolute paths before dispatch so Forgetter does not spend budget re-resolving the path registry.
 
 ### 2.0 Choose dispatch scopes (rotation for the large tier)
 
@@ -498,7 +506,7 @@ For each Forgetter dispatch return:
    as a historical decay record. A report is not considered persisted until
    Step 7 commits it with the audit log.
 
-3. **Parse `findings_inline`** for routing in step 3. Read `mode`, `summary`, and the per-category arrays. Note the mode: `full` (complete sweep) or `partial` (budget-exhausted) — both have valid findings; `partial` triggers an audit-log § Errors row like `forgetter_partial: scope=<scope>, candidates_evaluated=<n>, reason=<budget | maxTurns-self-stop>` for transparency.
+3. **Parse `findings_inline`** for routing in step 3. Read `mode`, `summary`, and the per-category arrays. Note the mode: `full` (complete sweep) or `partial` (bounded by budget or candidate cap) — both have valid findings and both map to `envelope_returned`. For transparency, `partial` triggers an audit-log § Notes row like `forgetter_partial: scope=<scope>, candidates_evaluated=<n>, reason=<budget | max_candidates | maxTurns-self-stop>`. Do not put a returned partial envelope in § Skipped or § Errors.
 
 The three persisted decay-report files plus their parsed envelopes feed step 3.
 
@@ -949,6 +957,9 @@ Run ID: <RUN_TS>
 ### Lint
 - ERROR: <n>, WARN: <n>, INFO: <n>
 
+### Notes
+- (none) | forgetter_partial: scope=<scope>, candidates_evaluated=<n>, reason=<budget | max_candidates | maxTurns-self-stop>
+
 ### Skipped (reason)
 - (none) | <gate>: <detail>
 
@@ -1035,7 +1046,7 @@ The cue at next /hi surfaces the audit log's Skipped / Errors sections regardles
 ## Edge cases
 
 - **No findings at all.** Forgetter sweeps return empty reports; steps 4-5 are no-ops. Step 6-7 still run and produce a minimal audit log with all sections "(none)". This is a valid clean night.
-- **Forgetter returns `mode: partial`.** A sweep hit `time_budget_s`. Use whatever findings came back; note "partial sweep on `<scope>`" in audit log § "Errors" (so the user knows next-night might catch more).
+- **Forgetter returns `mode: partial`.** A sweep hit `time_budget_s`, `max_candidates`, or its self-stop ceiling. Use whatever findings came back; record `forgetter_partial: ...` in audit log § Notes. The returned envelope is successful coverage, so § Skipped and § Errors remain empty unless a separate problem occurred.
 - **Forgetter dispatch returns no envelope** (no `---forgetter-result---` markers in the agent output). Covered by step 2a: log to audit § Errors as `forgetter_no_envelope: scope=<scope_path>, ...` and continue to the next dispatch. Do not retry this scope this run.
 - **Target path = no source path** (rare for redundant: when the orchestrator picks a new canonical slug not matching any source filename). In step 4a, write the new file, delete all sources, commit. The merged content is the canonical record.
 - **Curator refuses an op.** Curator's scope guards (wiki, daily-notes, non-working-tier) refuse with an error envelope. Log under § "Errors" with the refusal reason; continue to next op.

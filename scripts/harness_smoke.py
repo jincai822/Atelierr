@@ -1668,6 +1668,9 @@ Run ID: 20990103-070000
 ### Lint
 - ERROR: 0, WARN: 0, INFO: 0
 
+### Notes
+- forgetter_partial: scope=/fixture/research, candidates_evaluated=15, reason=max_candidates
+
 ### Skipped (reason)
 - (none)
 
@@ -1942,6 +1945,14 @@ def check_codex_routine_runner() -> None:
             fragment in autoevo,
             f"autoevo command cannot persist verifier-required evidence: {fragment}",
         )
+    expect(
+        "| 2: Per-step budget | demote dispatch | Notes (`forgetter_partial: ...`) |"
+        in autoevo
+        and "Do not put a returned partial envelope in § Skipped or § Errors."
+        in autoevo
+        and 'note "partial sweep on `<scope>`" in audit log § "Errors"' not in autoevo,
+        "bounded partial Forgetter envelopes can still poison completion verification",
+    )
     expect(
         'git -C "$OV" restore .' not in autoevo,
         "autoevo failure recovery may not restore the whole user worktree",

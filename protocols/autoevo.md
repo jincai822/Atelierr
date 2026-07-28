@@ -152,6 +152,12 @@ rejects a wrapper-level `noop`. A passing cycle must have:
 - final `verified_sweeps` and `verification_commit` fields that match the
   audit and Git evidence.
 
+A Forgetter envelope with `mode: partial` is valid bounded coverage when it
+contains the required structured envelope. Record its cap reason in the
+latest audit § Notes and count it as `envelope_returned`; partial mode alone
+must not populate § Skipped or § Errors. Missing envelopes, unsafe skips, and
+execution faults remain verifier failures.
+
 ## Pre-flight gates
 
 The deterministic preflight defers before model launch if any gate holds. The
