@@ -171,8 +171,9 @@ Lightweight capture of dining experiences for personal preference learning + fut
 - 1-2 句话: 必点菜, 服务/ambiance, 同行
 - 推断 from context (else 1-line confirm): City / 类型 / booking platform / payment benefit used
 
-**Accumulate as a pending Scribe operation** (do NOT `Edit` directly from the orchestrator):
-- Pending op: `dining_row` with `target_file` resolved from `profile/diet.md § Catalog files`, structured row fields (date, restaurant, city, type, score, 再去, health flags, party size, total, per-person, platform, credit), `raw_content` for the 必点·备注 free-text column. 评分 + 再去 mandatory; dash placeholder only for missing data the user can't recall. Dispatch happens at Pre-Output. The Scribe reads the file's schema header at dispatch time and formats the row to match exactly.
+**Route the capture:**
+- If the user explicitly associates the visit with a named trip or a same-session explicit `current trip → exact existing trip-note path/title` mapping, route it directly to `/dine` Intent C and its confirmation gate. Do not accumulate a `dining_row` Scribe operation.
+- Otherwise, accumulate a pending `dining_row` Scribe operation with `target_file` resolved from `profile/diet.md § Catalog files`, structured row fields (date, restaurant, city, type, score, 再去, health flags, party size, total, per-person, platform, credit), and `raw_content` for the 必点·备注 free-text column. 评分 + 再去 mandatory; dash placeholder only for missing data the user can't recall. Dispatch happens at Pre-Output. The Scribe reads the file's schema header at dispatch time and formats the row to match exactly.
 
 **Cross-doc sync triggers** (silent unless flagged for user):
 - If 评分 ≥ 8 AND 再去 = Y AND restaurant NOT in the regional catalog rotation → flag user: "Add to rotation?"
@@ -206,14 +207,15 @@ The orchestrator accumulates pending Scribe operations during the session (it do
 |---|---|---|
 | Step 0 closure write-back (TODO Awareness rule) | `gtd_entry` (`toggle_done` / `toggle_killed` / `prefix_line`) | User confirmed a TODO done or killed (GTD-source toggle; reflection-source prefix) |
 | Step 0 stale prompt → promote | `gtd_entry` (`add`) | User picked "promote" with due date and area |
-| Step 6 Dining Pulse | `dining_row` | User shared a restaurant visit |
+| Step 6 Dining Pulse, ordinary meal | `dining_row` | User shared a restaurant visit without an explicit trip association |
+| Step 6 Dining Pulse, explicitly trip-associated meal | `/dine` Intent C | Route immediately to Intent C's confirmation gate; do not accumulate a Scribe operation |
 | Any step where user dictates a daily-note-style narrative for a date | `daily_note` | Narrative covers events for a date whose daily-note file is missing or lacks the new content |
 | Any step where a person is mentioned with bio context AND no person note exists | `people_stub` | Verify with `uv run scripts/people.py "<name>"` before adding; only accumulate if no match returned |
 | User explicitly says "save this" / "记一下" with no typed slot fit | `generic` | Orchestrator picks a `<paths.wip>/` path and confirms with user before adding to pending list |
 
 **Skip condition (per op):** the corresponding file already captures the content, or the user provided only reflection-mode input (questions, feelings, abstract discussion) for that surface. Do not invent content.
 
-**Dispatch all accumulated ops at this stage.** For each pending op, call the Scribe with the operation-specific fields documented in `.claude/agents/scribe.md` ("Operations" section). Do NOT pre-rewrite user text before passing it; the Scribe applies verbatim + light-format rules.
+**Dispatch all accumulated Scribe ops at this stage.** For each pending op, call the Scribe with the operation-specific fields documented in `.claude/agents/scribe.md` ("Operations" section). Do NOT pre-rewrite user text before passing it; the Scribe applies verbatim + light-format rules. Trip-associated Dining Pulse captures have already routed to `/dine` Intent C and are not pending Scribe work.
 
 Where pending ops target independent files, dispatch the Scribe calls in parallel (single message, multiple `Agent` tool calls) for latency.
 

@@ -6,7 +6,7 @@ description: Restaurant recommendation flow using local context and credit-burn 
 Three intents (auto-detected from args):
 - **A. Restaurant Recommendation** (default): pick 3 restaurant candidates based on user-supplied context, historical preferences, and credit-burn opportunities. Read-only on catalog docs under this intent.
 - **B. Workplace Catering Tracker**: parse a weekly catering PDF from the folder mapped to a workplace slug in `profile/diet.md`, choose health-aware picks for the user's attendance days, and surface a confirmed table for the user to record themselves (the system does not write to daily notes).
-- **C. Meal Log Capture** (ad-hoc): log a meal the user just ate. Parses receipt images (HEIC/JPG/PNG/PDF) when provided, cross-references catalogs for missing slots, asks ONE compact question for what cannot be derived, shows a draft row + side-effect plan, and appends to the private meal-history tracker on confirm. Co-equal capture path with `/hi` Dining Pulse.
+- **C. Meal Log Capture** (ad-hoc): log a meal the user just ate. Parses receipt images (HEIC/JPG/PNG/PDF) when provided, cross-references catalogs for missing slots, asks ONE compact question for what cannot be derived, shows a draft row + side-effect plan, and appends to the private meal-history tracker on confirm. An explicitly trip-associated capture may also add a date-only meal-history reference to that trip note. Co-equal capture path with `/hi` Dining Pulse.
 
 ## Quick start
 
@@ -219,6 +219,20 @@ Read `profile/diet.md` § Catalog files first to resolve the five roles below; i
 - `Grep` the prepaid-balance file under `<paths.finance>/` for the restaurant → if listed, expect the profile-defined prepaid payment label unless the receipt says otherwise.
 - If any catalog file is missing, skip silently and note in the closing line.
 
+### C.2a Resolve explicit trip context
+
+Consider a trip only when the user explicitly says the meal belongs to a named trip or to their current trip. Do not infer a trip from city, restaurant location, receipt address, date, or any combination of those facts.
+
+- **Named trip:** resolve only an exact, unique existing trip-note title or filename under `<paths.travel>/`. If no note or more than one note matches, ask one compact question for the intended trip note; do not offer the trip-log side effect until it is resolved.
+- **Current trip:** resolve only when the same session contains an explicit `current trip → exact existing trip-note path/title` mapping. Aliases, partial titles, implicit associations, and a stale, incidental, or merely present trip mention are insufficient. Otherwise ask one compact question for the intended trip note.
+- **Compatible location:** read the resolved trip note and use only an existing, clearly labelled log or status section that already contains date-prefixed list entries in its local convention. If no such section exists or the match is uncertain, state that the trip-log reference is unavailable and continue with the meal capture; do not create a heading or invent a trip-note schema.
+
+For a compatible location, record its exact section heading, section-content SHA-256, insertion anchor, before/after position, and date-prefixed list shape. Read the meal-history tracker and resolve its existing document title under the user's local title convention; do not substitute a fixed label. Compute the relative local Markdown path from the resolved trip note's directory to that tracker, then prepare only this reference:
+
+`- YYYY-MM-DD: [<resolved-meal-history-title>](<relative-meal-log-path>)`
+
+Before offering the side effect, search the resolved compatible section for the exact date plus resolved relative meal-history link in its local list shape. If it already exists, do not offer or write another reference. The trip note must not repeat the restaurant, rating, cost, dishes, or any other meal-row content.
+
 ### C.3 Auto-derive what you can
 
 | Slot | Derivation |
@@ -249,9 +263,12 @@ Before writing, plan side effects. Each is opt-in via the confirm prompt (see C.
 | Gift card update | Receipt shows gift-card balance line OR user volunteers balance | Update existing row in the gift-card catalog file (under `<paths.finance>/`, filename per `profile/diet.md`): Balance + Last updated + Source; or insert new row if first time. |
 | Benefits-tracker nudge | Credit slot maps to a tracked benefit cycle in the private profile | Suggest an update and cite the affected row without copying program policy into this command. Do NOT auto-write; surface as a one-liner for the user to apply manually. |
 | Catalog promotion flag | 评分 ≥ 8 AND 再去 = Y AND restaurant not currently in the relevant city catalog file (per `profile/diet.md`) | One-line suggestion at the end: `→ 考虑 promote 到 <city catalog name> (评分 N + 再去 Y, 还没在 catalog)`. Do NOT write. |
+| Trip-log reference | User explicitly associated this meal with a named/current trip, one compatible trip-note location was resolved, and the exact date plus relative meal-history link is not already present | After a successful, audited meal-log append, append the date-only resolved meal-history-title link from C.2a to the trip note. Do not copy meal-row details. |
 | Daily note | (never) | Daily notes are user-authored. Do NOT auto-create even if today's note is missing. |
 
 ### C.5 Confirm gate (non-negotiable)
+
+Show only applicable side effects, numbered consecutively, and retain a number-to-action map for the selected writes. The trip-log reference is dependent on the meal-log append.
 
 Show the user in this exact shape:
 
@@ -261,27 +278,46 @@ Draft row (meal log):
 
 Side effects:
   1. Append row to meal log + bump Last updated
-  2. <gift card update if any>
-  3. <benefits-tracker nudge if any>
-  4. <catalog promotion flag if any>
+  <next number>. <gift card update if applicable>
+  <next number>. <benefits-tracker nudge if applicable>
+  <next number>. <catalog promotion flag if applicable>
+  <next number>. <trip-log reference if resolved>
 
-OK to apply 1-N? (yes / partial: "1,2" / no / edit: tell me what to change)
+OK to apply listed effects? (yes / partial: "1,2" / no / edit: tell me what to change)
 ```
 
-User says `yes` → apply all. Partial → apply only the listed numbers. `no` → do nothing. `edit` → patch and re-confirm. **Never silent-append.**
+User says `yes` → apply all. Partial → apply only the listed numbers. A partial selection containing the trip-log reference but not the meal-log append is invalid: explain that the reference depends on the meal row, ask the user to include the meal append or remove the reference, then re-present the plan without writing. `no` → do nothing. `edit` → patch and re-confirm. **Never silent-append.**
 
 ### C.6 Write
 
 For the meal log: use `Edit` to insert the new row in ascending event-date order. Insert before the next-newer-date row, or append after the last row when it is newest. Never append a backfill at the end merely because it was captured today. Bump `Last updated:` line. For the gift-card catalog: same `Edit` pattern.
 
-After writing, run `python3 scripts/dining_audit.py --json` when available. If the audit fails, repair only the row or invariant introduced by this capture before reporting success.
+After writing the meal row, run `python3 scripts/dining_audit.py --json` when available. If the audit fails, repair only the row or invariant introduced by this capture before reporting success. If the audit cannot pass, or the repair removes or rolls back the new meal row, do not write the trip reference.
+
+For a selected trip-log reference: write it only after the meal row was successfully written and the dining audit passed with that row intact. Do not use `Edit` directly. Invoke the helper with the already-resolved values; it canonicalizes the trip-note path and derives its trusted cache lock path internally:
+
+```bash
+python3 scripts/trip_reference.py \
+  --trip-note "<resolved-trip-note-path>" \
+  --section-heading "<exact-section-heading>" \
+  --section-sha256 "<captured-section-sha256>" \
+  --anchor "<exact-insertion-anchor>" \
+  --position "<before-or-after>" \
+  --reference "<fully-rendered-date-only-relative-meal-history-link>"
+```
+
+The helper holds an exclusive advisory lock for the entire final read, validation, insertion, durable write, and release sequence.
+
+Interpret its JSON status exactly: `inserted` means report the reference added; `already_present` means do not duplicate it; `drift` or `anchor_missing` means skip safely; `error` means skip safely with no fallback direct `Edit`. In every non-`inserted` case, leave the successfully audited meal row intact and report the reference as deferred/skipped.
 
 For the benefits tracker: do NOT write; surface the one-liner only.
 
 ### C.7 Report
 
 One line:
-> `Logged: <Restaurant> <Date> 评 <N>/10. <one optional flag, e.g., "prepaid balance updated", "promote candidate", or "benefits tracker update to apply manually">.`
+> `Logged: <Restaurant> <Date> 评 <N>/10. <one optional flag, e.g., "prepaid balance updated", "trip reference added", "trip reference skipped after meal log", "promote candidate", or "benefits tracker update to apply manually">.`
+
+If the meal row was not written successfully, or was removed or rolled back because its audit could not pass, report: `Not logged: <Restaurant> <Date>. Neither the meal row nor trip reference was written.` If a successfully audited meal row remains but the helper returns a non-`inserted` status, report: `Logged: <Restaurant> <Date>. Trip reference skipped: <reason>.`
 
 ## Rules
 

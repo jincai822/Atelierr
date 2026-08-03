@@ -153,17 +153,20 @@ The `<!-- sub-mode-procedures-map -->` markers above bound the table that `scrip
 
 ### Capture Fast Path
 
-When the user's input is "just write this down" (factual, no reflection sought), do not run the coaching flow. Dispatch the Scribe directly with the right operation:
+When the user's input is "just write this down" (factual, no reflection sought), do not run the coaching flow. Use the handling path that matches its capture shape:
 
-| Content shape | Scribe operation | Target tier |
+| Content shape | Handling | Target tier |
 |---|---|---|
 | Date-stamped narrative for a day | `daily_note` | under `<paths.daily_notes>/` |
+| Restaurant + score / 必点, explicitly associated by the user with a named or current trip | Delegate to `/dine` Intent C | The meal log plus the resolved trip note's existing dated-log/list section |
 | Restaurant + score / 必点 | `dining_row` | the user's dining-log file under `<paths.travel>/` |
 | New person mentioned with bio context, file does not exist | `people_stub` | under `<paths.people>/` |
 | Action item with deadline / area | `gtd_entry` (`add`) | most recently modified file under `<paths.gtd>/` |
 | Anything else "just save this" | `generic` | orchestrator picks an appropriate path under `<paths.wip>/` |
 
 Resolve the exact target file path at dispatch time by inspecting the target directory for the user's existing structural conventions (subdirectory tree, filename style). Do not assume a layout; the user owns these conventions and they are private to `$OV/`. Confirm with the user once when multiple plausible targets exist; if the path is obvious from a quick directory listing, just dispatch.
+
+The trip exception requires the user to state that the meal belongs to a named trip or their current trip. A city, restaurant location, receipt address, or date alone is not trip context. Delegate this exception to Intent C so its existing confirmation gate can offer the optional trip-note reference; retain the direct `dining_row` dispatch for every other meal capture.
 
 ### Effective Date
 

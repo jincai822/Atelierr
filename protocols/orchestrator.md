@@ -101,7 +101,7 @@ Agent output that quietly satisfies both sides is a flag. This is the runtime an
 All note writes are local file writes under `$OV/`. There are two writing paths, one cognitive and one mechanical:
 
 - **Cognitive (→ Curator):** the Curator drafts content operations (compactions, merges, new wiki entries, session-derived notes); the orchestrator owns `Write`/`Edit` and writes after user approval. Every proposal carries a `target_path` under `$OV/`.
-- **Mechanical (→ Scribe):** the Scribe records user-dictated raw content verbatim (daily-note narrative, dining-log rows, GTD entries, people-note stubs, generic passthrough). The Scribe writes directly using its own `Write`/`Edit` tools at the target path the orchestrator names. No user approval gate — verbatim preservation IS the trust property. See "Capture Operations" below and `.claude/agents/scribe.md`.
+- **Mechanical (→ Scribe):** the Scribe records user-dictated raw content verbatim (daily-note narrative, ordinary dining-log rows, GTD entries, people-note stubs, generic passthrough). The Scribe writes directly using its own `Write`/`Edit` tools at the target path the orchestrator names. No user approval gate — verbatim preservation IS the trust property. **Narrow exception:** an explicitly trip-associated meal capture hands off to `/dine` Intent C's existing confirmation-gated structured-write flow so it can add the optional trip-note reference; this also applies when the association emerges in Daily Reflection's Dining Pulse. Ordinary meal captures remain Scribe-owned. See "Capture Operations" below and `.claude/agents/scribe.md`.
 
 The orchestrator must not transcribe raw user content itself; that burns deep-cognition tokens on mechanical I/O and is the failure mode the Scribe role exists to prevent.
 
@@ -290,18 +290,19 @@ Bounded decay sweeps over `$OV/`. Forgetter never deletes and has no Write tool;
 | "Are any of my wiki entries contradicted by newer notes?" | Dispatch Forgetter with `scope_path: <paths.wiki>/`. Forgetter only flags Contradicted on L4; report routes Contradicted items to Challenger to probe before any rewrite. | Forgetter → Challenger |
 | "Find redundant notes I should compact" | Dispatch Forgetter with the user's `scope_path` of choice (or ask). Redundant items in the report route to Curator after user approval. | Forgetter → Curator |
 
-### Capture Operations (→ Scribe)
-Cheap-tier verbatim recording. Scribe voices and operation contracts live in `harness/agents.toml` and `.claude/agents/scribe.md`. The orchestrator MUST NOT transcribe raw user content itself — that burns deep-cognition tokens on mechanical I/O.
+### Capture Operations
+Cheap-tier verbatim recording defaults to Scribe. Scribe voices and operation contracts live in `harness/agents.toml` and `.claude/agents/scribe.md`. The sole exception is an explicitly trip-associated meal capture, including Daily Reflection's Dining Pulse, which follows `/dine` Intent C's confirmation-gated structured-write flow. The orchestrator MUST NOT transcribe raw user content itself — that burns deep-cognition tokens on mechanical I/O.
 
 | User dictates | Operation | Target tier |
 |---|---|---|
 | Date-stamped narrative for a day | `daily_note` | under `<paths.daily_notes>/` |
+| Restaurant + score / 必点 explicitly associated with a named/current trip | `/dine` Intent C confirmation-gated structured write | the meal-history tracker plus one resolved compatible trip-note location |
 | Restaurant + score / 必点 | `dining_row` | the user's dining-log file under `<paths.travel>/` |
 | Action item with deadline / area, or close-out toggle on an existing item | `gtd_entry` (`add` / `toggle_done` / `toggle_killed`) | most recently modified file under `<paths.gtd>/` |
 | Person mentioned with bio context, no person note exists yet | `people_stub` | under `<paths.people>/` |
 | "Save this somewhere" — no typed slot fits | `generic` | orchestrator picks an `<paths.wip>/` path |
 
-The Scribe is the only writer for these surfaces; the orchestrator does not duplicate the work after dispatch returns. Schemas (column layouts, field names, marker glyphs, header styles) are user-private and discovered from `$OV/` at dispatch time, not encoded here.
+The Scribe is the only writer for its listed operations; the orchestrator does not duplicate the work after dispatch returns. The explicitly trip-associated meal exception is owned by `/dine` Intent C and is confirmation-gated. Schemas (column layouts, field names, marker glyphs, header styles) are user-private and discovered from `$OV/` at dispatch time, not encoded here.
 
 **Zero-files recovery (orchestrator side, before dispatch):**
 - `gtd_entry` — if `<paths.gtd>/` is empty, ask the user once for a default GTD filename and create the file in the dispatch context (or skip the dispatch and surface the question). Do not pass an empty `target_file` to the Scribe.
@@ -439,6 +440,6 @@ During any session, actively look for these signals and chain agents:
 1. **Don't bottleneck.** If the user asks for something an agent can do, dispatch it — don't try to do it yourself.
 2. **Present, don't lecture.** Your job is to facilitate the user's thinking, not to overwhelm them with agent outputs.
 3. **One thing at a time.** Present findings incrementally, not all at once.
-4. **Ask before acting.** For Curator-mediated note operations (create, merge, replace), confirm with the user before writing. **Exception: Scribe capture operations** (`daily_note`, `dining_row`, `gtd_entry`, `people_stub`, `generic`) write directly without an approval gate — verbatim preservation is the trust property and the user has already authored the content via chat. See "Note Writing" section above.
+4. **Ask before acting.** For Curator-mediated note operations (create, merge, replace), confirm with the user before writing. **Exception: Scribe capture operations** (`daily_note`, ordinary `dining_row`, `gtd_entry`, `people_stub`, `generic`) write directly without an approval gate — verbatim preservation is the trust property and the user has already authored the content via chat. Explicitly trip-associated meal captures instead use `/dine` Intent C's confirmation gate. See "Note Writing" section above.
 5. **Track dispatches.** Note which agents were invoked and their results in the session output.
 6. **Quality gate enforcement.** Check Gate outputs before presenting to user.
