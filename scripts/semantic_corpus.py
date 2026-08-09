@@ -26,7 +26,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import unquote
 
-POLICY_VERSION = 1
+# Increment whenever classification, exclusion, scope, or raw-card rendering
+# changes in a way that requires existing derived indexes to be refreshed.
+POLICY_VERSION = 2
+POLICY_FINGERPRINT = f"semantic-corpus-v{POLICY_VERSION}"
 
 ACTIVE_SCOPE = "active"
 RAW_SCOPE = "raw"
@@ -65,6 +68,7 @@ _HARD_EXCLUSION_REASONS = frozenset(
         "trash",
         "orphan_stub",
         "hidden_operational",
+        "operational_tools",
         "dependency_tree",
     }
 )
@@ -159,6 +163,27 @@ class CorpusRecord:
 ChunkEstimator = Callable[[str], int | Sequence[Any] | Sized]
 
 
+def corpus_metadata_fingerprint(scope: str, representation: str) -> str:
+    """Bind one indexed record to policy, scope, and representation."""
+    return f"{POLICY_FINGERPRINT}:{scope}:{representation}"
+
+
+def physical_manifest_fingerprint(
+    scope: str,
+    representation: str,
+    mtime: float,
+) -> str:
+    """Bind a physical record to its policy metadata and precise timestamp.
+
+    The index still stores the portable float ``mtime`` for query filters, but
+    its manifest needs a sub-second signature.  Otherwise the historical
+    one-second comparison tolerance can hide an edit made immediately after
+    an index pass.
+    """
+    mtime_ns = int(round(mtime * 1_000_000_000))
+    return f"{corpus_metadata_fingerprint(scope, representation)}:mtime-ns={mtime_ns}"
+
+
 def normalize_relative_path(path: str | os.PathLike[str]) -> str:
     """Return a safe, normalized POSIX path relative to a supplied root."""
     raw = os.fspath(path).replace("\\", "/")
@@ -236,6 +261,22 @@ def scope_matches(
     return requested in scopes
 
 
+def path_prefix_matches(
+    path: str | os.PathLike[str],
+    prefix: str | os.PathLike[str],
+) -> bool:
+    """Match a physical path or a raw locator through its virtual source path."""
+    relative = normalize_relative_path(path)
+    requested = normalize_relative_path(prefix)
+    candidates = [relative]
+    if relative.startswith(RAW_LOCATOR_PATH_PREFIX):
+        candidates.append(relative[len(RAW_LOCATOR_PATH_PREFIX) :])
+    return any(
+        candidate == requested or candidate.startswith(requested + "/")
+        for candidate in candidates
+    )
+
+
 def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
@@ -265,12 +306,22 @@ def _legacy_scope_sql(scope: str, path_column: str) -> str:
         f"({path_column} >= {_sql_literal('.')} AND "
         f"{path_column} < {_sql_literal('/')})"
     )
-    for dependency_segment in ("node_modules", ".venv", "__pycache__"):
+    for operational_segment in (
+        "cache",
+        "_meta",
+        "_routine_prompts",
+        ".trash",
+        "_tools",
+        "node_modules",
+        ".venv",
+        "__pycache__",
+    ):
         hard_parts.append(
-            f"({path_column} LIKE {_sql_literal(dependency_segment + '/%')} OR "
+            f"({path_column} LIKE {_sql_literal(operational_segment + '/%')} OR "
             f"{path_column} LIKE "
-            f"{_sql_literal('%/' + dependency_segment + '/%')})"
+            f"{_sql_literal('%/' + operational_segment + '/%')})"
         )
+    hard_parts.append(f"{path_column} LIKE {_sql_literal('%/.%')}")
     hard = "(" + " OR ".join(hard_parts) + ")"
     allowed = f"NOT {hard}"
 
@@ -280,9 +331,18 @@ def _legacy_scope_sql(scope: str, path_column: str) -> str:
         f"{path_column} LIKE {_sql_literal('%/raw/%')})"
     )
     raw = f"({locator} OR {raw_file})"
-    archive = _path_prefix_sql(path_column, "archive")
-    inbox = _path_prefix_sql(path_column, "inbox")
-    process = _path_prefix_sql(path_column, "sessions")
+    archive_prefix = _path_prefix_sql(path_column, "archive")
+    process_prefix = _path_prefix_sql(path_column, "sessions")
+    inbox_path = (
+        f"({_path_prefix_sql(path_column, 'inbox')} OR "
+        f"{path_column} LIKE {_sql_literal('%/inbox/%')})"
+    )
+    archive = f"({archive_prefix} AND NOT {raw})"
+    process = f"({process_prefix} AND NOT {raw})"
+    inbox = (
+        f"({inbox_path} AND NOT {raw} AND NOT {archive_prefix} "
+        f"AND NOT {process_prefix})"
+    )
 
     if scope == ALL_SCOPE:
         return allowed
@@ -367,19 +427,22 @@ def raw_cluster_path(path: str | os.PathLike[str]) -> str | None:
 def _hard_exclusion_reason(relative_path: str) -> str | None:
     parts = PurePosixPath(relative_path).parts
     top = parts[0]
-    if top == "cache":
+    directories = parts[:-1]
+    if "cache" in directories or top == "cache":
         return "cache"
-    if top == "_meta":
+    if "_meta" in directories or top == "_meta":
         return "operational_meta"
-    if top == "_routine_prompts":
+    if "_routine_prompts" in directories or top == "_routine_prompts":
         return "routine_prompts"
-    if top == ".trash":
+    if ".trash" in directories or top == ".trash":
         return "trash"
     if len(parts) >= 2 and parts[:2] == ("archive", "orphan-stubs"):
         return "orphan_stub"
-    if any(part in {"node_modules", ".venv", "__pycache__"} for part in parts[:-1]):
+    if "_tools" in directories:
+        return "operational_tools"
+    if any(part in {"node_modules", ".venv", "__pycache__"} for part in directories):
         return "dependency_tree"
-    if top.startswith("."):
+    if top.startswith(".") or any(part.startswith(".") for part in directories):
         return "hidden_operational"
     return None
 
@@ -387,13 +450,14 @@ def _hard_exclusion_reason(relative_path: str) -> str | None:
 def _native_scope(relative_path: str, *, raw: bool) -> str:
     if raw:
         return RAW_SCOPE
-    top = PurePosixPath(relative_path).parts[0]
+    parts = PurePosixPath(relative_path).parts
+    top = parts[0]
     if top == "archive":
         return ARCHIVE_SCOPE
-    if top == "inbox":
-        return INBOX_SCOPE
     if top == "sessions":
         return PROCESS_SCOPE
+    if "inbox" in parts[:-1]:
+        return INBOX_SCOPE
     return ACTIVE_SCOPE
 
 
@@ -656,7 +720,6 @@ def corpus_record_for_file(
         raise ValueError(f"included file became empty: {item.relative_path}")
 
     prefix = "raw-text" if item.is_raw else "file"
-    fingerprint = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return CorpusRecord(
         record_id=f"{prefix}:{item.relative_path}",
         path=item.relative_path,
@@ -666,7 +729,11 @@ def corpus_record_for_file(
         representation=item.representation,
         mtime=item.mtime,
         size=item.size,
-        manifest_fingerprint=fingerprint,
+        manifest_fingerprint=physical_manifest_fingerprint(
+            item.scope,
+            item.representation,
+            item.mtime,
+        ),
         source_path=item.absolute_path,
     )
 
@@ -782,7 +849,8 @@ def build_raw_clusters(
             )
         )
         manifest_hasher = hashlib.sha256()
-        manifest_hasher.update(b"raw-locator-manifest-v1\0")
+        manifest_hasher.update(POLICY_FINGERPRINT.encode("ascii"))
+        manifest_hasher.update(b"\0raw-locator-manifest\0")
         for item in assets:
             manifest_hasher.update(item.relative_path.encode("utf-8"))
             manifest_hasher.update(b"\0")
@@ -983,7 +1051,10 @@ def build_raw_locator_records(
                 representation=RAW_LOCATOR_REPRESENTATION,
                 mtime=cluster.mtime_end,
                 size=len(text.encode("utf-8")),
-                manifest_fingerprint=cluster.manifest_fingerprint,
+                manifest_fingerprint=(
+                    f"{corpus_metadata_fingerprint(ACTIVE_SCOPE, RAW_LOCATOR_REPRESENTATION)}:"
+                    f"{cluster.manifest_fingerprint}"
+                ),
                 source_path=None,
                 raw_cluster=cluster,
             )
@@ -1399,6 +1470,7 @@ __all__ = [
     "INDEX_SCOPES",
     "INBOX_SCOPE",
     "POLICY_VERSION",
+    "POLICY_FINGERPRINT",
     "PROCESS_SCOPE",
     "RAW_LOCATOR_REPRESENTATION",
     "RAW_LOCATOR_PATH_PREFIX",
@@ -1412,6 +1484,8 @@ __all__ = [
     "build_raw_locator_records",
     "classify_file",
     "classify_relative_path",
+    "corpus_metadata_fingerprint",
+    "physical_manifest_fingerprint",
     "corpus_record_for_file",
     "discover_authored_digest_references",
     "is_raw_path",
@@ -1423,6 +1497,7 @@ __all__ = [
     "raw_cluster_path",
     "render_raw_locator_card",
     "scope_matches",
+    "path_prefix_matches",
     "scope_sql",
     "scopes_for_path",
     "top_level_path",

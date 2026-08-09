@@ -6,12 +6,12 @@ Provider-neutral registry files for the Atelier runtime layer.
 |---|---|
 | `commands.toml` | Portable workflow names mapped to `.claude/commands/*.md` sources; Codex exposes matching `$command` skills. |
 | `agents.toml` | Portable role names mapped to source files (typically `.claude/agents/*.md`; may be a script for script-driven roles like `external-reviewer`) and a per-role `voices = {leg = "model", ...}` table. Allowed leg keys: `native`, `direct`, `codex`. |
-| `intents.toml` | Intent router registry for `/hi` — trigger phrases mapped to dispatch shape (mode, agents, profile reads, coordination pattern). |
+| `intents.toml` | Intent router registry for `/hi`: trigger phrases mapped to one procedure path, bounded context budget, dispatch shape, and profile reads. |
 | `models.toml` | Model identity registry with runtime-neutral reasoning tiers (identity names like opus, sonnet, deepseek_pro_max; no provider bindings). Provider/model bindings live in gitignored `profile/models.toml` and merge at runtime. |
 | `capabilities.toml` | Runtime-neutral capability names and the Codex-side tool that implements each. The Claude Code mapping lives in `.claude/agents/*.md` `tools:` frontmatter (single source of truth). |
 | `runtimes.toml` | Native CLI registry and shipped Codex default. A user can persist Claude in gitignored `runtime.local.toml`. |
 | `runtime.local.toml.example` | Template for the optional per-user runtime default. `scripts/atelier_runtime.py use <runtime>` writes the gitignored live file. |
-| `paths.toml` | Canonical logical-name → vault-path registry for every L1–L4 surface (the `<paths.<name>>` placeholders in docs). Renames happen here; per-user extensions live in gitignored `paths.local.toml`. |
+| `paths.toml` | Canonical logical-name → vault-path registry for L1–L4 surfaces and the private operational feature root (the `<paths.<name>>` placeholders in docs). Renames happen here; per-user extensions live in gitignored `paths.local.toml`. |
 | `paths.local.toml.example` | Template for the gitignored per-user `paths.local.toml` (localized wikis, sandbox overrides, private tiers). |
 | `model_costs.toml` | Per-1M-token USD prices by model identity, consumed by `scripts/shadow.py report` (fails closed when prices are >90 days stale). Per-user overrides in gitignored `profile/model_costs.toml`. |
 | `shadow_tasks.toml` | Per-task-type verdict-token extraction rules for `scripts/shadow.py report`. |

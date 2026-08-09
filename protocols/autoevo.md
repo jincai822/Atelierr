@@ -374,7 +374,7 @@ The auto-detection check above takes precedence; explicit tombstones are an addi
 ## What is out of scope
 
 - **Push.** Bot never pushes to `origin`; push remains user-driven per the `$OV` git push convention.
-- **Daily notes.** Bot never reads them as autoevo targets. CLAUDE.md § Writing Rules forbids system writes to daily notes (sole exception: Scribe `daily_note` verbatim capture); this protocol upholds that.
+- **Daily notes.** Bot never reads them as autoevo targets. CLAUDE.md's writes-and-communication rules forbid system writes to daily notes (sole exception: Scribe `daily_note` verbatim capture); this protocol upholds that.
 - **Wiki rewrites.** Contradicted findings against L4 are always pending-queue, never auto-applied. The Curator wiki-edit path requires human approval.
 - **Re-indexing decisions.** Autoevo does not mutate the semantic index inline.
   The owner-gated `com.atelier.semantic-index` launchd job detects corpus drift

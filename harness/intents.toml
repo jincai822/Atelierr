@@ -5,14 +5,13 @@
 # invoke, which agents the orchestrator should expect to dispatch, and which
 # profile files to pre-read.
 #
-# Source of truth: this file. `.claude/commands/hi.md` references rows here
-# by intent name; the prose does not duplicate trigger phrases or agent
-# lists. To add or change a routing rule, edit this file and update only
-# the prose pointer / per-mode procedural section in hi.md.
+# Source of truth: this file. `.claude/commands/hi.md` consumes the selected
+# row; the prose does not duplicate trigger phrases, procedures, or agent
+# lists. To add or change a route, edit this file and the selected procedure.
 #
 # Discoverability: Codex and other tools read this TOML directly; no helper
 # subcommand. The orchestrator surfaces the matched intent inline on every
-# `/hi` dispatch (see hi.md "Always-on Routing Announcement"); there is no
+# `/hi` dispatch (see hi.md § Load and dispatch); there is no
 # opt-in flag.
 #
 # Schema:
@@ -21,6 +20,11 @@
 #                             dispatch helper treats list members as ORed)
 #   mode                      string identifier of a /hi sub-mode (e.g.,
 #                             "capture-fast-path", "read-and-discuss")
+#   procedure                 authoritative project-relative workflow file;
+#                             the router reads only this file after selection
+#   context_budget_bytes      default serialized context projection budget;
+#                             operational rows are skipped by /hi even though
+#                             the helper retains a small diagnostic budget
 #   agents                    list of agent keys from harness/agents.toml
 #                             that the orchestrator expects to dispatch
 #                             (informational; not a hard contract)
@@ -52,8 +56,8 @@
 # Capture also matches on input shape, not only literal phrases: a date-prefixed
 # factual narrative without analytical question (e.g., `5/4 早上去了 X, 中午
 #吃了 Y`) routes here even though no `patterns` substring matches. The
-# orchestrator decides on shape via the routing prose in `.claude/commands/hi.md`
-# → "Always-on Routing Announcement" / "Semantic match". Keep `patterns` for
+# orchestrator decides on shape via `.claude/commands/hi.md` § Contextual
+# routing. Keep `patterns` for
 # explicit phrases; do not add structural placeholders here.
 #
 # Entry-hint skill: `.claude/skills/capture/SKILL.md` (forwards into `/hi`;
@@ -68,6 +72,8 @@ patterns = [
     "save this",
 ]
 mode = "capture-fast-path"
+procedure = "protocols/intent-capture.md"
+context_budget_bytes = 4096
 agents = ["scribe"]
 profile_reads = []
 priority = 50
@@ -75,7 +81,7 @@ pattern = "solo"
 expected_subagent_count = 1
 parallel = false
 
-# Reading routes to the "Read & Discuss" sub-flow (hi.md). Initial dispatch is
+# Reading routes to `.claude/commands/read.md`. Initial dispatch is
 # Reader + Researcher; Reviewer + Challenger fire later as a write-back gate
 # (not the routing announcement chain). `agents` here = the initial dispatch
 # only, matching what the routing announcement claims is happening.
@@ -106,9 +112,39 @@ patterns = [
     "let's discuss",
 ]
 mode = "read-and-discuss"
+procedure = ".claude/commands/read.md"
+context_budget_bytes = 6144
 agents = ["reader", "researcher"]
 profile_reads = ["identity.md"]
 priority = 40
+pattern = "agent-team"
+expected_subagent_count = 2
+parallel = true
+
+[intents.finance-analysis]
+patterns = [
+    "财报",
+    "公司现金流",
+    "自由现金流",
+    "资本开支",
+    "股票分析",
+    "市场信号",
+    "earnings report",
+    "earnings results",
+    "quarterly results",
+    "free cash flow",
+    "company cash flow",
+    "capital expenditure",
+    "market signal",
+    "hyperscaler",
+    "ai cycle",
+]
+mode = "finance-analysis"
+procedure = "protocols/analysis-signals.md"
+context_budget_bytes = 6144
+agents = ["researcher", "scout"]
+profile_reads = ["expertise.md"]
+priority = 46
 pattern = "agent-team"
 expected_subagent_count = 2
 parallel = true
@@ -121,6 +157,8 @@ patterns = [
     "meeting notes",
 ]
 mode = "meeting-process"
+procedure = "protocols/intent-meeting.md"
+context_budget_bytes = 4096
 agents = ["meeting", "challenger", "curator"]
 profile_reads = []
 priority = 30
@@ -128,8 +166,7 @@ pattern = "orchestrator-subagent"
 expected_subagent_count = 3
 parallel = false
 
-# Talk/transcript routes to the "Read & Discuss" sub-mode of /hi (per
-# .claude/commands/hi.md → "Intent Routing"), which dispatches 1 Reader
+# Talk/transcript routes to `.claude/commands/read.md`, which dispatches 1 Reader
 # (Critical lens, with auto-transcript preprocessing) + 1 Researcher (related
 # notes) in parallel.
 [intents.talk]
@@ -141,6 +178,8 @@ patterns = [
     "video",
 ]
 mode = "transcript-read"
+procedure = ".claude/commands/read.md"
+context_budget_bytes = 6144
 agents = ["reader", "researcher"]
 profile_reads = ["identity.md"]
 priority = 20
@@ -167,6 +206,8 @@ patterns = [
     "fleeting digest",
 ]
 mode = "sync"
+procedure = ".claude/commands/sync.md"
+context_budget_bytes = 4096
 agents = ["researcher", "curator", "challenger", "scribe", "reviewer"]
 profile_reads = []
 priority = 28
@@ -189,6 +230,8 @@ patterns = [
     "scan my drafts",  # legacy alias; pre-rename muscle memory
 ]
 mode = "decay-scan"
+procedure = "protocols/intent-forget.md"
+context_budget_bytes = 4096
 agents = ["forgetter"]
 profile_reads = []
 priority = 25
@@ -198,9 +241,8 @@ parallel = false
 
 # Sub-mode intents (/weekly, /review, /decision, /energy-audit, /explore,
 # /curate, /introspect, /lint, /promote): reachable as direct slashes for
-# muscle memory, and via `/hi <natural language>`. Each row points at the
-# procedure file in `.claude/commands/<name>.md`. See `.claude/commands/hi.md`
-# "Sub-mode procedures" for the mode → file map.
+# muscle memory, and via `/hi <natural language>`. Each row's `procedure`
+# points directly at the authoritative workflow file.
 
 # Weekly review of the past 7 days. Procedure: .claude/commands/weekly.md.
 # Higher priority than `reading` (40) so explicit "weekly" / "this week"
@@ -215,6 +257,8 @@ patterns = [
     "run weekly",
 ]
 mode = "weekly-review"
+procedure = ".claude/commands/weekly.md"
+context_budget_bytes = 8192
 agents = ["researcher"]
 profile_reads = ["identity.md", "directions.md"]
 priority = 45
@@ -236,6 +280,8 @@ patterns = [
     "energy check",
 ]
 mode = "energy-audit"
+procedure = ".claude/commands/energy-audit.md"
+context_budget_bytes = 8192
 agents = ["researcher"]
 profile_reads = ["identity.md", "directions.md"]
 priority = 43
@@ -257,6 +303,8 @@ patterns = [
     "quarterly review",
 ]
 mode = "goal-review"
+procedure = ".claude/commands/review.md"
+context_budget_bytes = 8192
 agents = ["researcher", "synthesizer"]
 profile_reads = ["identity.md", "directions.md"]
 priority = 42
@@ -278,6 +326,8 @@ patterns = [
     "make a decision",
 ]
 mode = "decision-journal"
+procedure = ".claude/commands/decision.md"
+context_budget_bytes = 6144
 agents = ["researcher", "thinker"]
 profile_reads = ["identity.md", "directions.md"]
 priority = 35
@@ -298,6 +348,8 @@ patterns = [
     "what's interesting",
 ]
 mode = "open-exploration"
+procedure = ".claude/commands/explore.md"
+context_budget_bytes = 6144
 agents = ["researcher"]
 profile_reads = ["identity.md"]
 priority = 22
@@ -328,6 +380,8 @@ patterns = [
     "readwise saves",
 ]
 mode = "curate-inbox"
+procedure = ".claude/commands/curate.md"
+context_budget_bytes = 8192
 agents = []
 profile_reads = ["identity.md", "directions.md"]
 priority = 23
@@ -348,6 +402,8 @@ patterns = [
     "wiki promote",
 ]
 mode = "promote"
+procedure = ".claude/commands/promote.md"
+context_budget_bytes = 4096
 agents = ["researcher", "curator"]
 profile_reads = []
 priority = 14
@@ -369,6 +425,8 @@ patterns = [
     "wiki lint",
 ]
 mode = "lint"
+procedure = ".claude/commands/lint.md"
+context_budget_bytes = 4096
 agents = []
 profile_reads = []
 priority = 12
@@ -390,6 +448,8 @@ patterns = [
     "refresh profile",
 ]
 mode = "introspect"
+procedure = ".claude/commands/introspect.md"
+context_budget_bytes = 4096
 agents = ["reviewer", "challenger"]
 profile_reads = []
 priority = 10
@@ -402,6 +462,8 @@ parallel = true
 [intents.reflection]
 patterns = []
 mode = "daily-reflection"
+procedure = ".claude/commands/daily-reflection.md"
+context_budget_bytes = 8192
 agents = ["researcher", "challenger", "scout", "synthesizer", "reviewer"]
 profile_reads = ["identity.md", "directions.md"]
 priority = 0

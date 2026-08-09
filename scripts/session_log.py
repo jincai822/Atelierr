@@ -128,6 +128,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.type == "reading":
+        sys.stderr.write(
+            "reading logs must be created complete in one file operation; "
+            "follow protocols/session-log.md\n"
+        )
+        return 2
+
     # Late-sleep rule: before 03:00, use previous day.
     now = datetime.now()
     if now.hour < 3:

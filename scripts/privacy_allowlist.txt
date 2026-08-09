@@ -29,6 +29,8 @@ Readwise Reader
 Root Cause Analysis
 Scikit-learn
 Source Quality
+# Generic atelier/library vocabulary used by protocols/atelier.md.
+Source Register
 
 # Public schema and adapter vocabulary. Both slug and display forms are kept
 # because private vault filenames can produce either candidate.

@@ -90,7 +90,7 @@ A narrow non-interactive mode used exclusively by `/autoevo-nightly` per `protoc
 
 1. `band` is not `redundant-high` or `low-signal-high`. No other bands have auto-apply paths.
 2. Any source path resolves under `<paths.wiki>/` or any localized shadow wiki declared in `harness/paths.local.toml`. Wiki content never auto-applies.
-3. Any source path resolves under `<paths.daily_notes>/`. Daily notes are user-authored per `CLAUDE.md` § Writing Rules and `protocols/local-first-architecture.md` § Source of Truth.
+3. Any source path resolves under `<paths.daily_notes>/`. Daily notes are user-authored per CLAUDE.md's writes-and-communication rules and `protocols/local-first-architecture.md` § Source of Truth.
 4. Any source path resolves outside the working tier set: `<paths.wip>/`, `<paths.research>/`, `<paths.reflections>/`. (Note: `<paths.agent_findings>/` is excluded because it is reports about decay, not user notes; an op on it is suspicious.)
 5. For `band: redundant-high`: any source path's mtime is within the last 30 days. The Forgetter heuristic should already exclude this, but you verify independently.
 6. For `band: low-signal-high`: any source path's mtime is within the last 365 days. Same independent verification rule.

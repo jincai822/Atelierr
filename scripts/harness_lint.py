@@ -18,9 +18,8 @@ Claude Code and Codex:
      resolves to an agent in `harness/agents.toml`; pattern values in
      both registries are drawn from the allowed set; `agents.<name>.used_by`
      is consistent with the intents/commands walk; orphans flagged.
- 10. Every `intents.<name>.mode` is reachable from the Sub-mode procedures
-     map in `.claude/commands/hi.md`; every `intents.<name>.profile_reads`
-     filename exists at `profile/<name>`.
+ 10. Every intent declares an existing procedure and a bounded context budget;
+     every `intents.<name>.profile_reads` filename exists at `profile/<name>`.
  11. The native runtime selector has a Codex shipped default, a supported
      Claude choice, and a gitignored local override.
 
@@ -48,6 +47,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SEVERITY_ORDER = {"ERROR": 0, "WARN": 1, "INFO": 2}
+MAX_CONTEXT_BUDGET_BYTES = 20 * 1024
 
 # Allowed coordination-pattern values for both `agents.<name>.pattern` (in
 # harness/agents.toml) and `intents.<name>.pattern` (in harness/intents.toml).
@@ -183,7 +183,9 @@ def load_claude_commands() -> tuple[dict[str, str], list[Finding]]:
 
     command_paths = sorted(
         p for p in set(tracked) | set(untracked)
-        if p.endswith(".md") and p.startswith(".claude/commands/")
+        if p.endswith(".md")
+        and p.startswith(".claude/commands/")
+        and (ROOT / p).is_file()
     )
     commands: dict[str, str] = {}
     findings: list[Finding] = []
@@ -843,7 +845,7 @@ def check_agent_registry(
                 ROOT / str(source),
                 ROOT / "protocols" / "agent-handoff.md",
                 ROOT / "protocols" / "orchestrator.md",
-                ROOT / ".claude" / "commands" / "hi.md",
+                ROOT / "protocols" / "intent-forget.md",
                 ROOT / ".claude" / "commands" / "autoevo-nightly.md",
             )
             if canonical_marker not in prompt or legacy_marker in prompt:
@@ -1125,8 +1127,10 @@ def check_codex_hooks() -> list[Finding]:
     findings: list[Finding] = []
     required = (
         ("SessionStart", ("scripts/cues.py", "--hook", "--runtime codex")),
+        ("UserPromptSubmit", ("scripts/session_replay.py", "hook --runtime codex")),
         ("UserPromptSubmit", ("scripts/cues.py", "--touch-lock")),
         ("UserPromptSubmit", ("scripts/intent_coverage.py", "intent-hook", "--runtime codex")),
+        ("Stop", ("scripts/session_replay.py", "hook --runtime codex")),
         ("Stop", ("scripts/shadow.py", "gc")),
     )
     for event, needles in required:
@@ -1176,11 +1180,14 @@ def check_claude_hooks() -> list[Finding]:
     findings: list[Finding] = []
     required = (
         ("SessionStart", ("scripts/cues.py", "--hook", "--runtime claude")),
+        ("UserPromptSubmit", ("scripts/session_replay.py", "hook --runtime claude-code")),
         ("UserPromptSubmit", ("scripts/cues.py", "--touch-lock")),
         (
             "UserPromptSubmit",
             ("scripts/intent_coverage.py", "intent-hook", "--runtime claude-code"),
         ),
+        ("Stop", ("scripts/session_replay.py", "hook --runtime claude-code")),
+        ("SessionEnd", ("scripts/session_replay.py", "hook --runtime claude-code")),
         ("SessionEnd", ("scripts/shadow.py", "gc")),
     )
     for event, needles in required:
@@ -2088,56 +2095,13 @@ def check_intents_registry(
     return findings
 
 
-def check_intents_mode_mapping(
+def check_intents_procedures(
     intents: dict[str, dict[str, Any]],
 ) -> list[Finding]:
-    """Verify every `intents.<name>.mode` is reachable from `.claude/commands/hi.md`.
-
-    The orchestrator only knows what to do with a matched intent if `hi.md`
-    documents the procedure for that mode (either an inline section or a path
-    to an external command file). Without this check, a new intent row could
-    land with no executable instruction — the dual-path drift problem
-    (advertised but unreachable).
-
-    Implementation: parse the block delimited by `<!-- sub-mode-procedures-map -->`
-    and `<!-- /sub-mode-procedures-map -->` markers in `hi.md`, extract every
-    table cell wrapped in backticks, and verify each `intents.*.mode` value
-    appears as a literal token. Marker-bounded so the check is robust to other
-    files re-using the table format.
-    """
+    """Verify each intent owns a safe procedure path and context budget."""
     findings: list[Finding] = []
     if not intents:
         return findings
-
-    hi_path = ROOT / ".claude" / "commands" / "hi.md"
-    if not hi_path.exists():
-        return [
-            Finding(
-                "ERROR",
-                "intents-mode-hi-missing",
-                rel(hi_path),
-                "`.claude/commands/hi.md` is missing; cannot verify intent mode mappings",
-            )
-        ]
-    text = _read(hi_path)
-    block_re = re.compile(
-        r"<!--\s*sub-mode-procedures-map\s*-->(.*?)<!--\s*/sub-mode-procedures-map\s*-->",
-        re.DOTALL,
-    )
-    block_match = block_re.search(text)
-    if not block_match:
-        return [
-            Finding(
-                "ERROR",
-                "intents-mode-map-block-missing",
-                rel(hi_path),
-                "missing `<!-- sub-mode-procedures-map -->` ... `<!-- /sub-mode-procedures-map -->` block in hi.md",
-            )
-        ]
-    block_text = block_match.group(1)
-    # Tokens are anything wrapped in backticks within the table block.
-    backtick_re = re.compile(r"`([^`\n]+)`")
-    documented_modes = {m.strip() for m in backtick_re.findall(block_text)}
 
     for intent_name, entry in sorted(intents.items()):
         if not isinstance(entry, dict):
@@ -2153,13 +2117,51 @@ def check_intents_mode_mapping(
                 )
             )
             continue
-        if mode not in documented_modes:
+
+        procedure = entry.get("procedure")
+        if not isinstance(procedure, str) or not procedure.strip():
             findings.append(
                 Finding(
                     "ERROR",
-                    "intents-mode-unmapped",
+                    "intents-procedure-missing",
                     "harness/intents.toml",
-                    f"intent `{intent_name}` mode=`{mode}` not in `.claude/commands/hi.md` Sub-mode procedures map",
+                    f"intent `{intent_name}` has no `procedure` path",
+                )
+            )
+        else:
+            procedure_path = Path(procedure)
+            resolved = (ROOT / procedure_path).resolve()
+            if procedure_path.is_absolute() or not resolved.is_relative_to(ROOT):
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "intents-procedure-path",
+                        "harness/intents.toml",
+                        f"intent `{intent_name}` procedure escapes the repository: `{procedure}`",
+                    )
+                )
+            elif not resolved.is_file():
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "intents-procedure-missing",
+                        "harness/intents.toml",
+                        f"intent `{intent_name}` procedure does not exist: `{procedure}`",
+                    )
+                )
+
+        budget = entry.get("context_budget_bytes")
+        if (
+            isinstance(budget, bool)
+            or not isinstance(budget, int)
+            or not 1 <= budget <= MAX_CONTEXT_BUDGET_BYTES
+        ):
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "intents-context-budget",
+                    "harness/intents.toml",
+                    f"intent `{intent_name}` context_budget_bytes must be an integer from 1 to {MAX_CONTEXT_BUDGET_BYTES}",
                 )
             )
 
@@ -2517,32 +2519,22 @@ def check_doc_indirection_depth() -> list[Finding]:
 
 
 def check_commands_intent_coverage() -> list[Finding]:
-    """Every commands.toml entry must either appear in hi.md's sub-mode
-    procedures map (reachable via /hi <natural language>), be a routing
-    hub itself (hi), or declare `direct_only = true`. Aliases delegate
-    to the target's intent surface and are exempt.
-
-    Reachability is established by the command's source path appearing in
-    the sub-mode procedures map block; this is what already wires intent
-    mode → procedure file in hi.md.
-    """
+    """Require public commands to be routed, aliased, or direct-only."""
     findings: list[Finding] = []
     data, err = _load_toml(ROOT / "harness" / "commands.toml")
     if err:
         return [err]
     assert data is not None
     command_map = data.get("commands", {}) or {}
-
-    hi_path = ROOT / ".claude" / "commands" / "hi.md"
-    if not hi_path.exists():
-        return findings
-    text = _read(hi_path)
-    block_re = re.compile(
-        r"<!--\s*sub-mode-procedures-map\s*-->(.*?)<!--\s*/sub-mode-procedures-map\s*-->",
-        re.DOTALL,
-    )
-    block_match = block_re.search(text)
-    procedure_block = block_match.group(1) if block_match else ""
+    intents, intent_err = _load_toml(ROOT / "harness" / "intents.toml")
+    if intent_err:
+        return [intent_err]
+    assert intents is not None
+    routed_sources = {
+        str(entry.get("procedure", ""))
+        for entry in (intents.get("intents", {}) or {}).values()
+        if isinstance(entry, dict)
+    }
 
     for name, entry in sorted(command_map.items()):
         if not isinstance(entry, dict):
@@ -2555,14 +2547,14 @@ def check_commands_intent_coverage() -> list[Finding]:
         if name == "hi":
             continue
         source = str(entry.get("source", ""))
-        if source and source in procedure_block:
+        if source and source in routed_sources:
             continue
         findings.append(
             Finding(
                 "WARN",
                 "commands-routing-undeclared",
                 "harness/commands.toml",
-                f"command `{name}` has no hi.md routing and no `direct_only = true`",
+                f"command `{name}` has no intent procedure and no `direct_only = true`",
             )
         )
     return findings
@@ -2792,7 +2784,7 @@ def run_lints() -> list[Finding]:
     harness_agents_raw, _ = _load_toml(ROOT / "harness" / "agents.toml")
     harness_agents_data = (harness_agents_raw or {}).get("agents", {}) or {}
     findings.extend(check_intents_registry(intents, agents, harness_agents_data))
-    findings.extend(check_intents_mode_mapping(intents))
+    findings.extend(check_intents_procedures(intents))
     findings.extend(check_intents_profile_reads(intents))
     findings.extend(check_claude_skills(intents))
     findings.extend(check_agent_pattern_and_used_by(intents, commands))

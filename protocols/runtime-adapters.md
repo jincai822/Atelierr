@@ -21,6 +21,13 @@ workflow.
 | Codex | `AGENTS.md` | `.agents/skills/`, `.codex/agents/`, `.codex/hooks.json`, Codex CLI and review | First-class native harness; shipped default |
 | Claude Code | `CLAUDE.md` | `.claude/agents/`, `.claude/commands/`, `.claude/skills/` (entry hints only; not authoritative dispatch) | First-class native harness; selectable default |
 
+Private user features are an exception to the committed project-edge layout.
+Their canonical source is `<paths.private_features>/<name>/SKILL.md`, and
+native symlinks expose that same directory through the user-level Claude and
+Codex skill roots. Private names never enter `commands.toml`,
+`intents.toml`, or committed runtime adapters. The full ownership and
+activation contract is in `protocols/private-features.md`.
+
 `.claude/skills/` is a Claude Code-only surface holding **entry hints**, not authoritative dispatch. Claude Code matches a skill's frontmatter description against user phrasing semantically: the LLM judges relevance, not substring. On a match the skill forwards into `/hi`; the canonical intent router in `harness/intents.toml` is still the single decision point for which agents run. Codex does not read `.claude/skills/`; repo-scoped skills under `.agents/skills/` provide its native entry surface. `$atelier` handles broad routing and harness work, while explicit command skills such as `$weekly` and `$review` read the matching `.claude/commands/*.md` specification directly. Skill exposure is additive at both runtime edges and produces zero workflow duplication.
 
 `scripts/harness_lint.py` enforces structural invariants only: skill name matches its directory, frontmatter has a non-empty description that mentions `/hi` (delegation), and the skill name corresponds to an existing `intents.<name>` row. Coherence between the skill's prose description and the intent it exposes is human-curated — substring-checking an LLM-judged trigger surface would be the wrong tool.
@@ -47,10 +54,13 @@ another registered project command, Codex renders the `$command` form. Native
 Codex built-ins such as `/hooks` keep their slash form.
 
 Codex lifecycle hooks live in `.codex/hooks.json`. `SessionStart` reuses
-`scripts/cues.py --hook --runtime codex`; `UserPromptSubmit` refreshes the
-session lock and runs `scripts/intent_coverage.py intent-hook --runtime codex`;
-`Stop` runs the shared shadow-log cleanup. Claude Code keeps the corresponding behavior in
-`.claude/settings.json`, using `SessionEnd` for cleanup. Both edges call shared
+`scripts/cues.py --hook --runtime codex`; `UserPromptSubmit` optionally records
+the replay prompt, refreshes the session lock, and runs
+`scripts/intent_coverage.py intent-hook --runtime codex`; `Stop` optionally
+reconciles the replay snapshot and runs shared shadow-log cleanup. Claude Code
+keeps the corresponding behavior in `.claude/settings.json`, using both `Stop`
+and `SessionEnd` for optional replay reconciliation. Replay hooks are disabled
+unless `ATELIER_SESSION_REPLAY_ENABLED=1`; both edges otherwise call shared
 scripts rather than duplicating hook logic.
 
 ## Runtime Selection
@@ -74,6 +84,15 @@ launches. Unattended local routines intentionally do not use this resolution
 chain: `scripts/routine_runner.sh` fixes them to Codex because their sandbox,
 plugin loading, sanitized environment, and approval policy are implemented and
 tested at that runtime edge.
+
+## Session replay
+
+When `ATELIER_SESSION_REPLAY_ENABLED=1`, both runtime edges capture each user
+input before routing and reconcile a private native-transcript snapshot after
+work stops. Capture is off by default. The shared contract, storage boundary,
+privacy guard, and recovery procedure are in protocols/session-replay.md. This
+archive is operational evidence for deferred bot-only re-analysis, never
+ambient model context or a replacement for user-facing reflections.
 
 ## Provider-Neutral Rules
 
@@ -153,9 +172,15 @@ When a user asks Codex to run an Atelier command:
    instructs the subagent to read the authoritative `.claude/agents/` brief.
    If subagents are unavailable, emulate the brief sequentially and disclose it.
 6. Prefer local `$OV/` files, `rg`, and `uv run scripts/semantic.py`.
-7. Ask before any local file write under `$OV/`. **Exception: Scribe capture operations** (`daily_note`, `dining_row`, `gtd_entry`, `people_stub`, `generic`) write directly without an approval gate — the user has already authored the raw content via chat and verbatim preservation is the trust property. Other agents and ad-hoc orchestrator writes still ask first.
+7. Ask before user-facing note writes under `$OV/`. Scribe capture operations
+   (`daily_note`, `dining_row`, `gtd_entry`, `people_stub`, `generic`) write
+   directly because the user already authored the raw content. Bounded private
+   operational artifacts defined by `protocols/session-log.md` or
+   `protocols/session-replay.md` also write without approval. Other agents and
+   ad-hoc orchestrator writes still ask first.
 8. Report any downgraded capability, such as missing web access or unavailable
    subagent dispatch.
 
-For command invocation and fresh-session recipes, see `AGENTS.md` § Codex
-Quick Recipes.
+For command invocation, use the native `/name` or `$name` surface described
+above. Keep launch recipes in user-level CLI documentation rather than the
+always-loaded project adapter.

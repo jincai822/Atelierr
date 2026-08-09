@@ -64,9 +64,7 @@ Current `$OV/_meta/` inhabitants:
 - (planned migration) `drive_aliases.toml` — Drive top-level → $OV domain mapping (currently hardcoded in `drive-zk-ingestion.md` lines 73-76)
 - (planned) `mcp_grants.toml` — enumeration of MCPs authorized and what private data each may send
 
-## Open Items
-
-These are SHOULD-FIX or DEFER from peer-review rounds. Tracked here as the keystone; resolve in subsequent rounds.
+## Open gaps
 
 - **Bootstrap runbook** missing for fresh-clone OSS users (no `BOOTSTRAP.md`). Until written, the "OSS-portable" framing in `runtime-adapters.md` is aspirational. Tracked as the next material gap.
 - **Heartbeat checks** (liveness): no backend has a periodic verification that it still satisfies its declared behavior. Drive MCP could change `create_file` semantics; routine cron could shift; Readwise CLI could change auth flow. A `scripts/backend_heartbeat.py` (deferred) would write a no-op probe per backend on a known cadence and fire a hard cue if any probe fails. Separate concern from deprecation playbooks below.
@@ -74,11 +72,16 @@ These are SHOULD-FIX or DEFER from peer-review rounds. Tracked here as the keyst
 - **MUST + soft-cue alignment**: `remote-routines.md` declares "every routine MUST persist to $OV" but enforces with a soft cue. The `needs_drive_write_update` flag is migration debt acknowledgment, not a permanent escape hatch. Hardening path: replace the bool with an expiry date (`needs_drive_write_update = "YYYY-MM-DD"`) and have `/lint` fail after the date. Implementation deferred; schema documentation tightened.
 - **Cloud-prompt hygiene**: routine prompts and MCP-authorized backends accept private content from $OV and send it to provider clouds (Anthropic, Google). No policy governs what identifier classes are permitted to cross. Add `protocols/cloud-prompt-hygiene.md` (deferred). Until then, the registry rows for Gmail MCP and Calendar MCP carry no formal identifier policy.
 
-**Resolved in earlier rounds (kept here for trace):**
-- profile cleavage: documented as gitignored per-user config in `CLAUDE.md` § Profile; intentionally excluded from `harness/paths.toml`.
-- Vault git push policy: documented in `repo-conventions.md` § $OV git push policy.
-- Conflict resolution between overlapping backends: promoted to `remote-routines.md` § Policy (Drive file canonical; email/calendar bodies are pointers capped at 5 lines).
-- Drive aliases (generic public ones): kept in `drive-zk-ingestion.md` as transitional default; taxonomy-private mappings still go to `$OV/_meta/drive_aliases.toml`.
+## Established contracts
+
+- Profile config is gitignored per-user state under
+  `protocols/session-continuity.md` and is intentionally excluded from
+  `harness/paths.toml`.
+- Vault Git push policy lives in `repo-conventions.md` § $OV git push policy.
+- `remote-routines.md` § Policy resolves overlapping backends: the Drive file
+  is canonical; email and calendar bodies are pointers capped at five lines.
+- Generic Drive aliases live in `drive-zk-ingestion.md`; taxonomy-private
+  mappings live in `$OV/_meta/drive_aliases.toml`.
 
 ## Cross-References
 

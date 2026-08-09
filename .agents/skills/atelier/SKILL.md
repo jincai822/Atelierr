@@ -17,6 +17,8 @@ agents, or harness portability.
    `$review`, `$lint`, and so on).
 4. Read the command skill's declared `.claude/commands/<command>.md` source
    directly and execute it in the current thread.
+   For `$hi`, use the injected route packet and read only its registry-owned
+   `procedure`; load the full intent table only on packet fallback.
 5. Do not launch Codex recursively.
 6. Discover native roles under `.codex/agents/` and inspect them with `/agent`.
 7. Load only the selected `.claude/commands/<command>.md` spec and any directly
@@ -32,6 +34,9 @@ agents, or harness portability.
     profiles in `harness/routine_profiles.toml`, and run
     `python3 scripts/routine_audit.py audit --check-system --json` before
     enabling or handing off launchd jobs.
+11. Keep private skill sources under `<paths.private_features>/`. Link the same
+    source directory into Claude and Codex user skill discovery; do not copy
+    the skill body or add its name to committed registries.
 
 ## Command Execution
 
@@ -77,8 +82,12 @@ When editing the harness:
    synchronized with the Codex adapter's `model_reasoning_effort`.
 8. Keep `.codex/agents/` and `.codex/hooks.json` synchronized with the shared
    registries and lifecycle contracts.
-9. Run `python3 scripts/harness_lint.py` before finishing.
-10. Run `python3 scripts/harness_smoke.py` after helper or registry edits.
+9. Keep private feature names and behavior out of committed registries; the
+   source-root contract is defined in `protocols/private-features.md`.
+10. Run `python3 scripts/harness_lint.py` before finishing.
+11. Run `.venv/bin/python scripts/harness_smoke.py` after helper or registry
+    edits when the project environment exists; otherwise use the configured
+    dependency runner.
 
 Keep command skills thin: they point to shared Claude command specifications
 and must not copy workflow bodies into the Codex edge.

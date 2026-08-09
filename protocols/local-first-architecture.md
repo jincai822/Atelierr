@@ -121,7 +121,8 @@ projection with deliberate visibility boundaries:
 - `raw`, `archive`, `inbox`, and `process` are explicit deep-search scopes.
   `raw` includes readable raw text; `process` maps to `<paths.sessions>/`.
 - `all` is an audit or recall-maximizing union, not the agent default.
-- `<paths.cache>/` and operational metadata never enter semantic retrieval.
+- Any nested `cache/`, `_meta/`, `_routine_prompts/`, `.trash/`, or `_tools/`
+  directory never enters semantic retrieval.
 - Readwise remains external and opt-in through `--sources local,readwise`.
 
 `scripts/semantic_corpus.py` owns classification, hard exclusions, locator
@@ -159,7 +160,7 @@ The expected steady-state ratio is roughly: hundreds of L1/L2 notes for every L4
 
 L1-L5 measures certification depth, not aggregation. Within a single tier (typically L2), the user often maintains both *detail files* (one file per subject, e.g. `<paths.travel>/trips/<trip>.md`) and *aggregate trackers* (one file summarizing many subjects, e.g. `<paths.travel>/<calendar>.md`, `<paths.travel>/<inventory>.md`, or `<paths.finance>/<benefits-tracker>.md`). Aggregates are hand-mirrored views over the details; nothing pushes detail edits back to the aggregates.
 
-The system handles this asymmetry at **read time**, not write time. Read commands that surface aggregate values (`/perks`, `/civ`) run `scripts/aggregate_freshness.py` as a pre-step and emit a divergence warning when any aggregate's `Last updated:` line lags the newest detail file. The convention: detail files are the SOT; aggregates may be stale; readers must cross-check the detail before quoting an aggregate value as authoritative. This is a read-time guard against antipattern #6 (shadow state) — the divergence is made visible rather than silently propagated.
+The system handles this asymmetry at **read time**, not write time. Read workflows that surface aggregate values run `scripts/aggregate_freshness.py` as a pre-step and emit a divergence warning when any aggregate's `Last updated:` line lags the newest detail file. The convention: detail files are the SOT; aggregates may be stale; readers must cross-check the detail before quoting an aggregate value as authoritative. This is a read-time guard against antipattern #6 (shadow state); the divergence is made visible rather than silently propagated.
 
 Write-time propagation (auto-generating aggregates from details) is deferred. It requires structured frontmatter on every detail file plus per-aggregate generators, which is heavier scaffolding than the read-time guard. The read-time guard is sufficient as long as readers respect the divergence warning.
 
@@ -172,7 +173,7 @@ freshness: required                  # marks the file as an aggregate to check
 ---
 ```
 
-With both keys present, `scripts/aggregate_freshness.py --discover` walks `$OV` (skipping `cache/`, `archive/`, `papers/`, `preprints/`, `zettelm/`, dotfiles), groups self-declared aggregates by their `subjects:` dir, and runs the same scan the explicit-args form does. `--stale-only` filters to just stale entries — silent when everything is fresh, ideal for session-start cues. The model rule in `CLAUDE.md` § Reading Rules wires this into every read of an aggregate: before quoting an aggregate as authoritative, run `--discover --stale-only` and cross-check any flagged file's subject SOT.
+With both keys present, `scripts/aggregate_freshness.py --discover` walks `$OV` (skipping `cache/`, `archive/`, `papers/`, `preprints/`, `zettelm/`, dotfiles), groups self-declared aggregates by their `subjects:` dir, and runs the same scan the explicit-args form does. `--stale-only` filters to just stale entries — silent when everything is fresh, ideal for session-start cues. The knowledge-and-retrieval rule in `CLAUDE.md` wires this into every read of an aggregate: before quoting an aggregate as authoritative, run `--discover --stale-only` and cross-check any flagged file's subject SOT.
 
 Adoption is forward-looking: existing aggregates opt in by adding the frontmatter block. Files without the marker are silently ignored by `--discover`; the explicit `--subjects` / `--aggregates` form continues to work for ad-hoc or transitional cases.
 

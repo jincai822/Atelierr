@@ -152,14 +152,6 @@ direct_only = true
 description = "Restaurant recommendation flow using local context and credit-burn signals."
 codex_prompt = "Execute the $dine skill in this Codex thread using `.claude/commands/dine.md` as the authoritative spec."
 
-[commands.perks]
-source = ".claude/commands/perks.md"
-category = "dashboard"
-status = "portable-adapted"
-direct_only = true
-description = "Read-only perks and trip status dashboard over local trackers."
-codex_prompt = "Execute the $perks skill in this Codex thread using `.claude/commands/perks.md` as the authoritative spec."
-
 [commands.autoevo-nightly]
 source = ".claude/commands/autoevo-nightly.md"
 category = "ops"

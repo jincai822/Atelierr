@@ -1,7 +1,0 @@
-interface:
-  display_name: "Atelier $perks"
-  short_description: "Run the Atelier $perks skill in Codex"
-  default_prompt: "Use $perks to run the matching Atelier command."
-
-policy:
-  allow_implicit_invocation: false

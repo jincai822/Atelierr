@@ -18,6 +18,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "[ \"${ATELIER_SESSION_REPLAY_ENABLED:-0}\" = \"1\" ] && uv run \"$(git rev-parse --show-toplevel)/scripts/session_replay.py\" hook --runtime codex || true",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "uv run \"$(git rev-parse --show-toplevel)/scripts/cues.py\" --touch-lock",
             "timeout": 3
           },
@@ -32,6 +37,11 @@
     "Stop": [
       {
         "hooks": [
+          {
+            "type": "command",
+            "command": "[ \"${ATELIER_SESSION_REPLAY_ENABLED:-0}\" = \"1\" ] && uv run \"$(git rev-parse --show-toplevel)/scripts/session_replay.py\" hook --runtime codex || true",
+            "timeout": 10
+          },
           {
             "type": "command",
             "command": "uv run \"$(git rev-parse --show-toplevel)/scripts/shadow.py\" gc 2>/dev/null || true",

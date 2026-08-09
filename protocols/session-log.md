@@ -14,6 +14,32 @@ At session end, immediately before (or alongside) the reflection file write. The
 - **Tier:** L2, same as `<paths.reflections>/` and `<paths.daily_notes>/`
 - **Write method:** Local `Write` only. No user approval needed (system-facing artifact). If the write fails, warn and continue; do not block the session.
 
+## Reading checkpoint
+
+Reading has a distinct abandonment risk: the first grounded analysis can finish
+before the user begins discussion or approves a reflection. For every reading
+flow, write the complete session log immediately after that first analysis and
+before entering discussion. Create its header, standard sections, and filled
+Reading Capsule in one file operation; never persist an empty skeleton first.
+This is an orchestrator-owned, system-facing write and needs no approval.
+
+Add this bounded section at that checkpoint:
+
+    ## Reading Capsule
+    checkpoint: initial-analysis
+    source: title, canonical URL, and Readwise document ID when present
+    source_locator: durable source identifier; a cache path is diagnostic only
+    mode: read-and-discuss, focused, or multi-lens
+    claims:
+    - [source] up to three attributed source claims with locations
+    - [analysis] up to two clearly labelled initial analytical findings
+    status: discussion-open
+
+Keep the capsule below 1.5 KB. It contains no diary material, user facts,
+goals, action commitments, or unsourced financial claims. If the reading later
+completes, append final gates and continuity to the same session log. A
+user-approved reflection remains a separate, optional artifact.
+
 ## Format
 
 ```markdown

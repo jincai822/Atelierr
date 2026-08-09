@@ -28,10 +28,19 @@ current capture. Add route-specific sources with `--component sources
 --source "<vault-relative-path>[#Section]"`. Generic startup, capture, lint,
 sync, promotion, and meeting routes do not load a daily note by default.
 
-The complete serialized projection must fit 12 KB. A selected workflow may
-raise `--byte-budget` to at most 20 KB. Anything omitted is retrieved
-deliberately after routing. This gives the session a "previously on..." anchor
-without loading three complete reflections or unrelated profile material.
+The complete serialized projection uses the selected intent's
+`context_budget_bytes` from `harness/intents.toml`, currently 4, 6, or 8 KB.
+A workflow may explicitly raise `--byte-budget` to at most 20 KB. Anything
+omitted is retrieved deliberately after routing. This gives the session a
+"previously on..." anchor without loading complete reflections or unrelated
+profile material.
+
+### Reading recovery
+
+For a reading or transcript/talk route, the projection also includes the most recent Reading
+Capsule from a reading session log. This is the bounded recovery path for a
+reading whose first analysis completed but whose discussion or reflection did
+not. Other routes never preload it.
 
 ### Connecting Back
 

@@ -24,13 +24,13 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INTENTS_PATH = ROOT / "harness" / "intents.toml"
 DEFAULT_COMPONENTS = ("profile", "session", "reflections")
 VALID_COMPONENTS = ("profile", "session", "reflections", "daily", "sources")
-DEFAULT_BYTE_BUDGET = 12 * 1024
 MAX_BYTE_BUDGET = 20 * 1024
 DEFAULT_REFLECTION_COUNT = 3
 MAX_REFLECTION_COUNT = 10
 ROUTE_PREFIX = "ATELIER_INTENT_ROUTE "
 
 SESSION_SECTION_NAMES = ("Continuity", "Anomalies")
+READING_CAPSULE_SECTION = "Reading Capsule"
 REFLECTION_HEADING_LIMIT = 40
 REFLECTION_CLOSING_LIMIT = 2
 MIN_INITIAL_EXCERPT_BYTES = 160
@@ -288,6 +288,19 @@ def _validate_profile_reads(value: Any, intent_name: str) -> list[str]:
     return result
 
 
+def _validate_context_budget(value: Any, intent_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise BundleError(
+            f"intents.{intent_name}.context_budget_bytes must be an integer"
+        )
+    if value <= 0 or value > MAX_BYTE_BUDGET:
+        raise BundleError(
+            f"intents.{intent_name}.context_budget_bytes must be between 1 and "
+            f"{MAX_BYTE_BUDGET}"
+        )
+    return value
+
+
 def resolve_route(
     *,
     intent_arg: str | None,
@@ -322,12 +335,28 @@ def resolve_route(
     mode = row.get("mode", "")
     if not isinstance(mode, str):
         raise BundleError(f"intents.{intent_name}.mode must be a string")
+    procedure = row.get("procedure", "")
+    if not isinstance(procedure, str) or not procedure.strip():
+        raise BundleError(f"intents.{intent_name}.procedure must be a path string")
+    context_budget_bytes = _validate_context_budget(
+        row.get("context_budget_bytes"), intent_name
+    )
     profile_reads = _validate_profile_reads(row.get("profile_reads", []), intent_name)
 
     mismatches: list[str] = []
     if packet is not None:
         if isinstance(packet.get("mode"), str) and packet["mode"] != mode:
             mismatches.append("mode")
+        if (
+            isinstance(packet.get("procedure"), str)
+            and packet["procedure"] != procedure
+        ):
+            mismatches.append("procedure")
+        if (
+            isinstance(packet.get("context_budget_bytes"), int)
+            and packet["context_budget_bytes"] != context_budget_bytes
+        ):
+            mismatches.append("context_budget_bytes")
         if "profile_reads" in packet and packet.get("profile_reads") != profile_reads:
             mismatches.append("profile_reads")
 
@@ -335,6 +364,8 @@ def resolve_route(
         "input": input_kind,
         "name": intent_name,
         "mode": mode,
+        "procedure": procedure,
+        "context_budget_bytes": context_budget_bytes,
         "profile_reads": profile_reads,
         "registry": display_path(intents_path),
     }
@@ -576,6 +607,7 @@ def add_session_candidates(
     *,
     vault: Path,
     effective_date: date,
+    route_name: str,
     next_ordinal: int,
 ) -> int:
     paths = latest_markdown_paths(vault / "sessions", effective_date, 1)
@@ -613,7 +645,77 @@ def add_session_candidates(
             )
         )
         next_ordinal += 1
-    return next_ordinal
+
+    if route_name not in {"reading", "talk"}:
+        return next_ordinal
+
+    reading_path: Path | None = None
+    reading_key: tuple[date, int, str] | None = None
+    for path in (vault / "sessions").rglob("*.md"):
+        if not path.is_file() or not re.search(r"-reading(?:-\d+)?$", path.stem):
+            continue
+        key = dated_path_key(path)
+        if key is not None and key[0] <= effective_date and (
+            reading_key is None or key > reading_key
+        ):
+            reading_path = path
+            reading_key = key
+    if reading_path is None:
+        omissions.append(
+            omission("session", "sessions/", READING_CAPSULE_SECTION, "no_reading_log")
+        )
+        return next_ordinal
+
+    reading_relative = relative_vault_path(vault, reading_path)
+    reading_text, reading_error = read_utf8(reading_path)
+    if reading_error is not None:
+        omissions.append(
+            omission(
+                "session",
+                reading_relative,
+                READING_CAPSULE_SECTION,
+                reading_error,
+            )
+        )
+        return next_ordinal
+    assert reading_text is not None
+    reading_section = section_by_title(
+        parse_markdown_sections(reading_text), READING_CAPSULE_SECTION
+    )
+    if reading_section is None:
+        omissions.append(
+            omission(
+                "session",
+                reading_relative,
+                READING_CAPSULE_SECTION,
+                "section_missing",
+            )
+        )
+        return next_ordinal
+    if not reading_section.body.strip():
+        omissions.append(
+            omission(
+                "session",
+                reading_relative,
+                reading_section.title,
+                "empty",
+            )
+        )
+        return next_ordinal
+    candidates.append(
+        Candidate(
+            component="session",
+            source=reading_relative,
+            section=reading_section.title,
+            representation="source_section",
+            text=reading_section.body,
+            source_bytes=utf8_len(reading_text),
+            cap_bytes=1536,
+            priority=1,
+            ordinal=next_ordinal,
+        )
+    )
+    return next_ordinal + 1
 
 
 def add_reflection_candidates(
@@ -855,6 +957,7 @@ def gather_candidates(
             omissions,
             vault=vault,
             effective_date=effective_date,
+            route_name=route["name"],
             next_ordinal=ordinal,
         )
     if "reflections" in components:
@@ -1226,7 +1329,7 @@ def build_bundle(
     components: Sequence[str],
     source_specs: Sequence[str],
     effective_date: date,
-    byte_budget: int,
+    byte_budget: int | None,
     reflection_count: int,
     output_format: str,
 ) -> str:
@@ -1234,6 +1337,9 @@ def build_bundle(
         intent_arg=intent,
         route_json_arg=route_json,
         intents_path=intents_path,
+    )
+    selected_budget = (
+        byte_budget if byte_budget is not None else route["context_budget_bytes"]
     )
     candidates, omissions = gather_candidates(
         vault=vault,
@@ -1243,14 +1349,14 @@ def build_bundle(
         effective_date=effective_date,
         reflection_count=reflection_count,
     )
-    excerpts = allocate_excerpts(candidates, omissions, byte_budget)
+    excerpts = allocate_excerpts(candidates, omissions, selected_budget)
     return fit_rendered_output(
         route=route,
         effective_date=effective_date,
         components=components,
         excerpts=excerpts,
         omissions=omissions,
-        byte_budget=byte_budget,
+        byte_budget=selected_budget,
         output_format=output_format,
     )
 
@@ -1309,10 +1415,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--byte-budget",
         "--budget",
         type=int,
-        default=DEFAULT_BYTE_BUDGET,
+        default=None,
         help=(
-            f"maximum serialized UTF-8 output bytes (default: "
-            f"{DEFAULT_BYTE_BUDGET}; maximum: {MAX_BYTE_BUDGET})"
+            "maximum serialized UTF-8 output bytes (default: selected "
+            "intent's context_budget_bytes; "
+            f"maximum: {MAX_BYTE_BUDGET})"
         ),
     )
     parser.add_argument(
@@ -1337,9 +1444,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.byte_budget <= 0:
+        if args.byte_budget is not None and args.byte_budget <= 0:
             raise BundleError("--byte-budget must be positive")
-        if args.byte_budget > MAX_BYTE_BUDGET:
+        if args.byte_budget is not None and args.byte_budget > MAX_BYTE_BUDGET:
             raise BundleError(
                 f"--byte-budget exceeds the selected-workflow maximum "
                 f"of {MAX_BYTE_BUDGET} bytes"

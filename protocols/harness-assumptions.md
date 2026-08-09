@@ -52,10 +52,10 @@ Voice band vocabulary used in this file:
 
 | Rule | Location | Current Value | Re-test When |
 |------|----------|--------------|-------------|
-| Generic route context | context_bundle.py, session-continuity.md, hi.md | At most 12 KB serialized UTF-8 | Context needs or model window changes materially |
+| Route context | context_bundle.py, session-continuity.md, intents.toml | Per-intent 4, 6, or 8 KB serialized UTF-8 | Repeated targeted retrieval shows a route is under-provisioned |
 | Selected workflow context | context_bundle.py, session-continuity.md | At most 20 KB before targeted source reads | Workflow evidence needs exceed the cap repeatedly |
 | Reflection continuity | context_bundle.py | Headings plus at most two high-signal closing sections from up to 3 files | Reflection structure changes |
-| Daily-note preload | context_bundle.py, hi.md | Explicit component only | More routes demonstrably require current capture |
+| Daily-note preload | context_bundle.py, session-continuity.md | Explicit component only | More routes demonstrably require current capture |
 | Profile preload | context_bundle.py, intents.toml | Only selected row's `profile_reads` | Intent ownership changes |
 | Session-log preload | context_bundle.py | Latest `Continuity` and `Anomalies` sections only | Session schema changes |
 
@@ -63,8 +63,8 @@ Voice band vocabulary used in this file:
 
 | Rule | Location | Current Value | Re-test When |
 |------|----------|--------------|-------------|
-| Profile staleness warning | CLAUDE.md, hi.md, review.md | 7 days | User data shows profiles change faster/slower |
-| Semantic search recency window | hi.md | 7 days for recent, 3+ months for forgotten | Embedding index makes recency less important |
+| Profile staleness warning | CLAUDE.md, context_bundle.py, review.md | 7 days | User data shows profiles change faster/slower |
+| Semantic search recency window | daily-reflection.md, challenger.md, researcher.md | 3+ months for forgotten-context probes | Embedding index makes recency less important |
 | L2 staleness thresholds | staleness.py | dormant=45d, stale=90d, promote=180d+2refs | First real corpus ages past 90 days; tune with actual archival decisions |
 | Meta-reflection trigger | evolver.md (principle 8 pruning trigger) | Every 5 sessions | Session volume data |
 

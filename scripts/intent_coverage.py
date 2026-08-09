@@ -28,7 +28,7 @@ INTENT_MISS_KINDS = ("fallback", "ambiguous", "low_confidence")
 INTENT_MISS_RUNTIMES = ("claude-code", "codex")
 INTENT_MISS_DISTINCT_DAYS_THRESHOLD = 3
 INTENT_MISS_KINDS_COL_WIDTH = len(",".join(sorted(INTENT_MISS_KINDS)))
-INTENT_ROUTE_SCHEMA_VERSION = 1
+INTENT_ROUTE_SCHEMA_VERSION = 2
 INTENT_ROUTE_CONTEXT_PREFIX = "ATELIER_INTENT_ROUTE "
 INTENT_ROUTE_MAX_CONTEXT_BYTES = 1024
 
@@ -61,6 +61,8 @@ def match_intents(
         entry = {
             "name": name,
             "mode": str(row.get("mode", "")),
+            "procedure": str(row.get("procedure", "")),
+            "context_budget_bytes": int(row.get("context_budget_bytes", 0)),
             "agents": list(row.get("agents") or []),
             "profile_reads": list(row.get("profile_reads") or []),
             "priority": priority,
@@ -103,6 +105,8 @@ def build_intent_route_projection(
         return {
             "name": str(match.get("name", "")),
             "mode": str(match.get("mode", "")),
+            "procedure": str(match.get("procedure", "")),
+            "context_budget_bytes": int(match.get("context_budget_bytes", 0)),
             "agents": list(match.get("agents") or []),
             "profile_reads": list(match.get("profile_reads") or []),
             "priority": int(match.get("priority", 0)),
@@ -203,6 +207,8 @@ def cmd_intent(args: argparse.Namespace) -> int:
         "input": text,
         "winner": matches[0]["name"],
         "mode": matches[0]["mode"],
+        "procedure": matches[0]["procedure"],
+        "context_budget_bytes": matches[0]["context_budget_bytes"],
         "agents": matches[0]["agents"],
         "parallel": matches[0]["parallel"],
         "profile_reads": matches[0]["profile_reads"],
@@ -214,6 +220,8 @@ def cmd_intent(args: argparse.Namespace) -> int:
             {
                 "name": m["name"],
                 "mode": m["mode"],
+                "procedure": m["procedure"],
+                "context_budget_bytes": m["context_budget_bytes"],
                 "priority": int(m["priority"]),
                 "matched_pattern": m.get("matched_pattern", ""),
                 "agents": m["agents"],
@@ -233,6 +241,8 @@ def cmd_intent(args: argparse.Namespace) -> int:
     )
     if payload["matched_pattern"]:
         print(f"matched:  {payload['matched_pattern']}")
+    print(f"workflow: {payload['procedure']}")
+    print(f"context:  {payload['context_budget_bytes']} bytes")
     if payload["agents"]:
         agent_list = ", ".join(payload["agents"])
         para = " (parallel)" if payload["parallel"] else " (sequential)"

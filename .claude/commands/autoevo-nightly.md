@@ -290,7 +290,7 @@ echo "autoevo-nightly run started $RUN_TS"
 
 # Resolve registry-defined paths once, bind shell variables for the rest of the run.
 # This is the canonical way to address vault segments; never hardcode `archive/decayed/`
-# or `agent-findings/` inline (CLAUDE.md § Path placeholders + scripts/_paths.py contract).
+# or `agent-findings/` inline (CLAUDE.md path-placeholder invariant + scripts/_paths.py contract).
 PATHS_CACHE=$(uv run --quiet python3 -c "from scripts._paths import tier; print(tier('cache'))")
 PATHS_ARCHIVE=$(uv run --quiet python3 -c "from scripts._paths import tier; print(tier('archive'))")
 PATHS_FINDINGS=$(uv run --quiet python3 -c "from scripts._paths import tier; print(tier('agent_findings'))")

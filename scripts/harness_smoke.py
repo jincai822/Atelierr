@@ -501,13 +501,41 @@ def check_semantic_maintenance() -> None:
         os.utime(stable, (baseline, baseline))
         os.utime(modified, (baseline + 10, baseline + 10))
         os.utime(added, (baseline + 20, baseline + 20))
+        current_manifest, physical_count, _, unreadable = (
+            semantic._current_corpus_manifest(vault)
+        )
         indexed = {
-            "stable.md": baseline,
-            "modified.md": baseline,
-            "removed.md": baseline,
+            "stable.md": {
+                "mtime": baseline,
+                "manifest_fingerprint": semantic.physical_manifest_fingerprint(
+                    "active",
+                    "authored",
+                    baseline,
+                ),
+            },
+            "modified.md": {
+                "mtime": baseline,
+                "manifest_fingerprint": semantic.physical_manifest_fingerprint(
+                    "active",
+                    "authored",
+                    baseline,
+                ),
+            },
+            "removed.md": {
+                "mtime": baseline,
+                "manifest_fingerprint": semantic.physical_manifest_fingerprint(
+                    "active",
+                    "authored",
+                    baseline,
+                ),
+            },
         }
-        files = list(vault.glob("*.md"))
-        stale = semantic._freshness_from_files(files, vault, indexed)
+        stale = semantic._freshness_from_manifest(
+            current_manifest,
+            indexed,
+            physical_count=physical_count,
+            unreadable=unreadable,
+        )
         expect(
             stale["fresh"] is False
             and stale["current_files"] == 3
@@ -518,15 +546,42 @@ def check_semantic_maintenance() -> None:
             f"semantic freshness drift classification failed: {stale}",
         )
 
-        current = {
-            "stable.md": stable.stat().st_mtime,
-            "modified.md": modified.stat().st_mtime,
-            "added.md": added.stat().st_mtime,
-        }
-        fresh = semantic._freshness_from_files(files, vault, current)
+        fresh = semantic._freshness_from_manifest(
+            current_manifest,
+            current_manifest,
+            physical_count=physical_count,
+            unreadable=unreadable,
+        )
         expect(
             fresh["fresh"] is True,
             f"semantic freshness rejected a current index: {fresh}",
+        )
+        immediate_edit = semantic._freshness_from_manifest(
+            {
+                "active.md": {
+                    "mtime": baseline + 0.5,
+                    "manifest_fingerprint": semantic.physical_manifest_fingerprint(
+                        "active",
+                        "authored",
+                        baseline + 0.5,
+                    ),
+                }
+            },
+            {
+                "active.md": {
+                    "mtime": baseline,
+                    "manifest_fingerprint": semantic.physical_manifest_fingerprint(
+                        "active",
+                        "authored",
+                        baseline,
+                    ),
+                }
+            },
+            physical_count=1,
+        )
+        expect(
+            immediate_edit["modified"] == 1 and immediate_edit["fresh"] is False,
+            "sub-second physical-file edits did not invalidate semantic freshness",
         )
 
     args = semantic.build_parser().parse_args(["index", "--if-stale"])
@@ -588,10 +643,13 @@ def check_semantic_corpus_policy() -> None:
             "duplicate.md": "## Active\ncurrent authored knowledge\n",
             "archive/old.md": "## Old\ncold history\n",
             "inbox/pending.md": "## Pending\nunreviewed capture\n",
+            "health/nutrition/inbox/pending.md": "## Pending\nnested capture\n",
             "sessions/2099-01-01-test.md": "## Continuity\nprocess only\n",
             "cache/noise.md": "cache noise\n",
+            "wip/cache/noise.md": "nested cache noise\n",
             "_meta/noise.md": "operational noise\n",
             "_routine_prompts/noise.md": "prompt noise\n",
+            "career/_tools/runs/noise.md": "generated run log\n",
             ".trash/noise.md": "trash noise\n",
             "archive/orphan-stubs/noise.md": "stub noise\n",
             "research/tool/node_modules/pkg/README.md": "dependency docs\n",
@@ -618,14 +676,17 @@ def check_semantic_corpus_policy() -> None:
             by_path["active.md"].included
             and by_path["archive/old.md"].scope == "archive"
             and by_path["inbox/pending.md"].scope == "inbox"
+            and by_path["health/nutrition/inbox/pending.md"].scope == "inbox"
             and by_path["sessions/2099-01-01-test.md"].scope == "process"
             and by_path["finance/raw/tax-2099/receipt.txt"].scope == "raw",
             "central corpus scope classification drift",
         )
         for excluded_path in (
             "cache/noise.md",
+            "wip/cache/noise.md",
             "_meta/noise.md",
             "_routine_prompts/noise.md",
+            "career/_tools/runs/noise.md",
             ".trash/noise.md",
             "archive/orphan-stubs/noise.md",
             "research/tool/node_modules/pkg/README.md",
@@ -678,6 +739,10 @@ def check_semantic_corpus_policy() -> None:
             "dependency-tree exclusion missing from corpus audit",
         )
         expect(
+            audit["by_exclusion_reason"]["operational_tools"]["files"] == 1,
+            "nested operational-tool exclusion missing from corpus audit",
+        )
+        expect(
             audit["exact_duplicates"]["basis"] == "all_regular_physical_files"
             and audit["exact_duplicates"]["groups"] >= 2
             and audit["exact_duplicates"]["included_text"]["groups"] >= 1,
@@ -724,11 +789,20 @@ def check_semantic_corpus_policy() -> None:
         )
 
     query_args = semantic.build_parser().parse_args(["query", "fixture"])
+    hybrid_query_args = semantic.build_parser().parse_args(
+        ["query", "fixture", "--hybrid"]
+    )
     expect(
         query_args.scope == "active"
         and query_args.sources == "local"
         and query_args.context is False,
         "semantic query defaults are not local active bounded opt-in",
+    )
+    expect(
+        hybrid_query_args.hybrid
+        and semantic._locator_backfill_enabled(hybrid_query_args.scope)
+        and not semantic._locator_backfill_enabled("archive"),
+        "hybrid retrieval disabled raw-locator navigation backfill",
     )
     eval_args = semantic_eval.build_parser().parse_args(["run"])
     expect(
@@ -766,6 +840,174 @@ def check_semantic_corpus_policy() -> None:
         and len([hit for hit in collapsed if hit.representation == "raw_locator"]) == 2,
         "result collapse or active raw-locator cap drift",
     )
+    expect(
+        semantic._path_matches(
+            "@raw-locator/finance/raw/tax-2099",
+            ["finance"],
+        )
+        and semantic_backends._passes_filters(
+            semantic_backends.SearchResult(
+                path="@raw-locator/finance/raw/tax-2099",
+                score=0.9,
+                representation="raw_locator",
+            ),
+            {"path_prefix": ["finance/raw"]},
+        ),
+        "raw locator did not honor its virtual source path prefix",
+    )
+    locator_sql = semantic_backends._path_prefix_where_clause(
+        ["finance/raw"],
+        lambda value: value,
+    )
+    expect(
+        "@raw-locator/finance/raw/%" in locator_sql,
+        "Lance path SQL omitted the raw-locator virtual alias",
+    )
+
+    delete_filters: list[str] = []
+
+    class FakeDeleteTable:
+        @staticmethod
+        def delete(predicate: str) -> None:
+            delete_filters.append(predicate)
+
+    delete_store = semantic_backends.LanceStore.__new__(semantic_backends.LanceStore)
+    delete_store._table = FakeDeleteTable()
+    delete_paths = [f"notes/item-{index}.md" for index in range(300)]
+    expect(
+        delete_store.delete_by_path(delete_paths) == len(delete_paths)
+        and len(delete_filters) == 3
+        and all(
+            predicate.count('path = "')
+            <= semantic_backends.LanceStore.DELETE_PATH_BATCH_SIZE
+            for predicate in delete_filters
+        ),
+        "Lance path deletion did not bound policy-wide predicates",
+    )
+
+    failed_delete_filters: list[str] = []
+
+    class FakePartialDeleteTable:
+        @staticmethod
+        def delete(predicate: str) -> None:
+            failed_delete_filters.append(predicate)
+            if len(failed_delete_filters) == 2:
+                raise RuntimeError("fixture delete failure")
+
+    failed_delete_store = semantic_backends.LanceStore.__new__(
+        semantic_backends.LanceStore
+    )
+    failed_delete_store._table = FakePartialDeleteTable()
+    try:
+        failed_delete_store.delete_by_path(delete_paths)
+    except RuntimeError:
+        pass
+    else:
+        raise SmokeFailure("partial Lance path deletion did not abort")
+    expect(
+        len(failed_delete_filters) == 2,
+        "Lance path deletion continued after a partial batch failure",
+    )
+
+    legacy_active_sql = semantic_corpus.scope_sql(
+        "active",
+        has_metadata_columns=False,
+    )
+    expect(
+        "_tools" in legacy_active_sql
+        and "%/inbox/%" in legacy_active_sql
+        and "%/cache/%" in legacy_active_sql,
+        "legacy scope SQL drifted from nested operational and inbox policy",
+    )
+
+    bm25_trace: dict[str, object] = {}
+
+    class FakeLanceQuery:
+        def where(self, predicate: str) -> "FakeLanceQuery":
+            bm25_trace["where"] = predicate
+            return self
+
+        def select(self, columns: list[str]) -> "FakeLanceQuery":
+            bm25_trace["columns"] = columns
+            return self
+
+        def limit(self, count: int) -> "FakeLanceQuery":
+            bm25_trace["limit"] = count
+            return self
+
+        @staticmethod
+        def to_pandas() -> str:
+            return "scope-frame"
+
+    class FakeLanceTable:
+        @staticmethod
+        def count_rows() -> int:
+            return 99
+
+        @staticmethod
+        def search() -> FakeLanceQuery:
+            return FakeLanceQuery()
+
+    class FakeLanceStore:
+        _table = FakeLanceTable()
+
+        @staticmethod
+        def has_corpus_metadata() -> bool:
+            return True
+
+    expect(
+        semantic_backends._bm25_scope_frame(FakeLanceStore(), "active") == "scope-frame"
+        and bm25_trace["where"] == "scope = 'active'"
+        and bm25_trace["limit"] == 99,
+        "BM25 materialized Lance before applying the selected scope",
+    )
+    locator_candidates = [
+        semantic_backends.SearchResult(
+            path="@raw-locator/finance/raw/tax",
+            score=0.0,
+            chunk_text="Filename terms: unique-token",
+            tier="L1",
+            scope="active",
+            representation="raw_locator",
+        ),
+        semantic_backends.SearchResult(
+            path="@raw-locator/travel/raw/receipts",
+            score=0.0,
+            chunk_text="Filename terms: hotel receipt",
+            tier="L1",
+            scope="active",
+            representation="raw_locator",
+        ),
+    ]
+    locator_ranked = semantic_backends._rank_raw_locator_results(
+        locator_candidates,
+        "unique-token",
+        top_k=10,
+        filters={"scope": "active"},
+    )
+    expect(
+        [result.path for result in locator_ranked] == ["@raw-locator/finance/raw/tax"],
+        "filename-only query did not discover its raw locator",
+    )
+    generic_locator_ranked = semantic_backends._rank_raw_locator_results(
+        [
+            semantic_backends.SearchResult(
+                path="@raw-locator/archive/education/raw/training",
+                score=0.0,
+                chunk_text="Filename terms: training",
+                tier="L1",
+                scope="active",
+                representation="raw_locator",
+            )
+        ],
+        "distributed training architecture",
+        top_k=10,
+        filters={"scope": "active"},
+    )
+    expect(
+        generic_locator_ranked == [],
+        "multi-word concept query triggered a locator on one rare token",
+    )
     capsule = semantic._capsule(collapsed[0], "active")
     expect(
         len(capsule["snippet"]) <= 600 and capsule["truncated"] is True,
@@ -794,6 +1036,70 @@ def check_semantic_corpus_policy() -> None:
         and semantic._collapse_hits(hits, top=0, requested_scope="active") == [],
         "legacy chunk ranking or non-positive top handling drift",
     )
+    authored_page = [
+        semantic.QueryHit(
+            path=f"note-{index}.md",
+            score=0.9 - index * 0.03,
+            chunk_text="authored",
+        )
+        for index in range(10)
+    ]
+    exact_locator = semantic.QueryHit(
+        path="@raw-locator/finance/raw/tax",
+        score=1.0,
+        chunk_text="Filename terms: unique-token",
+        tier="L1",
+        representation="raw_locator",
+    )
+    backfilled = semantic._backfill_locator_hit(
+        authored_page,
+        [exact_locator],
+        top=10,
+        requested_scope="active",
+        collapse=True,
+    )
+    chunk_backfilled = semantic._backfill_locator_hit(
+        authored_page,
+        [exact_locator],
+        top=10,
+        requested_scope="active",
+        collapse=False,
+    )
+    authored_first = semantic._rank_hits(
+        [
+            semantic.QueryHit(
+                path="authored.md",
+                score=0.1,
+                chunk_text="authored",
+            ),
+            exact_locator,
+        ],
+        top=2,
+        requested_scope="active",
+    )
+    expect(
+        len(backfilled) == 10
+        and [hit.path for hit in backfilled[:9]]
+        == [hit.path for hit in authored_page[:9]]
+        and backfilled[-1].path == exact_locator.path
+        and backfilled[-1].score <= backfilled[-2].score
+        and chunk_backfilled[-1].path == exact_locator.path
+        and chunk_backfilled[-1].score <= chunk_backfilled[-2].score
+        and [hit.path for hit in authored_first] == ["authored.md", exact_locator.path]
+        and authored_first[0].score >= authored_first[1].score,
+        "raw locator competed with authored or reranked results instead of backfilling",
+    )
+    expect(
+        semantic._backfill_locator_hit(
+            authored_page,
+            [exact_locator],
+            top=1,
+            requested_scope="active",
+            collapse=True,
+        )[0].path
+        == "note-0.md",
+        "top-1 active search displaced its authored result with a locator",
+    )
     expect(
         semantic._local_candidate_count(
             10,
@@ -814,6 +1120,48 @@ def check_semantic_corpus_policy() -> None:
         )
         == 30,
         "candidate widening escaped context, federation, or rerank modes",
+    )
+    current_manifest = semantic._record_manifest(
+        decisions,
+        tuple(record for record in active if record.representation == "raw_locator"),
+    )
+    active_decision = next(
+        item for item in decisions if item.relative_path == "active.md"
+    )
+    expect(
+        current_manifest["active.md"]["manifest_fingerprint"]
+        == semantic.physical_manifest_fingerprint(
+            "active",
+            "authored",
+            active_decision.mtime,
+        )
+        and semantic._manifest_uses_current_policy(current_manifest),
+        "corpus policy version was not persisted in the index manifest",
+    )
+    scope_drift = semantic._freshness_from_manifest(
+        {
+            "active.md": {
+                "mtime": 100.0,
+                "manifest_fingerprint": semantic.corpus_metadata_fingerprint(
+                    "inbox",
+                    "authored",
+                ),
+            }
+        },
+        {
+            "active.md": {
+                "mtime": 100.0,
+                "manifest_fingerprint": semantic.corpus_metadata_fingerprint(
+                    "active",
+                    "authored",
+                ),
+            }
+        },
+        physical_count=1,
+    )
+    expect(
+        scope_drift["modified"] == 1 and scope_drift["fresh"] is False,
+        "scope-only corpus drift did not invalidate freshness",
     )
     external_capsule = semantic._capsule(
         semantic.QueryHit(
@@ -848,7 +1196,14 @@ def check_semantic_corpus_policy() -> None:
         total_chunks = 12
         model_name = "fixture"
 
+    class FakeStore:
+        @staticmethod
+        def has_corpus_metadata() -> bool:
+            return False
+
     class FakeRetriever:
+        store = FakeStore()
+
         def query(
             self,
             _query: str,
@@ -3480,6 +3835,13 @@ def check_context_bundle() -> None:
             "## Full Text\nmust not preload\n",
             encoding="utf-8",
         )
+        (vault / "sessions" / "2099-01-02-reading.md").write_text(
+            "## Reading Capsule\n"
+            "checkpoint: initial-analysis\n"
+            "source: durable reading source\n"
+            "status: discussion-open\n",
+            encoding="utf-8",
+        )
         (vault / "reflections" / "2099-01-02-reflection.md").write_text(
             "## Theme\nbody must stay out of the heading projection\n\n"
             "## Next Action\ndo one bounded thing\n",
@@ -3517,6 +3879,10 @@ def check_context_bundle() -> None:
         expect(
             capture["budget"]["output_bytes"] == len(capture_stdout.encode("utf-8")),
             "context bundle JSON byte accounting drift",
+        )
+        expect(
+            capture["budget"]["limit_bytes"] == 4096,
+            "capture route did not use its registry context budget",
         )
 
         reflection_stdout = run(
@@ -3576,10 +3942,99 @@ def check_context_bundle() -> None:
             "context bundle exceeded its selected byte budget",
         )
 
+        reading = json.loads(
+            run(
+                [
+                    "scripts/context_bundle.py",
+                    "--intent",
+                    "reading",
+                    "--vault",
+                    str(vault),
+                    "--effective-date",
+                    "2099-01-03",
+                    "--format",
+                    "json",
+                ]
+            )
+        )
+        expect(
+            any(
+                row["section"] == "Reading Capsule"
+                and row["source"] == "sessions/2099-01-02-reading.md"
+                and "discussion-open" in row["content"]
+                for row in reading["excerpts"]
+            ),
+            "reading route did not receive the latest reading capsule",
+        )
+        expect(
+            reading["budget"]["limit_bytes"] == 6144,
+            "reading route did not use its registry context budget",
+        )
+        talk = json.loads(
+            run(
+                [
+                    "scripts/context_bundle.py",
+                    "--intent",
+                    "talk",
+                    "--vault",
+                    str(vault),
+                    "--effective-date",
+                    "2099-01-03",
+                    "--format",
+                    "json",
+                ]
+            )
+        )
+        expect(
+            any(
+                row["section"] == "Reading Capsule"
+                and row["source"] == "sessions/2099-01-02-reading.md"
+                for row in talk["excerpts"]
+            ),
+            "talk route did not receive the latest reading capsule",
+        )
+        expect(
+            not any(
+                row["section"] == "Reading Capsule" for row in reflection["excerpts"]
+            ),
+            "non-reading route leaked a reading capsule",
+        )
+        for offset in range(1, 102):
+            session_day = date(2099, 1, 2) + timedelta(days=offset)
+            (vault / "sessions" / f"{session_day.isoformat()}-review.md").write_text(
+                "## Continuity\nnewer non-reading session\n",
+                encoding="utf-8",
+            )
+        late_reading = json.loads(
+            run(
+                [
+                    "scripts/context_bundle.py",
+                    "--intent",
+                    "reading",
+                    "--vault",
+                    str(vault),
+                    "--effective-date",
+                    "2099-05-01",
+                    "--format",
+                    "json",
+                ]
+            )
+        )
+        expect(
+            any(
+                row["section"] == "Reading Capsule"
+                and row["source"] == "sessions/2099-01-02-reading.md"
+                for row in late_reading["excerpts"]
+            ),
+            "reading recovery stopped after 100 newer non-reading session logs",
+        )
+
         injected = json.dumps(
             {
                 "name": "capture",
                 "mode": "wrong",
+                "procedure": "../../outside.md",
+                "context_budget_bytes": 9999,
                 "profile_reads": ["../../outside.md"],
             }
         )
@@ -3600,7 +4055,12 @@ def check_context_bundle() -> None:
         )
         expect(
             sorted(routed["route"].get("packet_registry_mismatch", []))
-            == ["mode", "profile_reads"],
+            == [
+                "context_budget_bytes",
+                "mode",
+                "procedure",
+                "profile_reads",
+            ],
             "route packet mismatch was not made visible",
         )
         expect(
@@ -3752,13 +4212,21 @@ def check_codex_intent_hook() -> None:
             env_overrides={"OV": temp_dir},
         )
         exact_route, exact_context = parse_intent_route(exact_output)
-        expect(exact_route.get("schema") == 1, "intent route schema drift")
+        expect(exact_route.get("schema") == 2, "intent route schema drift")
         expect(
             exact_route.get("source") == "harness/intents.toml",
             "intent route source drift",
         )
         expect(exact_route.get("name") == "review", "Codex exact route winner drift")
         expect(exact_route.get("mode") == "goal-review", "Codex exact route mode drift")
+        expect(
+            exact_route.get("procedure") == ".claude/commands/review.md",
+            "Codex exact route procedure drift",
+        )
+        expect(
+            exact_route.get("context_budget_bytes") == 8192,
+            "Codex exact route context budget drift",
+        )
         expect(
             exact_route.get("agents") == ["researcher", "synthesizer"],
             "Codex exact route agents drift",
@@ -3969,9 +4437,29 @@ def check_claude_intent_hook() -> None:
     oversized_output = io.StringIO()
     with contextlib.redirect_stdout(oversized_output):
         intent_coverage._emit_intent_route_projection(oversized_route)
+        expect(
+            oversized_output.getvalue() == "",
+            "oversized intent route must stay silent for full-registry fallback",
+        )
+
+
+def check_public_regression_tests() -> None:
+    result = subprocess.run(
+        [
+            PYTHON,
+            "-m",
+            "unittest",
+            "tests.test_session_replay",
+            "tests.test_signal_facts",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
     expect(
-        oversized_output.getvalue() == "",
-        "oversized intent route must stay silent for full-registry fallback",
+        result.returncode == 0,
+        "public replay/signal regression tests failed\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
     )
 
 
@@ -3989,6 +4477,7 @@ def main() -> int:
         ("runtime selector", check_runtime_selector),
         ("runtime cue syntax", check_runtime_cue_syntax),
         ("bounded context projection", check_context_bundle),
+        ("public replay and signal regressions", check_public_regression_tests),
         ("privacy scanner", check_privacy_scanner),
         ("Codex routine runner", check_codex_routine_runner),
         ("routine capability profiles", check_routine_profiles),

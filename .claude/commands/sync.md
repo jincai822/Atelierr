@@ -235,7 +235,9 @@ Print a one-screen summary:
 | Skipped | N (with reasons) |
 | Capture reminders | N (unnamed restaurants / clinics / etc. — bring photos or verbal context next time) |
 
-End the session here. The cue in `hi.md` will not surface again this `/hi` invocation; if the user runs `/hi` later and `zettelm/` has new content, it cues again.
+End the session here. The session-start cue will not surface again in this
+`/hi` invocation; if the user runs `/hi` later and `zettelm/` has new content,
+it cues again.
 
 ## Defaults you can override per invocation
 

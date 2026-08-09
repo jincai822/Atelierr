@@ -461,6 +461,7 @@ class Retriever:
         batch_texts: List[str] = []
         file_list = list(files)
         n_files = len(file_list)
+        from semantic_corpus import physical_manifest_fingerprint
 
         for i, fpath in enumerate(file_list):
             try:
@@ -491,6 +492,11 @@ class Retriever:
                     mtime=mtime,
                     scope=scope,
                     representation=representation,
+                    manifest_fingerprint=physical_manifest_fingerprint(
+                        scope,
+                        representation,
+                        mtime,
+                    ),
                 )
                 batch_docs.append(doc)
                 # Include the vault-relative path in the embedding input so
@@ -706,6 +712,34 @@ class Retriever:
 RRF_K = 60  # Reciprocal Rank Fusion constant; 60 is the standard default.
 
 
+def _bm25_scope_frame(store: Any, scope: str) -> Any:
+    """Materialize only the selected scope from Lance for sparse indexing."""
+    from semantic_corpus import scope_sql
+
+    metadata_scope = store.has_corpus_metadata()
+    columns = [
+        "path",
+        "chunk_id",
+        "chunk_text",
+        "tier",
+        "mtime",
+    ]
+    if metadata_scope:
+        columns.extend(["scope", "representation"])
+    predicate = scope_sql(
+        scope,
+        has_metadata_columns=metadata_scope,
+    )
+    row_limit = store._table.count_rows()  # noqa: SLF001
+    return (
+        store._table.search()  # noqa: SLF001
+        .where(predicate)
+        .select(columns)
+        .limit(row_limit)
+        .to_pandas()
+    )
+
+
 class _BM25Index:
     """Lightweight BM25Okapi index built from a Store's stored chunks.
 
@@ -750,7 +784,7 @@ class _BM25Index:
     def build(self, store: "LanceStore", scope: str = "all") -> None:
         from rank_bm25 import BM25Okapi
 
-        df = store._table.to_pandas()  # noqa: SLF001 (BM25 needs full corpus)
+        df = _bm25_scope_frame(store, scope)
         corpus_tokens: List[List[str]] = []
         meta: List[Dict[str, Any]] = []
         for _, row in df.iterrows():
@@ -824,16 +858,131 @@ class _BM25Index:
         return results
 
 
-_BM25_SINGLETONS: Dict[Tuple[str, str, int], _BM25Index] = {}
+_BM25_SINGLETONS: Dict[Tuple[str, str, int, str], _BM25Index] = {}
 
 
 def _get_bm25(store: "LanceStore", scope: str = "all") -> _BM25Index:
-    key = (store._db_path, scope, store.count())  # noqa: SLF001
+    version = getattr(store._table, "version", "")  # noqa: SLF001
+    if callable(version):
+        version = version()
+    key = (store._db_path, scope, store.count(), str(version))  # noqa: SLF001
     if key not in _BM25_SINGLETONS:
+        for stale_key in tuple(_BM25_SINGLETONS):
+            if stale_key[:2] == key[:2]:
+                _BM25_SINGLETONS.pop(stale_key, None)
         idx = _BM25Index()
         idx.build(store, scope=scope)
         _BM25_SINGLETONS[key] = idx
     return _BM25_SINGLETONS[key]
+
+
+def _rank_raw_locator_results(
+    candidates: Sequence[SearchResult],
+    query: str,
+    *,
+    top_k: int,
+    filters: Optional[Dict[str, Any]] = None,
+) -> List[SearchResult]:
+    """Rank the small locator-only view by exact token coverage and rarity."""
+    import math
+    from collections import Counter
+
+    if top_k <= 0:
+        return []
+    filtered = [
+        candidate
+        for candidate in candidates
+        if not filters or _passes_filters(candidate, filters)
+    ]
+    if not filtered:
+        return []
+
+    query_tokens = list(dict.fromkeys(_BM25Index._tokenize(query)))
+    if not query_tokens:
+        return []
+    document_tokens = [
+        set(_BM25Index._tokenize(f"{candidate.path}\n{candidate.chunk_text}"))
+        for candidate in filtered
+    ]
+    document_frequency = Counter(
+        token for tokens in document_tokens for token in query_tokens if token in tokens
+    )
+    corpus_size = len(filtered)
+    weights = {
+        token: math.log((corpus_size + 1) / (document_frequency[token] + 1)) + 1.0
+        for token in query_tokens
+    }
+    total_weight = sum(weights.values())
+    requested_scope = str((filters or {}).get("scope", "all"))
+
+    ranked: List[SearchResult] = []
+    for candidate, tokens in zip(filtered, document_tokens):
+        matched = [token for token in query_tokens if token in tokens]
+        if not matched:
+            continue
+        if requested_scope == "active":
+            multi_token_match = len(matched) >= 2
+            exact_rare_single_token_query = len(query_tokens) == 1 and any(
+                document_frequency[token] <= 3 for token in matched
+            )
+            if not (multi_token_match or exact_rare_single_token_query):
+                continue
+        coverage = sum(weights[token] for token in matched) / total_weight
+        score = min(1.0, 0.65 + 0.35 * coverage)
+        ranked.append(replace(candidate, score=round(score, 4)))
+
+    ranked.sort(key=lambda result: (-result.score, result.path, result.chunk_id))
+    return ranked[:top_k]
+
+
+def search_raw_locators_lexical(
+    store: "LanceStore",
+    query: str,
+    *,
+    top_k: int = 10,
+    filters: Optional[Dict[str, Any]] = None,
+) -> List[SearchResult]:
+    """Search only generated locator cards without building full-corpus BM25."""
+    if top_k <= 0 or not store.has_corpus_metadata():
+        return []
+    row_limit = store.count()
+    frame = (
+        store._table.search()  # noqa: SLF001
+        .where("representation = 'raw_locator'")
+        .select(
+            [
+                "path",
+                "chunk_id",
+                "chunk_text",
+                "tier",
+                "mtime",
+                "scope",
+                "representation",
+            ]
+        )
+        .limit(row_limit)
+        .to_pandas()
+    )
+    candidates = [
+        SearchResult(
+            path=str(row.get("path", "")),
+            score=0.0,
+            chunk_id=int(row.get("chunk_id", 0)),
+            chunk_text=str(row.get("chunk_text", "")),
+            tier=str(row.get("tier", "")),
+            mtime=float(row.get("mtime", 0.0)),
+            source="local",
+            scope=str(row.get("scope", "active")),
+            representation=str(row.get("representation", "raw_locator")),
+        )
+        for _, row in frame.iterrows()
+    ]
+    return _rank_raw_locator_results(
+        candidates,
+        query,
+        top_k=top_k,
+        filters=filters,
+    )
 
 
 def _rrf_fuse(
@@ -940,10 +1089,9 @@ def _passes_filters(r: SearchResult, filters: Dict[str, Any]) -> bool:
     if "path_prefix" in filters:
         prefix = filters["path_prefix"]
         prefixes = prefix if isinstance(prefix, list) else [prefix]
-        # Directory-boundary match: a "wiki" filter must not also match the
-        # sibling "wiki-cn/" localized shadow. Match the path exactly or as a
-        # "<prefix>/" directory child.
-        if not any(r.path == p or r.path.startswith(p + "/") for p in prefixes):
+        from semantic_corpus import path_prefix_matches
+
+        if not any(path_prefix_matches(r.path, p) for p in prefixes):
             return False
     if "tier" in filters and r.tier != filters["tier"]:
         return False
@@ -952,6 +1100,24 @@ def _passes_filters(r: SearchResult, filters: Dict[str, Any]) -> bool:
     if "mtime_before" in filters and r.mtime > filters["mtime_before"]:
         return False
     return True
+
+
+def _path_prefix_where_clause(
+    prefix: str | List[str],
+    quote: Any,
+) -> str:
+    """Build the Lance path predicate, including raw-locator virtual aliases."""
+    prefixes = prefix if isinstance(prefix, list) else [prefix]
+    parts: List[str] = []
+    for item in prefixes:
+        candidates = [str(item)]
+        if not str(item).startswith("@raw-locator/"):
+            candidates.append(f"@raw-locator/{item}")
+        parts.extend(
+            f'(path = "{quote(candidate)}" OR path LIKE "{quote(candidate)}/%")'
+            for candidate in candidates
+        )
+    return f"({' OR '.join(parts)})"
 
 
 def _result_matches_scope(result: SearchResult, scope: str) -> bool:
@@ -1353,6 +1519,7 @@ class LanceStore:
     """
 
     TABLE_NAME = "semantic_index"
+    DELETE_PATH_BATCH_SIZE = 128
     CORPUS_METADATA_COLUMNS = {
         "scope",
         "representation",
@@ -1483,19 +1650,7 @@ class LanceStore:
         if filters:
             if "path_prefix" in filters:
                 prefix = filters["path_prefix"]
-                # Directory-boundary match (exact or "<prefix>/" child) so a
-                # "wiki" filter does not also match the sibling "wiki-cn/"
-                # localized shadow. See _passes_filters for the in-memory twin.
-                if isinstance(prefix, list):
-                    parts = [
-                        f'(path = "{self._q(p)}" OR path LIKE "{self._q(p)}/%")'
-                        for p in prefix
-                    ]
-                    where_clauses.append(f"({' OR '.join(parts)})")
-                else:
-                    where_clauses.append(
-                        f'(path = "{self._q(prefix)}" OR path LIKE "{self._q(prefix)}/%")'
-                    )
+                where_clauses.append(_path_prefix_where_clause(prefix, self._q))
             if "tier" in filters:
                 where_clauses.append(f'tier = "{self._q(filters["tier"])}"')
             if "mtime_after" in filters:
@@ -1593,16 +1748,20 @@ class LanceStore:
             return {}
 
     def delete_by_path(self, paths: List[str]) -> int:
-        """Delete all chunks for the given file paths."""
+        """Delete all chunks for paths, aborting on any partial batch failure."""
         if not paths:
             return 0
-        path_filter = " OR ".join(f'path = "{self._q(p)}"' for p in paths)
-        try:
-            self._table.delete(path_filter)
-            return len(paths)
-        except Exception as exc:
-            self._warn("delete_by_path", exc)
-            return 0
+        deleted = 0
+        for start in range(0, len(paths), self.DELETE_PATH_BATCH_SIZE):
+            batch = paths[start : start + self.DELETE_PATH_BATCH_SIZE]
+            path_filter = " OR ".join(f'path = "{self._q(p)}"' for p in batch)
+            try:
+                self._table.delete(path_filter)
+                deleted += len(batch)
+            except Exception as exc:
+                self._warn("delete_by_path", exc)
+                raise
+        return deleted
 
     def count(self) -> int:
         try:
@@ -1688,7 +1847,7 @@ class ReadwiseSearcher:
                     score=round(score, 4),
                     chunk_id=0,
                     chunk_text=f"[{title}] {chunk_text}" if title else chunk_text,
-                    tier="L3",
+                    tier="L1",
                     source="readwise",
                     scope="external",
                     representation="readwise",

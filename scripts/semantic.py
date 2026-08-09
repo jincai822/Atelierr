@@ -39,7 +39,7 @@ import json
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator, List, Optional, Sequence, Tuple
@@ -50,13 +50,18 @@ from _paths import vault_root  # type: ignore[import-not-found]  # noqa: E402
 from semantic_corpus import (  # type: ignore[import-not-found]  # noqa: E402
     ACTIVE_SCOPE,
     ALL_SCOPE,
+    POLICY_FINGERPRINT,
     RAW_LOCATOR_REPRESENTATION,
+    RAW_SCOPE,
     VALID_SCOPES,
     CorpusRecord,
     audit_corpus,
     build_raw_locator_records,
+    corpus_metadata_fingerprint,
     iter_corpus_records,
     iter_file_decisions,
+    path_prefix_matches,
+    physical_manifest_fingerprint,
 )
 
 # Lance index is machine-local (rebuild is ~7s on MPS, not worth syncing binaries).
@@ -136,22 +141,6 @@ class QueryHit:
     matched_tokens: tuple[str, ...] = ()
 
 
-# Subdirectories under the vault excluded from indexing (ephemeral caches,
-# not worth embedding). Trailing slash constrains matching to directories
-# (e.g., excludes `$OV/cache/**` but not `$OV/cached_*.md` siblings).
-# The segment comes from the path registry so a cache-tier rename propagates.
-def _index_exclude() -> set:
-    try:
-        from _paths import tier_segments
-
-        return {tier_segments().get("cache", "cache") + "/"}
-    except Exception:
-        return {"cache/"}
-
-
-INDEX_EXCLUDE = _index_exclude()
-
-
 def in_real_mode() -> bool:
     """Sentinel check: real mode is active iff the lance directory exists."""
     return LANCE_DIR.exists()
@@ -190,20 +179,6 @@ def _exclusive_index_lock() -> Iterator[bool]:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
-def _has_non_whitespace(path: Path) -> Optional[bool]:
-    """Return whether a file contains indexable text, or None if unreadable."""
-    try:
-        if path.stat().st_size == 0:
-            return False
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            while chunk := handle.read(4096):
-                if chunk.strip():
-                    return True
-        return False
-    except OSError:
-        return None
-
-
 def _corpus_snapshot(
     vault: Path,
 ) -> tuple[tuple[Any, ...], list[Path], tuple[CorpusRecord, ...]]:
@@ -228,9 +203,14 @@ def _current_corpus_manifest(
     for item in decisions:
         if item.included:
             physical_count += 1
+            assert item.scope is not None and item.representation is not None
             manifest[item.relative_path] = {
                 "mtime": item.mtime,
-                "manifest_fingerprint": "",
+                "manifest_fingerprint": physical_manifest_fingerprint(
+                    item.scope,
+                    item.representation,
+                    item.mtime,
+                ),
             }
         elif item.exclusion_reason == "unreadable":
             unreadable.append(item.relative_path)
@@ -291,70 +271,6 @@ def _freshness_from_manifest(
     }
 
 
-def _freshness_from_files(
-    files: List[Path],
-    vault: Path,
-    indexed_mtimes: dict[str, float],
-) -> dict[str, Any]:
-    """Compare the Markdown corpus with the index manifest.
-
-    Only new or mtime-changed files need a content probe. This keeps the
-    scheduled no-op check cheap while excluding empty and whitespace-only
-    Markdown files that the indexer deliberately skips.
-    """
-    current_mtimes: dict[str, float] = {}
-    unreadable: list[str] = []
-    for path in files:
-        try:
-            relative = str(path.relative_to(vault))
-        except ValueError:
-            relative = str(path)
-        try:
-            stat = path.stat()
-        except OSError:
-            unreadable.append(relative)
-            continue
-        if stat.st_size == 0:
-            continue
-
-        indexed_mtime = indexed_mtimes.get(relative)
-        changed = indexed_mtime is None or stat.st_mtime - indexed_mtime > 1.0
-        if changed:
-            has_text = _has_non_whitespace(path)
-            if has_text is None:
-                unreadable.append(relative)
-                continue
-            if not has_text:
-                continue
-        current_mtimes[relative] = stat.st_mtime
-
-    current_paths = set(current_mtimes)
-    indexed_paths = set(indexed_mtimes)
-    new_paths = sorted(current_paths - indexed_paths)
-    modified_paths = sorted(
-        path
-        for path in current_paths & indexed_paths
-        if current_mtimes[path] - indexed_mtimes[path] > 1.0
-    )
-    removed_paths = sorted(indexed_paths - current_paths)
-    unreadable.sort()
-    return {
-        "fresh": not (new_paths or modified_paths or removed_paths or unreadable),
-        "current_files": len(current_paths),
-        "indexed_files": len(indexed_paths),
-        "new": len(new_paths),
-        "modified": len(modified_paths),
-        "removed": len(removed_paths),
-        "unreadable": len(unreadable),
-        "samples": {
-            "new": new_paths[:20],
-            "modified": modified_paths[:20],
-            "removed": removed_paths[:20],
-            "unreadable": unreadable[:20],
-        },
-    }
-
-
 def inspect_index_freshness(
     *,
     vault: Optional[Path] = None,
@@ -399,11 +315,18 @@ def inspect_index_freshness(
             "index_path": str(active_index),
             "index_present": index_present,
             "schema_current": schema_current,
+            "policy_current": _manifest_uses_current_policy(indexed_manifest),
+            "corpus_policy": POLICY_FINGERPRINT,
             "raw_locator_records": len(locators),
             "error": error,
         }
     )
-    if not index_present or not schema_current or error is not None:
+    if (
+        not index_present
+        or not schema_current
+        or not result["policy_current"]
+        or error is not None
+    ):
         result["fresh"] = False
     return result
 
@@ -420,6 +343,8 @@ def _freshness_summary(result: dict[str, Any]) -> str:
     )
     if result.get("schema_current") is False:
         summary += ", schema=migration-required"
+    if result.get("policy_current") is False:
+        summary += ", policy=migration-required"
     if result.get("error"):
         summary += f", error={result['error']}"
     return summary
@@ -444,63 +369,6 @@ def parse_date(s: Optional[str], flag_name: str) -> Optional[datetime]:
     except ValueError:
         warn(f"invalid {flag_name} value (expected YYYY-MM-DD): {s}")
         sys.exit(2)
-
-
-def walk_markdown(
-    paths: List[str],
-    after: Optional[datetime],
-    before: Optional[datetime],
-    exclude: Optional[set] = None,
-) -> Iterator[Path]:
-    """Yield .md files under the given paths, filtered by mtime window.
-
-    Path resolution: absolute paths are used as-is; relative paths are
-    resolved against the vault root ($OV), not the repo root, so a bare
-    `--path wiki` scans `$OV/wiki/`.
-
-    Exclusion: each `exclude` entry is matched as a path-prefix against
-    the file's path relative to its walk root (e.g., `INDEX_EXCLUDE =
-    {"cache"}` excludes `$OV/cache/**`).
-    """
-    vault = vault_root()
-    seen: set = set()
-    for p in paths:
-        root = Path(p) if Path(p).is_absolute() else (vault / p)
-        if not root.exists():
-            warn(f"path not found, skipping: {p}")
-            continue
-        if root.is_file():
-            candidates: Iterator[Path] = iter([root])
-        else:
-            candidates = root.rglob("*.md")
-        for f in candidates:
-            if f in seen:
-                continue
-            seen.add(f)
-            if exclude:
-                try:
-                    rel = str(f.relative_to(root))
-                except ValueError:
-                    rel = str(f)
-                if any(rel.startswith(ex) for ex in exclude):
-                    continue
-            try:
-                mtime = datetime.fromtimestamp(f.stat().st_mtime)
-            except OSError:
-                continue
-            if after and mtime < after:
-                continue
-            if before and mtime > before:
-                continue
-            yield f
-
-
-def lexical_score(path: Path, tokens: List[str]) -> Tuple[float, List[str]]:
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return 0.0, []
-    return lexical_score_text(text, tokens)
 
 
 def lexical_score_text(text: str, tokens: List[str]) -> Tuple[float, List[str]]:
@@ -562,7 +430,41 @@ def _normalize_path_prefix(value: str, vault: Path) -> Optional[str]:
 
 
 def _path_matches(path: str, prefixes: Sequence[str]) -> bool:
-    return any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
+    return any(path_prefix_matches(path, prefix) for prefix in prefixes)
+
+
+def _hit_sort_key(
+    hit: QueryHit,
+    requested_scope: str,
+) -> tuple[int, float, str, int]:
+    """Keep generated locator cards behind authored results in active search."""
+    locator_tail = int(
+        requested_scope == ACTIVE_SCOPE
+        and hit.representation == RAW_LOCATOR_REPRESENTATION
+    )
+    return (locator_tail, -hit.score, hit.path, hit.chunk_id)
+
+
+def _calibrate_active_locator_tail(
+    hits: Sequence[QueryHit],
+    requested_scope: str,
+) -> list[QueryHit]:
+    """Make displayed scores agree with the active authored-first ordering."""
+    if requested_scope != ACTIVE_SCOPE:
+        return list(hits)
+    calibrated: list[QueryHit] = []
+    for hit in hits:
+        if (
+            calibrated
+            and hit.representation == RAW_LOCATOR_REPRESENTATION
+            and hit.score >= calibrated[-1].score
+        ):
+            hit = replace(
+                hit,
+                score=round(max(0.0, calibrated[-1].score - 0.0001), 4),
+            )
+        calibrated.append(hit)
+    return calibrated
 
 
 def _collapse_hits(
@@ -574,7 +476,7 @@ def _collapse_hits(
     """Keep the best chunk per path and cap active raw-locator competition."""
     if top <= 0:
         return []
-    ordered = sorted(hits, key=lambda hit: (-hit.score, hit.path, hit.chunk_id))
+    ordered = sorted(hits, key=lambda hit: _hit_sort_key(hit, requested_scope))
     unique: list[QueryHit] = []
     seen: set[tuple[str, str]] = set()
     locator_count = 0
@@ -593,7 +495,7 @@ def _collapse_hits(
         unique.append(hit)
         if len(unique) >= top:
             break
-    return unique
+    return _calibrate_active_locator_tail(unique, requested_scope)
 
 
 def _rank_hits(
@@ -607,7 +509,7 @@ def _rank_hits(
         return []
     selected: list[QueryHit] = []
     locator_count = 0
-    for hit in sorted(hits, key=lambda hit: (-hit.score, hit.path, hit.chunk_id)):
+    for hit in sorted(hits, key=lambda hit: _hit_sort_key(hit, requested_scope)):
         if (
             requested_scope == ACTIVE_SCOPE
             and hit.representation == RAW_LOCATOR_REPRESENTATION
@@ -618,7 +520,76 @@ def _rank_hits(
         selected.append(hit)
         if len(selected) >= top:
             break
-    return selected
+    return _calibrate_active_locator_tail(selected, requested_scope)
+
+
+def _backfill_locator_hit(
+    selected: Sequence[QueryHit],
+    supplements: Sequence[QueryHit],
+    *,
+    top: int,
+    requested_scope: str,
+    collapse: bool,
+) -> list[QueryHit]:
+    """Reserve at most one tail slot for an exact raw-locator navigation hit.
+
+    The locator never competes on a dense, tier, or cross-encoder score scale.
+    In active search, one authored result is always retained ahead of it.
+    """
+    if top <= 0:
+        return []
+    chosen = (
+        _collapse_hits(supplements, top=1, requested_scope=requested_scope)
+        if collapse
+        else _rank_hits(supplements, top=1, requested_scope=requested_scope)
+    )
+    base = list(selected[:top])
+    if not chosen:
+        return base
+
+    locator = chosen[0]
+    identity = (
+        (locator.source, locator.path)
+        if collapse
+        else (locator.source, locator.path, locator.chunk_id)
+    )
+    existing = {
+        (hit.source, hit.path) if collapse else (hit.source, hit.path, hit.chunk_id)
+        for hit in base
+    }
+    if identity in existing:
+        return base
+    if (
+        requested_scope == ACTIVE_SCOPE
+        and top == 1
+        and any(hit.representation != RAW_LOCATOR_REPRESENTATION for hit in base)
+    ):
+        return base
+
+    if requested_scope == ACTIVE_SCOPE:
+        non_locators = [
+            hit for hit in base if hit.representation != RAW_LOCATOR_REPRESENTATION
+        ]
+        existing_locators = [
+            hit for hit in base if hit.representation == RAW_LOCATOR_REPRESENTATION
+        ]
+        base = non_locators[: max(0, top - 1)]
+        remaining = max(0, top - 1 - len(base))
+        # One existing dense locator plus the exact backfill stays within the
+        # active two-card cap when authored results do not fill the page.
+        base.extend(existing_locators[: min(1, remaining)])
+    else:
+        base = base[: max(0, top - 1)]
+
+    score = max(0.0, min(1.0, locator.score))
+    if base:
+        score = min(score, max(0.0, base[-1].score - 0.0001))
+    return [*base, replace(locator, score=round(score, 4))]
+
+
+def _locator_backfill_enabled(scope: str) -> bool:
+    """Raw locator navigation is orthogonal to dense or hybrid retrieval."""
+    return scope in {ACTIVE_SCOPE, RAW_SCOPE}
 
 
 def _local_candidate_count(
@@ -915,6 +886,7 @@ def real_query(args: argparse.Namespace) -> int:
 
     t0 = time.time()
     results: list[QueryHit] = []
+    locator_supplements: list[QueryHit] = []
     collapse_results = args.context or len(sources) > 1
 
     # Local search. When the cross-encoder is enabled we pull a wider
@@ -933,6 +905,31 @@ def real_query(args: argparse.Namespace) -> int:
             local_results = cross_encoder.rerank(
                 args.query, local_results, top_k=candidate_k
             )
+        if _locator_backfill_enabled(args.scope):
+            from semantic_backends import search_raw_locators_lexical
+
+            locator_results = search_raw_locators_lexical(
+                retriever.store,
+                args.query,
+                top_k=max(args.top, 2),
+                filters=filters,
+            )
+            locator_supplements.extend(
+                QueryHit(
+                    path=result.path,
+                    score=result.score,
+                    chunk_id=result.chunk_id,
+                    chunk_text=result.chunk_text,
+                    tier=result.tier,
+                    mtime=result.mtime,
+                    source=result.source,
+                    scope=result.scope,
+                    representation=result.representation,
+                )
+                for result in locator_results
+            )
+            if locator_results:
+                warn(f"raw locator lexical backfill: {len(locator_results)} candidates")
         results.extend(
             QueryHit(
                 path=result.path,
@@ -982,6 +979,13 @@ def real_query(args: argparse.Namespace) -> int:
         if collapse_results
         else _rank_hits(results, top=args.top, requested_scope=args.scope)
     )
+    results = _backfill_locator_hit(
+        results,
+        locator_supplements,
+        top=args.top,
+        requested_scope=args.scope,
+        collapse=collapse_results,
+    )
 
     elapsed = time.time() - t0
     warn(f"total: {len(results)} results in {elapsed:.2f}s")
@@ -1004,7 +1008,11 @@ def _record_manifest(
     manifest = {
         item.relative_path: {
             "mtime": item.mtime,
-            "manifest_fingerprint": "",
+            "manifest_fingerprint": physical_manifest_fingerprint(
+                str(item.scope),
+                str(item.representation),
+                item.mtime,
+            ),
         }
         for item in decisions
         if item.included
@@ -1033,6 +1041,22 @@ def _manifest_changed(
     )
 
 
+def _manifest_uses_current_policy(
+    manifest: dict[str, dict[str, Any]],
+) -> bool:
+    """Whether every indexed record declares the current corpus policy."""
+    if not manifest:
+        return False
+    prefix = POLICY_FINGERPRINT + ":"
+    return all(
+        (fingerprint := str(row.get("manifest_fingerprint", "") or "")).startswith(
+            prefix
+        )
+        and len(fingerprint.split(":", 3)) >= 3
+        for row in manifest.values()
+    )
+
+
 def _search_efficiency_report(
     retriever: Any,
     *,
@@ -1058,6 +1082,14 @@ def _search_efficiency_report(
             top_k=30,
             filters={"scope": ACTIVE_SCOPE},
         )
+        from semantic_backends import search_raw_locators_lexical
+
+        locator_results = search_raw_locators_lexical(
+            retriever.store,
+            query,
+            top_k=10,
+            filters={"scope": ACTIVE_SCOPE},
+        )
         latencies_ms.append((time.perf_counter() - started) * 1000)
         hits = [
             QueryHit(
@@ -1073,12 +1105,33 @@ def _search_efficiency_report(
             )
             for result in raw_results
         ]
+        locator_hits = [
+            QueryHit(
+                path=result.path,
+                score=result.score,
+                chunk_id=result.chunk_id,
+                chunk_text=result.chunk_text,
+                tier=result.tier,
+                mtime=result.mtime,
+                source=result.source,
+                scope=result.scope,
+                representation=result.representation,
+            )
+            for result in locator_results
+        ]
         collapsed = _collapse_hits(
             hits,
             top=10,
             requested_scope=ACTIVE_SCOPE,
         )
-        candidate_rows += len(hits)
+        collapsed = _backfill_locator_hit(
+            collapsed,
+            locator_hits,
+            top=10,
+            requested_scope=ACTIVE_SCOPE,
+            collapse=True,
+        )
+        candidate_rows += len(hits) + len(locator_hits)
         unique_rows += len(collapsed)
         for hit in collapsed:
             capsule_bytes += len(
@@ -1133,9 +1186,18 @@ def real_index(args: argparse.Namespace) -> int:
     assert isinstance(retriever, Retriever), "indexing requires base Retriever"
 
     schema_migration = not retriever.store.has_corpus_metadata()
-    rebuild = bool(args.rebuild or schema_migration)
+    indexed_manifest = retriever.store.get_indexed_manifest()
+    policy_migration = bool(indexed_manifest) and not _manifest_uses_current_policy(
+        indexed_manifest
+    )
+    empty_index = not indexed_manifest
+    rebuild = bool(args.rebuild or schema_migration or policy_migration or empty_index)
     if schema_migration and not args.rebuild:
         warn("index schema lacks corpus metadata; forcing one derived-cache rebuild")
+    elif policy_migration and not args.rebuild:
+        warn("corpus policy version changed; forcing one derived-cache rebuild")
+    elif empty_index and not args.rebuild:
+        warn("index is empty; forcing a full derived-cache rebuild")
     if rebuild:
         warn("--rebuild: clearing existing index...")
         retriever.store.clear()
@@ -1184,7 +1246,6 @@ def real_index(args: argparse.Namespace) -> int:
             f"full rebuild: {physical_chunks + locator_chunks} chunks in {elapsed:.1f}s"
         )
     else:
-        indexed_manifest = retriever.store.get_indexed_manifest()
         current_paths = set(current_manifest)
         indexed_paths = set(indexed_manifest)
         changed_paths = {

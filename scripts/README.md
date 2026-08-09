@@ -32,7 +32,9 @@ Executable tooling for the Atelier knowledge layer. All scripts are stdlib-only 
 | `recurring.py` | Manages recurring obligations in `$OV/gtd/recurring.md` — re-emerging tasks with `every:` / `last-done:` due computation, distinct from one-shot GTD items | ops | stdlib |
 | `todos.py` | Aggregate open TODOs from `$OV/gtd/` and reflection Next Action sections; computes priority from `due:` / `priority:` / age; flags closure candidates from daily-note language; subcommands `list`, `stale`, `closure-candidates`, `digest` — `digest` powers `/daily-reflection` Step 0 (reached via `/hi`) | ops | stdlib |
 | `session_log.py` | Session event log skeleton generator — handles late-sleep date rule and collision auto-increment | E | stdlib |
+| `session_replay.py` | Opt-in private native-transcript capture with prompt journaling, secret screening, and inspection; disabled unless `ATELIER_SESSION_REPLAY_ENABLED=1` | ops | stdlib |
 | `context_bundle.py` | Builds route-first, byte-bounded profile and continuity projections from the intent registry | E | stdlib |
+| `signal_facts.py` | Validates and ingests immutable private signal facts, derives definition-bound metrics, and emits bounded relevance-gated analysis bundles | ops | stdlib |
 | `shadow.py` | Cross-provider shadow-log correlation + reporting — `group-start` / `group-close` witnesses for multi-leg call sites, `report` over the JSONL call logs | ops | stdlib |
 | `command_timeout.py` | Runs one scheduled subprocess with an epoch-based wall-clock timeout that survives macOS sleep and terminates its process group on expiry | ops | stdlib |
 | `autoevo_preflight.py` | Checks autoevo Git, session, privacy, semantic, branch, and LFS readiness before model launch; writes a checksum-owned blocker audit without repairing Git | ops | stdlib, `git`, `uv`, optional Git LFS |

@@ -40,7 +40,7 @@ The atelier uses five coordination patterns — annotated on every agent (`harne
 | Shared-state | Agents read and write a common store rather than passing context turn-by-turn. | Currently unused; reserved for future cross-agent coordination (e.g., a shared TrustRank store, cross-session findings cache). |
 | Solo | Single-agent dispatch with no coordination. | Scribe verbatim capture (single-leg native voice). |
 
-The `pattern` field is annotation only. The orchestrator's actual dispatch behavior is governed by the Voice Dispatch contract (§ Voice Dispatch below) and the agent collaboration matrix; `pattern` is descriptive metadata that lets reviewers and lint reason about dispatch shape without re-deriving it from prose. User-facing visibility of routing decisions for `/hi` is provided by the always-on dispatch announcement (canonical instructions in `.claude/commands/hi.md` § "Always-on Routing Announcement"); the `pattern` field itself is consumed only by review tooling.
+The `pattern` field is annotation only. The orchestrator's actual dispatch behavior is governed by the Voice Dispatch contract (§ Voice Dispatch below) and the agent collaboration matrix; `pattern` is descriptive metadata that lets reviewers and lint reason about dispatch shape without re-deriving it from prose. User-facing visibility of `/hi` routing decisions is defined in `.claude/commands/hi.md` § Load and dispatch; the `pattern` field itself is consumed only by review tooling.
 
 No-branching contract: `pattern` is documentation. No code path in `scripts/`, no agent prompt, and no orchestrator instruction may branch on this field's value (e.g., `if pattern == "agent-team": auto_parallelize()`). To add behavior keyed on coordination shape, propose a separate field with explicit semantics; do not extend `pattern` with new values to enable a runtime check. The 5-value enum is intentionally a closed set; expansion requires a separate wave with explicit governance. Lint validates the value is in the allowed set; behavioral coupling is forbidden by convention. A future audit could grep `scripts/`, `.claude/`, and `protocols/` for `pattern == "..."` if the contract slips, but for now prose is sufficient.
 
@@ -62,9 +62,10 @@ same profile, reflection, or session files.
    by the route. If one is older than 7 days, suggest `/introspect`. Routes
    with empty `profile_reads` do not inspect profile freshness.
 
-The default bundle is capped at 12 KB; a selected workflow may raise it to at
-most 20 KB. Daily capture and full source files are explicit additions, not
-generic startup context. The complete contract is in
+The selected intent declares a 4, 6, or 8 KB default budget in
+`harness/intents.toml`; an explicit workflow may raise it to at most 20 KB.
+Daily capture and full source files are explicit additions, not generic
+startup context. The complete contract is in
 `protocols/session-continuity.md`.
 
 ## Criteria-First Dispatch
@@ -92,11 +93,17 @@ When an agent's instructions from multiple sources disagree at runtime (e.g., CL
 2. Return without resolving — the agent does NOT pick a winner.
 3. The orchestrator applies the precedence rule (`dispatch prompt > agent file > command > protocol > CLAUDE.md`) and either redispatches with the conflict resolved or surfaces it to the user.
 
-**Carve-out: CLAUDE.md behavioral rules are the floor, not a default.** The precedence chain above governs **operational specifics** (which dispatch shape, which path, which framework). It does NOT authorize a higher-precedence source to soften or invert a behavioral rule from CLAUDE.md (Critical Rules, Reading Rules, Writing Rules, Coaching Style). A conflict that would have any source override a CLAUDE.md behavioral rule is itself the conflict; the orchestrator MUST surface to the user and refuse to auto-resolve. CLAUDE.md applies to every turn, every agent, by design.
+**Carve-out: CLAUDE.md behavioral rules are the floor, not a default.** The precedence chain above governs **operational specifics** (which dispatch shape, which path, which framework). It does NOT authorize a higher-precedence source to soften or invert the always-on invariants, knowledge and retrieval rules, or writes and communication rules in CLAUDE.md. A conflict that would have any source override those rules is itself the conflict; the orchestrator MUST surface it to the user and refuse to auto-resolve. CLAUDE.md applies to every turn and every agent.
 
 Agent output that quietly satisfies both sides is a flag. This is the runtime analog of antipatterns.md #2 (Rule duplication, which covers conflicts at writing time); the precedence chain is the same.
 
 ## Note Writing
+
+System logs and replay archives are a third, operational write path. The
+orchestrator may write them without approval only when their schemas are
+bounded, private, and documented in protocols/session-log.md or
+protocols/session-replay.md. They must never substitute for an approved
+reflection, note operation, or daily-note write.
 
 All note writes are local file writes under `$OV/`. There are two writing paths, one cognitive and one mechanical:
 
@@ -147,7 +154,7 @@ The multi-leg dispatch shape is enabled at these specific sites today:
 - **`/system-review` Step 1c** — privacy-reviewer's `native` + `direct` legs both fire (worked example in that command file).
 - **`scripts/review.sh`** — external-reviewer's `direct` + `codex` legs both fire.
 - **`/decision` (decision journals):** Thinker's `native` + `direct` legs both fire. Decisions are single-shot, high-stakes choices where single-model framing is the failure mode dual-voice exists for. Pattern: dispatch Thinker through the selected runtime's native project-agent surface in parallel with `chat_completion.py --model <thinker.voices.direct>` carrying the same framing prompt. At synthesis, surface any disagreement on framework choice or verdict before presenting to the user.
-- **Quantitative-claim outputs (synthesis-time check, all roles, all sites):** whenever an agent's returned output contains the fabrication-prone fact classes in CLAUDE.md § "Critical Rules", the orchestrator inspects the dispatch shape at synthesis time. If the dispatch was single-leg `native`, the orchestrator either (a) redispatches the role's `direct` leg in parallel as a disagreement detector on the same prompt and diffs numeric / factual claims at synthesis, OR (b) marks every claim in those fact classes as `unverified` before write-back. **Option (a) is a disagreement detector, not a verification gate**: two-leg agreement does NOT promote `unverified` claims to verified, because both legs see the same prompt and can co-hallucinate. Verification still requires a primary-source citation (arXiv abstract, lab blog, primary press release) under the Critical Rules. Option (a)'s value is catching disagreement between legs (a real fabrication signal) and forcing the claim to `unverified` regardless. **Option (a) requires the role to have a `direct` voice declared; for the Scribe role (single-leg-only by carve-out), option (b) is the mandatory fallback.** This is a post-dispatch gate, not a per-call-site predeclaration; it applies uniformly without requiring every command file to opt in.
+- **Quantitative-claim outputs (synthesis-time check, all roles, all sites):** whenever an agent's returned output contains quantitative or factual claims covered by CLAUDE.md's always-on invariants, the orchestrator inspects the dispatch shape at synthesis time. If the dispatch was single-leg `native`, the orchestrator either (a) redispatches the role's `direct` leg in parallel as a disagreement detector on the same prompt and diffs numeric / factual claims at synthesis, OR (b) marks every affected claim as `unverified` before write-back. **Option (a) is a disagreement detector, not a verification gate**: two-leg agreement does NOT promote `unverified` claims to verified, because both legs see the same prompt and can co-hallucinate. Verification still requires a primary-source citation. Option (a)'s value is catching disagreement between legs and forcing the claim to `unverified` regardless. **Option (a) requires the role to have a `direct` voice declared; for the Scribe role (single-leg-only by carve-out), option (b) is the mandatory fallback.** This is a post-dispatch gate, not a per-call-site predeclaration; it applies uniformly without requiring every command file to opt in.
 
 Every other dispatch site (the Reading hub in `/hi` for non-fact-bearing reads, ad-hoc Reader / Scout / Curator calls that produce only narrative or capture, single-source restatements) fires only the role's `native` leg. The `direct` leg is declared in `voices` as a forward binding for when that call site opts in. To enable a second leg at any new call site, follow the worked example in `/system-review` Step 1c. Lint does NOT enforce dual dispatch at every call site; the schema is intent, the call site is policy.
 
@@ -332,7 +339,7 @@ The orchestrator should actively look for collaboration opportunities during ses
 | **Meeting → Curator** | User approves meeting notes for saving | Meeting output → Curator drafts local note → orchestrator writes after approval | Turns transcript into permanent note |
 | **Reader → Synthesizer** | Multiple Reader lenses complete | Synthesizer combines all lens briefs into unified report | Multi-dimensional reading analysis |
 | **Reader → Challenger** | Reader surfaces a claim worth questioning | Challenger probes the claim against user's existing beliefs | Deepens engagement with the text |
-| **Reviewer + Challenger → Write-back** | Reading discussion ready for write-back | Reviewer checks grounding, Challenger checks completeness | Quality gate before writing to daily note |
+| **Reviewer + Challenger → Write-back** | Reading discussion ready for write-back | Reviewer checks grounding, Challenger checks completeness | Quality gate before an approved reading reflection |
 | **Evolver → Orchestrator → Review → Commit** | Evolver proposes a system change | Evolver makes changes (no commit) → returns `review_tier` to orchestrator → orchestrator dispatches reviewers → fixes issues → commits | Quality gate on system evolution (see Review Tiers) |
 | **Batch Compaction** | User asks to compact a topic area | Researcher finds all notes in `$OV/` → Orchestrator snapshots each source to `<paths.cache>/compact-<slug>.md` at dispatch time → Curator drafts one output note at a time → orchestrator writes each after approval | Sequential: all snapshots must exist on disk before Curator starts |
 | **Pre-Output Raw Capture** | Reflection / coaching session about to write its reflection file, and the user dictated raw capture content during the session | Orchestrator collects raw user content per Capture surface (daily note, dining row, GTD, people stub, generic) → dispatches one Scribe per surface in parallel → all Scribe writes complete before the orchestrator writes the reflection file | Cost-partitioned: cheap-tier captures (Scribe), deep-cognition voices do not transcribe |

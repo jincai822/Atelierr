@@ -4,8 +4,8 @@ Entry point for all agents. When you need to know how to behave, start here.
 
 ## By Situation
 
-- **Session start.** `orchestrator.md` (role as hub) → `session-continuity.md` (cross-session) → `coaching-progressions.md` (depth).
-- **During session.** `quality-gates.md` (checkpoints) → `agent-handoff.md` (envelope format) → `error-handling.md` (escalation).
+- **Session start.** `orchestrator.md` (role as hub) → `session-continuity.md` (cross-session) → `coaching-progressions.md` (depth). No-context `/hi` uses `hi-menu.md`; routed capture, meeting, and forgetting use their `intent-*.md` procedures.
+- **During session.** `quality-gates.md` (checkpoints) → `agent-handoff.md` (envelope format) → `error-handling.md` (escalation). For configured earnings and market-signal work, use `analysis-signals.md` before retrieval.
 - **Producing output.** `session-scoring.md` (rubric) → `pattern-library.md` (recurring patterns).
 - **After session.** `meta-reflection.md` (system health) → `session-log.md` (process log).
 - **System evolution.** `harness-assumptions.md` (stale model-era assumptions) → `antipatterns.md` (named failure modes for Tier 2+ review) → `repo-conventions.md` ($OV layout, tooling, push policy).
@@ -54,8 +54,9 @@ backend-taxonomy.md (external systems + SOT carve-outs; per-backend contracts)
   └── drive-zk-ingestion.md (raw landing → $OV ingestion) → raw-indexing.md (wikilink indexes over raw archives)
   └── intent-coverage.md (router-miss JSONL log; coverage feedback into harness/intents.toml)
   └── shadow-log.md (multi-leg dispatch correlation; cost + verdict-agreement reporting)
+analysis-signals.md (relevance-gated preflight) → analysis-signal-cache.md (fact-ledger reference) → local-first-architecture.md
 
-session-log.md (process recording) → meta-reflection.md (system health)
+session-log.md (process recording) → session-replay.md (private native transcript archive) → meta-reflection.md (system health)
 harness-assumptions.md (model-era assumption registry)
 antipatterns.md (named failure-mode catalog for Tier 2+ review)
 runtime-adapters.md (provider-neutral runtime contracts: Claude Code + Codex)

@@ -68,10 +68,20 @@ readwise reader-create-document \
 
 Print the resulting Readwise URL or `document_id` to the user as a one-liner confirmation. Do not pre-check for duplicates: if Readwise re-creates a doc, the second `document_id` is fine. Do not loop on errors; if the call fails (network, auth), report the error and continue, since the reflection file is already saved.
 
+## Initial-analysis persistence checkpoint
+
+Immediately after the first complete reading analysis returns, run the reading
+checkpoint defined in protocols/session-log.md before presenting the analysis
+or entering discussion. Do not wait for a future write-back request. Resolve a
+collision-free reading session-log path, then create the complete log and its
+filled Reading Capsule in one Write/Edit operation. Do not use
+`scripts/session_log.py` for reading because skeleton-then-fill leaves an
+interruption window.
+
 ## Per-option flows
 
-- **Read & Discuss:** Ask for the article/note. Run the Prefetch Step above if it's a Readwise source. Dispatch 1 Reader (Critical lens) + 1 Researcher (find related notes). Present the analysis, then enter interactive discussion mode. Before write-back, dispatch **Reviewer** + **Challenger** in parallel to verify accuracy, then create a standalone article note (see Article Note step below). After the article note is saved, run the Backup to Readwise step above. This is the lightweight default — most reading sessions start here.
-- **Focused Read:** Ask the user which article/note and which lens(es): Critical, Structural, Practical, or Dialectical. Run the Prefetch Step above if it's a Readwise source. Dispatch 1-2 Reader instances with the chosen lenses. Reader automatically handles transcript format (video/podcast) with preprocessing before applying the lens. Before write-back, dispatch **Reviewer** + **Challenger** in parallel to verify accuracy, then create a standalone article note (see Article Note step below). After the article note is saved, run the Backup to Readwise step above. Use when the user knows what angle they want.
+- **Read & Discuss:** Ask for the article/note. Run the Prefetch Step above if it's a Readwise source. Dispatch 1 Reader (Critical lens) + 1 Researcher (find related notes). Complete the Initial-analysis persistence checkpoint, then present the analysis and enter interactive discussion mode. Before any user-approved reflection write, dispatch **Reviewer** + **Challenger** in parallel to verify accuracy. After the reflection is saved, run the Backup to Readwise step above. This is the lightweight default — most reading sessions start here.
+- **Focused Read:** Ask the user which article/note and which lens(es): Critical, Structural, Practical, or Dialectical. Run the Prefetch Step above if it's a Readwise source. Dispatch 1-2 Reader instances with the chosen lenses. Reader automatically handles transcript format (video/podcast) with preprocessing before applying the lens. Complete the Initial-analysis persistence checkpoint before discussion. Before any user-approved reflection write, dispatch **Reviewer** + **Challenger** in parallel to verify accuracy. After the reflection is saved, run the Backup to Readwise step above. Use when the user knows what angle they want.
 - **Multi-Lens Read:** Ask the user which article or note to read. Run the Prefetch Step above if it's a Readwise source. Then follow the Reading Hub flow below. Use for important articles worth deep multi-angle analysis.
 
 ## Reading Hub Flow (Multi-Lens Read)
@@ -88,6 +98,7 @@ Print the resulting Readwise URL or `document_id` to the user as a one-liner con
 
 2. **Convergence — Phase 2 (synthesize):**
    - **Synthesizer** combines all Reader briefs + Researcher + Scout + Thinker into a unified reading report
+   - Complete the Initial-analysis persistence checkpoint before presenting the report
    - Present the report in Chinese (reading-intensive)
 
 3. **Discussion — Phase 3 (interact):**
@@ -103,7 +114,10 @@ Print the resulting Readwise URL or `document_id` to the user as a one-liner con
 
 5. **Save — Phase 5 (local reflection file):**
    - Write the reflection file to `<paths.reflections>/YYYY-MM-DD-reading-<slug>.md`
-   - Include full source text under `### Full Text` (see source-text persistence rule in CLAUDE.md)
+   - Include the complete source text under `### Full Text` when the source is
+     user-supplied or locally retained and redistribution rights are not in
+     question. For third-party copyrighted sources, store a source locator and
+     bounded excerpts instead.
    - No write-back to daily notes. The reflection file is the durable output.
 
 6. **Backup to Readwise — Phase 6 (source preservation):**

@@ -99,7 +99,6 @@ pattern = "generator-verifier"
 used_by = [
     "commands.autoevo-nightly",
     "commands.autoevo-review",
-    "commands.hi",
     "commands.introspect",
     "commands.prm",
     "commands.read",
@@ -122,7 +121,6 @@ pattern = "orchestrator-subagent"
 used_by = [
     "commands.autoevo-nightly",
     "commands.autoevo-review",
-    "commands.hi",
     "commands.promote",
     "commands.sync",
     "intents.meeting",
@@ -155,7 +153,6 @@ pattern = "generator-verifier"
 used_by = [
     "commands.autoevo-nightly",
     "commands.autoevo-review",
-    "commands.hi",
     "intents.forget",
 ]
 
@@ -168,7 +165,7 @@ status = "portable-adapted"
 description = "Recommends readings, resources, and thinkers relevant to the painter's interests and goals. Le cercle archetype: The Cataloguer."
 codex_prompt = "Run the Librarian role through native Codex agent `librarian`; `.claude/agents/librarian.md` remains authoritative."
 pattern = "orchestrator-subagent"
-# Dispatched from `.claude/commands/hi.md` (Deep Dive + Recommend Resources
+# Dispatched from `protocols/hi-menu.md` (Deep Dive + Recommend Resources
 # sub-flows); no direct intent route. `used_by` is computed from command-
 # file dispatch-context mentions by `harness_lint --fix-used-by`.
 used_by = [
@@ -185,7 +182,6 @@ description = "Processes work meeting transcripts into structured notes with act
 codex_prompt = "Run the Meeting role through native Codex agent `meeting`; `.claude/agents/meeting.md` remains authoritative."
 pattern = "orchestrator-subagent"
 used_by = [
-    "commands.hi",
     "intents.meeting",
 ]
 
@@ -199,7 +195,6 @@ description = "Reads articles and notes through critical, structural, practical,
 codex_prompt = "Run the Reader role through native Codex agent `reader`; `.claude/agents/reader.md` remains authoritative."
 pattern = "agent-team"
 used_by = [
-    "commands.hi",
     "commands.read",
     "intents.reading",
     "intents.talk",
@@ -229,7 +224,6 @@ codex_prompt = "Run the Researcher role through native Codex agent `researcher`;
 pattern = "orchestrator-subagent"
 used_by = [
     "commands.civ",
-    "commands.hi",
     "commands.prm",
     "commands.promote",
     "commands.read",
@@ -237,6 +231,7 @@ used_by = [
     "intents.decision",
     "intents.energy-audit",
     "intents.explore",
+    "intents.finance-analysis",
     "intents.promote",
     "intents.reading",
     "intents.reflection",
@@ -256,7 +251,6 @@ description = "Quality-checks session outputs and system evolution changes. Le c
 codex_prompt = "Run the Reviewer role through native Codex agent `reviewer`; `.claude/agents/reviewer.md` remains authoritative."
 pattern = "generator-verifier"
 used_by = [
-    "commands.hi",
     "commands.introspect",
     "commands.prm",
     "commands.promote",
@@ -278,8 +272,8 @@ description = "Gathers external context from outside the œuvre: articles, discu
 codex_prompt = "Run the Scout role through native Codex agent `scout`; `.claude/agents/scout.md` remains authoritative."
 pattern = "agent-team"
 used_by = [
-    "commands.hi",
     "commands.read",
+    "intents.finance-analysis",
     "intents.reflection",
 ]
 
@@ -294,7 +288,6 @@ codex_prompt = "Run the Synthesizer role through native Codex agent `synthesizer
 pattern = "orchestrator-subagent"
 used_by = [
     "commands.civ",
-    "commands.hi",
     "commands.read",
     "intents.reflection",
     "intents.review",
@@ -312,7 +305,6 @@ pattern = "orchestrator-subagent"
 used_by = [
     "commands.daily-reflection",
     "commands.decision",
-    "commands.hi",
     "commands.read",
     "intents.decision",
 ]
@@ -341,7 +333,6 @@ codex_prompt = "Run the Scribe role through native Codex agent `scribe`; `.claud
 pattern = "solo"
 used_by = [
     "commands.daily-reflection",
-    "commands.hi",
     "commands.sync",
     "intents.capture",
     "intents.sync",

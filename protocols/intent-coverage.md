@@ -11,12 +11,12 @@ invocation, the shared `UserPromptSubmit` hook runs the deterministic matcher
 once and injects its result as:
 
 ```text
-ATELIER_INTENT_ROUTE {"schema":1,"source":"harness/intents.toml",...}
+ATELIER_INTENT_ROUTE {"schema":2,"source":"harness/intents.toml",...}
 ```
 
 The packet projects only fields needed by the live command: `name`, `mode`,
-`agents`, `profile_reads`, `priority`, `matched_pattern`, `parallel`,
-`fallback`, and `ambiguous`. An ambiguous result also carries
+`procedure`, `context_budget_bytes`, `agents`, `profile_reads`, `priority`,
+`matched_pattern`, `parallel`, `fallback`, and `ambiguous`. An ambiguous result also carries
 `tied_candidates` with the same route fields. It contains registry data only:
 never the raw user input, session ID, transcript path, or resolved filesystem
 paths.
@@ -41,7 +41,7 @@ orchestrator could not classify the intent with high confidence. Three kinds:
 |---|---|
 | `fallback` | No `patterns` matched; `intents.reflection` (priority 0, empty patterns) won by default. |
 | `ambiguous` | 2+ non-fallback intents tied at the top priority; orchestrator used `AskUserQuestion` to disambiguate. |
-| `low_confidence` | A short generic substring matched inside a longer message whose primary intent looked different (see the heuristic table in `.claude/commands/hi.md` § Clarify before dispatching). Orchestrator used `AskUserQuestion` to confirm. |
+| `low_confidence` | A short generic substring matched inside a longer message whose primary intent looked different under `.claude/commands/hi.md` § Contextual routing. Orchestrator used `AskUserQuestion` to confirm. |
 
 The happy path (high-confidence single winner) is NOT logged. The log is a coverage feedback channel, not a session history.
 
@@ -81,7 +81,7 @@ Two producers feed the same JSONL, partitioned by `match_kind`:
 | Producer | Surface | Captures | Token cost into orchestrator |
 |---|---|---|---|
 | `intent-hook` | `UserPromptSubmit` hook (`.claude/settings.json` and `.codex/hooks.json`) | Compact route for every contextual invocation; logs `fallback` and `ambiguous` via `match_intents()` | At most 1 KiB of high-signal route context; no extra model or tool call |
-| `intent-log` | In-band `Bash:` call by the orchestrator | `low_confidence` — heuristic LLM judgment over message shape (see `.claude/commands/hi.md` § Clarify before dispatching) | ~200-300 tokens per call (Bash command + result) |
+| `intent-log` | In-band `Bash:` call by the orchestrator | `low_confidence` — heuristic LLM judgment over message shape under `.claude/commands/hi.md` § Contextual routing | ~200-300 tokens per call (Bash command + result) |
 
 The hook projects every deterministic route and captures the bulk of misses
 (fallback is purely "no patterns matched"; ambiguous is purely "2+ tied at
@@ -96,7 +96,22 @@ orchestrator call. Hook-produced rows carry
 `"logged_by": "user_prompt_submit_hook"`; orchestrator-produced rows omit that
 field, which preserves producer attribution in the report.
 
-The shape of the in-band call is documented in `.claude/commands/hi.md` § Miss Logging. The shared hook entry is wired with the runtime label appropriate to each edge:
+For the low-confidence branch, use this best-effort in-band shape after the
+route is clarified:
+
+```bash
+uv run scripts/intent_coverage.py intent-log \
+  --input "<raw hi text>" \
+  --match-kind low_confidence \
+  --runtime <claude-code-or-codex> \
+  --initial-name <intent-name> \
+  --initial-priority <priority> \
+  --initial-pattern "<matched-pattern>" \
+  --clarified-to <selected-intent> \
+  --final-dispatch <selected-intent>
+```
+
+The shared hook entry is wired with the runtime label appropriate to each edge:
 
 ```
 {"type": "command",
@@ -132,7 +147,10 @@ Output:
 - Coverage signal: phrases recurring across at least the distinct-days threshold defined in `scripts/intent_coverage.py` as `INTENT_MISS_DISTINCT_DAYS_THRESHOLD` (currently 3) are flagged as candidate triggers — strong enough that user is hitting the gap repeatedly, not just once.
 - A note line `(N event(s) had empty raw_input — counted in by-kind totals, omitted from the phrase table)` appears when applicable; `kind_counts` and `phrase_stats` deliberately disagree by N in that case so a fire-time logging glitch is visible in the audit, not silently dropped.
 
-Run cadence: opportunistic. No automated cue yet; check during `/system-review` or before sprints of harness work. This is a deliberate v1 scope choice — the cue template would mirror `check_routine_outputs` (directory existence + recent entry count + ack-state in `$OV/_meta/`), and adding it is tracked as the natural v2 step. Without the cue, the user discovers the backlog by remembering to run `intent-misses`; this is acceptable while traffic is low.
+Run cadence: opportunistic. No automated cue exists; check during
+`/system-review` or before sprints of harness work. Add a cue when traffic
+justifies it, using the `check_routine_outputs` shape: directory existence,
+recent entry count, and acknowledgement state under `$OV/_meta/`.
 
 ## Acting on the report
 
@@ -151,7 +169,7 @@ The log accumulates indefinitely. There is no rotation / compaction policy yet �
 ## Related
 
 - `harness/intents.toml` — canonical intent registry; misses feed pattern additions here.
-- `.claude/commands/hi.md` § Clarify before dispatching — heuristic for when to flag as `low_confidence`.
-- `.claude/commands/hi.md` § Miss Logging — exact Bash shape orchestrator runs.
+- `.claude/commands/hi.md` § Contextual routing — heuristic for when to flag as `low_confidence`.
+- This protocol's producer section — exact `intent-log` command shape.
 - `scripts/intent_coverage.py` — `intent-log` and `intent-misses` subcommands; source of truth for the path and the distinct-days threshold.
 - `protocols/shadow-log.md` — sibling JSONL-append + report system. Different write target (canonical to `$OV/` here, redacted mirror skeleton there) but a useful precedent if this log ever grows multi-leg / verdict-aggregation needs.

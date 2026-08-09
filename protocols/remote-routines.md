@@ -519,4 +519,4 @@ The output directory itself is left in place (rmdir manually if empty and unwant
 - `local-first-architecture.md` — vault tier model + aggregation/detail boundary (this doc extends it with the routine layer)
 - `repo-conventions.md` — atelier vs $OV separation
 - `harness-assumptions.md` — track when the routine layer assumes specific MCP behaviors
-- CLAUDE.md § Tooling layout — script placement rules
+- CLAUDE.md scratch-path invariant and `scripts/README.md` — script placement rules

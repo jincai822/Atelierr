@@ -8,7 +8,7 @@ are the source of truth for a specific subject; aggregate trackers (e.g.
 `travel/<calendar>.md`, `travel/<inventory>.md`, and
 `finance/<benefits-tracker>.md`) are hand-mirrored views over many subjects. When the user
 updates a detail file, nothing pushes back to the aggregates, so read commands
-(`/perks`, `/civ`, ...) can surface stale facts as authoritative. This is
+Read workflows can surface stale facts as authoritative. This is
 antipattern #6 (shadow state) at the data layer.
 
 This script is a read-time guard. Given a subjects directory and a list of

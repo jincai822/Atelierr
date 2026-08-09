@@ -46,6 +46,14 @@ scripts/semantic.py --help
 caps raw locators at two in the default scope, and limits each snippet to 600
 characters. Without `--context`, a single-source query preserves the legacy
 chunk-ranked output. Multi-source queries deduplicate paths after merging.
+In real mode, default `active` and explicit `raw` queries also search the
+small raw-locator view lexically. This recovers exact filename and cluster
+terms without materializing full-corpus BM25 on every query. `--hybrid`
+remains the opt-in full dense plus BM25 path. A strong lexical locator match
+is a one-slot tail backfill, not a relevance competitor: authored results and
+any configured reranker keep their order ahead of the generated navigation
+card. The same backfill remains enabled with `--hybrid`, so exact raw filename
+lookup does not regress when full BM25 is selected.
 
 ### Corpus policy
 
@@ -61,9 +69,11 @@ indexing, freshness checks, audits, and smoke tests.
 | `process` | Session-process records under `sessions/`. |
 | `all` | Union of the indexed scopes. |
 
-The corpus always excludes `cache/`, `_meta/`, `_routine_prompts/`, `.trash/`,
-`archive/orphan-stubs/`, hidden operational directories, dependency trees such
-as `node_modules/`, and empty or whitespace-only files.
+The corpus always excludes any nested `cache/`, `_meta/`, `_routine_prompts/`,
+`.trash/`, or `_tools/` directory; `archive/orphan-stubs/`; hidden operational
+directories; dependency trees such as `node_modules/`; and empty or
+whitespace-only files. Any non-archived, non-process directory segment named
+`inbox` maps to explicit `inbox` scope rather than default `active`.
 
 Binary raw assets are discoverable without OCR. The policy groups files by raw
 cluster and generates an in-memory locator card containing safe path terms,
@@ -75,9 +85,9 @@ Markdown/text/CSV/HTML raw files are additionally available in `raw` scope.
 
 | Call | Meaning |
 |---|---|
-| `semantic.py status --format json` | Compare the current corpus manifest, raw-locator fingerprints, and index schema with the stored index without loading the embedding model. |
+| `semantic.py status --format json` | Compare the current corpus manifest, policy version, raw-locator fingerprints, and index schema with the stored index without loading the embedding model. |
 | `semantic.py corpus --format json` | Audit scope classification, hard exclusions, raw locator coverage, exact duplicates, and estimated chunks without loading an embedding model. |
-| `semantic.py index` | Incrementally update changed records and remove deleted records. A schema migration forces one derived-cache rebuild. |
+| `semantic.py index` | Incrementally update changed records and remove deleted records. A schema or corpus-policy migration forces one derived-cache rebuild. |
 | `semantic.py index --if-stale` | Run the lightweight freshness check first; load the embedding model only when drift exists. Used by scheduled maintenance. |
 | `semantic.py index --rebuild` | Clear and rebuild the complete index. Keep this manual. |
 
