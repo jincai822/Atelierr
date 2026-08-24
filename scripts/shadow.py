@@ -91,12 +91,52 @@ SCOPE_BANNER = (
 # ---------- group-start ----------
 
 
-def cmd_group_start(args: argparse.Namespace) -> int:
+def _agent_direct_model(subagent_type: str) -> str:
+    """`agents.<subagent_type>.voices.direct` from harness/agents.toml, or ""."""
     try:
-        expected = json.loads(args.expected)
-    except json.JSONDecodeError as e:
-        sys.stderr.write(f"shadow: --expected is not valid JSON: {e}\n")
+        data = tomllib.loads((REPO_ROOT / "harness" / "agents.toml").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    agent = data.get("agents", {}).get(subagent_type)
+    voices = agent.get("voices") if isinstance(agent, dict) else None
+    value = voices.get("direct") if isinstance(voices, dict) else None
+    return str(value) if value else ""
+
+
+def _expected_for_agent(subagent_type: str, runtime: str = "") -> list[dict]:
+    """Build the expected-dispatch list for a dual-voice agent.
+
+    Native leg from the runtime-aware identity, direct leg from the agent's
+    canonical voices binding, so call sites track harness/agents.toml
+    automatically instead of re-deriving both identities in inline bash.
+    """
+    expected: list[dict] = []
+    native = _runtime_native_model(subagent_type, _active_runtime(runtime))
+    if native:
+        expected.append({"model": native, "leg": "native", "subagent_type": subagent_type})
+    direct = _agent_direct_model(subagent_type)
+    if direct:
+        expected.append({"model": direct, "leg": "direct"})
+    return expected
+
+
+def cmd_group_start(args: argparse.Namespace) -> int:
+    if bool(args.agent) == bool(args.expected):
+        sys.stderr.write("shadow: pass exactly one of --agent or --expected\n")
         return 2
+    if args.agent:
+        expected = _expected_for_agent(args.agent, args.runtime)
+        if not expected:
+            sys.stderr.write(
+                f"shadow: no voice bindings found for agent={args.agent!r}\n"
+            )
+            return 2
+    else:
+        try:
+            expected = json.loads(args.expected)
+        except json.JSONDecodeError as e:
+            sys.stderr.write(f"shadow: --expected is not valid JSON: {e}\n")
+            return 2
     if not isinstance(expected, list) or not all(
         isinstance(e, dict) and "model" in e and "leg" in e for e in expected
     ):
@@ -116,6 +156,9 @@ def cmd_group_start(args: argparse.Namespace) -> int:
     # Emit shell-eval-able exports so the caller can: eval "$(shadow.py group-start ...)"
     print(f'export ATELIER_SHADOW_GROUP="{group_id}"')
     print(f'export ATELIER_TASK_TYPE="{args.task}"')
+    direct_models = [e["model"] for e in expected if e.get("leg") == "direct"]
+    if direct_models:
+        print(f'export ATELIER_DIRECT_MODEL="{direct_models[0]}"')
     sys.stderr.write(f"shadow: opened group {group_id} (task={args.task}, expected_legs={len(expected)})\n")
     return 0
 
@@ -892,7 +935,19 @@ def build_parser() -> argparse.ArgumentParser:
     gs = sub.add_parser("group-start", help="Open a shadow group; print env exports + write witness file.")
     gs.add_argument("--task", required=True, help="Task type (e.g., system-review, decision, privacy-review).")
     gs.add_argument(
-        "--expected", required=True,
+        "--agent",
+        help=(
+            "Registered dual-voice agent role (e.g. privacy-reviewer, thinker): "
+            "expected legs are derived from harness/agents.toml voices plus the "
+            "runtime-aware native identity. Alternative to --expected."
+        ),
+    )
+    gs.add_argument(
+        "--runtime", default="",
+        help="Override the active runtime for --agent native-leg resolution.",
+    )
+    gs.add_argument(
+        "--expected",
         help=(
             'JSON list of expected dispatches; each entry has {"model": "...", "leg": "native|direct|codex"} '
             'AND an optional {"subagent_type": "..."} field used by the hook to disambiguate when multiple '

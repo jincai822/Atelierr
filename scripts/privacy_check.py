@@ -418,7 +418,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.json:
             print(json.dumps(
-                {"zk_missing": True, "titles_scanned": 0, "hits": []},
+                {"action": "soft_skip", "reason": "vault not available",
+                 "zk_missing": True, "titles_scanned": 0, "hits": []},
                 indent=2,
             ))
         else:
@@ -444,6 +445,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.json:
             print(json.dumps(
                 {
+                    "action": "soft_skip",
+                    "reason": "no private dirs to scan",
                     "vacuous_gate": True,
                     "ov_dir": OV.as_posix(),
                     "titles_scanned": 0,
@@ -475,6 +478,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.json:
         print(json.dumps({
+            "action": "abort" if hits else "proceed",
             "ov_dir": OV.as_posix(),
             "filename_stems": len(titles),
             "wikilink_targets": len(wikilinks),

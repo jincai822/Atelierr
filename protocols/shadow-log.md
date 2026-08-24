@@ -54,10 +54,11 @@ Claude Code and Codex run each shell tool call in a separate subprocess. Env var
 
 **Step 1 (before dispatch):** Run `group-start` in one Bash call. Parse the UUID from stdout.
 ```bash
-NATIVE_MODEL=$(python3 scripts/shadow.py native-model --agent privacy-reviewer)
-python3 scripts/shadow.py group-start \
-  --task privacy-review \
-  --expected '[{"model":"'"$NATIVE_MODEL"'","leg":"native","subagent_type":"privacy-reviewer"},{"model":"deepseek_pro_max","leg":"direct"}]'
+python3 scripts/shadow.py group-start --task privacy-review --agent privacy-reviewer
+# --agent derives expected legs from harness/agents.toml voices + the
+# runtime-aware native identity, and prints ATELIER_DIRECT_MODEL for leg B.
+# Hand-built --expected stays available for call sites without a registered
+# dual-voice agent.
 ```
 The output contains `export ATELIER_SHADOW_GROUP="<uuid>"`. The orchestrator remembers this UUID.
 

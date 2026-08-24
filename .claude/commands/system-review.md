@@ -29,22 +29,14 @@ If the working tree is clean, stop and tell the user there is nothing to review.
 uv run scripts/privacy_check.py --json
 ```
 
-Parse stdout as JSON. `--json` mode emits the document on every run regardless of exit code; `exit 1` is the script's normal "hits found" signal, not a script error.
+Parse stdout as JSON and route on its `action` field (`exit 1` is the normal "hits found" signal, not a script error):
 
-Match top-to-bottom — first matching row wins. Field defaults when keys are absent: `zk_missing` → `false` (only the missing-vault payload sets it); `vacuous_gate` → `false` (only the empty-dirs payload sets it); `coverage_warnings` → `[]`; `hit_count` → `len(hits)` (only the skip payloads omit it).
+- `"proceed"` — continue to Step 1c. Carry any `coverage_warnings` into the synthesis; do not describe the mechanical gate as complete while one is present.
+- `"soft_skip"` — continue to Step 2, noting "privacy gate skipped (<reason>)" in the synthesis.
+- `"abort"` — abort with `NEEDS_REVISION`. Present each `hits` entry verbatim (`file:line` + `private_title`). Do not dispatch reviewers; fix leaks, re-run `/system-review`.
+- JSON missing/unparseable or exit ≥ 2 with no JSON — real script error: surface stderr, soft-skip, note "privacy gate skipped (script error)".
 
-| JSON parses? | zk_missing | vacuous_gate | hit_count | coverage_warnings | Action |
-|---|---|---|---|---|---|
-| Yes | true | any | any (often absent) | any | Soft-skip; note "privacy gate skipped (vault not available)" in synthesis. Proceed to Step 2. |
-| Yes | any | true | any (often absent) | any | Soft-skip; note "privacy gate skipped (no private dirs to scan)" in synthesis. Proceed to Step 2. |
-| Yes | false | false | >0 | any | Abort with `NEEDS_REVISION`. Present each `hits` entry verbatim (`file:line` + `private_title`). Do not dispatch reviewers; fix leaks, re-run `/system-review`. |
-| Yes | false | false | 0 | non-empty | Proceed to Step 1c and carry the coverage warning into synthesis. Do not describe the mechanical gate as complete. |
-| Yes | false | false | 0 | empty | Proceed to Step 1c. |
-| No, OR stdout empty, OR exit ≥2 with no JSON | any | any | any | any | Real script error. Surface stderr, soft-skip, note "privacy gate skipped (script error)" in synthesis. |
-
-The script scans public-bound pathnames and file content for tracked plus untracked-but-not-ignored files. When a staged blob differs from the working copy, it scans both, so cleaning the worktree after staging cannot hide a leak. It also loads exact local names, places, and preference phrases from gitignored `profile/private_terms.txt` when present.
-
-Rationale: privacy leaks are a hard veto regardless of score. Catching them deterministically before dispatching the expensive external reviewers saves tokens and prevents NEEDS_REVISION cycles caused by mechanical issues a script already knows. Mirrors `/lint` Phase 0c.
+The script scans public-bound pathnames and content for tracked plus untracked-but-not-ignored files, both staged and working copies, plus exact terms from gitignored `profile/private_terms.txt` when present. Leaks are a hard veto regardless of score; catching them before the expensive external reviewers mirrors `/lint` Phase 0c.
 
 ### 1c. Semantic privacy double-guard (blocking, cross-provider)
 
@@ -55,11 +47,10 @@ The mechanical script in 1b matches discovered private titles and locally declar
 **Before dispatch — shadow group setup (best-effort):** Run a single Bash call to create the witness file. Parse the UUID from the output line `export ATELIER_SHADOW_GROUP="<uuid>"` and **remember it** for the direct-API leg and for cleanup after dispatch. Best-effort: if the call fails, proceed without correlation.
 
 ```bash
-NATIVE_MODEL=$(python3 scripts/shadow.py native-model --agent privacy-reviewer)
-DIRECT_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('privacy-reviewer',{}).get('voices',{}).get('direct',''))")
-EXPECTED='[{"model":"'"$NATIVE_MODEL"'","leg":"native","subagent_type":"privacy-reviewer"},{"model":"'"$DIRECT_MODEL"'","leg":"direct"}]'
-python3 scripts/shadow.py group-start --task privacy-review --expected "$EXPECTED"
+python3 scripts/shadow.py group-start --task privacy-review --agent privacy-reviewer
 ```
+
+`--agent` derives both expected legs from `harness/agents.toml` voices plus the runtime-aware native identity, and also prints `export ATELIER_DIRECT_MODEL="<direct identity>"` for the direct-leg dispatch.
 
 **Do NOT use `eval` + `trap EXIT` here.** Claude Code and Codex run each workflow shell call in an isolated subprocess; an EXIT trap would destroy the witness immediately when that call returns, before the native project-agent dispatch fires. The witness file must stay open on disk until explicit `group-close` after both legs complete.
 

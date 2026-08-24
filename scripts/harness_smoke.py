@@ -4545,6 +4545,8 @@ def check_public_regression_tests() -> None:
             "tests.test_render_edges",
             "tests.test_autoevo_commit",
             "tests.test_autoevo_run",
+            "tests.test_shadow_group",
+            "tests.test_privacy_action",
             "tests.test_intent_routing",
             "tests.test_intent_overlay",
             "tests.test_session_stats",

@@ -69,11 +69,10 @@ Based on the decision type, select the right pairing from `frameworks/cross-vali
 **Before dispatch — shadow group setup (best-effort):** Run a single Bash call to create the witness file. Parse the UUID from the output line `export ATELIER_SHADOW_GROUP="<uuid>"` and **remember it** for the direct-API leg and for cleanup. Best-effort: if the call fails, proceed without correlation.
 
 ```bash
-NATIVE_MODEL=$(python3 scripts/shadow.py native-model --agent thinker)
-DIRECT_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/agents.toml','rb').read().decode()).get('agents',{}).get('thinker',{}).get('voices',{}).get('direct',''))")
-EXPECTED='[{"model":"'"$NATIVE_MODEL"'","leg":"native","subagent_type":"thinker"},{"model":"'"$DIRECT_MODEL"'","leg":"direct"}]'
-python3 scripts/shadow.py group-start --task decision --expected "$EXPECTED"
+python3 scripts/shadow.py group-start --task decision --agent thinker
 ```
+
+`--agent` derives both expected legs from `harness/agents.toml` voices plus the runtime-aware native identity, and also prints `export ATELIER_DIRECT_MODEL="<direct identity>"` for the direct-leg dispatch.
 
 **Do NOT use `eval` + `trap EXIT` here.** Claude Code and Codex run each workflow shell call in an isolated subprocess; an EXIT trap would destroy the witness immediately when that call returns, before the native project-agent dispatch fires. The witness file must stay open on disk until explicit `group-close` after both legs complete.
 

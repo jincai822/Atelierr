@@ -100,16 +100,7 @@ Advisory only: never blocks the run. Exit code 0 unless $OV is missing (exit 2).
 Bash: uv run scripts/privacy_check.py --json
 ```
 
-`--json` mode emits a document on every run regardless of exit code. Parse stdout as JSON, then route on flags:
-
-| JSON | Flag | Action |
-|---|---|---|
-| Yes | `zk_missing: true` | Soft-skip; note "privacy gate skipped (vault not available)". Continue. |
-| Yes | `vacuous_gate: true` | Soft-skip; note "privacy gate skipped (no private dirs to scan)". Continue. |
-| Yes | `hit_count > 0` | ERROR — block; present each `hits` entry verbatim. |
-| Yes | `hit_count == 0`, non-empty `coverage_warnings` | WARN; surface each coverage gap, then continue. |
-| Yes | `hit_count == 0`, no skip flag or coverage warning | Pass; continue. |
-| No / stdout empty / exit ≥ 2 with no JSON | n/a | Real script error. Surface stderr; soft-skip. |
+`--json` mode emits a document on every run regardless of exit code. Route on its `action` field: `"proceed"` → pass (WARN first on any `coverage_warnings`); `"soft_skip"` → note "privacy gate skipped (<reason>)" and continue; `"abort"` → ERROR, block and present each `hits` entry verbatim. No JSON / exit ≥ 2 without JSON → real script error: surface stderr, soft-skip.
 
 Normal-scan JSON shape:
 ```json
