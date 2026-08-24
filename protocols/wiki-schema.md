@@ -2,21 +2,13 @@
 
 The structural format for a note that lives under `<paths.wiki>/`. Location is the certification: a note is a wiki entry by virtue of being in `<paths.wiki>/`, not by carrying any tag. Wiki entries are parseable by `scripts/trust.py` and have claim-level granularity in the trust graph. Notes outside `<paths.wiki>/` are alloy by default (see `epistemic-hygiene.md`).
 
-## Why Location, Not Tag
-
-`$OV/` is a real markdown vault with hundreds of pre-existing notes. A dedicated subdirectory is the cleanest structural sub-tier: `<paths.wiki>/` is the trust-engine-visible region; everything else in `$OV/` is alloy. The trust engine walks one directory; the user has free use of every tag.
-
-The `#solo-flight` tag lives orthogonally to the schema and marks unstructured pure-human capture, which is location-independent (see `epistemic-hygiene.md`).
+Design rationale for location-based certification and claim-level trust lives in the architecture review ledger under `$OV/research/`, not here; this file carries only the operative schema. The `#solo-flight` tag lives orthogonally to the schema and marks unstructured pure-human capture, which is location-independent (see `epistemic-hygiene.md`).
 
 ## Session-Visible Markers
 
 Because wiki entries live under `<paths.wiki>/` and nothing outside that directory participates in the trust graph, a reader scanning a session (the orchestrator, a subagent, or the user skimming chat) has no visible cue that a referenced file is wiki-grade. The file-path prefix `<paths.wiki>/` is the cue. When agents cite a wiki entry in session output, they cite by path (`<paths.wiki>/<title>.md`), not by bare note title, so the certification is legible inline. Notes outside `<paths.wiki>/` continue to be cited as `[[Note Title]]`. A `[[Note Title]]` reference in any session output is alloy by default; a `<paths.wiki>/...` path reference is wiki-grade. Mixing the two forms in one citation (e.g., `[[<paths.wiki>/foo]]`) is a schema violation the Reviewer flags.
 
-## Why Claim-Level
-
-Most PKM trust systems assign trust to whole notes. A note like that can contain one well-anchored claim and five confabulated ones, and the whole note inherits the same score. RAGAS faithfulness work shows that atomic-claim granularity is materially more reliable. Graphiti's bi-temporal edge model is the production analog.
-
-atelier's wiki entries are structured around claims, not paragraphs. Each claim has its own anchor set and its own trust score. Note-level aggregation is a derived view, not the primary unit.
+Wiki entries are structured around claims, not paragraphs: each claim has its own anchor set and trust score, and note-level aggregation is a derived view.
 
 ## Note Structure
 

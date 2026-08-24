@@ -163,5 +163,30 @@ class ThresholdSourceOfTruthTest(unittest.TestCase):
         self.assertIn(f"`--max-age-days` (default {max_age.group(1)})", review)
 
 
+class HotPathCeilingGuardTest(unittest.TestCase):
+    def test_oversized_hot_path_file_is_flagged(self) -> None:
+        out = _run_py(
+            """
+            import tempfile, pathlib
+            tmp = pathlib.Path(tempfile.mkdtemp(prefix='atelier-ceiling-'))
+            big = tmp / 'big.md'
+            big.write_text('x' * 2048, encoding='utf-8')
+            findings = h.check_hot_path_ceilings({str(big): 1024})
+            print(json.dumps([f.code for f in findings]))
+            """
+        )
+        self.assertIn("hot-path-ceiling", out)
+
+    def test_real_hot_path_files_are_under_ceiling(self) -> None:
+        out = _run_py(
+            """
+            findings = h.check_hot_path_ceilings()
+            print(json.dumps([f"{f.code}:{f.path}" for f in findings]))
+            """
+        )
+        self.assertEqual(out, [])
+
+
 if __name__ == "__main__":
     unittest.main()
+

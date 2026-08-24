@@ -3025,6 +3025,38 @@ def check_prose_budget() -> list[Finding]:
     return []
 
 
+# Nightly hot-path files are re-read by a model on every scheduled run, so
+# their bytes bill nightly. Ceilings hold the 2026-08 compression wins;
+# raising one requires subtracting elsewhere on the same hot path.
+HOT_PATH_CEILINGS = {
+    ".claude/commands/autoevo-nightly.md": 24576,
+    ".claude/agents/forgetter.md": 15360,
+    ".claude/agents/curator.md": 20480,
+}
+
+
+def check_hot_path_ceilings(ceilings: dict[str, int] | None = None) -> list[Finding]:
+    findings: list[Finding] = []
+    for rel, ceiling in (ceilings or HOT_PATH_CEILINGS).items():
+        path = ROOT / rel
+        if not path.is_file():
+            findings.append(
+                Finding("ERROR", "hot-path-ceiling", rel, "hot-path file missing")
+            )
+            continue
+        size = path.stat().st_size
+        if size > ceiling:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "hot-path-ceiling",
+                    rel,
+                    f"{size} bytes exceeds the {ceiling}-byte nightly hot-path ceiling; subtract before adding",
+                )
+            )
+    return findings
+
+
 def run_lints() -> list[Finding]:
     findings: list[Finding] = []
     findings.extend(check_root_files())
@@ -3069,6 +3101,7 @@ def run_lints() -> list[Finding]:
     findings.extend(check_flat_tier_globs())
     findings.extend(check_price_surfaces_agree())
     findings.extend(check_prose_budget())
+    findings.extend(check_hot_path_ceilings())
     findings.sort(key=lambda f: (SEVERITY_ORDER.get(f.severity, 99), f.code, f.where, f.message))
     return findings
 
