@@ -105,7 +105,6 @@ used_by = [
     "commands.sync",
     "intents.introspect",
     "intents.meeting",
-    "intents.reflection",
     "intents.sync",
 ]
 
@@ -228,17 +227,10 @@ used_by = [
     "commands.promote",
     "commands.read",
     "commands.sync",
-    "intents.decision",
-    "intents.energy-audit",
-    "intents.explore",
-    "intents.finance-analysis",
     "intents.promote",
     "intents.reading",
-    "intents.reflection",
-    "intents.review",
     "intents.sync",
     "intents.talk",
-    "intents.weekly",
 ]
 
 [agents.reviewer]
@@ -258,7 +250,6 @@ used_by = [
     "commands.sync",
     "commands.system-review",
     "intents.introspect",
-    "intents.reflection",
     "intents.sync",
 ]
 
@@ -273,8 +264,6 @@ codex_prompt = "Run the Scout role through native Codex agent `scout`; `.claude/
 pattern = "agent-team"
 used_by = [
     "commands.read",
-    "intents.finance-analysis",
-    "intents.reflection",
 ]
 
 [agents.synthesizer]
@@ -289,8 +278,6 @@ pattern = "orchestrator-subagent"
 used_by = [
     "commands.civ",
     "commands.read",
-    "intents.reflection",
-    "intents.review",
 ]
 
 [agents.thinker]
@@ -307,6 +294,7 @@ used_by = [
     "commands.decision",
     "commands.read",
     "intents.decision",
+    "intents.reflection",
 ]
 
 [agents.privacy-reviewer]
@@ -335,6 +323,7 @@ used_by = [
     "commands.daily-reflection",
     "commands.sync",
     "intents.capture",
+    "intents.reflection",
     "intents.sync",
 ]
 

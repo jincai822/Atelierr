@@ -46,6 +46,8 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+from render_runtime_edges import TIER_TO_EFFORT  # noqa: E402  (single owner of the tier map)
+
 SEVERITY_ORDER = {"ERROR": 0, "WARN": 1, "INFO": 2}
 MAX_CONTEXT_BUDGET_BYTES = 20 * 1024
 
@@ -356,13 +358,13 @@ def check_models(agents: dict[str, dict[str, str]]) -> tuple[list[Finding], dict
                 )
             )
         reasoning_tier = entry.get("reasoning_tier")
-        if reasoning_tier not in {"light", "balanced", "deep", "xdeep"}:
+        if reasoning_tier not in TIER_TO_EFFORT:
             findings.append(
                 Finding(
                     "ERROR",
                     "models-reasoning-tier",
                     "harness/models.toml",
-                    f"model `{model_name}` reasoning_tier must be light, balanced, deep, or xdeep",
+                    f"model `{model_name}` reasoning_tier must be one of the tiers in render_runtime_edges.TIER_TO_EFFORT",
                 )
             )
 
@@ -530,13 +532,32 @@ def check_runtime_registry() -> list[Finding]:
         )
 
     expected_prefixes = {"codex": "$", "claude": "/"}
-    if set(runtimes) != set(expected_prefixes):
+    # The two shipped runtimes are a required SUBSET; additional runtimes
+    # (cursor, grok, ...) may be declared and are validated by the same
+    # per-runtime field checks below. Prefixes must stay unique so command
+    # routing is unambiguous.
+    missing_required = set(expected_prefixes) - set(runtimes)
+    if missing_required:
         findings.append(
             Finding(
                 "ERROR",
                 "runtime-set",
                 rel(path),
-                f"runtime registry must contain exactly {sorted(expected_prefixes)}",
+                f"runtime registry must contain at least {sorted(expected_prefixes)}; missing {sorted(missing_required)}",
+            )
+        )
+    declared_prefixes = [
+        str(entry.get("command_prefix", ""))
+        for entry in runtimes.values()
+        if isinstance(entry, dict)
+    ]
+    if len(declared_prefixes) != len(set(declared_prefixes)):
+        findings.append(
+            Finding(
+                "ERROR",
+                "runtime-prefix-collision",
+                rel(path),
+                "every declared runtime needs a unique command_prefix",
             )
         )
     required_fields = (
@@ -548,7 +569,9 @@ def check_runtime_registry() -> list[Finding]:
         "interactive_args",
         "non_interactive_args",
     )
-    for name, expected_prefix in expected_prefixes.items():
+    for name, expected_prefix in (
+        (n, expected_prefixes.get(n)) for n in runtimes if n in expected_prefixes
+    ):
         entry = runtimes.get(name)
         if not isinstance(entry, dict):
             continue
@@ -613,6 +636,7 @@ def check_runtime_registry() -> list[Finding]:
 
     supporting_paths = (
         ROOT / "harness" / "runtime.local.toml.example",
+        ROOT / "harness" / "session-replay.toml.example",
         ROOT / "scripts" / "atelier_runtime.py",
     )
     for supporting_path in supporting_paths:
@@ -636,7 +660,6 @@ def check_runtime_registry() -> list[Finding]:
                 "the per-user runtime preference must remain gitignored",
             )
         )
-
     local_path = ROOT / "harness" / "runtime.local.toml"
     if local_path.exists():
         local_data, local_err = _load_toml(local_path)
@@ -655,6 +678,34 @@ def check_runtime_registry() -> list[Finding]:
                         f"local runtime default must be one of {sorted(expected_prefixes)}",
                     )
                 )
+
+    replay_config_path = ROOT / "harness" / "session-replay.toml.example"
+    replay_data, replay_err = _load_toml(replay_config_path)
+    if replay_err:
+        findings.append(replay_err)
+    else:
+        assert replay_data is not None
+        unknown_tables = sorted(set(replay_data) - {"session_replay"})
+        replay_table = replay_data.get("session_replay")
+        unknown_fields = (
+            sorted(set(replay_table) - {"enabled"})
+            if isinstance(replay_table, dict)
+            else []
+        )
+        if (
+            unknown_tables
+            or not isinstance(replay_table, dict)
+            or not isinstance(replay_table.get("enabled"), bool)
+            or unknown_fields
+        ):
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "session-replay-config-shape",
+                    rel(replay_config_path),
+                    "replay preference must contain only [session_replay] with boolean `enabled`",
+                )
+            )
     return findings
 
 
@@ -1026,12 +1077,7 @@ def check_codex_agent_adapters(models: dict[str, Any]) -> list[Finding]:
                     f"adapter description differs from harness/agents.toml for `{name}`",
                 )
             )
-        effort_by_tier = {
-            "light": "low",
-            "balanced": "medium",
-            "deep": "high",
-            "xdeep": "xhigh",
-        }
+        effort_by_tier = TIER_TO_EFFORT
         voices = entry.get("voices")
         native_identity = voices.get("native") if isinstance(voices, dict) else None
         model_entry = models.get(native_identity) if isinstance(native_identity, str) else None
@@ -1678,7 +1724,7 @@ def check_path_registry_drift() -> list[Finding]:
     for k in (reg.get("wiki_localized") or {}).keys():
         valid_names.add(f"wiki_localized.{k}")
 
-    literal_pat = re.compile(r"\$OV/([A-Za-z][A-Za-z0-9_-]*)/?")
+    literal_pat = re.compile(r"\$OV/([A-Za-z_][A-Za-z0-9_-]*)/?")
     # Placeholder form documented in CLAUDE.md "Path placeholders": match
     # `<paths.X>` where X is either a simple name or a `wiki_localized.<lang>`
     # dotted reference. Underscores are allowed (canonical names like
@@ -2165,6 +2211,42 @@ def check_intents_procedures(
                 )
             )
 
+    return findings
+
+
+def check_intents_agents_in_procedure(intents: dict[str, dict[str, Any]]) -> list[Finding]:
+    """Every agent an intent row declares must be dispatchable from its procedure.
+
+    2026-08-22: `intents.reflection` declared five parallel agents that
+    `daily-reflection.md` never dispatches; `/hi` batched them anyway
+    ("when parallel = true, dispatch the declared initial agents"), so each
+    reflection bootstrapped 3 to 5 idle subagents. The registry row is the
+    routing announcement; if the procedure does not mention the role, the row
+    is advertising work that will not happen (or, worse, causing it).
+    """
+    findings: list[Finding] = []
+    for name, row in sorted(intents.items()):
+        agents = row.get("agents") or []
+        procedure = row.get("procedure")
+        if not agents or not isinstance(procedure, str):
+            continue
+        path = ROOT / procedure
+        if not path.is_file():
+            continue  # reported by check_intents_procedures
+        text = _read(path).lower()
+        for agent in agents:
+            if not isinstance(agent, str):
+                continue
+            if not re.search(r"\b" + re.escape(agent.lower()) + r"\b", text):
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "intent-agent-not-in-procedure",
+                        f"harness/intents.toml:intents.{name}",
+                        f"declares agent '{agent}' but {procedure} never mentions it; "
+                        "drop it from `agents` or add the dispatch to the procedure",
+                    )
+                )
     return findings
 
 
@@ -2750,6 +2832,164 @@ def check_reader_scholar_sync() -> list[Finding]:
     return findings
 
 
+# Tiers that have undergone directory fission (`scripts/fission.py`,
+# protocols/repo-conventions.md 32-entry rule). A non-recursive glob or a
+# flat shell `ls` over one of these returns nothing or a partial listing.
+# 2026-08-22: `reflections/` buckets blinded the weekly cue and the TODO
+# digest; a flat `ls "$OV"/wiki/*.md` in civ.md counted 1 of 90 entries.
+def _bucketed_tiers() -> tuple[str, ...]:
+    """Tiers declared fission-eligible in protocols/repo-conventions.md.
+
+    Read from the "Per-tier split axes" table so a newly fissioned tier is
+    guarded the moment the convention records it; only rows naming a bare
+    tier (`reflections/`, not `research/<area>/labs/`) count.
+    """
+    path = ROOT / "protocols" / "repo-conventions.md"
+    found: list[str] = []
+    if path.is_file():
+        for line in _read(path).splitlines():
+            m = re.match(r"^\|\s*`([a-z0-9-]+)/`", line)
+            if m and m.group(1) not in found:
+                found.append(m.group(1))
+    if not found and path.is_file():
+        # The table exists but the parser matched zero rows: the guard would
+        # silently narrow to the fallback trio. Surface it as a finding via a
+        # sentinel the check function reports (import-time, so no Finding yet).
+        global _BUCKETED_PARSE_FAILED
+        _BUCKETED_PARSE_FAILED = True
+    for fallback in ("reflections", "agent-findings", "wiki"):
+        if fallback not in found:
+            found.append(fallback)
+    return tuple(found)
+
+
+_BUCKETED_PARSE_FAILED = False
+
+
+BUCKETED_TIERS = _bucketed_tiers()
+_FLAT_TIER_LS_RE = re.compile(
+    r"""ls\s+(?:-\w+\s+)*["']?\$\{?OV\}?["']?/(?:%s)/[^\s|;)]*\*""" % "|".join(BUCKETED_TIERS)
+)
+_FLAT_TIER_PY_RES = [
+    # tier("reflections").glob(...)
+    re.compile(r'tier\(\s*["\'][a-z_]+["\']\s*\)\.glob\('),  # any registry tier may fission
+    # <anything>_dir.glob(...) / REFLECTIONS_DIR.glob(...) where the name
+    # says which tier it points at.
+    re.compile(r'\b\w*(?:reflect|finding|wiki|weekly|people|archive|daily)\w*\.glob\(', re.IGNORECASE),
+]
+
+
+_TIER_ALIAS_RE = re.compile(
+    r'(\w+)\s*=\s*tier\(\s*["\']([a-z_]+)["\']\s*\)'
+)
+
+
+def check_flat_tier_globs() -> list[Finding]:
+    if _BUCKETED_PARSE_FAILED:
+        return [
+            Finding(
+                "ERROR",
+                "bucketed-tier-parse",
+                "protocols/repo-conventions.md",
+                "the per-tier split-axes table parsed to zero rows; the flat-glob guard silently narrowed to its fallback trio",
+            )
+        ] + _flat_tier_glob_findings()
+    return _flat_tier_glob_findings()
+
+
+def _flat_tier_glob_findings() -> list[Finding]:
+    """Flag non-recursive reads over bucketed tiers in scripts and docs.
+
+    Also tracks per-file aliases (`refl = tier("reflections")` followed by
+    `refl.glob(...)`), which the line-level regexes cannot see.
+    """
+    findings: list[Finding] = []
+    for path in sorted((ROOT / "scripts").glob("*.py")):
+        if path.name in {"harness_lint.py", "fission.py"}:
+            continue
+        text = _read(path)
+        bucketed = {t.replace("-", "_") for t in BUCKETED_TIERS}
+        aliases = {
+            m.group(1)
+            for m in _TIER_ALIAS_RE.finditer(text)
+            if m.group(2).replace("-", "_") in bucketed
+        }
+        alias_rx = (
+            re.compile(r"\b(?:%s)\.glob\(" % "|".join(re.escape(a) for a in sorted(aliases)))
+            if aliases
+            else None
+        )
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if any(rx.search(line) for rx in _FLAT_TIER_PY_RES) or (
+                alias_rx and alias_rx.search(line)
+            ):
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "flat-tier-glob",
+                        f"scripts/{path.name}:{lineno}",
+                        "non-recursive glob over a bucketed tier; use _paths.tier_files() or rglob",
+                    )
+                )
+    for path in _doc_files():
+        if path.name == "repo-conventions.md":
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        for lineno, line in enumerate(_read(path).splitlines(), start=1):
+            if _FLAT_TIER_LS_RE.search(line):
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "flat-tier-glob",
+                        f"{rel}:{lineno}",
+                        "flat `ls` over a bucketed tier; use `find \"$OV/<tier>\" -name ...`",
+                    )
+                )
+    return findings
+
+
+# model_costs.toml identity -> pricing.toml provider slot for the same model.
+PRICE_SURFACE_MAP = {
+    "opus": ("anthropic", "flagship"),
+    "sonnet": ("anthropic", "standard"),
+    "codex_gpt55_max": ("openai", "standard"),
+    "deepseek_pro_max": ("deepseek", "flagship"),
+    "deepseek_pro": ("deepseek", "flagship"),
+    "deepseek_flash": ("deepseek", "standard"),
+}
+
+
+def check_price_surfaces_agree() -> list[Finding]:
+    """The two pricing files state the same volatile facts; they must match."""
+    findings: list[Finding] = []
+    costs_data, err1 = _load_toml(ROOT / "harness" / "model_costs.toml")
+    catalog, err2 = _load_toml(ROOT / "scripts" / "pricing.toml")
+    for err in (err1, err2):
+        if err:
+            findings.append(err)
+    if not costs_data or not catalog:
+        return findings
+    costs = costs_data.get("costs", {})
+    providers = catalog.get("providers", {})
+    for identity, (provider, slot) in PRICE_SURFACE_MAP.items():
+        row = costs.get(identity)
+        entry = providers.get(provider, {}).get(slot)
+        if not isinstance(row, dict) or not isinstance(entry, dict):
+            continue
+        for cost_key, catalog_key in (("input_per_1m_usd", "input"), ("output_per_1m_usd", "output")):
+            a, b = row.get(cost_key), entry.get(catalog_key)
+            if a is not None and b is not None and float(a) != float(b):
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "price-surface-drift",
+                        f"harness/model_costs.toml:costs.{identity}",
+                        f"{cost_key}={a} disagrees with scripts/pricing.toml providers.{provider}.{slot}.{catalog_key}={b}",
+                    )
+                )
+    return findings
+
+
 def run_lints() -> list[Finding]:
     findings: list[Finding] = []
     findings.extend(check_root_files())
@@ -2785,11 +3025,14 @@ def run_lints() -> list[Finding]:
     harness_agents_data = (harness_agents_raw or {}).get("agents", {}) or {}
     findings.extend(check_intents_registry(intents, agents, harness_agents_data))
     findings.extend(check_intents_procedures(intents))
+    findings.extend(check_intents_agents_in_procedure(intents))
     findings.extend(check_intents_profile_reads(intents))
     findings.extend(check_claude_skills(intents))
     findings.extend(check_agent_pattern_and_used_by(intents, commands))
     findings.extend(check_doc_indirection_depth())
     findings.extend(check_shadow_group_start())
+    findings.extend(check_flat_tier_globs())
+    findings.extend(check_price_surfaces_agree())
     findings.sort(key=lambda f: (SEVERITY_ORDER.get(f.severity, 99), f.code, f.where, f.message))
     return findings
 

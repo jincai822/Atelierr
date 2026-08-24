@@ -88,9 +88,9 @@ def load_registry() -> dict[str, Any]:
                     f"runtimes.{name}.{field} must be {expected_type.__name__}"
                 )
         prefix = entry["command_prefix"]
-        if prefix not in ("$", "/"):
+        if not isinstance(prefix, str) or len(prefix) > 1:
             raise RuntimeConfigError(
-                f"runtimes.{name}.command_prefix must be '$' or '/'"
+                f"runtimes.{name}.command_prefix must be a single character (or empty)"
             )
         for field, value in entry.items():
             if field.endswith("_args"):
@@ -349,11 +349,11 @@ def build_parser() -> argparse.ArgumentParser:
     status.set_defaults(func=cmd_status)
 
     use = subparsers.add_parser("use", help="Persist the local default runtime.")
-    use.add_argument("runtime", choices=("codex", "claude"))
+    use.add_argument("runtime", choices=_registered_runtime_names())
     use.set_defaults(func=cmd_use)
 
     shell = subparsers.add_parser("shell", help="Open the selected runtime without a workflow.")
-    shell.add_argument("--runtime", choices=("codex", "claude"))
+    shell.add_argument("--runtime", choices=_registered_runtime_names())
     shell.add_argument("--dry-run", action="store_true")
     shell.set_defaults(func=cmd_shell)
 
@@ -365,7 +365,7 @@ def build_parser() -> argparse.ArgumentParser:
             "the workflow name; all remaining words become workflow context."
         ),
     )
-    run.add_argument("--runtime", choices=("codex", "claude"))
+    run.add_argument("--runtime", choices=_registered_runtime_names())
     run.add_argument("--non-interactive", action="store_true")
     run.add_argument("--dry-run", action="store_true")
     session = run.add_mutually_exclusive_group()
@@ -375,6 +375,18 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("context", nargs=argparse.REMAINDER, help="Optional workflow context.")
     run.set_defaults(func=cmd_run)
     return parser
+
+
+def _registered_runtime_names() -> tuple[str, ...]:
+    """Runtime names from harness/runtimes.toml; shipped pair on any error."""
+    try:
+        import tomllib
+
+        with (ROOT / "harness" / "runtimes.toml").open("rb") as handle:
+            names = tuple(sorted(tomllib.load(handle).get("runtimes", {})))
+        return names or ("claude", "codex")
+    except Exception:
+        return ("claude", "codex")
 
 
 def main(argv: list[str] | None = None) -> int:

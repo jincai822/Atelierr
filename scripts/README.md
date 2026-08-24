@@ -29,15 +29,17 @@ Executable tooling for the Atelier knowledge layer. All scripts are stdlib-only 
 | `auto_memory_audit.py` | Audit pass over Claude Code auto-memory — surfaces stale, orphaned, dead-linked, or self-flagged provisional entries for human invalidation | ops | stdlib |
 | `people.py` | Canonical person-note lookup by name fragment — pathlib walk (no xargs word-splitting); opt-in body-field matching via env var | ops | stdlib |
 | `cues.py` | Unified quiet-by-default cue checker for Claude `/hi` and Codex `$hi` session start; silent when nothing fires and runtime-native command syntax when a cue is due | ops | stdlib |
+| `render_runtime_edges.py` | Renders per-runtime edge files (Codex agent TOMLs, `$command` skills) from the registries; `--check` fails on any byte drift | ops | stdlib |
 | `recurring.py` | Manages recurring obligations in `$OV/gtd/recurring.md` — re-emerging tasks with `every:` / `last-done:` due computation, distinct from one-shot GTD items | ops | stdlib |
 | `todos.py` | Aggregate open TODOs from `$OV/gtd/` and reflection Next Action sections; computes priority from `due:` / `priority:` / age; flags closure candidates from daily-note language; subcommands `list`, `stale`, `closure-candidates`, `digest` — `digest` powers `/daily-reflection` Step 0 (reached via `/hi`) | ops | stdlib |
 | `session_log.py` | Session event log skeleton generator — handles late-sleep date rule and collision auto-increment | E | stdlib |
-| `session_replay.py` | Opt-in private native-transcript capture with prompt journaling, secret screening, and inspection; disabled unless `ATELIER_SESSION_REPLAY_ENABLED=1` | ops | stdlib |
+| `session_replay.py` | Opt-in private native-transcript capture with prompt journaling, secret screening, and activation-aware inspection; disabled by default, enabled by machine-local preference or process override | ops | stdlib |
 | `context_bundle.py` | Builds route-first, byte-bounded profile and continuity projections from the intent registry | E | stdlib |
 | `signal_facts.py` | Validates and ingests immutable private signal facts, derives definition-bound metrics, and emits bounded relevance-gated analysis bundles | ops | stdlib |
 | `shadow.py` | Cross-provider shadow-log correlation + reporting — `group-start` / `group-close` witnesses for multi-leg call sites, `report` over the JSONL call logs | ops | stdlib |
 | `command_timeout.py` | Runs one scheduled subprocess with an epoch-based wall-clock timeout that survives macOS sleep and terminates its process group on expiry | ops | stdlib |
 | `autoevo_preflight.py` | Checks autoevo Git, session, privacy, semantic, branch, and LFS readiness before model launch; writes a checksum-owned blocker audit without repairing Git | ops | stdlib, `git`, `uv`, optional Git LFS |
+| `autoevo_pending.py` | Sole writer for the autoevo pending queue: append with peers dedupe, resolve, defer, auto-dismiss; atomic TOML writes that preserve unknown tables | ops | stdlib |
 | `autoevo_quarantine.py` | Lists active per-scope quarantines for a selected cycle date, updates their state, and inserts generated skip evidence into the latest audit's Skipped section | ops | stdlib |
 | `autoevo_verify.py` | Proves one autoevo cycle delivered a committed clean audit with real Forgetter coverage, one same-commit decay report per returned envelope, lint, claim-owned event journal, and matching final verification evidence | ops | stdlib, `git` |
 | `routine_owner.py` | Claims and transfers the single machine allowed to execute local routines; compares a gitignored machine identity with shared `$OV/_meta/routine_owner.toml` | ops | stdlib |

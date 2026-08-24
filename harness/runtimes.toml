@@ -19,6 +19,14 @@ label = "Codex"
 executable = "codex"
 command_prefix = "$"
 native_shadow_identity = "codex_native"
+# Surface declaration (consumed by scripts/render_runtime_edges.py and, later,
+# runtime-aware helpers). Paths are repo-relative.
+instruction_file = "AGENTS.md"
+agent_dir = ".codex/agents"
+agent_format = "codex-toml"
+skills_dir = ".agents/skills"
+hooks_file = ".codex/hooks.json"
+supports = ["hooks", "subagents", "skills"]
 shell_args = ["-C", "{root}"]
 interactive_args = ["-C", "{root}"]
 non_interactive_args = ["exec", "-C", "{root}"]
@@ -31,6 +39,12 @@ label = "Claude Code"
 executable = "claude"
 command_prefix = "/"
 native_shadow_identity = "role"
+instruction_file = "CLAUDE.md"
+agent_dir = ".claude/agents"
+agent_format = "claude-markdown"
+skills_dir = ".claude/skills"
+hooks_file = ".claude/settings.json"
+supports = ["hooks", "subagents", "skills", "choice-ui"]
 shell_args = []
 interactive_args = []
 non_interactive_args = ["-p"]

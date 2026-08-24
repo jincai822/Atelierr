@@ -46,7 +46,7 @@ If you read one thing in this repo, read these in order:
 4. **`scripts/trust.py`** — Personalized PageRank with external anchors as seeds. Stdlib-only, deterministic. Adapt freely.
 5. **`scripts/semantic.py`** — pluggable embedder + store backends (BGE-M3 + LanceDB by default). The CLI contract is encoder-agnostic; the embedder choice is yours.
 6. **`scripts/lint.py` and `scripts/privacy_check.py`** — quality gates with structured JSON output. Lint enforces wiki schema integrity; privacy_check scans private titles, local exact terms, and both worktree and staged content, and fails loud on placebo-pass conditions.
-7. **`.claude/agents/*.md` and `.codex/agents/*.toml`:** fifteen shared role specs and their native Codex adapters. Useful as templates for your own agent definitions.
+7. **`.claude/agents/*.md` and `.codex/agents/*.toml`:** fifteen shared role specs and their native Codex adapters. The adapters and the `$command` skills are rendered from the registries by `scripts/render_runtime_edges.py` (`--check` keeps them byte-identical); edit the registries, not the generated files. Useful as templates for your own agent definitions.
 
 What's deliberately *not* portable: `profile/` (symlinked config), `$OV/personal/`, `$OV/wiki/` content, the impressionist vocabulary register (le cercle, the Painter, le œuvre), the bilingual English/Chinese behavior, the Era / Direction taxonomy, and the `civ`, `dine`, and `prm` workflows which encode a bespoke life-area model. Strip those before adapting.
 
@@ -261,7 +261,7 @@ Capture sources                  Local data layer ($OV/)
                      |           |               |        lint.py)
                      v           v               v
                 Protocols    $OV/reflections/   Cross-validation
-                (~25 rules)  (session outputs)  & Pattern Library
+                (protocols/) (session outputs)  & Pattern Library
 ```
 
 **Five-tier knowledge model.** Everything under `$OV/` is classified by depth of crystallization — raw capture (L1), working notes (L2), externally-certified papers (L3), locally-certified wiki entries (L4); L5 (universally certified) is reserved. Directory = tier; no tags required. Agents read from disk via semantic search and grep.
@@ -270,7 +270,7 @@ Capture sources                  Local data layer ($OV/)
 
 **Session output.** The orchestrator dispatches agents, gathers findings, runs a quality gate, and writes session output to `$OV/reflections/`. Daily notes are user-authored — the system reads them; the sole write path is the Scribe agent recording user-dictated content verbatim. All personal data under `$OV/` is gitignored; only system configuration is committed.
 
-**Harness engineering.** `CLAUDE.md` stays a bounded routing map because every unconditional line consumes recurring context. `AGENTS.md` and `.agents/skills/` give Codex the root contract and native `$command` surface. `harness/models.toml`, `harness/capabilities.toml`, `harness/commands.toml`, `harness/agents.toml`, and `protocols/runtime-adapters.md` keep provider and runtime assumptions explicit. Critical rules live at the top; detailed specifications load on demand from protocols and agent definitions. The Master of the Atelier (Evolver) has a "subtract before adding" principle and a root-instruction budget gate. `/lint` Phase 0 checks harness health alongside the wiki structural pass.
+**Harness engineering.** `CLAUDE.md` stays a bounded routing map because every unconditional line consumes recurring context. Mechanical work stays in scripts: the autoevo pending queue has a single deterministic writer (`scripts/autoevo_pending.py`), fission-aware tier readers go through `_paths.tier_files()`, and Codex edge files are generated, not hand-kept. `AGENTS.md` and `.agents/skills/` give Codex the root contract and native `$command` surface. `harness/models.toml`, `harness/capabilities.toml`, `harness/commands.toml`, `harness/agents.toml`, and `protocols/runtime-adapters.md` keep provider and runtime assumptions explicit. Critical rules live at the top; detailed specifications load on demand from protocols and agent definitions. The Master of the Atelier (Evolver) has a "subtract before adding" principle and a root-instruction budget gate. `/lint` Phase 0 checks harness health alongside the wiki structural pass.
 
 Key design choices:
 

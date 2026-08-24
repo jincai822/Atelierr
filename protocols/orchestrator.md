@@ -187,12 +187,13 @@ Launch agents based on command type:
 
 | Command | Agents Launched |
 |---------|----------------|
-| `/hi` (default reflection / fallback) | Researcher + Challenger + 2-5× Scout (parallel) |
-| `/review` or `/hi review my goals` | Researcher (then Synthesizer) |
-| `/weekly` or `/hi weekly review` | Researcher |
-| `/decision` or `/hi should I…` | Researcher + Thinker (parallel) |
-| `/explore` or `/hi explore` | Researcher |
-| `/energy-audit` or `/hi I'm drained` | Researcher (include amenity floor check) |
+| `/hi` general fallback | No fixed agent; semantic handoff via `protocols/intent-general.md` |
+| `/daily-reflection` or `/hi daily reflection` | None at start (context bundle + inline semantic queries); Thinker optional at Step 4; Scribe at pre-output capture |
+| `/review` or `/hi review my goals` | None (inline retrieval and synthesis) |
+| `/weekly` or `/hi weekly review` | None (inline retrieval) |
+| `/decision` or `/hi should I…` | Thinker (dual-leg); retrieval inline |
+| `/explore` or `/hi explore` | None (inline wide-net searches) |
+| `/energy-audit` or `/hi I'm drained` | None (inline retrieval; include amenity floor check) |
 | `/prm` | Researcher (daily-note scanning for DL0-1 mentions) + Challenger (vulnerability probing) |
 | Read mode (via `/hi`) | Reader (1-4 instances by lens) + Researcher + Scout + Thinker (parallel) |
 | Work meeting transcript | Meeting (Executive mode — action items + decisions) |
@@ -348,8 +349,6 @@ The orchestrator should actively look for collaboration opportunities during ses
 
 | Pattern | Agents | When | Value |
 |---------|--------|------|-------|
-| **Gather + Probe** | Researcher + Challenger + 2-5× Scout | Start of daily reflection | Internal notes + mood + external context from two angles |
-| **Research + Frame** | Researcher + Thinker + 2-5× Scout | Start of decision session | Internal thinking + frameworks + external evidence from two angles |
 | **Deep Dive** | Researcher + 2-5× Scout + Librarian + Thinker | User picks Deep Dive | Full briefing: notes + multi-angle web intel + resources + framework |
 | **Reading Hub** | 2-4× Reader + Researcher + Scout + Thinker | User picks Read or says "let's read" | Multi-lens analysis: lenses + notes + external + framework |
 | **Multi-topic Triage** | Multiple Researcher dispatches | User picks Note Triage | Scan several topic areas simultaneously |

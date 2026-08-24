@@ -36,5 +36,8 @@ configuration; it does not bypass approvals or the sandbox.
 
 Keep workflows provider-neutral and runtime adapters thin. Update the relevant
 `harness/*.toml` registry and `.agents/skills/atelier/SKILL.md` when behavior
-changes. Run `python3 scripts/harness_lint.py` and
+changes. `.codex/agents/` and the `$command` skills (except `atelier`) are
+rendered: after a registry edit run
+`uv run scripts/render_runtime_edges.py --runtime codex --apply` instead of
+hand-editing them. Run `python3 scripts/harness_lint.py` and
 `.venv/bin/python scripts/harness_smoke.py` before finishing.

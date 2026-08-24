@@ -45,3 +45,4 @@ signal-sweep
 
 # Public sample infrastructure identifiers explicitly approved by the user.
 atelier-mbp
+

@@ -142,12 +142,12 @@ patterns = [
 mode = "finance-analysis"
 procedure = "protocols/analysis-signals.md"
 context_budget_bytes = 6144
-agents = ["researcher", "scout"]
+agents = []
 profile_reads = ["expertise.md"]
 priority = 46
-pattern = "agent-team"
-expected_subagent_count = 2
-parallel = true
+pattern = "solo"
+expected_subagent_count = 0
+parallel = false
 
 [intents.meeting]
 patterns = [
@@ -195,7 +195,7 @@ parallel = true
 #
 # Priority 28: between explore (22) and forget (25) on one side and meeting
 # (30) on the other, so explicit "sync" / "digest zettelm" beats the
-# fallback reflection but does not steal from meeting / reading / capture.
+# general fallback but does not steal from meeting / reading / capture.
 [intents.sync]
 patterns = [
     "sync",
@@ -259,11 +259,11 @@ patterns = [
 mode = "weekly-review"
 procedure = ".claude/commands/weekly.md"
 context_budget_bytes = 8192
-agents = ["researcher"]
+agents = []
 profile_reads = ["identity.md", "directions.md"]
 priority = 45
-pattern = "orchestrator-subagent"
-expected_subagent_count = 1
+pattern = "solo"
+expected_subagent_count = 0
 parallel = false
 
 # Energy audit across physical / mental / emotional / social dimensions.
@@ -282,15 +282,15 @@ patterns = [
 mode = "energy-audit"
 procedure = ".claude/commands/energy-audit.md"
 context_budget_bytes = 8192
-agents = ["researcher"]
+agents = []
 profile_reads = ["identity.md", "directions.md"]
 priority = 43
-pattern = "orchestrator-subagent"
-expected_subagent_count = 1
+pattern = "solo"
+expected_subagent_count = 0
 parallel = false
 
 # Goal review: quarterly full review or monthly light pulse. Procedure:
-# .claude/commands/review.md. Patterns are deliberately specific
+# .claude/commands/review.md. Retrieval and synthesis run inline; no dispatch. Patterns are deliberately specific
 # ("review my goals" not bare "review") so they never collide with reading
 # patterns ("read", "discuss", URLs) at priority 40.
 [intents.review]
@@ -305,16 +305,16 @@ patterns = [
 mode = "goal-review"
 procedure = ".claude/commands/review.md"
 context_budget_bytes = 8192
-agents = ["researcher", "synthesizer"]
+agents = []
 profile_reads = ["identity.md", "directions.md"]
 priority = 42
-pattern = "orchestrator-subagent"
-expected_subagent_count = 2
+pattern = "solo"
+expected_subagent_count = 0
 parallel = false
 
 # Decision journal: structured framework cross-validation for a hard choice.
-# Procedure: .claude/commands/decision.md. Researcher + Thinker fire in
-# parallel (per orchestrator.md Phase 1 Gather), so pattern is agent-team.
+# Procedure: .claude/commands/decision.md. Retrieval runs inline; the only
+# dispatch is the Thinker (dual-leg at this call site).
 [intents.decision]
 patterns = [
     "should I",
@@ -328,16 +328,16 @@ patterns = [
 mode = "decision-journal"
 procedure = ".claude/commands/decision.md"
 context_budget_bytes = 6144
-agents = ["researcher", "thinker"]
+agents = ["thinker"]
 profile_reads = ["identity.md", "directions.md"]
 priority = 35
-pattern = "agent-team"
-expected_subagent_count = 2
-parallel = true
+pattern = "orchestrator-subagent"
+expected_subagent_count = 1
+parallel = false
 
 # Open exploration: surface forgotten threads, cross-domain links, evolution
-# of thinking. Procedure: .claude/commands/explore.md. Single Researcher
-# dispatch on a wide net of semantic + grep + time-shifted searches.
+# of thinking. Procedure: .claude/commands/explore.md. The orchestrator runs
+# the wide net of semantic + grep + time-shifted searches inline.
 [intents.explore]
 patterns = [
     "explore",
@@ -350,11 +350,11 @@ patterns = [
 mode = "open-exploration"
 procedure = ".claude/commands/explore.md"
 context_budget_bytes = 6144
-agents = ["researcher"]
+agents = []
 profile_reads = ["identity.md"]
 priority = 22
-pattern = "orchestrator-subagent"
-expected_subagent_count = 1
+pattern = "solo"
+expected_subagent_count = 0
 parallel = false
 
 # Curate Readwise inbox against active goals. Procedure:
@@ -457,16 +457,40 @@ pattern = "generator-verifier"
 expected_subagent_count = 2
 parallel = true
 
-# Fallback: matches anything not picked up by a higher-priority intent.
-# Empty patterns + priority 0 makes this the catch-all.
+# Daily reflection is explicit. Unclassified requests belong to the semantic
+# handoff below instead of silently starting a reflection workflow.
+# `agents` lists the roles the procedure can dispatch: Thinker (optional,
+# Step 4) and Scribe (pre-output capture). Retrieval runs inline; the
+# typical session dispatches one of the two, hence expected_subagent_count.
 [intents.reflection]
-patterns = []
+patterns = [
+    "daily reflection",
+    "let's reflect",
+    "reflect on",
+    "每日复盘",
+    "复盘今天",
+    "反思一下",
+]
 mode = "daily-reflection"
 procedure = ".claude/commands/daily-reflection.md"
 context_budget_bytes = 8192
-agents = ["researcher", "challenger", "scout", "synthesizer", "reviewer"]
+agents = ["thinker", "scribe"]
 profile_reads = ["identity.md", "directions.md"]
-priority = 0
+priority = 10
 pattern = "orchestrator-subagent"
-expected_subagent_count = 5
-parallel = true
+expected_subagent_count = 1
+parallel = false
+
+# Fallback: the deterministic registry has no high-confidence match. Hand the
+# request back to the active runtime's semantic skill / app / tool routing.
+[intents.general]
+patterns = []
+mode = "semantic-handoff"
+procedure = "protocols/intent-general.md"
+context_budget_bytes = 4096
+agents = []
+profile_reads = []
+priority = 0
+pattern = "solo"
+expected_subagent_count = 0
+parallel = false

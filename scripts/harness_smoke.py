@@ -18,6 +18,7 @@ import tempfile
 import tomllib
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import cues
 import _paths
@@ -182,12 +183,7 @@ def check_codex_native_agents() -> None:
         actual == expected,
         "native Codex agent adapters drifted from harness/agents.toml",
     )
-    effort_by_tier = {
-        "light": "low",
-        "balanced": "medium",
-        "deep": "high",
-        "xdeep": "xhigh",
-    }
+    from render_runtime_edges import TIER_TO_EFFORT as effort_by_tier
     for name in expected:
         with (ROOT / ".codex" / "agents" / f"{name}.toml").open("rb") as handle:
             adapter = tomllib.load(handle)
@@ -381,6 +377,7 @@ def check_dining_audit() -> None:
 
 | Date | Restaurant | City | 类型 | ⭐ | 评分 | 再去 | 健康 | 人数 | 总额 | 人均 | Platform | Credit | 必点·备注 |
 |---|---|---|---|---|---|---|---|---:|---:|---:|---|---|---|
+| 2025-12-31 | JPY | Tokyo | Test | — | 7 | Y | flag-a | 2 | ¥23,925 | ¥11,962.50 | W | — | okay |
 | 2026-01-01 | A | X | Test | — | 8 | Y | flag-a | 2 | $20.00 | $10.00 | W | — | good |
 | 2026-01-02 | B | X | Test | — | 7 | Maybe | flag-b | 3 | ~$30.00 | ~$10.00 | W | — | okay |
 
@@ -390,7 +387,7 @@ def check_dining_audit() -> None:
         )
         valid = dining_audit.audit(vault, 2)
         expect(valid["ok"] is True, f"valid dining fixture failed: {valid}")
-        expect(valid["stats"]["rows"] == 2, "dining row count drift")
+        expect(valid["stats"]["rows"] == 3, "dining row count drift")
         expect(
             len(valid["recent"]) == 2
             and valid["per_person_trend"]["known"] == 2
@@ -1585,13 +1582,29 @@ def check_autoevo_reliability() -> None:
                 }
 
             session_lock = vault / "cache" / "atelier-session-lock"
+            original_run = autoevo_preflight._run
+            status_commands: list[list[str]] = []
+
+            def capture_status(command: list[str], **kwargs: object):
+                status_commands.append(command)
+                return original_run(command, **kwargs)
+
+            autoevo_preflight._run = capture_status
             clean = autoevo_preflight.inspect_preflight(
                 vault=vault,
                 lock_path=session_lock,
                 privacy_probe=privacy_probe,
                 semantic_probe=semantic_probe,
             )
+            autoevo_preflight._run = original_run
             expect(clean["ready"] is True, f"clean autoevo fixture blocked: {clean}")
+            expect(
+                any(
+                    command[1:3] == ["--no-optional-locks", "status"]
+                    for command in status_commands
+                ),
+                "autoevo status probe may create an optional Git index lock",
+            )
 
             raw_index = git("rev-parse", "--git-path", "index").stdout.strip()
             index_path = Path(raw_index)
@@ -1674,7 +1687,29 @@ def check_autoevo_reliability() -> None:
                 locked["gate"] == "git_index_lock_present",
                 "autoevo did not diagnose a Git index lock precisely",
             )
+            first_locked_record = autoevo_preflight.record_blocker(
+                locked,
+                run_date="2099-01-03",
+                run_ts="smoke-locked-first",
+                cycle="2099-01-03",
+            )
+            repeated_locked_record = autoevo_preflight.record_blocker(
+                locked,
+                run_date="2099-01-03",
+                run_ts="smoke-locked-repeat",
+                cycle="2099-01-03",
+            )
+            expect(
+                first_locked_record["audit_commit"] == "deferred"
+                and repeated_locked_record["audit_commit"] == "reused",
+                "unchanged index-lock blocker audit was not reusable on retry",
+            )
             index_lock.unlink()
+            recovery = autoevo_preflight.recover_owned_audit()
+            expect(
+                recovery["status"] == "committed",
+                f"index-lock blocker audit did not recover: {recovery}",
+            )
 
             note.write_text("dirty\n", encoding="utf-8")
             dirty = autoevo_preflight.inspect_preflight(
@@ -1686,8 +1721,38 @@ def check_autoevo_reliability() -> None:
             )
             expect(
                 dirty["gate"] == "dirty_vault_worktree"
-                and dirty["health"]["worktree_entries"] == 1,
+                and dirty["health"]["worktree_entries"] == 1
+                and dirty["health"]["worktree_entries_in_scope"] == 1,
                 "autoevo dirty-tree classification drift",
+            )
+            # Dirt outside the sweep scopes must not block: the bot stages
+            # explicit paths, so user edits elsewhere cannot leak into its
+            # commits. (2026-08-22: a vault-wide gate blocked 73 of 103 runs.)
+            (vault / "personal").mkdir(exist_ok=True)
+            stray = vault / "personal" / "stray.md"
+            stray.write_text("user edit in progress\n", encoding="utf-8")
+            note.write_text("base\n", encoding="utf-8")
+            out_of_scope = autoevo_preflight.inspect_preflight(
+                vault=vault,
+                lock_path=session_lock,
+                now=1_000,
+                privacy_probe=privacy_probe,
+                semantic_probe=semantic_probe,
+            )
+            expect(
+                out_of_scope["ready"] is True
+                and out_of_scope["health"]["worktree_entries"] == 1
+                and out_of_scope["health"]["worktree_entries_in_scope"] == 0,
+                f"out-of-scope dirt must not block autoevo: {out_of_scope.get('gate')}",
+            )
+            stray.unlink()
+            note.write_text("dirty\n", encoding="utf-8")
+            dirty = autoevo_preflight.inspect_preflight(
+                vault=vault,
+                lock_path=session_lock,
+                now=1_000,
+                privacy_probe=privacy_probe,
+                semantic_probe=semantic_probe,
             )
             expect(
                 dirty["retry_after_epoch"]
@@ -2290,7 +2355,7 @@ def check_codex_routine_runner() -> None:
     for fragment in (
         "DECAY_REPORT_RELS=()",
         'FINAL_COMMIT_PATHS=("$AUDIT_REL")',
-        'git -C "$OV" add -f -- "_meta/autoevo_quarantine.toml"',
+        '--force-add _meta/autoevo_quarantine.toml',
         "scripts/autoevo_quarantine.py active-scopes",
         "scripts/autoevo_quarantine.py update",
         "scripts/autoevo_quarantine.py insert-skipped",
@@ -2353,7 +2418,7 @@ def check_codex_routine_runner() -> None:
         "bot-only autoevo must not become a Codex user skill",
     )
     expect(
-        'git -C "$OV" commit --only' in autoevo,
+        'scripts/autoevo_commit.py' in autoevo,
         "autoevo audit commits must not absorb a dirty pre-flight index",
     )
     expect(
@@ -3808,6 +3873,7 @@ def check_runtime_cue_syntax() -> None:
         )
 
 
+
 def check_context_bundle() -> None:
     with tempfile.TemporaryDirectory(prefix="atelier-context-") as temp_dir:
         root = Path(temp_dir)
@@ -3842,7 +3908,8 @@ def check_context_bundle() -> None:
             "status: discussion-open\n",
             encoding="utf-8",
         )
-        (vault / "reflections" / "2099-01-02-reflection.md").write_text(
+        (vault / "reflections" / "2099-01").mkdir(parents=True, exist_ok=True)
+        (vault / "reflections" / "2099-01" / "2099-01-02-reflection.md").write_text(
             "## Theme\nbody must stay out of the heading projection\n\n"
             "## Next Action\ndo one bounded thing\n",
             encoding="utf-8",
@@ -4227,9 +4294,11 @@ def check_codex_intent_hook() -> None:
             exact_route.get("context_budget_bytes") == 8192,
             "Codex exact route context budget drift",
         )
+        with (ROOT / "harness" / "intents.toml").open("rb") as handle:
+            review_row = tomllib.load(handle)["intents"]["review"]
         expect(
-            exact_route.get("agents") == ["researcher", "synthesizer"],
-            "Codex exact route agents drift",
+            exact_route.get("agents") == list(review_row.get("agents", [])),
+            "Codex exact route agents drift (route packet must mirror the registry row)",
         )
         expect(
             exact_route.get("profile_reads") == ["identity.md", "directions.md"],
@@ -4263,7 +4332,11 @@ def check_codex_intent_hook() -> None:
         )
         fallback_route, _ = parse_intent_route(output)
         expect(
-            fallback_route.get("name") == "reflection", "Codex fallback winner drift"
+            fallback_route.get("name") == "general", "Codex fallback winner drift"
+        )
+        expect(
+            fallback_route.get("procedure") == "protocols/intent-general.md",
+            "Codex fallback did not use semantic handoff",
         )
         expect(fallback_route.get("fallback") is True, "Codex fallback flag drift")
         expect(
@@ -4449,8 +4522,17 @@ def check_public_regression_tests() -> None:
             PYTHON,
             "-m",
             "unittest",
+            "tests.test_session_log",
             "tests.test_session_replay",
             "tests.test_signal_facts",
+            "tests.test_paths",
+            "tests.test_autoevo_preflight",
+            "tests.test_autoevo_pending",
+            "tests.test_cues",
+            "tests.test_lint_guards",
+            "tests.test_session_replay_default",
+            "tests.test_render_edges",
+            "tests.test_autoevo_commit",
         ],
         cwd=ROOT,
         capture_output=True,
@@ -4458,9 +4540,38 @@ def check_public_regression_tests() -> None:
     )
     expect(
         result.returncode == 0,
-        "public replay/signal regression tests failed\n"
+        "public session-log/replay/signal regression tests failed\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
     )
+
+
+def check_ruff_strict_core() -> None:
+    """The committed ruff gate: correctness classes only, always clean.
+
+    Soft-skips when uvx/ruff is unavailable (offline launchd runs must not
+    fail on a missing linter); any lint FINDING is a real failure.
+    """
+    import shutil
+
+    if shutil.which("uvx") is None:
+        print("  note: uvx unavailable; ruff strict-core check skipped")
+        return
+    result = subprocess.run(
+        ["uvx", "ruff", "check", "scripts", "tests", "--select", "F,E4,E7,E9,EXE001"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=300,
+    )
+    if result.returncode not in (0, 1):
+        print(f"  note: ruff unavailable (exit {result.returncode}); check skipped")
+        return
+    expect(
+        result.returncode == 0,
+        f"ruff strict-core violations:\n{result.stdout}",
+    )
+
 
 
 def main() -> int:
@@ -4477,7 +4588,8 @@ def main() -> int:
         ("runtime selector", check_runtime_selector),
         ("runtime cue syntax", check_runtime_cue_syntax),
         ("bounded context projection", check_context_bundle),
-        ("public replay and signal regressions", check_public_regression_tests),
+        ("public session-log, replay, and signal regressions", check_public_regression_tests),
+        ("ruff strict-core lint", check_ruff_strict_core),
         ("privacy scanner", check_privacy_scanner),
         ("Codex routine runner", check_codex_routine_runner),
         ("routine capability profiles", check_routine_profiles),

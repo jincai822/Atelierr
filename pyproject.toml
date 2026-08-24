@@ -13,3 +13,13 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "boto3>=1.43.14",
 ]
+
+[tool.ruff]
+# Strict core only: correctness (F), syntax-adjacent pycodestyle errors, and
+# the shebang/exec-bit class that produced a false review BLOCKER on
+# 2026-08-23. Style families stay out until their existing findings are
+# triaged; widen deliberately, never by default.
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F", "E4", "E7", "E9", "EXE001"]
