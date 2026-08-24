@@ -83,6 +83,13 @@ Resolve the following roles through `profile/diet.md § Catalog files`. Paths ar
 
 **Missing-file fallback:** if any of these is absent, skip it silently and note the gap in the closing line ("scored without [missing source]"). The recommendation still produces; the user can decide whether to recreate the catalog.
 
+**Log-side aggregates (deterministic):** run
+`uv run scripts/dine_rank.py --avoid-days <window>` first; it returns
+per-restaurant visit counts, last-visit recency, `评分` averages, `再去`
+state, the log-derived score component, and the avoid-window exclusions.
+Do not re-read the meal-history tracker row by row; combine the returned
+`log_score` with the catalog-side factors below.
+
 **Integrity preflight:** when running from the Atelier repo, execute `python3 scripts/dining_audit.py --json`. If it reports errors, exclude the affected rows or source from scoring and disclose the degraded input. Warnings such as missing legacy values do not block recommendations.
 
 ## Step 3: Filter + score
@@ -96,7 +103,7 @@ Resolve the following roles through `profile/diet.md § Catalog files`. Paths ar
 - For "Special occasion": Michelin OR Exclusive Tables only
 - Skip restaurants visited within `avoid recent` window (from the meal-history tracker)
 
-**Soft scoring** (rank candidates):
+**Soft scoring** (rank candidates; rows marked "log" come precomputed in `dine_rank.py`'s `log_score`, do not recompute):
 | Factor | Score |
 |---|---|
 | Catalog 评 (legacy field) = 3 | +3 |
