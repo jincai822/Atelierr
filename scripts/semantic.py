@@ -49,6 +49,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 from _paths import vault_root  # type: ignore[import-not-found]  # noqa: E402
 from semantic_corpus import (  # type: ignore[import-not-found]  # noqa: E402
     ACTIVE_SCOPE,
+    corpus_metadata_fingerprint,  # noqa: F401  (re-export; harness_smoke calls semantic.corpus_metadata_fingerprint)
     ALL_SCOPE,
     POLICY_FINGERPRINT,
     RAW_LOCATOR_REPRESENTATION,
@@ -57,7 +58,6 @@ from semantic_corpus import (  # type: ignore[import-not-found]  # noqa: E402
     CorpusRecord,
     audit_corpus,
     build_raw_locator_records,
-    corpus_metadata_fingerprint,
     iter_corpus_records,
     iter_file_decisions,
     path_prefix_matches,

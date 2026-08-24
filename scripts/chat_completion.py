@@ -107,6 +107,12 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+from _paths import atomic_write  # noqa: E402
+
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMA_TOML = REPO_ROOT / "harness" / "models.toml"
 BINDINGS_TOML = REPO_ROOT / "profile" / "models.toml"
@@ -170,10 +176,7 @@ def _load_session(path: Path) -> list[dict]:
 
 
 def _save_session(path: Path, messages: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(messages, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    atomic_write(path, json.dumps(messages, ensure_ascii=False, indent=2))
 
 
 def _resolve_extras(
@@ -594,6 +597,19 @@ def main(argv: list[str] | None = None) -> int:
             _log_call(log_dir, log_event)
             _mirror_shadow_skeleton(log_event)
 
+
+    def _fail(kind: str, code: int, message: str, **extra: object) -> int:
+        """One exit ramp for request failures: stderr + log event + exit code.
+
+        Five copy-pasted blocks lived here; forgetting `_maybe_log()` in a
+        sixth would silently drop the failure from the cost/latency audit
+        trail this log exists for.
+        """
+        sys.stderr.write(f"chat_completion: {message}\n")
+        log_event.update({"status": "error", "error_kind": kind, **extra})
+        _maybe_log()
+        return code
+
     try:
         resp = _post_with_retry(
             endpoint, body, api_key, timeout, max_attempts=args.max_attempts
@@ -603,25 +619,13 @@ def main(argv: list[str] | None = None) -> int:
             err_body = json.loads(e.read().decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError):
             err_body = {"raw": str(e)}
-        sys.stderr.write(f"chat_completion: HTTP {e.code}: {json.dumps(err_body)}\n")
-        log_event.update({"status": "error", "error_kind": f"http_{e.code}"})
-        _maybe_log()
-        return 1
+        return _fail(f"http_{e.code}", 1, f"HTTP {e.code}: {json.dumps(err_body)}")
     except (TimeoutError, socket.timeout):
-        sys.stderr.write(f"chat_completion: request timed out after {timeout}s\n")
-        log_event.update({"status": "error", "error_kind": "timeout"})
-        _maybe_log()
-        return 3
+        return _fail("timeout", 3, f"request timed out after {timeout}s")
     except urllib.error.URLError as e:
-        sys.stderr.write(f"chat_completion: network error: {e}\n")
-        log_event.update({"status": "error", "error_kind": "network", "error_message": str(e)})
-        _maybe_log()
-        return 1
+        return _fail("network", 1, f"network error: {e}", error_message=str(e))
     except json.JSONDecodeError as e:
-        sys.stderr.write(f"chat_completion: response not JSON: {e}\n")
-        log_event.update({"status": "error", "error_kind": "decode"})
-        _maybe_log()
-        return 1
+        return _fail("decode", 1, f"response not JSON: {e}")
 
     if "error" in resp:
         sys.stderr.write(f"chat_completion: API error: {json.dumps(resp['error'])}\n")
@@ -637,12 +641,7 @@ def main(argv: list[str] | None = None) -> int:
         reasoning = msg.get("reasoning_content")
         finish = choice.get("finish_reason")
     except (KeyError, IndexError) as e:
-        sys.stderr.write(
-            f"chat_completion: malformed response (missing choices/message/content): {e}\n"
-        )
-        log_event.update({"status": "error", "error_kind": "malformed_response"})
-        _maybe_log()
-        return 1
+        return _fail("malformed_response", 1, f"malformed response (missing choices/message/content): {e}")
 
     # Truncation = caller-visible failure (unless --max-tokens 0 opts out).
     # Partial content still written to stdout / session so the caller can
@@ -650,9 +649,14 @@ def main(argv: list[str] | None = None) -> int:
     # success/failure modes. Computed BEFORE _maybe_log() so the
     # error_kind marker actually lands in the logged event.
     truncated = finish == "length" and args.max_tokens > 0
+    # A reasoning model can spend its whole budget on reasoning_content and
+    # return an empty `content` with finish_reason=length; with --max-tokens 0
+    # that was logged as a clean success and the caller got a 0-byte report
+    # (2026-08-23, review.sh direct leg). Empty completions are failures.
+    empty = not (content or "").strip()
 
     log_event.update({
-        "status": "ok",
+        "status": "ok" if not empty else "error",
         "response_content": content,
         "reasoning_content": reasoning,
         "finish_reason": finish,
@@ -660,7 +664,16 @@ def main(argv: list[str] | None = None) -> int:
     })
     if truncated:
         log_event["error_kind"] = "truncated_max_tokens"
+    if empty:
+        log_event["error_kind"] = "empty_completion"
     _maybe_log()
+
+    if empty:
+        sys.stderr.write(
+            f"chat_completion: empty completion (finish_reason={finish}, "
+            f"reasoning_chars={len(reasoning or '')}); no content written.\n"
+        )
+        return 1
 
     if truncated:
         sys.stderr.write(

@@ -254,6 +254,30 @@ run_direct_api() {
   printf '%s' "$body" | python3 "$REPO_ROOT/scripts/chat_completion.py" \
       --model "$DIRECT_MODEL" --max-tokens 0 --prompt - > "$out" 2> "$err"
   local rc=$?
+  if [ $rc -eq 1 ] && grep -q "empty completion" "$err" 2>/dev/null; then
+    # The "max" identity spent the provider's whole completion budget on
+    # reasoning (2026-08-23: finish_reason=length, 65537 reasoning tokens, 0
+    # content on a 56K-token bundle). Retry once on the default-thinking
+    # sibling identity (same provider, `_max` suffix dropped) if declared.
+    local fallback="${DIRECT_MODEL%_max}"
+    if [ "$fallback" != "$DIRECT_MODEL" ] && grep -qF "[models.$fallback]" "$REPO_ROOT/harness/models.toml"; then
+      echo "[direct-api] empty completion from $DIRECT_MODEL (reasoning budget exhausted); retrying once with $fallback" >&2
+      printf '%s' "$body" | python3 "$REPO_ROOT/scripts/chat_completion.py" \
+          --model "$fallback" --max-tokens 0 --prompt - > "$out" 2>> "$err"
+      rc=$?
+      if [ $rc -eq 1 ] && grep -q "empty completion" "$err" 2>/dev/null; then
+        echo "[direct-api] fallback $fallback also returned an empty completion → soft-skip" >&2
+        return 127
+      fi
+    fi
+  fi
+  if [ $rc -eq 0 ] && [ ! -s "$out" ]; then
+    # rc 0 with an empty report is a placebo pass (2026-08-23: the direct
+    # leg returned nothing and the run still printed "done"). Treat it as a
+    # soft-skip so the synthesis says "direct leg produced no output".
+    echo "[direct-api] EMPTY output (exit 0, 0 bytes) → treated as soft-skip; see $err" >&2
+    return 127
+  fi
   if [ $rc -eq 0 ]; then
     echo "[direct-api] done → $out"
     return 0
@@ -288,7 +312,7 @@ case "$MODE" in
     ;;
   direct)
     run_direct_api; rc=$?
-    [ $rc -eq 127 ] && { echo "[review] direct-api config missing — nothing ran" >&2; exit 1; }
+    [ $rc -eq 127 ] && { echo "[review] direct-api soft-skipped (config missing or empty completion); no report produced" >&2; exit 1; }
     exit $rc
     ;;
   both)

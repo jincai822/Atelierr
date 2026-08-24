@@ -32,6 +32,22 @@ from functools import lru_cache
 from pathlib import Path
 
 
+class PathsError(SystemExit):
+    """Path-registry failure.
+
+    Subclasses SystemExit so an unhandled error still exits a CLI with the
+    message (the historical behavior), while libraries, smoke checks, and
+    in-process tests can catch a TYPED error instead of a bare SystemExit
+    string killing the host process.
+    """
+
+
+def reset() -> None:
+    """Clear process-wide caches (for in-process tests that change $OV)."""
+    vault_root.cache_clear()
+    _registry.cache_clear()
+
+
 @lru_cache(maxsize=1)
 def vault_root() -> Path:
     """Return $OV as an absolute Path. Exit with a clear error if unset.
@@ -42,7 +58,7 @@ def vault_root() -> Path:
     ov = os.environ.get("OV")
     if not ov:
         prog = Path(sys.argv[0]).name if sys.argv else "<script>"
-        sys.exit(
+        raise PathsError(
             f"ERROR: $OV environment variable not set. "
             f"Set it to your vault root before running {prog} "
             f'(e.g., `export OV="$HOME/zk"`).'
@@ -68,7 +84,7 @@ def _registry() -> dict:
     """
     canonical_path = _atelier_root() / "harness" / "paths.toml"
     if not canonical_path.is_file():
-        sys.exit(
+        raise PathsError(
             f"ERROR: canonical path registry missing at {canonical_path}. "
             "The atelier repo is incomplete; restore harness/paths.toml."
         )
@@ -111,7 +127,7 @@ def tier(name: str) -> Path:
     reg = _registry()
     if name not in reg:
         known = sorted(k for k in reg if k != "wiki_localized")
-        sys.exit(
+        raise PathsError(
             f"ERROR: unknown tier '{name}' in path registry. "
             f"Known: {', '.join(known)}. "
             "Add it to harness/paths.toml (or paths.local.toml for "
@@ -119,11 +135,35 @@ def tier(name: str) -> Path:
         )
     value = reg[name]
     if not isinstance(value, str):
-        sys.exit(
+        raise PathsError(
             f"ERROR: tier '{name}' resolves to {type(value).__name__}, "
             "expected string. Check harness/paths.toml."
         )
     return _resolve_segment(value)
+
+
+def tier_files(name: str, pattern: str = "*.md") -> list[Path]:
+    """Return files matching `pattern` anywhere under a tier, sorted by name.
+
+    Tiers undergo directory fission (`scripts/fission.py`, repo-conventions
+    32-entry rule; the per-tier split axes live in that protocol's table,
+    e.g. `reflections/` and `agent-findings/` by year-month, `wiki/` by
+    topic cluster, `people/` by first letter). A non-recursive `tier(x).glob()`
+    silently returns nothing once a tier has been split, which is how the
+    weekly cue and the TODO digest went blind on 2026-08-22. Readers must use
+    this helper (or `rglob`) so bucket layout is never a reader's concern.
+
+    Sort key is the file name, which for date-prefixed names yields
+    chronological order regardless of bucket. Returns [] when the tier
+    directory does not exist.
+    """
+    root = tier(name)
+    if not root.is_dir():
+        return []
+    return sorted(
+        (p for p in root.rglob(pattern) if p.is_file()),
+        key=lambda p: (p.name, p.as_posix()),
+    )
 
 
 def tier_segments() -> dict[str, str]:
@@ -149,6 +189,30 @@ def wiki_dirs() -> list[Path]:
         if isinstance(segment, str):
             dirs.append(_resolve_segment(segment))
     return dirs
+
+
+def atomic_write(path: Path, text: str, *, fsync: bool = True) -> None:
+    """Write text atomically: unique temp name, optional fsync, os.replace.
+
+    Eleven independent re-implementations of this existed by 2026-08-23; two
+    used a FIXED temp name and could race concurrent invocations into
+    FileNotFoundError, and five skipped fsync. One helper, one guarantee:
+    concurrent writers cannot corrupt or cross-clobber, and a crash after
+    return cannot lose the write (fsync=True).
+    """
+    import os
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            handle.write(text)
+            if fsync:
+                handle.flush()
+                os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def fmt(p: Path) -> str:

@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Optional
@@ -113,7 +112,7 @@ def relink_file(path: Path, idx: dict[str, list[Path]]) -> tuple[str, list[tuple
         source_dir = path.parent
         target_abs = (source_dir / href).resolve()
         try:
-            target_rel_existing = target_abs.relative_to(OV)
+            _ = target_abs.relative_to(OV)
         except ValueError:
             return m.group(0)  # outside zk
         if target_abs.exists():

@@ -126,7 +126,7 @@ def main() -> None:
     for b, n in sorted(buckets.items()):
         print(f"        {b}/  ({n} files)", file=sys.stderr)
     if unmoved:
-        print(f"[plan] unmovable (no axis match):", file=sys.stderr)
+        print("[plan] unmovable (no axis match):", file=sys.stderr)
         for f in unmoved[:5]:
             print(f"        {f.name}", file=sys.stderr)
         if len(unmoved) > 5:
@@ -137,7 +137,7 @@ def main() -> None:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dst))
         print(f"[apply] moved {len(moves)} files", file=sys.stderr)
-        print(f"[next] run: uv run scripts/relink.py --apply", file=sys.stderr)
+        print("[next] run: uv run scripts/relink.py --apply", file=sys.stderr)
     else:
         print(f"[dry-run] would move {len(moves)} files", file=sys.stderr)
 

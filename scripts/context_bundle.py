@@ -13,7 +13,6 @@ import json
 import os
 import re
 import sys
-import tomllib
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -192,14 +191,13 @@ def display_path(path: Path) -> str:
 
 def load_intents(path: Path) -> dict[str, dict[str, Any]]:
     try:
-        with path.open("rb") as handle:
-            payload = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
-        raise BundleError(f"cannot read intents registry {path}: {exc}") from exc
+        from registries import RegistryError, load_intents as _shared_load
 
-    intents = payload.get("intents")
-    if not isinstance(intents, dict):
-        raise BundleError(f"{path} has no [intents] table")
+        intents = _shared_load()
+    except ImportError as exc:  # pragma: no cover - registries.py always ships
+        raise BundleError(f"cannot import shared registry loader: {exc}") from exc
+    except RegistryError as exc:
+        raise BundleError(str(exc)) from exc
     return {
         str(name): row
         for name, row in intents.items()

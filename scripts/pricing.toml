@@ -8,7 +8,9 @@
 # representative pair; ultra-cheap or ultra-niche variants live in
 # `notes` rather than as additional rows.
 #
-# Prices in USD per 1M tokens. Re-verify when `verified_at` is
+# Prices in USD per 1M tokens. Each refresh leaves a fetched snapshot at
+# <paths.cache>/rate-cards-<verified_at>.md (private) as the source record.
+# Re-verify when `verified_at` is
 # older than ~30 days, when a provider announces a price change,
 # or when a promotional discount expires.
 #
@@ -31,27 +33,27 @@
 # estimation against the invocation log.
 
 [providers.anthropic]
-verified_at = "2026-05-03"
+verified_at = "2026-08-22"
 long_context_premium = false
 
 [providers.anthropic.flagship]
-model = "claude-opus-4-7"
+model = "claude-opus-5"
 input = 5.00
 output = 25.00
 cache_hit = 0.50
 context_window = 1000000
-notes = "tokenizer uses up to 35% more tokens; effective blended ~$13.50"
+notes = "Opus 4.5 through 5 share this price; 4.7+ tokenizer yields ~30% more tokens for the same text; blended $10.00"
 
 [providers.anthropic.standard]
-model = "claude-sonnet-4-6"
-input = 3.00
-output = 15.00
-cache_hit = 0.30
+model = "claude-sonnet-5"
+input = 2.00
+output = 10.00
+cache_hit = 0.20
 context_window = 1000000
-notes = "flat pricing across full 1M window; rare among 1M-context models"
+notes = "Sonnet 5 introductory $2/$10 made permanent (the 2026-09-01 rise to $3/$15 was cancelled); Sonnet 4.6 stays 3/15; blended $4.00"
 
 [providers.openai]
-verified_at = "2026-05-03"
+verified_at = "2026-08-22"
 long_context_premium = false
 
 [providers.openai.flagship]
@@ -70,11 +72,11 @@ cache_hit = 0.50
 context_window = 1000000
 
 [providers.google]
-verified_at = "2026-05-03"
+verified_at = "2026-08-22"
 long_context_premium = "200K -> 2x"
 
 [providers.google.flagship]
-model = "gemini-3.1-pro"
+model = "gemini-3.1-pro-preview"
 input = 2.00
 output = 12.00
 cache_hit = 0.20
@@ -82,34 +84,35 @@ context_window = 1000000
 notes = "doubles to $4 input / $18 output above 200K input tokens; effective blended ~$7.50 for long-context workloads"
 
 [providers.google.standard]
-model = "gemini-3-flash"
-input = 0.50
-output = 3.00
-cache_hit = 0.05
+model = "gemini-3.7-flash"
+input = 0.75
+output = 3.75
+cache_hit = 0.075
 context_window = 1000000
-notes = "Gemini 3.1 Flash-Lite at $0.25/$1.50 (blended $0.56) is the ultra-cheap variant; use 3 Flash as the representative standard"
+notes = "$0.75/$3.75 through 2026-12-31, $1.50/$7.50 from 2027-01-01; Gemini 3.5 Flash is 1.50/9.00; blended $1.50"
 
 [providers.deepseek]
-verified_at = "2026-05-03"
+verified_at = "2026-08-22"
 long_context_premium = false
 
 [providers.deepseek.flagship]
 model = "deepseek-v4-pro"
-input = 0.435
-output = 0.87
-cache_hit = 0.003625
+input = 1.32
+output = 3.96
+cache_hit = 0.044
 context_window = 1000000
-notes = "75% promotional discount in effect; expires 2026-05-31 15:59 UTC. Standard prices: input=1.74, output=3.48, cache=0.0145, blended $2.18"
+notes = "peak list price; off-peak (outside 01:00-04:00 and 06:00-10:00 UTC Mon-Fri) is half: input 0.66, output 1.98, cache 0.022; blended $1.98 peak"
 
 [providers.deepseek.standard]
 model = "deepseek-v4-flash"
-input = 0.14
-output = 0.28
-cache_hit = 0.0028
+input = 0.44
+output = 1.32
+cache_hit = 0.014
 context_window = 1000000
-notes = "rock-bottom blended at $0.175/M; thinking off by default"
+notes = "peak list price; off-peak half: input 0.22, output 0.66, cache 0.007; blended $0.66 peak"
 
 [providers.zhipu]
+# Not re-verified in the 2026-08-22 refresh; treat as stale until refetched.
 verified_at = "2026-05-03"
 long_context_premium = false
 
@@ -128,6 +131,7 @@ cache_hit = 0.11
 context_window = 200000
 
 [providers.alibaba]
+# Not re-verified in the 2026-08-22 refresh; treat as stale until refetched.
 verified_at = "2026-05-03"
 long_context_premium = false
 
@@ -140,6 +144,7 @@ context_window = 262000
 notes = "no separate standard tier currently tracked"
 
 [providers.moonshot]
+# Not re-verified in the 2026-08-22 refresh; treat as stale until refetched.
 verified_at = "2026-05-03"
 long_context_premium = false
 

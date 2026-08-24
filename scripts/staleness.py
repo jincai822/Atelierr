@@ -40,7 +40,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _paths import tier  # type: ignore[import-not-found]  # noqa: E402
+from _paths import tier, tier_files  # type: ignore[import-not-found]  # noqa: E402
 
 # L2 directories to scan (daily-notes excluded: capture stream, not working
 # knowledge). health excluded: longitudinal records, different lifecycle.
@@ -179,9 +179,7 @@ def scan(
     if WIKI_DIR.exists():
         corpus.extend(WIKI_DIR.rglob("*.md"))
 
-    reflections_dir = tier("reflections")
-    if reflections_dir.exists():
-        corpus.extend(reflections_dir.glob("*.md"))
+    corpus.extend(tier_files("reflections", "*.md"))
 
     # Last 30 days of daily notes for recency-weighted reference counting.
     daily_dir = tier("daily_notes")
@@ -204,7 +202,10 @@ def scan(
     for d in dirs:
         if not d.exists():
             continue
-        for path in sorted(d.glob("*.md")):
+        # Fission-aware: L2 tiers bucket into subdirectories (reflections by
+        # year-month, agent-findings topically); a flat glob went blind here
+        # for the third time on 2026-08-23.
+        for path in sorted(d.rglob("*.md")):
             days = _days_since_modified(path, today)
             title = _extract_title(path)
 

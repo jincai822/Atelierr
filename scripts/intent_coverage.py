@@ -253,8 +253,8 @@ def cmd_intent(args: argparse.Namespace) -> int:
         print(f"profile:  {', '.join(payload['profile_reads'])}")
     if is_fallback:
         print()
-        print("note: no specific patterns matched; defaulted to fallback reflection.")
-        print("      consider asking the user for confirmation before dispatching.")
+        print("note: no specific patterns matched; entered the semantic handoff.")
+        print("      clarify only when semantic routing is materially ambiguous.")
     if ambiguous:
         print()
         print(
@@ -278,7 +278,9 @@ def resolve_intent_miss_dir() -> Path:
     """
     ov = os.environ.get("OV")
     if ov:
-        return Path(ov) / "_meta" / "intent_misses"
+        from _paths import tier_segments
+
+        return Path(ov) / tier_segments().get("meta", "_meta") / "intent_misses"
     return INTENT_MISS_FALLBACK_DIR
 
 
@@ -304,7 +306,7 @@ def cmd_intent_log(args: argparse.Namespace) -> int:
 
     Called by the orchestrator after deciding routing. Three trigger cases
     (see `.claude/commands/hi.md` → "Miss Logging"):
-      - fallback: `intents.reflection` won by default; nothing else matched.
+      - fallback: `intents.general` won by default; nothing else matched.
       - ambiguous: 2+ non-fallback intents tied at the top priority.
       - low_confidence: a generic substring matched inside a longer message
         whose primary intent looked different; orchestrator used
@@ -695,7 +697,7 @@ def build_parser() -> argparse.ArgumentParser:
     intent_log.add_argument(
         "--initial-name",
         default=None,
-        help="Name of the initial matched intent (e.g., 'reflection' for fallback).",
+        help="Name of the initial matched intent (e.g., 'general' for fallback).",
     )
     intent_log.add_argument(
         "--initial-priority", default=None, help="Priority of the initial match."

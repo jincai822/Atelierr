@@ -55,6 +55,12 @@ sessions        = "sessions"
 # L2 transient — mobile-capture submodule, digested then cleared by /sync.
 zettelm         = "zettelm"
 
+# Operational state (bot claims, queues, watch registries, miss logs) and
+# archived private routine prompts. Underscore prefix keeps them sorted apart
+# from knowledge tiers; they are state, not notes.
+meta            = "_meta"
+routine_prompts = "_routine_prompts"
+
 # L1: pending or raw capture
 inbox           = "inbox"
 cache           = "cache"

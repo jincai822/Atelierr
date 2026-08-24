@@ -49,7 +49,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _paths import vault_root  # type: ignore[import-not-found]  # noqa: E402
+from _paths import tier_segments, vault_root  # type: ignore[import-not-found]  # noqa: E402
 
 OV = vault_root()
 
@@ -60,7 +60,7 @@ OV = vault_root()
 # infrastructure (cache, assets), other tier homes, and the archive
 # (which is checked separately for overlap with ingestion domains).
 _NON_INGESTION_DOMAINS = {
-    "_meta",
+    tier_segments().get("meta", "_meta"),
     "agent-findings",
     "archive",
     "assets",

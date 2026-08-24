@@ -23,6 +23,9 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Siz
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+import sys as _s
+_s.path.insert(0, str(Path(__file__).resolve().parent))
+from _paths import tier_segments  # noqa: E402
 from typing import Any
 from urllib.parse import unquote
 
@@ -296,7 +299,7 @@ def _legacy_scope_sql(scope: str, path_column: str) -> str:
     """Build a path-derived filter for an index without metadata columns."""
     hard_prefixes = (
         "cache",
-        "_meta",
+        tier_segments().get("meta", "_meta"),
         "_routine_prompts",
         ".trash",
         "archive/orphan-stubs",
@@ -308,7 +311,7 @@ def _legacy_scope_sql(scope: str, path_column: str) -> str:
     )
     for operational_segment in (
         "cache",
-        "_meta",
+        tier_segments().get("meta", "_meta"),
         "_routine_prompts",
         ".trash",
         "_tools",
@@ -430,7 +433,7 @@ def _hard_exclusion_reason(relative_path: str) -> str | None:
     directories = parts[:-1]
     if "cache" in directories or top == "cache":
         return "cache"
-    if "_meta" in directories or top == "_meta":
+    if tier_segments().get("meta", "_meta") in directories or top == tier_segments().get("meta", "_meta"):
         return "operational_meta"
     if "_routine_prompts" in directories or top == "_routine_prompts":
         return "routine_prompts"

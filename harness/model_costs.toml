@@ -15,46 +15,55 @@
 #                            aggregated model is >90 days stale, unless
 #                            invoked with `--accept-stale-costs`.
 #
-# Prices for the major flagship and mid-tier identities as of 2026-05-21
-# (public rate cards). Refresh quarterly; the report's fail-closed gate is
-# the forcing function. Missing prices → the report treats that model as
-# unknown-cost (no $ column for it) rather than erroring out.
+# Prices as of 2026-08-22, read from the providers' published rate cards.
+# Evidence snapshot (private, L1): <paths.cache>/rate-cards-2026-08-22.md,
+# with one table per provider page and the fetch date; re-snapshot on refresh.
+# (Anthropic platform.claude.com pricing page; DeepSeek api-docs pricing
+# page, peak list prices; peak hours are 01:00-04:00 and 06:00-10:00 UTC
+# Mon-Fri, all other hours are off-peak at half; OpenAI
+# developers.openai.com pricing page).
+# Claude aliases (`opus`, `sonnet`, `haiku`) are priced at the newest model
+# each alias resolves to on Claude Code (Opus 5, Sonnet 5, Haiku 4.5); Opus
+# 4.5 through 5 share one price, Sonnet 4.6 is 3/15 if the alias still pins
+# it. Refresh quarterly; the report's fail-closed gate is the forcing
+# function. Missing prices → the report treats that model as unknown-cost
+# (no $ column for it) rather than erroring out.
 
 [costs.opus]
-input_per_1m_usd = 15.00
-output_per_1m_usd = 75.00
-last_verified = "2026-05-21"
+input_per_1m_usd = 5.00
+output_per_1m_usd = 25.00
+last_verified = "2026-08-22"
 
 [costs.sonnet]
-input_per_1m_usd = 3.00
-output_per_1m_usd = 15.00
-last_verified = "2026-05-21"
+input_per_1m_usd = 2.00
+output_per_1m_usd = 10.00
+last_verified = "2026-08-22"
 
 [costs.haiku]
-input_per_1m_usd = 0.80
-output_per_1m_usd = 4.00
-last_verified = "2026-05-21"
+input_per_1m_usd = 1.00
+output_per_1m_usd = 5.00
+last_verified = "2026-08-22"
 
 [costs.deepseek_pro_max]
-input_per_1m_usd = 0.27
-output_per_1m_usd = 1.10
-reasoning_per_1m_usd = 1.10
-last_verified = "2026-05-21"
+input_per_1m_usd = 1.32
+output_per_1m_usd = 3.96
+reasoning_per_1m_usd = 3.96
+last_verified = "2026-08-22"
 
 [costs.deepseek_pro]
-input_per_1m_usd = 0.27
-output_per_1m_usd = 1.10
-last_verified = "2026-05-21"
+input_per_1m_usd = 1.32
+output_per_1m_usd = 3.96
+last_verified = "2026-08-22"
 
 [costs.deepseek_flash]
-input_per_1m_usd = 0.07
-output_per_1m_usd = 0.28
-last_verified = "2026-05-21"
+input_per_1m_usd = 0.44
+output_per_1m_usd = 1.32
+last_verified = "2026-08-22"
 
 [costs.codex_gpt55_max]
 # OpenAI gpt-5.5 (high reasoning effort). Codex CLI does not currently
 # surface usage tokens to parents; cost from this leg is char_approx in
 # the report.
 input_per_1m_usd = 5.00
-output_per_1m_usd = 20.00
-last_verified = "2026-05-21"
+output_per_1m_usd = 30.00
+last_verified = "2026-08-22"

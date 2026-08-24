@@ -20,8 +20,8 @@ Review progress on near/mid/long-term goals. Surface what's progressing, what's 
 Inspect the last full review and the last pulse-equivalent so the monthly cadence does not produce duplicate pulses within 30 days. A pulse-equivalent is either a standalone `*-review-pulse.md` OR a `*-weekly.md` (because `/weekly` §6 Honest Assessment doubles as the monthly pulse — see Cadence table). Take whichever is most recent:
 
 ```
-Bash: last_full=$(ls "$OV"/reflections/*-review.md 2>/dev/null | grep -v -- '-review-pulse' | sort | tail -1)
-Bash: last_pulse=$( (ls "$OV"/reflections/*-review-pulse.md 2>/dev/null; ls "$OV"/reflections/*-weekly.md 2>/dev/null) | sort | tail -1)
+Bash: last_full=$(find "$OV/reflections" -name '*-review.md' ! -name '*-review-pulse.md' 2>/dev/null | sort | tail -1)
+Bash: last_pulse=$(find "$OV/reflections" \( -name '*-review-pulse.md' -o -name '*-weekly.md' \) 2>/dev/null | sort | tail -1)
 ```
 
 Note: a no-change pulse intentionally skips writing a file (per Output → Pulse write gate), so `last_pulse` may understate by up to 30 days. That's tolerable — the cost of suggesting one extra pulse during the gap is far lower than the cost of a missed pulse.

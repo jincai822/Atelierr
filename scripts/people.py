@@ -60,7 +60,9 @@ def scan(query: str) -> list[dict]:
         sys.exit(2)
     q_lower = query.lower()
     results: list[dict] = []
-    for path in sorted(PEOPLE_DIR.glob("*.md")):
+    # people/ is first-letter bucketed (repo-conventions § fission); a flat
+    # glob misses every bucketed stub, which is how duplicates got created.
+    for path in sorted(PEOPLE_DIR.rglob("*.md")):
         stem = path.stem
         match_src: str | None = None
         if q_lower in stem.lower():

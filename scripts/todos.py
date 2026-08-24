@@ -46,7 +46,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _paths import tier  # type: ignore[import-not-found]  # noqa: E402
+from _paths import tier, tier_files  # type: ignore[import-not-found]  # noqa: E402
 
 GTD_DIR = tier("gtd")
 REFLECTIONS_DIR = tier("reflections")
@@ -171,7 +171,8 @@ def line_age_days(path: Path, line_no: int) -> int:
             capture_output=True,
             text=True,
             check=True,
-        ).stdout
+        timeout=10,
+    ).stdout
         for ln in out.splitlines():
             if ln.startswith("author-time "):
                 ts = int(ln.split()[1])
@@ -282,9 +283,8 @@ def collect_all_todos(load_age: bool = True) -> list[Todo]:
     if GTD_DIR.exists():
         for f in sorted(GTD_DIR.glob("*.md")):
             todos.extend(scan_gtd_file(f))
-    if REFLECTIONS_DIR.exists():
-        for f in sorted(REFLECTIONS_DIR.glob("*.md")):
-            todos.extend(scan_reflection_next_actions(f))
+    for f in tier_files("reflections", "*.md"):
+        todos.extend(scan_reflection_next_actions(f))
     if load_age:
         for t in todos:
             t.age_days = line_age_days(Path(t.source), t.line)
@@ -356,14 +356,8 @@ def _phrase_matches_todo(phrase: str, todo_text: str) -> bool:
 
 
 def find_last_reflection() -> Path | None:
-    if not REFLECTIONS_DIR.exists():
-        return None
-    files = sorted(
-        REFLECTIONS_DIR.glob("*-reflection*.md"),
-        key=lambda p: p.name,
-        reverse=True,
-    )
-    return files[0] if files else None
+    files = tier_files("reflections", "*-reflection*.md")
+    return files[-1] if files else None
 
 
 def cmd_list(args: argparse.Namespace) -> int:
