@@ -39,17 +39,13 @@ Run `uv run --quiet python3 scripts/autoevo_pending.py auto-dismiss --today <RUN
 ```bash
 PATHS_FINDINGS=$(uv run --quiet python3 -c "from scripts._paths import tier; print(tier('agent_findings'))")
 FINDINGS_REL="${PATHS_FINDINGS#$OV/}"   # portable shell strip; macOS realpath has no --relative-to
-git -C "$OV" add -- _meta/autoevo_pending.toml "${FINDINGS_REL}/autoevo-applied-${RUN_DATE}.md"
-git -C "$OV" commit -m "$(cat <<'EOF'
-[autoevo:queue] _meta: auto-dismiss <N> stale pending entries
-
-Categories: <breakdown>
-Reason: surface_count >= 3 OR proposed_at older than --max-age-days
-
-Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
-EOF
-)"
+uv run --quiet python3 scripts/autoevo_commit.py queue \
+  --summary "auto-dismiss <N> stale pending entries" \
+  --detail "Categories: <breakdown>. Reason: surface_count >= 3 OR proposed_at older than --max-age-days" \
+  --extra-path "${FINDINGS_REL}/autoevo-applied-${RUN_DATE}.md"
 ```
+
+`scripts/autoevo_commit.py` is the sole committer: it stages the queue file plus `--extra-path`, commits `--only` those paths, and applies the bot author/committer identity.
 
 If no auto-dismiss candidates, skip the commit and continue.
 
@@ -119,14 +115,9 @@ This snoozes the entire autoevo_pending cue group; per-entry snoozing is not sup
 Commit the queue update at the end of the session (one commit covers all defers), not per-item, to avoid commit-spam:
 
 ```bash
-git -C "$OV" commit -m "$(cat <<'EOF'
-[autoevo:queue] _meta: defer <N> pending entries in <RUN_DATE> triage
-
-Categories: <breakdown>
-
-Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
-EOF
-)"
+uv run --quiet python3 scripts/autoevo_commit.py queue \
+  --summary "defer <N> pending entries in <RUN_DATE> triage" \
+  --detail "Categories: <breakdown>"
 ```
 
 ### Explain
@@ -160,15 +151,9 @@ If anything was applied, append a "Session via /autoevo-review" subsection to th
 If steps 4-5 produced any queue mutations not already committed (the defer batch, status changes), commit now:
 
 ```bash
-git -C "$OV" add _meta/autoevo_pending.toml
-git -C "$OV" commit -m "$(cat <<'EOF'
-[autoevo:queue] _meta: triage session <RUN_DATE> resolved <N> entries
-
-Applied=<n>, Dismissed=<n>, Deferred=<n>
-
-Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
-EOF
-)"
+uv run --quiet python3 scripts/autoevo_commit.py queue \
+  --summary "triage session <RUN_DATE> resolved <N> entries" \
+  --detail "Applied=<n>, Dismissed=<n>, Deferred=<n>"
 ```
 
 (If everything was applied and the queue is empty, the file still gets committed in its empty/header-only state — easier to revert than to special-case.)

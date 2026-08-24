@@ -187,6 +187,30 @@ class HotPathCeilingGuardTest(unittest.TestCase):
         self.assertEqual(out, [])
 
 
+class BotTrailerBanGuardTest(unittest.TestCase):
+    def test_reintroduced_trailer_is_flagged(self) -> None:
+        out = _run_py(
+            """
+            import tempfile, pathlib
+            tmp = pathlib.Path(tempfile.mkdtemp(prefix='atelier-trailer-'))
+            bad = tmp / 'cmd.md'
+            bad.write_text('Co-Authored-By: Atelier Autoevo Bot <x@y>', encoding='utf-8')
+            findings = h.check_bot_trailer_banned(roots=[str(tmp)])
+            print(json.dumps([f.code for f in findings]))
+            """
+        )
+        self.assertIn("bot-trailer-banned", out)
+
+    def test_repo_prompt_surfaces_are_clean(self) -> None:
+        out = _run_py(
+            """
+            findings = h.check_bot_trailer_banned()
+            print(json.dumps([f"{f.code}:{f.path}" for f in findings]))
+            """
+        )
+        self.assertEqual(out, [])
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -1,8 +1,8 @@
 """Pin the autoevo commit shapes now that a script owns them.
 
 Downstream consumers: the revert-tombstone walk greps `cluster_hash:` from
-commit bodies; `git log --grep='^\\[autoevo:'` is the operational index; the
-co-author trailer attributes bot commits. `--only` isolation is the safety
+commit bodies; `git log --grep='^\\[autoevo:'` is the operational index; bot
+authorship attributes automated changes. `--only` isolation is the safety
 property the scoped dirty gate relies on.
 """
 
@@ -30,7 +30,15 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
 def _run(vault: Path, *argv: str) -> dict:
     proc = subprocess.run(
         [sys.executable, "scripts/autoevo_commit.py", *argv],
-        cwd=REPO_ROOT, env={**os.environ, "OV": str(vault)},
+        cwd=REPO_ROOT,
+        env={
+            **os.environ,
+            "OV": str(vault),
+            "GIT_AUTHOR_NAME": "Local User",
+            "GIT_AUTHOR_EMAIL": "local@example.com",
+            "GIT_COMMITTER_NAME": "Local Committer",
+            "GIT_COMMITTER_EMAIL": "committer@example.com",
+        },
         capture_output=True, text=True, timeout=120,
     )
     payload = json.loads(proc.stdout)
@@ -68,7 +76,15 @@ class AutoevoCommitTest(unittest.TestCase):
             body = _git(vault, "log", "-1", "--format=%B").stdout
             self.assertIn("[autoevo:redundant] wip: merge 1 notes into target", body)
             self.assertIn(f"cluster_hash: {out['cluster_hash']}", body)
-            self.assertIn("Co-Authored-By: Atelier Autoevo Bot", body)
+            self.assertNotIn("Co-Authored-By:", body)
+            self.assertEqual(
+                _git(vault, "log", "-1", "--format=%an <%ae>").stdout.strip(),
+                "Atelier Autoevo Bot <noreply@atelier.local>",
+            )
+            self.assertEqual(
+                _git(vault, "log", "-1", "--format=%cn <%ce>").stdout.strip(),
+                "Atelier Autoevo Bot <noreply@atelier.local>",
+            )
             changed = _git(vault, "show", "--name-only", "--format=", "HEAD").stdout.split()
             self.assertIn("wip/target.md", changed)
             self.assertNotIn("wip/b.md", changed, "--only isolation breached")
@@ -111,6 +127,40 @@ class AutoevoCommitTest(unittest.TestCase):
             out = _run(vault, "queue", "--summary", "append 0", "--detail", "Categories: none")
             self.assertEqual(out["_exit"], 1)
             self.assertIn("error", out)
+
+
+class QueueExtraPathTest(unittest.TestCase):
+    def test_queue_commit_includes_extra_paths_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp) / "vault"
+            (vault / "_meta").mkdir(parents=True)
+            (vault / "agent-findings").mkdir()
+            (vault / "wip").mkdir()
+            queue = vault / "_meta" / "autoevo_pending.toml"
+            queue.write_text("# queue\n", encoding="utf-8")
+            audit = vault / "agent-findings" / "autoevo-applied-2099-01-02.md"
+            audit.write_text("## Autoevo Run\n", encoding="utf-8")
+            _git(vault, "init", "-q")
+            _git(vault, "add", "-A")
+            _git(vault, "commit", "-q", "-m", "base")
+            queue.write_text("# queue\n# dismissed\n", encoding="utf-8")
+            audit.write_text("## Autoevo Run\n### Auto-dismissed\n", encoding="utf-8")
+            # A stray edit that must NOT be swept into the queue commit.
+            (vault / "wip" / "stray.md").write_text("s\n", encoding="utf-8")
+            out = _run(
+                vault, "queue",
+                "--summary", "auto-dismiss 1 stale pending entries",
+                "--detail", "Categories: redundant=1",
+                "--extra-path", "agent-findings/autoevo-applied-2099-01-02.md",
+            )
+            self.assertEqual(out["_exit"], 0, out)
+            changed = _git(vault, "show", "--name-only", "--format=", "HEAD").stdout.split()
+            self.assertEqual(
+                sorted(changed),
+                ["_meta/autoevo_pending.toml", "agent-findings/autoevo-applied-2099-01-02.md"],
+            )
+            subject = _git(vault, "log", "-1", "--format=%s").stdout.strip()
+            self.assertEqual(subject, "[autoevo:queue] _meta: auto-dismiss 1 stale pending entries")
 
 
 if __name__ == "__main__":

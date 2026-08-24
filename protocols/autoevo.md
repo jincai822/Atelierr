@@ -222,10 +222,9 @@ Contradicted findings against L4 wiki entries always go to the pending queue, ne
 
 One commit per destructive op. Not one commit per night.
 
-- **Identity**: the user's `git config user.name` / `user.email`. The bot acts as the user's automated extension; co-author trailer disambiguates.
+- **Identity**: author and committer are `Atelier Autoevo Bot <noreply@atelier.local>`. Automated changes never attribute authorship, committership, or co-authorship to the user.
 - **Subject**: `[autoevo:<category>] <scope>: <summary>`. The `[autoevo:...]` prefix is the grep handle (`git log --grep='\[autoevo:'`).
 - **Body**: includes the Forgetter evidence verbatim so revert reviewer has full context. Cite peer paths, retrieval scores, mtime, mode (stub/real), floor threshold.
-- **Trailer**: `Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>`.
 
 Example — redundant merge:
 
@@ -239,8 +238,6 @@ Source notes:
 
 Auto-band: redundant-high (3 peers ≥ 0.85, all > 30d cold, mode=real, floor=0.6)
 Revert: git revert <sha>
-
-Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
 ```
 
 Example — low-signal archive:
@@ -250,8 +247,6 @@ Example — low-signal archive:
 
 words: 87, links_in: 0, tags: 0, mtime: 2025-04-04
 Moved: <paths.wip>/<slug>.md -> <paths.archive>/decayed/2026-05-22-<slug>.md
-
-Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
 ```
 
 ## Pending queue: `$OV/_meta/autoevo_pending.toml`

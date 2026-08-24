@@ -3058,6 +3058,32 @@ def check_hot_path_ceilings(ceilings: dict[str, int] | None = None) -> list[Find
     return findings
 
 
+BANNED_BOT_TRAILER = "Co-Authored-By: Atelier Autoevo Bot"
+
+
+def check_bot_trailer_banned(roots: list[str] | None = None) -> list[Finding]:
+    """Bot identity moved from co-author trailer to GIT_AUTHOR/COMMITTER env
+    (protocols/autoevo.md § Per-op commit policy). A prompt-layer commit
+    template reintroducing the trailer would attribute bot ops to the user;
+    scripts/autoevo_commit.py is the sole committer."""
+    findings: list[Finding] = []
+    for root in roots or (".claude/commands", ".claude/agents", "protocols"):
+        base = ROOT / root
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*.md")):
+            if BANNED_BOT_TRAILER in path.read_text(encoding="utf-8", errors="ignore"):
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "bot-trailer-banned",
+                        rel(path),
+                        "dead Co-Authored-By bot trailer; route the commit through scripts/autoevo_commit.py",
+                    )
+                )
+    return findings
+
+
 def run_lints() -> list[Finding]:
     findings: list[Finding] = []
     findings.extend(check_root_files())
@@ -3103,6 +3129,7 @@ def run_lints() -> list[Finding]:
     findings.extend(check_price_surfaces_agree())
     findings.extend(check_prose_budget())
     findings.extend(check_hot_path_ceilings())
+    findings.extend(check_bot_trailer_banned())
     findings.sort(key=lambda f: (SEVERITY_ORDER.get(f.severity, 99), f.code, f.where, f.message))
     return findings
 

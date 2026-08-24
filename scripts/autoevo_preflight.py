@@ -31,6 +31,8 @@ from routine_claim import validate_cycle_id
 ATELIER_ROOT = Path(__file__).resolve().parents[1]
 SESSION_LOCK_TTL_SECONDS = 6 * 60 * 60
 GENERIC_RETRY_DELAY_SECONDS = 60 * 60
+BOT_NAME = "Atelier Autoevo Bot"
+BOT_EMAIL = "noreply@atelier.local"
 
 # Paths autoevo may touch: the three sweep scopes, the audit write target,
 # and its queue files. The dirty-tree gate only looks here. The bot stages
@@ -111,8 +113,22 @@ def _run(
     return CommandResult(result.returncode, result.stdout, result.stderr)
 
 
-def _git(vault: Path, *args: str, timeout: float = 30) -> CommandResult:
-    return _run(["git", *args], cwd=vault, timeout=timeout)
+def _git(
+    vault: Path,
+    *args: str,
+    timeout: float = 30,
+    bot_identity: bool = False,
+) -> CommandResult:
+    env = None
+    if bot_identity:
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": BOT_NAME,
+            "GIT_AUTHOR_EMAIL": BOT_EMAIL,
+            "GIT_COMMITTER_NAME": BOT_NAME,
+            "GIT_COMMITTER_EMAIL": BOT_EMAIL,
+        }
+    return _run(["git", *args], cwd=vault, timeout=timeout, env=env)
 
 
 def _sha256(path: Path) -> str:
@@ -580,8 +596,7 @@ def _commit_audit(vault: Path, audit_path: Path, run_date: str) -> CommandResult
         return added
     message = (
         f"[autoevo:audit] agent-findings: record nightly run {run_date}\n\n"
-        "Auto-applied: 0, Pending: 0, Errors: 0\n\n"
-        "Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>"
+        "Auto-applied: 0, Pending: 0, Errors: 0"
     )
     return _git(
         vault,
@@ -592,6 +607,7 @@ def _commit_audit(vault: Path, audit_path: Path, run_date: str) -> CommandResult
         "--",
         relative,
         timeout=120,
+        bot_identity=True,
     )
 
 

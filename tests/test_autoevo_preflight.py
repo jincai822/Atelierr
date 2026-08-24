@@ -64,7 +64,14 @@ def _run_py(vault: Path, body: str) -> dict:
     proc = subprocess.run(
         [sys.executable, "-c", code],
         cwd=REPO_ROOT,
-        env={**os.environ, "OV": str(vault)},
+        env={
+            **os.environ,
+            "OV": str(vault.resolve()),
+            "GIT_AUTHOR_NAME": "Local User",
+            "GIT_AUTHOR_EMAIL": "local@example.com",
+            "GIT_COMMITTER_NAME": "Local Committer",
+            "GIT_COMMITTER_EMAIL": "committer@example.com",
+        },
         capture_output=True,
         text=True,
         timeout=120,
@@ -160,6 +167,31 @@ class DirtyGateScopeTest(unittest.TestCase):
 
 
 class TransientErrorsDeferTest(unittest.TestCase):
+    def test_recovered_audit_is_bot_authored_without_coauthor(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="atelier-preflight-") as tmp:
+            vault = _make_vault(Path(tmp))
+            audit = vault / "agent-findings" / "autoevo-applied-2099-01-02.md"
+            audit.write_text("## Autoevo Run\n", encoding="utf-8")
+            out = _run_py(
+                vault,
+                """
+                r = ap._commit_audit(vault, vault/'agent-findings'/'autoevo-applied-2099-01-02.md', '2099-01-02')
+                author = ap._git(vault, 'log', '-1', '--format=%an <%ae>').stdout.strip()
+                committer = ap._git(vault, 'log', '-1', '--format=%cn <%ce>').stdout.strip()
+                body = ap._git(vault, 'log', '-1', '--format=%B').stdout
+                print(json.dumps({'returncode': r.returncode, 'author': author,
+                                  'committer': committer, 'body': body}))
+                """,
+            )
+            self.assertEqual(out["returncode"], 0, out)
+            self.assertEqual(
+                out["author"], "Atelier Autoevo Bot <noreply@atelier.local>"
+            )
+            self.assertEqual(
+                out["committer"], "Atelier Autoevo Bot <noreply@atelier.local>"
+            )
+            self.assertNotIn("Co-Authored-By:", out["body"])
+
     def test_unreadable_owned_state_defers(self) -> None:
         with tempfile.TemporaryDirectory(prefix="atelier-preflight-") as tmp:
             vault = _make_vault(Path(tmp))
