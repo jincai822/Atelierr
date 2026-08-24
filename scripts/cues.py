@@ -1614,8 +1614,83 @@ def check_career_growth(ov: Path, today: date) -> tuple[Cue | None, str]:
 
 # Registry. To add a new cue, append a `check_*` function above and
 # register it here.
+
+def check_intent_misses(ov: Path, today: date) -> tuple[Cue | None, str]:
+    """Router coverage feedback: recurring fallback phrases deserve a pattern.
+
+    The miss log had a producer for three months with no consumer; the same
+    fallback class recurred the whole time. Soft cue at 5+ misses in 14 days.
+    """
+    miss_dir = _meta_dir(ov) / "intent_misses"
+    if not miss_dir.is_dir():
+        return None, "no miss log; skip"
+    cutoff = today - timedelta(days=14)
+    recent = 0
+    for path in sorted(miss_dir.glob("*.jsonl")):
+        try:
+            day = date.fromisoformat(path.stem)
+        except ValueError:
+            continue
+        if day < cutoff:
+            continue
+        try:
+            recent += sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+        except OSError:
+            continue
+    if recent < 5:
+        return None, f"{recent} misses in 14d < 5; silent"
+    return (
+        Cue(
+            key="intent_misses",
+            severity="soft",
+            command_path="protocols/intent-coverage.md",
+            message=(
+                f"过去 14 天有 {recent} 次 `/hi` 未命中确定路由. "
+                f"跑 `uv run scripts/intent_coverage.py intent-misses --propose` "
+                f"看候选 pattern, 采纳的加进 `harness/intents.local.toml`."
+            ),
+        ),
+        f"{recent} misses in 14d",
+    )
+
+
+def check_meta_reflection_due(ov: Path, today: date) -> tuple[Cue | None, str]:
+    """Every 5th session log in the trailing 30 days: meta-reflection is due.
+
+    The protocol said "after every 5th session" with no counter anywhere;
+    38 logs accumulated and zero meta-reflections ran.
+    """
+    sessions = ov / tier_segments().get("sessions", "sessions")
+    if not sessions.is_dir():
+        return None, "no session logs; skip"
+    cutoff = today - timedelta(days=30)
+    recent = 0
+    for path in sessions.rglob("*.md"):
+        try:
+            if date.fromisoformat(path.name[:10]) >= cutoff:
+                recent += 1
+        except ValueError:
+            continue
+    if recent == 0 or recent % 5 != 0:
+        return None, f"{recent} session logs in 30d; not a positive multiple of 5"
+    return (
+        Cue(
+            key="meta_reflection",
+            severity="soft",
+            command_path="protocols/meta-reflection.md",
+            message=(
+                f"最近 30 天已积累 {recent} 个 session logs. "
+                f"按协议该跑一次 meta-reflection 了 (`uv run scripts/session_stats.py` 先看数据). 现在跑吗?"
+            ),
+        ),
+        f"{recent} logs in 30d; multiple of 5",
+    )
+
+
 CHECKS = [
     ("weekly", check_weekly),
+    ("intent_misses", check_intent_misses),
+    ("meta_reflection", check_meta_reflection_due),
     ("zettelm", check_zettelm),
     ("recurring", check_recurring),
     ("aggregate_freshness", check_aggregate_freshness),

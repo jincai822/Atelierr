@@ -50,6 +50,7 @@ semantic.toml
 # Canonical names ship in harness/paths.toml; user overrides go here.
 # Loaded by scripts/_paths.py.
 harness/paths.local.toml
+harness/intents.local.toml
 
 # Per-user runtime preference. The committed default lives in
 # harness/runtimes.toml; this file can select Claude or Codex locally.

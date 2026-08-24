@@ -43,7 +43,11 @@ orchestrator could not classify the intent with high confidence. Three kinds:
 | `ambiguous` | 2+ non-fallback intents tied at the top priority; orchestrator used `AskUserQuestion` to disambiguate. |
 | `low_confidence` | A short generic substring matched inside a longer message whose primary intent looked different under `.claude/commands/hi.md` § Contextual routing. Orchestrator used `AskUserQuestion` to confirm. |
 
-The happy path (high-confidence single winner) is NOT logged. The log is a coverage feedback channel, not a session history.
+The happy path (high-confidence single winner) is logged separately and
+hashed: `$OV/_meta/intent_hits/YYYY-MM-DD.jsonl` records intent, matched
+pattern, and a sha256 of the normalized text (never the raw text), giving the
+miss log a denominator. The miss log itself stays the coverage feedback
+channel, not a session history.
 
 ## Where the log lives
 
@@ -171,5 +175,5 @@ The log accumulates indefinitely. There is no rotation / compaction policy yet �
 - `harness/intents.toml` — canonical intent registry; misses feed pattern additions here.
 - `.claude/commands/hi.md` § Contextual routing — heuristic for when to flag as `low_confidence`.
 - This protocol's producer section — exact `intent-log` command shape.
-- `scripts/intent_coverage.py` — `intent-log` and `intent-misses` subcommands; source of truth for the path and the distinct-days threshold.
+- `scripts/intent_coverage.py` — `intent-log` and `intent-misses` subcommands; source of truth for the path and the distinct-days threshold. `intent-misses --propose` renders candidate rows for the gitignored `harness/intents.local.toml` overlay (patterns merge into existing intents at load; the overlay cannot invent new intents). `cues.py check_intent_misses` surfaces 5+ misses in 14 days at session start, closing the loop that ran producer-only for three months.
 - `protocols/shadow-log.md` — sibling JSONL-append + report system. Different write target (canonical to `$OV/` here, redacted mirror skeleton there) but a useful precedent if this log ever grows multi-leg / verdict-aggregation needs.

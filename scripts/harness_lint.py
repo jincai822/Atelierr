@@ -2990,6 +2990,41 @@ def check_price_surfaces_agree() -> list[Finding]:
     return findings
 
 
+# Prose-budget ratchet. Baseline measured 2026-08-24. Raising these numbers is
+# allowed only in a commit whose message justifies the growth (subtract before
+# adding); the point is that growth becomes a decision, not a drift.
+PROSE_BUDGET_WARN = 556968
+PROSE_BUDGET_ERROR = 596164
+
+
+def check_prose_budget() -> list[Finding]:
+    """protocols/ + .claude/agents/ grew 2.3x in four months unnoticed."""
+    total = 0
+    for root in ("protocols", ".claude/agents"):
+        base = ROOT / root
+        if base.is_dir():
+            total += sum(p.stat().st_size for p in base.rglob("*.md"))
+    if total > PROSE_BUDGET_ERROR:
+        return [
+            Finding(
+                "ERROR",
+                "prose-budget",
+                "protocols/ + .claude/agents/",
+                f"{total} bytes exceeds the {PROSE_BUDGET_ERROR}-byte ceiling; subtract before adding",
+            )
+        ]
+    if total > PROSE_BUDGET_WARN:
+        return [
+            Finding(
+                "WARN",
+                "prose-budget",
+                "protocols/ + .claude/agents/",
+                f"{total} bytes exceeds the {PROSE_BUDGET_WARN}-byte budget; plan a pruning pass",
+            )
+        ]
+    return []
+
+
 def run_lints() -> list[Finding]:
     findings: list[Finding] = []
     findings.extend(check_root_files())
@@ -3033,6 +3068,7 @@ def run_lints() -> list[Finding]:
     findings.extend(check_shadow_group_start())
     findings.extend(check_flat_tier_globs())
     findings.extend(check_price_surfaces_agree())
+    findings.extend(check_prose_budget())
     findings.sort(key=lambda f: (SEVERITY_ORDER.get(f.severity, 99), f.code, f.where, f.message))
     return findings
 

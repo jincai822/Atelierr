@@ -34,6 +34,25 @@ INTENT_ROUTE_MAX_CONTEXT_BYTES = 1024
 
 
 def load_intents() -> dict[str, dict[str, Any]]:
+    intents = _load_intents_canonical()
+    overlay = ROOT / "harness" / "intents.local.toml"
+    if overlay.is_file():
+        try:
+            with overlay.open("rb") as handle:
+                local = tomllib.load(handle).get("intents", {})
+        except (OSError, tomllib.TOMLDecodeError):
+            return intents  # a broken overlay must never break routing
+        for name, row in local.items():
+            if not isinstance(row, dict) or name not in intents:
+                continue  # overlay extends existing intents; it cannot invent new ones
+            extra = [p for p in row.get("patterns", []) if isinstance(p, str)]
+            merged = list(intents[name].get("patterns", []))
+            merged.extend(p for p in extra if p not in merged)
+            intents[name]["patterns"] = merged
+    return intents
+
+
+def _load_intents_canonical() -> dict[str, dict[str, Any]]:
     intents = load_table(INTENTS_PATH, "intents")
     if not isinstance(intents, dict):
         raise SystemExit("atelier: harness/intents.toml has no [intents] table")
@@ -268,6 +287,36 @@ def cmd_intent(args: argparse.Namespace) -> int:
     return 0
 
 
+def resolve_intent_hit_dir() -> Path:
+    """Sibling of the miss log; single high-confidence routes, hashed."""
+    return resolve_intent_miss_dir().parent / "intent_hits"
+
+
+def write_intent_hit(runtime: str, match: dict[str, Any], text: str) -> None:
+    """One JSONL line per happy-path route: intent, pattern, sha256 of the
+    normalized text. No raw text: this is a denominator, not a history."""
+    import hashlib
+
+    try:
+        directory = resolve_intent_hit_dir()
+        directory.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(
+            {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "runtime": runtime,
+                "intent": match.get("name"),
+                "matched_pattern": match.get("matched_pattern"),
+                "text_sha256": hashlib.sha256(_normalize_phrase(text).encode("utf-8")).hexdigest(),
+            },
+            sort_keys=True,
+        )
+        path = directory / f"{date.today().isoformat()}.jsonl"
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        pass  # best-effort; never block a live invocation
+
+
 def resolve_intent_miss_dir() -> Path:
     """Where intent-miss JSONL files live.
 
@@ -455,6 +504,9 @@ def cmd_intent_hook(args: argparse.Namespace) -> int:
         if data.get("session_id"):
             payload["session_id"] = str(data["session_id"])
         write_intent_miss(payload)
+    if len(matches) == 1 and matches[0].get("matched_pattern") not in (None, "", "<fallback: no patterns matched>"):
+        write_intent_hit(args.runtime, matches[0], user_text)
+
     _emit_intent_route_projection(projection)
     return 0
 
@@ -553,6 +605,8 @@ def cmd_intent_misses(args: argparse.Namespace) -> int:
         entry["count"] += 1
         entry["kinds"].add(kind)
         entry["days"].add(file_date.isoformat())
+        if isinstance(ev.get("clarified_to"), str) and ev["clarified_to"]:
+            entry["clarified"] = ev["clarified_to"]
         ts = ev.get("timestamp")
         if isinstance(ts, str):
             if entry["first_seen"] is None or ts < entry["first_seen"]:
@@ -626,6 +680,19 @@ def cmd_intent_misses(args: argparse.Namespace) -> int:
             f"{INTENT_MISS_DISTINCT_DAYS_THRESHOLD}+ distinct days."
         )
         print("Consider adding a trigger to harness/intents.toml for these.")
+    if getattr(args, "propose", False):
+        print()
+        if repeaters:
+            print("# --- proposed overlay rows for harness/intents.local.toml (review before adopting) ---")
+            for phrase, pc in repeaters:
+                target = pc.get("clarified") or "<intent-name>"
+                safe = phrase.replace("\\", "\\\\").replace('"', '\\"')
+                print(f"# seen {len(pc['days'])} distinct days, {pc['count']} events; clarified_to={pc.get('clarified')}")
+                print(f"[intents.{target}]")
+                print(f'patterns = ["{safe}"]')
+                print()
+        else:
+            print("# no phrases cleared the distinct-days threshold; nothing to propose")
     return 0
 
 
@@ -769,6 +836,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Top-N distinct phrases to display (default 20).",
     )
     intent_misses.add_argument("--json", action="store_true", help="Emit JSON.")
+    intent_misses.add_argument("--propose", action="store_true", help="Emit candidate overlay rows for harness/intents.local.toml")
     intent_misses.set_defaults(func=cmd_intent_misses)
 
     intent_hook = sub.add_parser(
