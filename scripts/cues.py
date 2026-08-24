@@ -1615,6 +1615,44 @@ def check_career_growth(ov: Path, today: date) -> tuple[Cue | None, str]:
 # Registry. To add a new cue, append a `check_*` function above and
 # register it here.
 
+
+def check_eval_regression(ov: Path, today: date) -> tuple[Cue | None, str]:
+    """Compare the two most recent eval snapshots; cue on a routing drop.
+
+    The eval harness exists so evolution is measured; a snapshot that scores
+    below its predecessor must reach the user, not sit in a directory.
+    """
+    evals_dir = _meta_dir(ov) / "evals"
+    if not evals_dir.is_dir():
+        return None, "no evals recorded; skip"
+    snapshots = sorted(evals_dir.glob("*.json"))[-2:]
+    if len(snapshots) < 2:
+        return None, f"{len(snapshots)} snapshot(s); need 2 to compare"
+    try:
+        prev, curr = (json.loads(p.read_text(encoding="utf-8")) for p in snapshots)
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, f"snapshot unreadable: {exc!r}"
+    p_score = prev.get("routing", {}).get("score")
+    c_score = curr.get("routing", {}).get("score")
+    if not isinstance(p_score, (int, float)) or not isinstance(c_score, (int, float)):
+        return None, "no comparable routing scores"
+    if c_score >= p_score:
+        return None, f"routing {p_score} -> {c_score}; no regression"
+    return (
+        Cue(
+            key="eval_regression",
+            severity="hard",
+            command_path="scripts/eval_run.py",
+            message=(
+                f"Eval regression: routing {p_score:.0%} -> {c_score:.0%} "
+                f"({snapshots[0].name} -> {snapshots[1].name}). "
+                f"看 `{snapshots[1].name}` 里的 misses, 修复或有意接受后重跑 eval."
+            ),
+        ),
+        f"routing {p_score} -> {c_score}",
+    )
+
+
 def check_intent_misses(ov: Path, today: date) -> tuple[Cue | None, str]:
     """Router coverage feedback: recurring fallback phrases deserve a pattern.
 
@@ -1690,6 +1728,7 @@ def check_meta_reflection_due(ov: Path, today: date) -> tuple[Cue | None, str]:
 CHECKS = [
     ("weekly", check_weekly),
     ("intent_misses", check_intent_misses),
+    ("eval_regression", check_eval_regression),
     ("meta_reflection", check_meta_reflection_due),
     ("zettelm", check_zettelm),
     ("recurring", check_recurring),

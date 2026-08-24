@@ -1,0 +1,30 @@
+{
+  "description": "Deterministic routing eval: generic inputs only (no private phrases). Expected = intent name the substring matcher must pick, or 'general' for the semantic-handoff fallback. Shared by tests/test_intent_routing.py and scripts/eval_run.py.",
+  "cases": [
+    {"input": "记一下 今天把周报写完了", "expected": "capture"},
+    {"input": "log this: finished the draft", "expected": "capture"},
+    {"input": "read this https://example.com/some-article", "expected": "reading"},
+    {"input": "let's read [[Some Note Title]]", "expected": "reading"},
+    {"input": "discuss this article with me", "expected": "reading"},
+    {"input": "weekly review time", "expected": "weekly"},
+    {"input": "怎么安排 past week 的复盘", "expected": "weekly"},
+    {"input": "I'm so drained after this launch", "expected": "energy-audit"},
+    {"input": "review my goals for the quarter", "expected": "review"},
+    {"input": "should I take the offer or stay", "expected": "decision"},
+    {"input": "help me decide between two frameworks", "expected": "decision"},
+    {"input": "explore what am I missing lately", "expected": "explore"},
+    {"input": "triage inbox please", "expected": "curate"},
+    {"input": "browse saves from readwise", "expected": "curate"},
+    {"input": "promote this to wiki", "expected": "promote"},
+    {"input": "run lint on the wiki", "expected": "lint"},
+    {"input": "rebuild profile from my notes", "expected": "introspect"},
+    {"input": "每日复盘 走起", "expected": "reflection"},
+    {"input": "process this meeting transcript", "expected": "meeting"},
+    {"input": "digest zettelm inbox", "expected": "sync"},
+    {"input": "scan for decay in my wip", "expected": "forget"},
+    {"input": "earnings report for the quarter dropped", "expected": "finance-analysis"},
+    {"input": "watch this podcast episode with me", "expected": "talk"},
+    {"input": "tell me something interesting about typography", "expected": "general"},
+    {"input": "帮我查一下这个概念", "expected": "general"}
+  ]
+}

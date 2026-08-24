@@ -126,6 +126,20 @@ If the direct-api leg soft-skips (exit 2 - api_env unset), note "direct-api leg 
 
 Cross-provider rationale: two instances of the same model from the same provider have correlated failure modes (training lineage, tokenizer, corpus). The privacy-reviewer's two voices share none of those. Disagreement here is more likely to surface a real leak than two same-model samples would.
 
+### 1d. Eval snapshot (non-blocking)
+
+When the bundle touches `.claude/agents/`, `protocols/`, or
+`harness/intents.toml`, record an eval snapshot before dispatching reviewers
+so the synthesis can compare against the previous one:
+
+```bash
+uv run scripts/eval_run.py --no-semantic
+```
+
+Carry the routing score (and any misses) into the synthesis. A drop is a
+finding for the reviewers, not an automatic abort; the `eval_regression`
+session cue independently escalates drops that reach the vault.
+
 ### 2. Dispatch in parallel (one message, multiple tool calls)
 
 Send a **single** assistant message containing both tool calls:
