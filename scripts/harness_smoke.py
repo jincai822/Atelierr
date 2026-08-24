@@ -4536,6 +4536,8 @@ def check_public_regression_tests() -> None:
             "tests.test_intent_routing",
             "tests.test_intent_overlay",
             "tests.test_session_stats",
+            "tests.test_decay_scan",
+            "tests.test_dine_rank",
         ],
         cwd=ROOT,
         capture_output=True,

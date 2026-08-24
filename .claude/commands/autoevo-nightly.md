@@ -397,6 +397,11 @@ If any gate trips, write the audit log section "Skipped (reason: <gate>)" per st
 
 ## Step 2: Forgetter sweep + persist reports
 
+Optional accelerator: `uv run scripts/decay_scan.py --redundant --scope <tier>`
+precomputes the low-signal and redundant bands deterministically; pass its
+JSON to the Forgetter dispatch as pre-scanned candidates so the agent spends
+its turns on verification and the judgment-only bands.
+
 For each working-tier scope, dispatch Forgetter **synchronous, sequential** (the orchestrator awaits each Agent call before issuing the next). Sequential is mandatory: it (a) avoids subagent-runtime turn-cap contention, (b) keeps audit-log coverage and Notes entries in scope-order, (c) preserves per-dispatch determinism for the cluster_hash machinery downstream. The orchestrator pre-resolves placeholder paths to absolute paths before dispatch so Forgetter does not spend budget re-resolving the path registry.
 
 ### 2.0 Choose dispatch scopes (rotation for the large tier)

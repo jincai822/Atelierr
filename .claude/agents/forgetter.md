@@ -106,6 +106,11 @@ This is the only category where Forgetter touches L4. Even here, the proposed ac
 
 ### 4. Low-signal
 
+**Deterministic pre-pass:** `uv run scripts/decay_scan.py` computes this band
+(and, with `--redundant`, the retrieval-overlap band) without a model; when a
+scan result is supplied in your dispatch prompt, verify a sample instead of
+recomputing every candidate.
+
 **Heuristic — ALL FIVE conditions must hold:**
 
 | Condition | Check |
