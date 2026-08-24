@@ -153,7 +153,7 @@ Snapshot creation remains mandatory in auto-apply mode — Curator refuses with 
 
 ## Contract: Orchestrator → Challenger (Probe Contradiction)
 
-Used by `/autoevo-nightly` step 3d to filter rhetorical contradictions from genuine ones before queueing wiki rewrites for human review. Read-only by contract; Challenger does not write any file.
+Used by `/autoevo-nightly` step 3 to filter rhetorical contradictions from genuine ones before queueing wiki rewrites for human review. Read-only by contract; Challenger does not write any file.
 
 Dispatch prompt MUST include:
 - `task`: `probe-contradiction`

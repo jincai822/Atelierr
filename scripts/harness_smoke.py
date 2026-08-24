@@ -2356,7 +2356,12 @@ def check_codex_routine_runner() -> None:
         "DECAY_REPORT_RELS=()",
         'FINAL_COMMIT_PATHS=("$AUDIT_REL")',
         '--force-add _meta/autoevo_quarantine.toml',
-        "scripts/autoevo_quarantine.py active-scopes",
+        "scripts/autoevo_run.py plan",
+        "scripts/autoevo_run.py outcome",
+        "scripts/autoevo_run.py tombstone-check",
+        "scripts/autoevo_run.py snapshot",
+        "scripts/autoevo_run.py stage-merge",
+        "scripts/autoevo_run.py rollback",
         "scripts/autoevo_quarantine.py update",
         "scripts/autoevo_quarantine.py insert-skipped",
         "### Sweep reports (<S>)",
@@ -2364,6 +2369,12 @@ def check_codex_routine_runner() -> None:
         expect(
             fragment in autoevo,
             f"autoevo command cannot persist verifier-required evidence: {fragment}",
+        )
+    run_helper = (ROOT / "scripts" / "autoevo_run.py").read_text(encoding="utf-8")
+    for fragment in ("active_scopes(", "cluster_hash(", "autoevo_scope_prefixes"):
+        expect(
+            fragment in run_helper,
+            f"autoevo_run.py lost its single-owner delegation: {fragment}",
         )
     expect(
         "| 2: Per-step budget | demote dispatch | Notes (`forgetter_partial: ...`) |"
@@ -4533,6 +4544,7 @@ def check_public_regression_tests() -> None:
             "tests.test_session_replay_default",
             "tests.test_render_edges",
             "tests.test_autoevo_commit",
+            "tests.test_autoevo_run",
             "tests.test_intent_routing",
             "tests.test_intent_overlay",
             "tests.test_session_stats",
