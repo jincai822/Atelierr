@@ -3025,10 +3025,11 @@ def check_prose_budget() -> list[Finding]:
     return []
 
 
-# Nightly hot-path files are re-read by a model on every scheduled run, so
-# their bytes bill nightly. Ceilings hold the 2026-08 compression wins;
+# Hot-path files are re-read on every scheduled run (nightly trio) or on
+# every harness edit (evolution.md), so their bytes bill recurrently. Ceilings hold the 2026-08 compression wins;
 # raising one requires subtracting elsewhere on the same hot path.
 HOT_PATH_CEILINGS = {
+    "protocols/evolution.md": 4096,
     ".claude/commands/autoevo-nightly.md": 24576,
     ".claude/agents/forgetter.md": 15360,
     ".claude/agents/curator.md": 20480,

@@ -108,20 +108,21 @@ CLAUDE.md is the costliest file: loaded into every conversation and every subage
 
 ## Evolution Principles
 
+The root principles binding every harness editor are canonical in
+`protocols/evolution.md` (cost = bytes × load frequency; cut by provenance;
+layering + single source; subtract before adding — including the pruning
+trigger when protocol count outpaces trailing-30d session logs; every fix
+ships a guard + ledger row; evidence over intuition). Do not restate them
+here. Evolver-specific working rules:
+
 1. Small frequent changes > big rewrites. One targeted edit per issue.
-2. Evidence over intuition. Change because something didn't work, not because it could be "better."
-3. Don't break what works. Read the current version before editing. Preserve what's effective.
-4. Compound improvements. Each change should make the next session slightly better.
-5. Self-discipline propagation. When adding a new rule, ensure agents can enforce it, not just know about it.
-6. User is final judge. Propose significant changes, don't silently deploy.
-7. No personal details in tracked files. Examples in commands, protocols, and agent definitions must be generic. Rich personal examples go in `profile/examples.md` (gitignored).
-8. Subtract before adding. The system's default failure mode is monotonic growth. Before adding any rule: (a) is this already covered by an agent definition, command file, or protocol? (b) can an existing rule be generalized to cover this case? (c) will removing something else make this addition unnecessary? Pruning trigger: if the protocol count exceeds 1.5x the session-log count from the trailing 30 days (`uv run scripts/session_stats.py --json` reports it), or `harness_lint` fires `prose-budget`, the Evolver's first action must be a pruning review, not new work, because complexity that outpaces usage is dead weight.
-9. CLAUDE.md is recurring context. Rules belong in the most specific location:
-agent-specific rules in agent definitions, command-specific rules in command
-files, and domain knowledge in protocols. CLAUDE.md holds only universal rules
-and stays within the root-instruction budget enforced by harness lint.
-10. Position over formatting. Put critical rules at the top of files (primacy effect) and explain why they matter. Bold and ALL CAPS have no semantic weight for the model; they add tokens without improving instruction adherence. Use clear natural language and headers for structure.
-11. Explain why, not just what. Claude generalizes from reasoning better than from imperatives. "Don't write to daily notes because they are the user's capture stream" is more durable than "NEVER write to daily notes."
+2. Don't break what works. Read the current version before editing. Preserve what's effective.
+3. Compound improvements. Each change should make the next session slightly better.
+4. Self-discipline propagation. When adding a new rule, ensure agents can enforce it, not just know about it.
+5. User is final judge. Propose significant changes, don't silently deploy.
+6. No personal details in tracked files. Examples in commands, protocols, and agent definitions must be generic. Rich personal examples go in `profile/examples.md` (gitignored).
+7. Position over formatting. Put critical rules at the top of files (primacy effect) and explain why they matter. Bold and ALL CAPS have no semantic weight for the model; they add tokens without improving instruction adherence.
+8. Explain why, not just what. Claude generalizes from reasoning better than from imperatives. "Don't write to daily notes because they are the user's capture stream" is more durable than "NEVER write to daily notes."
 
 ## Output Format
 

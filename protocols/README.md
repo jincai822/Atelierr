@@ -8,7 +8,7 @@ Entry point for all agents. When you need to know how to behave, start here.
 - **During session.** `quality-gates.md` (checkpoints) → `agent-handoff.md` (envelope format) → `error-handling.md` (escalation). For configured earnings and market-signal work, use `analysis-signals.md` before retrieval.
 - **Producing output.** `session-scoring.md` (rubric) → `pattern-library.md` (recurring patterns).
 - **After session.** `meta-reflection.md` (system health) → `session-log.md` (process log).
-- **System evolution.** `harness-assumptions.md` (stale model-era assumptions) → `antipatterns.md` (named failure modes for Tier 2+ review) → `repo-conventions.md` ($OV layout, tooling, push policy).
+- **System evolution.** `evolution.md` (root principles every harness editor passes) → `harness-assumptions.md` (stale model-era assumptions) → `antipatterns.md` (named failure modes for Tier 2+ review) → `repo-conventions.md` ($OV layout, tooling, push policy).
 - **Cross-runtime / narrative.** `runtime-adapters.md` (Claude Code + Codex parity) → `atelier.md` (vocabulary register + cercle archetype map) → `semantic-vocabulary.md` (agent-meaningful tags).
 
 ## By Agent

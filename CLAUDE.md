@@ -61,4 +61,5 @@ paths live in `harness/intents.toml`; roles live in `harness/agents.toml` and
 
 Claude Code uses `.claude/`; Codex uses `AGENTS.md`, `.agents/skills/`, and
 `.codex/`. Shared behavior stays provider-neutral. Portability details are
-on-demand in `protocols/runtime-adapters.md`.
+on-demand in `protocols/runtime-adapters.md`. Harness changes pass the root
+principles in `protocols/evolution.md` before editing.
