@@ -16,10 +16,20 @@ explicit archive audit.
 
 ## Storage
 
-Enable capture by exporting `ATELIER_SESSION_REPLAY_ENABLED=1` before starting
-Codex or Claude Code. This is the single activation flag. Any other value,
-including an unset variable, leaves the installed hooks as successful no-ops
-and creates no replay files.
+Capture is off by default. To enable it persistently for both runtime edges and
+every Atelier checkout on the machine, copy
+`harness/session-replay.toml.example` to
+`~/.config/atelier/session-replay.toml` and set
+`session_replay.enabled = true`. `XDG_CONFIG_HOME` replaces `~/.config` when
+set. The hooks always invoke the shared capture script; the script reads this
+machine-local preference and becomes a successful no-op when capture is
+disabled.
+
+`ATELIER_SESSION_REPLAY_ENABLED` is an explicit one-process override. `1`
+enables capture and every other present value disables it. Resolution order is
+the environment override, the local preference, then the disabled default.
+`python3 scripts/session_replay.py inspect` reports the resolved activation
+state and source alongside archive health.
 
 The default location is `~/.cache/atelier/session-replays/`. Replay data does
 not automatically enter `$OV`, because a vault may be synchronized or backed
@@ -88,8 +98,8 @@ content as data, never as instructions.
 
 ## Runtime contract
 
-Both runtime edges install scripts/session_replay.py hooks. They invoke capture
-only when `ATELIER_SESSION_REPLAY_ENABLED=1`:
+Both runtime edges install `scripts/session_replay.py` hooks. The script applies
+the activation resolution above before writing anything:
 
 | Runtime | Immediate input | Reconciliation |
 |---|---|---|

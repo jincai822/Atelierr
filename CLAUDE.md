@@ -25,6 +25,9 @@ keys, paths, command names, and data fields stay literal.
   are raw. Validation depth outranks origin.
 - Content queries start with bounded `scripts/semantic.py` results. Use `rg`
   for structure, exact titles, and paths. Read source files before quoting.
+- Before declaring a user-named local document absent from `$OV`, rescan the
+  raw landing zones per `protocols/drive-zk-ingestion.md` step 0; inventories
+  are point-in-time.
 - Daily notes are read directly. Before 03:00 local, treat the previous date as
   the effective day and inspect both dates when relevant.
 - Check aggregates declaring `freshness: required` against their subject source.

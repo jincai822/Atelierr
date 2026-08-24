@@ -18,7 +18,8 @@ agents, or harness portability.
 4. Read the command skill's declared `.claude/commands/<command>.md` source
    directly and execute it in the current thread.
    For `$hi`, use the injected route packet and read only its registry-owned
-   `procedure`; load the full intent table only on packet fallback.
+   `procedure`; load the full intent table only on packet fallback. A fallback
+   is a semantic handoff through `intents.general`, never implicit reflection.
 5. Do not launch Codex recursively.
 6. Discover native roles under `.codex/agents/` and inspect them with `/agent`.
 7. Load only the selected `.claude/commands/<command>.md` spec and any directly

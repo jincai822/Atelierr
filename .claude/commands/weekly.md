@@ -67,7 +67,7 @@ Daily `/hi` may not run every day. Detect missing days from the past 7 by checki
 
 ```
 # macOS/BSD date syntax; Linux: replace `date -v-${d}d +%Y-%m-%d` with `date -d "${d} days ago" +%Y-%m-%d`
-Bash: for d in $(seq 0 6); do date_str=$(date -v-${d}d +%Y-%m-%d); ls "$OV"/reflections/${date_str}-reflection*.md 2>/dev/null > /dev/null || echo "missing: $date_str"; done
+Bash: for d in $(seq 0 6); do date_str=$(date -v-${d}d +%Y-%m-%d); find "$OV/reflections" -name "${date_str}-reflection*.md" 2>/dev/null | grep -q . || echo "missing: $date_str"; done
 ```
 
 Check whether daily notes exist for reflection-missing days. Read a note only
@@ -186,6 +186,7 @@ Based on the review:
 - Time well spent: [activities]
 - Time wasted: [activities]
 - Pareto insight: [the 20% that mattered]
+
 
 ## Next Week
 - Continue: [what's working]

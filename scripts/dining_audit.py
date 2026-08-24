@@ -41,7 +41,7 @@ EXPECTED_COLUMNS = (
 )
 UNKNOWN = {"", "—", "-"}
 DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
-MONEY_RE = re.compile(r"^(~)?\$([0-9]+(?:\.[0-9]{1,2})?)$")
+MONEY_RE = re.compile(r"^(~)?([$¥])([0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)$")
 PROFILE_ROLE_RE = re.compile(r"^[A-Za-z][A-Za-z -]+$")
 LINK_RE = re.compile(r"\[[^\]]+\]\((?:<([^>]+)>|([^)]+))\)")
 PENDING_MARKERS = ("待确认", "TBD", "UNKNOWN")
@@ -221,14 +221,18 @@ def _health_vocabulary(profile_path: Path) -> set[str]:
     }
 
 
-def _parse_money(value: str) -> tuple[Decimal | None, bool]:
+def _parse_money(value: str) -> tuple[Decimal | None, bool, str | None]:
     if value in UNKNOWN:
-        return None, False
+        return None, False, None
     match = MONEY_RE.fullmatch(value)
     if not match:
         raise ValueError(value)
     try:
-        return Decimal(match.group(2)), bool(match.group(1))
+        return (
+            Decimal(match.group(3).replace(",", "")),
+            bool(match.group(1)),
+            match.group(2),
+        )
     except InvalidOperation as exc:
         raise ValueError(value) from exc
 
@@ -469,33 +473,36 @@ def _audit_meal_history(
             )
             party = None
         try:
-            total, total_approximate = _parse_money(row["总额"])
+            total, total_approximate, total_currency = _parse_money(row["总额"])
         except ValueError:
             findings.append(
                 Finding(
                     "error",
                     "total_invalid",
                     display,
-                    f"total must be $N, ~$N, or dash: {row['总额']!r}",
+                    f"total must be $N, ~$N, ¥N, ~¥N, or dash: {row['总额']!r}",
                     line_number,
                 )
             )
-            total, total_approximate = None, False
+            total, total_approximate, total_currency = None, False, None
         try:
-            per_person, per_person_approximate = _parse_money(row["人均"])
+            per_person, per_person_approximate, per_person_currency = _parse_money(
+                row["人均"]
+            )
         except ValueError:
             findings.append(
                 Finding(
                     "error",
                     "per_person_invalid",
                     display,
-                    f"per-person must be $N, ~$N, or dash: {row['人均']!r}",
+                    f"per-person must be $N, ~$N, ¥N, ~¥N, or dash: {row['人均']!r}",
                     line_number,
                 )
             )
-            per_person, per_person_approximate = None, False
+            per_person, per_person_approximate, per_person_currency = None, False, None
 
         if party is not None and total is not None:
+            currency = total_currency or "$"
             expected = (total / Decimal(party)).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
@@ -505,7 +512,17 @@ def _audit_meal_history(
                         "error",
                         "per_person_missing",
                         display,
-                        f"party and total imply a per-person value of ${expected}",
+                        f"party and total imply a per-person value of {currency}{expected}",
+                        line_number,
+                    )
+                )
+            elif per_person_currency != total_currency:
+                findings.append(
+                    Finding(
+                        "error",
+                        "currency_mismatch",
+                        display,
+                        "total and per-person values use different currencies",
                         line_number,
                     )
                 )
@@ -515,7 +532,8 @@ def _audit_meal_history(
                         "error",
                         "per_person_mismatch",
                         display,
-                        f"stored ${per_person} does not match ${total} / {party} = ${expected}",
+                        f"stored {currency}{per_person} does not match "
+                        f"{currency}{total} / {party} = {currency}{expected}",
                         line_number,
                     )
                 )
@@ -644,10 +662,10 @@ def _recent_meals(
             }
         )
         try:
-            per_person, _ = _parse_money(row["人均"])
+            per_person, _, currency = _parse_money(row["人均"])
         except ValueError:
-            per_person = None
-        if per_person is not None:
+            per_person, currency = None, None
+        if per_person is not None and currency == "$":
             sourced.append((event_date, per_person))
 
     trend: dict[str, Any] = {

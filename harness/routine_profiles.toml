@@ -67,7 +67,7 @@ atelier_access = "read"
 web_search = "disabled"
 shell_network = "disabled"
 user_config = "required"
-timeout_seconds = 1200
+timeout_seconds = 3600
 reasoning_effort = "low"
 permissions = [
   "atelier:read",

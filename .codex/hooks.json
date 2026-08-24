@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"${ATELIER_SESSION_REPLAY_ENABLED:-0}\" = \"1\" ] && uv run \"$(git rev-parse --show-toplevel)/scripts/session_replay.py\" hook --runtime codex || true",
+            "command": "[ -f \"${XDG_CONFIG_HOME:-$HOME/.config}/atelier/session-replay.toml\" ] || [ -n \"$ATELIER_SESSION_REPLAY_ENABLED\" ] && uv run \"$(git rev-parse --show-toplevel)/scripts/session_replay.py\" hook --runtime codex || true",
             "timeout": 10
           },
           {
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"${ATELIER_SESSION_REPLAY_ENABLED:-0}\" = \"1\" ] && uv run \"$(git rev-parse --show-toplevel)/scripts/session_replay.py\" hook --runtime codex || true",
+            "command": "[ -f \"${XDG_CONFIG_HOME:-$HOME/.config}/atelier/session-replay.toml\" ] || [ -n \"$ATELIER_SESSION_REPLAY_ENABLED\" ] && uv run \"$(git rev-parse --show-toplevel)/scripts/session_replay.py\" hook --runtime codex || true",
             "timeout": 10
           },
           {

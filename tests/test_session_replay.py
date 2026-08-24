@@ -39,7 +39,7 @@ class SessionReplayTests(unittest.TestCase):
         if enabled:
             env[session_replay.ENABLED_ENV] = "1"
         else:
-            env.pop(session_replay.ENABLED_ENV, None)
+            env[session_replay.ENABLED_ENV] = "0"
         if extra_env:
             env.update(extra_env)
         return subprocess.run(
@@ -184,7 +184,7 @@ class SessionReplayTests(unittest.TestCase):
                 "hash_metadata_missing",
             )
 
-    def test_hook_is_a_noop_by_default(self) -> None:
+    def test_explicit_disable_is_a_noop(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             home = root / "home"
@@ -201,6 +201,27 @@ class SessionReplayTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse((vault / "_meta" / "session-replays").exists())
+
+    def test_local_preference_enables_capture_and_environment_overrides_it(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            local_config = Path(temp_dir) / "session-replay.local.toml"
+            local_config.write_text(
+                "[session_replay]\nenabled = true\n", encoding="utf-8"
+            )
+            with (
+                patch.object(session_replay, "LOCAL_CONFIG_PATH", local_config),
+                patch.dict(os.environ, {}, clear=True),
+            ):
+                self.assertEqual(
+                    session_replay.replay_activation(), (True, "local-config")
+                )
+                os.environ[session_replay.ENABLED_ENV] = "0"
+                self.assertEqual(
+                    session_replay.replay_activation(),
+                    (False, f"environment:{session_replay.ENABLED_ENV}"),
+                )
 
     def test_prompt_only_crash_does_not_override_later_transcript_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

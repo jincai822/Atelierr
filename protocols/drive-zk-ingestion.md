@@ -83,6 +83,12 @@ Anything more specific (per-document subfolder conventions, archival rules, docu
 
 For each ingestion task (one domain or one batch):
 
+0. **Rescan the landing zone before concluding that a file is absent.** Source
+   inventories are point-in-time. If the user downloads or exports a file
+   during the active session, discard an earlier negative scan and survey
+   Downloads / Drive again after the next user message. A request to import a
+   named landing-zone file authorizes the in-scope move and digest; it does not
+   authorize unrelated Downloads cleanup.
 1. **Survey** the source folder. Inventory: what's there, natural groupings (per-event subfolders, loose files, photos).
 2. **Tidy at source** if needed. Group orphaned loose files into appropriate subfolders before mv. (Easier to fix structure at source than after relocation.)
 3. **Mkdir destination** `"$OV"/<domain>/raw/` if not exists. Preserve source subfolder structure verbatim where it makes sense.

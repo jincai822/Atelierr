@@ -39,7 +39,7 @@ orchestrator could not classify the intent with high confidence. Three kinds:
 
 | Kind | Trigger |
 |---|---|
-| `fallback` | No `patterns` matched; `intents.reflection` (priority 0, empty patterns) won by default. |
+| `fallback` | No `patterns` matched; `intents.general` (priority 0, empty patterns) handed the request to semantic routing. |
 | `ambiguous` | 2+ non-fallback intents tied at the top priority; orchestrator used `AskUserQuestion` to disambiguate. |
 | `low_confidence` | A short generic substring matched inside a longer message whose primary intent looked different under `.claude/commands/hi.md` § Contextual routing. Orchestrator used `AskUserQuestion` to confirm. |
 
@@ -60,7 +60,7 @@ Schema:
   "raw_input": "improve the repo, so when I use /hi ...",
   "match_kind": "fallback",
   "initial_match": {
-    "name": "reflection",
+    "name": "general",
     "priority": 0,
     "matched_pattern": "<fallback: no patterns matched>"
   },
@@ -158,7 +158,7 @@ Three outcomes per recurring phrase:
 
 1. **Add a pattern to an existing intent.** The user's phrasing is a synonym for an intent that already exists, just not enumerated. Edit the matching `patterns = [...]` list in `harness/intents.toml`. Cheap, low-risk; the substring matcher handles it immediately.
 2. **Add a new intent.** The phrase describes a workflow `hi` doesn't model yet (e.g., a recurring engineering directive pattern). Decide whether Claude `/hi` and Codex `$hi` are the right surfaces, or whether the workflow belongs as a direct registered command with both native edges, or as a semantic Claude entry hint in `.claude/skills/`.
-3. **Confirm it stays a miss.** Some misses are correct. Claude `/hi` and Codex `$hi` are reflection entry points, and an engineering directive typed into either may genuinely be out of scope. Reflection-as-fallback is the safe degradation. Document the call by leaving the entry in the log; the recurring count itself is the audit trail.
+3. **Confirm it stays a miss.** Some misses are correct. One-off app, tool, or engineering requests should use the general semantic handoff rather than grow the deterministic registry. Document the call by leaving the entry in the log; the recurring count itself is the audit trail.
 
 Do NOT add patterns that would steal from another intent's substring space. The TOML header has cautionary notes (`"read"` would snag `"curate readwise"`, etc.); the lesson generalizes — prefer phrase-shaped patterns (`"improve the repo"`) over single-token patterns (`"improve"`).
 

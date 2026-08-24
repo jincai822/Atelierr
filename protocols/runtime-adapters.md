@@ -59,9 +59,10 @@ the replay prompt, refreshes the session lock, and runs
 `scripts/intent_coverage.py intent-hook --runtime codex`; `Stop` optionally
 reconciles the replay snapshot and runs shared shadow-log cleanup. Claude Code
 keeps the corresponding behavior in `.claude/settings.json`, using both `Stop`
-and `SessionEnd` for optional replay reconciliation. Replay hooks are disabled
-unless `ATELIER_SESSION_REPLAY_ENABLED=1`; both edges otherwise call shared
-scripts rather than duplicating hook logic.
+and `SessionEnd` for optional replay reconciliation. Replay capture is disabled
+by default. Both edges always call the shared script, which resolves the
+machine-local Atelier preference and optional process override. The canonical
+activation contract is in `protocols/session-replay.md`.
 
 ## Runtime Selection
 
@@ -87,12 +88,13 @@ tested at that runtime edge.
 
 ## Session replay
 
-When `ATELIER_SESSION_REPLAY_ENABLED=1`, both runtime edges capture each user
-input before routing and reconcile a private native-transcript snapshot after
-work stops. Capture is off by default. The shared contract, storage boundary,
-privacy guard, and recovery procedure are in protocols/session-replay.md. This
-archive is operational evidence for deferred bot-only re-analysis, never
-ambient model context or a replacement for user-facing reflections.
+When replay is enabled through the machine-local preference or process
+override, both runtime edges capture each user input before routing and
+reconcile a private native-transcript snapshot after work stops. Capture is off
+by default. The shared contract, storage boundary, privacy guard, and recovery
+procedure are in `protocols/session-replay.md`. This archive is operational
+evidence for deferred bot-only re-analysis, never ambient model context or a
+replacement for user-facing reflections.
 
 ## Provider-Neutral Rules
 

@@ -154,7 +154,21 @@ A lightweight check-in on the user's interpersonal interactions and support syst
 
 Keep this step under 2 minutes of conversation time. The value is in the longitudinal record, not the daily depth.
 
-### 6. Dining Pulse (brief, every session)
+### 6. Nutrition Review and Dining Pulse (brief, every session)
+
+#### Daily nutrition review
+
+Review the day's reported food using `profile/diet.md § Daily recap nutrition
+review`. Use the daily note and session context first. If meal details are absent,
+ask once: "今天三餐、零食和饮料大致吃了什么?" Do not infer missing meals.
+
+Return a brief `on track` / `mixed` / `heavy` verdict, the observed health flags,
+the rolling 7-day high-load gathering count when known, and exactly one practical
+adjustment for tomorrow. A restaurant meal whose observed flags are all ones that
+`profile/diet.md` says do not count toward the high-load limit is not a high-load gathering. Never recommend fasting, skipping meals,
+or punitive exercise as compensation.
+
+#### Dining Pulse
 
 Lightweight capture of dining experiences for personal preference learning + future `/dine` recommendations. Skip silently if user has nothing to share.
 
@@ -255,6 +269,12 @@ After the interactive session, write a reflection file:
 - Concentration flag: [any person carrying 3+ support types?]
 - New connection this week: yes / no
 - Observation: [one-line pattern note for longitudinal tracking]
+
+## Nutrition
+- Verdict: on track / mixed / heavy
+- Observed flags: [flags from profile/diet.md, or unobserved]
+- Rolling 7-day high-load gatherings: [N, or unknown]
+- Tomorrow's adjustment: [exactly one practical action]
 
 ## Dining
 | Restaurant | Score (/10) | 再去 | 健康 flags | 人数 | 总额 | 人均 | 必点·备注 |

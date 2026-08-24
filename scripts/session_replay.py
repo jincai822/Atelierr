@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Capture private, replayable snapshots of native Codex and Claude sessions.
 
-Installed hooks invoke this script on every user prompt and completed turn, but
-capture is disabled unless `ATELIER_SESSION_REPLAY_ENABLED=1`. When enabled,
-the prompt event is written immediately and completed-turn hooks copy the
-current native transcript atomically. Native formats are preserved rather than
-parsed because their schemas are runtime implementation details that may
-change.
+Installed hooks invoke this script on every user prompt and completed turn.
+Capture is disabled by default, enabled persistently through the machine-local
+preference, and overridable for one process through
+`ATELIER_SESSION_REPLAY_ENABLED`. When enabled, the prompt event is written
+immediately and completed-turn hooks copy the current native transcript
+atomically. Native formats are preserved rather than parsed because their
+schemas are runtime implementation details that may change.
 
 All output is private runtime data under a machine-local cache by default (or
 the path configured by `ATELIER_SESSION_REPLAY_ROOT`). It is intentionally
@@ -22,6 +23,7 @@ import os
 import re
 import sys
 import tempfile
+import tomllib
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +41,11 @@ CHUNK_BYTES = 64 * 1024
 SESSION_ID_MAX = 200
 ARCHIVE_ROOT_ENV = "ATELIER_SESSION_REPLAY_ROOT"
 ENABLED_ENV = "ATELIER_SESSION_REPLAY_ENABLED"
+LOCAL_CONFIG_PATH = (
+    Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config").expanduser()
+    / "atelier"
+    / "session-replay.toml"
+)
 
 # These patterns are intentionally conservative. A sensitive transcript is
 # excluded from the archive rather than traded for replay coverage.
@@ -70,8 +77,31 @@ def now_local() -> datetime:
     return datetime.now().astimezone()
 
 
+def replay_activation() -> tuple[bool, str]:
+    """Resolve capture activation with an explicit environment override."""
+    environment_value = os.environ.get(ENABLED_ENV)
+    if environment_value is not None:
+        return environment_value == "1", f"environment:{ENABLED_ENV}"
+
+    try:
+        with LOCAL_CONFIG_PATH.open("rb") as handle:
+            local_config = tomllib.load(handle)
+    except FileNotFoundError:
+        return False, "default"
+    except (OSError, tomllib.TOMLDecodeError):
+        return False, "local-config-invalid"
+
+    session_replay = local_config.get("session_replay")
+    enabled = (
+        session_replay.get("enabled") if isinstance(session_replay, dict) else None
+    )
+    if not isinstance(enabled, bool):
+        return False, "local-config-invalid"
+    return enabled, "local-config"
+
+
 def replay_enabled() -> bool:
-    return os.environ.get(ENABLED_ENV) == "1"
+    return replay_activation()[0]
 
 
 def archive_root() -> Path:
@@ -716,9 +746,11 @@ def without_internal_fields(value: dict[str, Any]) -> dict[str, Any]:
 def command_inspect(args: argparse.Namespace) -> int:
     root = Path(args.root).expanduser() if args.root else archive_root()
     selected_session_id = optional_string(args.session_id)
+    enabled, activation_source = replay_activation()
     result = {
         "schema": SCHEMA_VERSION,
         "archive_root": str(root),
+        "activation": {"enabled": enabled, "source": activation_source},
         "sessions": inspect_archive(root, selected_session_id),
     }
     sys.stdout.write(json.dumps(result, ensure_ascii=False, indent=2) + "\n")

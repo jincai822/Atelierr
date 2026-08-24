@@ -41,6 +41,7 @@ VALID_TYPES = {
     "meeting",
     "deep-dive",
     "system-review",
+    "prm",
 }
 
 SKELETON = """\
@@ -57,8 +58,8 @@ model: {model}
 |-------|------|--------|------------|
 
 ## Search Log
-| Query | Tool | Hits | Useful |
-|-------|------|------|--------|
+| Query | Tool | Hits | Top Result | Useful |
+|-------|------|------|------------|--------|
 
 ## Gate Results
 | Gate | Score/Pass | Notes |
@@ -85,23 +86,33 @@ model: {model}
 """
 
 
-def _next_path(session_type: str, today: date) -> tuple[Path, str]:
-    """Find the next available path, incrementing on collision."""
+def _write_next_log(
+    session_type: str,
+    today: date,
+    *,
+    duration: int,
+    model: str,
+) -> Path:
+    """Create the next log exclusively so collisions cannot overwrite data."""
     base_id = f"{today.isoformat()}-{session_type}"
-    candidate = SESSIONS_DIR / f"{base_id}.md"
-    if not candidate.exists():
-        return candidate, base_id
-
-    n = 2
+    sequence = 1
     while True:
-        sid = f"{base_id}-{n}"
-        candidate = SESSIONS_DIR / f"{sid}.md"
-        if not candidate.exists():
-            return candidate, sid
-        n += 1
-        if n > 99:
-            break
-    return candidate, f"{base_id}-{n}"
+        session_id = base_id if sequence == 1 else f"{base_id}-{sequence}"
+        path = SESSIONS_DIR / f"{session_id}.md"
+        content = SKELETON.format(
+            session_id=session_id,
+            date=today.isoformat(),
+            session_type=session_type,
+            duration=duration,
+            model=model,
+        )
+        try:
+            with path.open("x", encoding="utf-8") as handle:
+                handle.write(content)
+        except FileExistsError:
+            sequence += 1
+            continue
+        return path
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -139,23 +150,19 @@ def main(argv: list[str] | None = None) -> int:
     now = datetime.now()
     if now.hour < 3:
         from datetime import timedelta
+
         today = (now - timedelta(days=1)).date()
     else:
         today = now.date()
 
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
-    path, session_id = _next_path(args.type, today)
-
-    content = SKELETON.format(
-        session_id=session_id,
-        date=today.isoformat(),
-        session_type=args.type,
+    path = _write_next_log(
+        args.type,
+        today,
         duration=args.duration,
         model=args.model,
     )
-
-    path.write_text(content, encoding="utf-8")
     sys.stdout.write(fmt(path) + "\n")
     return 0
 

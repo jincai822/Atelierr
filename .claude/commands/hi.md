@@ -25,8 +25,13 @@ packet has `schema = 2`, `source = "harness/intents.toml"`, and registry-derived
 Use it without reading the full registry.
 
 Read `harness/intents.toml` only when the packet is absent, malformed,
-oversized, or insufficient for a semantic override. A date-prefixed factual
-narrative without an analytical question may override to `intents.capture`.
+oversized, or has `fallback = true`. A fallback packet is not a semantic
+classification: compare the full request with the registry rows and override
+to a clear match; otherwise execute `intents.general`, whose procedure hands
+off to the active runtime's skill, app, agent, or normal tool routing. Never
+start `intents.reflection` merely because deterministic matching missed. A
+date-prefixed factual narrative without an analytical question may override to
+`intents.capture`.
 
 If `ambiguous = true`, clarify among `tied_candidates`. Also clarify when a
 short generic substring conflicts with the message's main request, or when a
@@ -43,8 +48,10 @@ Logging is best-effort and must not block dispatch.
 ## Load and dispatch
 
 Announce `Routing as intents.<name> → <agents>`, adding `(parallel)` when
-declared. For an implicit fallback, say `No specific intent matched; routing
-as default reflection → <agents>`.
+declared. After a semantic override, say `Deterministic route missed; routing
+semantically as intents.<name> → <agents>`. If no registry row fits, say
+`No Atelier intent matched; handing off semantically → <capability>` and
+execute `intents.general`.
 
 When `profile_reads` is non-empty, run:
 
