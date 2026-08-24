@@ -103,24 +103,18 @@ Do not re-read the meal-history tracker row by row; combine the returned
 - For "Special occasion": Michelin OR Exclusive Tables only
 - Skip restaurants visited within `avoid recent` window (from the meal-history tracker)
 
-**Soft scoring** (rank candidates; rows marked "log" come precomputed in `dine_rank.py`'s `log_score`, do not recompute):
+**Soft scoring** (rank candidates):
 | Factor | Score |
 |---|---|
+| Log-side component | `dine_rank.py` `log_score`, verbatim (owns 评分 averages, 再去, rusty recency; components itemized in its `log_score_parts`) |
 | Catalog 评 (legacy field) = 3 | +3 |
 | Catalog 评 = 2 | +2 |
 | Catalog 评 = 1 | +1 |
-| Log 评分 avg (last 3 visits) ≥ 8 | +5 |
-| Log avg 6-7 | +2 |
-| Log avg ≤ 5 | -3 |
-| 再去 = Y in last entry | +2 |
-| 再去 = N in last entry | -5 (effectively eliminate unless strong override) |
 | 场景索引 match (regional catalog) | +3 |
-| Last visit 31-90d ago | 0 |
-| Last visit > 90d (rusty miss) | +1 |
 | Never visited + mood = "Surprise" or "探索" | +2 |
 | **Credit-burn priority** (Exclusive Tables restaurant + relevant cycle has unused credit AND ≤ 60d to deadline) | **+5** |
 | Michelin star match + mood = "Special occasion" | +4 |
-| Old-favorite revisit (rotation 评 ≥ 2 + last visit > 60d) | +2 |
+| Old-favorite revisit (rotation 评 ≥ 2 + `days_since` > 60 from dine_rank) | +2 |
 | **Health filter active** | apply scoring rules from `profile/diet.md` "Health-filter scoring rules" section (recent-visit penalties, clean-style bonuses, cumulative-load adjustments) |
 
 ## Step 4: Output

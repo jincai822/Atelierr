@@ -2,10 +2,10 @@
 """Log-side dining aggregates: the deterministic half of /dine Intent A.
 
 The dine flow re-read the whole meal-history tracker with a top-tier model on
-every run, so its cost grew linearly with dining history. This script owns
-the log-derived facts and score components from the public table in
-`.claude/commands/dine.md` § Step 3; the model keeps the catalog-side factors
-(场景索引, credit cycles, Michelin moods) and the conversation.
+every run, so its cost grew linearly with dining history. This script is the
+sole owner of the log-derived facts and score components; the table in
+`.claude/commands/dine.md` § Step 3 consumes `log_score` and keeps only the
+catalog-side factors (场景索引, credit cycles, Michelin moods).
 
 Emits one JSON object:
   restaurants   per-restaurant aggregates + log-side score component
