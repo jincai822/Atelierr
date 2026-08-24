@@ -895,7 +895,7 @@ def check_agent_registry(
             contract_paths = (
                 ROOT / str(source),
                 ROOT / "protocols" / "agent-handoff.md",
-                ROOT / "protocols" / "orchestrator.md",
+                ROOT / "protocols" / "orchestrator-actions.md",
                 ROOT / "protocols" / "intent-forget.md",
                 ROOT / ".claude" / "commands" / "autoevo-nightly.md",
             )

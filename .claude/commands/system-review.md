@@ -203,12 +203,12 @@ Then ask the user: "Address the blockers and re-review, or proceed to commit?"
 
 ## Tiers
 
-The Tier 1-4 ladder is canonical in `protocols/orchestrator.md` → "Review Tiers". This file does not restate the table. If the **Evolver** agent specified a tier in its handoff, honor it; otherwise default to Tier 3 (or Tier 4 for architecture-level bundles).
+The Tier 1-4 ladder is canonical in `protocols/collaboration-matrix.md` § "Review Tiers". This file does not restate the table. If the **Evolver** agent specified a tier in its handoff, honor it; otherwise default to Tier 3 (or Tier 4 for architecture-level bundles).
 
 ## Cross-references
 
 - `scripts/review.sh` — the actual invocation (prompts, flags, parallelism)
-- `protocols/orchestrator.md` → Review Tiers
+- `protocols/collaboration-matrix.md` § Review Tiers
 - `protocols/agent-handoff.md` → `system-review-request` contract
 - `.claude/agents/reviewer.md` → internal reviewer definition
 - `.claude/agents/privacy-reviewer.md` → semantic privacy guard (intrinsically dual; both voices fire in Step 1c)

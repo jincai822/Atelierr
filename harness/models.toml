@@ -19,7 +19,7 @@
 # Each role declares a `voices` keyed inline table in `harness/agents.toml`
 # (`{native = "X", direct = "Y"}`, with leg keys `native`/`direct`/`codex`).
 # Whether all declared legs fire on a dispatch is the call site's decision;
-# see `protocols/orchestrator.md` -> "Voice Dispatch" for the canonical
+# see `protocols/voice-dispatch.md` for the canonical
 # story. Single-leg roles (Scribe) declare only `{native}` by design. `native`
 # is the selected runtime's project-agent surface. Claude binds its concrete
 # model in agent frontmatter; Codex inherits the selected session model and
@@ -27,7 +27,7 @@
 # Tier scales the cardinality of role-units in a gathering (Tier N = N
 # parallel copies); tier never alters voices composition.
 #
-# The "Tier 1-4" review ladder in protocols/orchestrator.md, the evolver,
+# The "Tier 1-4" review ladder in protocols/collaboration-matrix.md, the evolver,
 # and /system-review is the canonical "tier" semantics in this repo.
 # It governs how many reviewer-units run on a change. It is NOT a model-
 # layer concept.

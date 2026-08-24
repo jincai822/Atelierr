@@ -36,7 +36,7 @@ last_match_wins = true
 [tasks.fact-check]
 # DORMANT: no dispatch site emits this task type yet; reserved for future
 # instrumentation of the quantitative-claim fact-check gate
-# (protocols/orchestrator.md -> "Voice Dispatch").
+# (protocols/voice-dispatch.md).
 verdict_pattern = '\b(verified|unverified|unknown|disputed)\b'
 case_insensitive = true
 last_match_wins = true

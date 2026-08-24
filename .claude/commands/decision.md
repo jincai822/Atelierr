@@ -64,7 +64,7 @@ Based on the decision type, select the right pairing from `frameworks/cross-vali
 | Build/invest | First Principles | Wardley Mapping |
 | Binary choice | Dialectical Thinking | Second-Order Thinking |
 
-**Dual-leg dispatch (cross-provider).** `/decision` is a multi-leg call site (`protocols/orchestrator.md` § "Currently-enabled multi-leg call sites"). Fire both Thinker legs in parallel — one message with two tool calls.
+**Dual-leg dispatch (cross-provider).** `/decision` is a multi-leg call site (`protocols/voice-dispatch.md` § "Currently-enabled multi-leg call sites"). Fire both Thinker legs in parallel — one message with two tool calls.
 
 **Before dispatch — shadow group setup (best-effort):** Run a single Bash call to create the witness file. Parse the UUID from the output line `export ATELIER_SHADOW_GROUP="<uuid>"` and **remember it** for the direct-API leg and for cleanup. Best-effort: if the call fails, proceed without correlation.
 

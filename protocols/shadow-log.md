@@ -192,7 +192,7 @@ If the hook were shipped it would become the production default; until then, the
 ## Cross-references
 
 - `protocols/backend-taxonomy.md` — backend role + SOT + failure mode + identifier-leakage contract
-- `protocols/orchestrator.md` § Voice Dispatch — multi-leg call-site enumeration
+- `protocols/voice-dispatch.md` — multi-leg call-site enumeration
 - `protocols/intent-coverage.md` § Producer side — UserPromptSubmit hook precedent for out-of-band logging
 - `scripts/chat_completion.py` docstring — log event schema
 - `scripts/shadow.py --help` — subcommand reference

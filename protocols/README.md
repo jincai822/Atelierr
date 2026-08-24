@@ -4,7 +4,7 @@ Entry point for all agents. When you need to know how to behave, start here.
 
 ## By Situation
 
-- **Session start.** `orchestrator.md` (role as hub) → `session-continuity.md` (cross-session) → `coaching-progressions.md` (depth). No-context `/hi` uses `hi-menu.md`; routed capture, meeting, and forgetting use their `intent-*.md` procedures.
+- **Session start.** `orchestrator.md` (role as hub; voice legs in `voice-dispatch.md`, per-role actions in `orchestrator-actions.md`, chains and Review Tiers in `collaboration-matrix.md`) → `session-continuity.md` (cross-session) → `coaching-progressions.md` (depth). No-context `/hi` uses `hi-menu.md`; routed capture, meeting, and forgetting use their `intent-*.md` procedures.
 - **During session.** `quality-gates.md` (checkpoints) → `agent-handoff.md` (envelope format) → `error-handling.md` (escalation). For configured earnings and market-signal work, use `analysis-signals.md` before retrieval.
 - **Producing output.** `session-scoring.md` (rubric) → `pattern-library.md` (recurring patterns).
 - **After session.** `meta-reflection.md` (system health) → `session-log.md` (process log).

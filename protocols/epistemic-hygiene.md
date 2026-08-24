@@ -97,7 +97,7 @@ This is distinct from normal iterative thinking. It bites specifically when:
 
 **Why this rule exists.** A strategic refinement arc has the same risk profile as an AI-confirmation loop, just at a higher level. Instead of the orchestrator echoing the user's words, the orchestrator echoes the *direction* of the user's refinements. Each step feels like progress because it is monotonically endorsed, but progress-by-endorsement is not progress-by-friction. Friction comes from independent adversarial evaluation (the Challenger's role); the orchestrator's own voice cannot substitute.
 
-The corresponding orchestrator trigger ("User refines a strategic/directional claim 2+ times") lives in `protocols/orchestrator.md` Collaboration Triggers; this hygiene rule is its semantic basis.
+The corresponding orchestrator trigger ("User refines a strategic/directional claim 2+ times") lives in `protocols/collaboration-matrix.md` Collaboration Triggers; this hygiene rule is its semantic basis.
 
 ## The Sacred Zone
 

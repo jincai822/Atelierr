@@ -121,7 +121,7 @@ extras) live in `profile/models.toml` (gitignored). Loaders merge schema +
 bindings at runtime.
 
 Voice dispatch model: the single source of truth is
-`protocols/orchestrator.md` -> "Voice Dispatch". The agent-to-voices mapping
+`protocols/voice-dispatch.md`. The agent-to-voices mapping
 lives in `harness/agents.toml` as a `voices` keyed inline table per agent
 (`{native = "...", direct = "..."}` or single-leg variants). `native` means
 the selected runtime's project-agent surface, not Claude specifically. Claude

@@ -54,7 +54,7 @@ Subcommands:
         Aggregate logs and emit cost/verdict-agreement comparison.
 
 See `protocols/backend-taxonomy.md` for the SOT/role/failure-mode contract,
-`protocols/orchestrator.md` § Voice Dispatch for when multi-leg call sites
+`protocols/voice-dispatch.md` for when multi-leg call sites
 use this, and `protocols/shadow-log.md` § Mechanism for the hook flow.
 Stdlib-only by design.
 """

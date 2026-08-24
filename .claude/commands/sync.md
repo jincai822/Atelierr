@@ -74,7 +74,7 @@ Wiki-tier targets under `<paths.wiki>/` are the only exception to the GitHub-lin
 
 For each markdown file:
 
-1. **Snapshot the source**: `cp "<paths.zettelm>/<file>.md" "<paths.cache>/sync-<basename>.md"` so the Curator works from a stable snapshot per the snapshot-first protocol in `protocols/orchestrator.md`.
+1. **Snapshot the source**: `cp "<paths.zettelm>/<file>.md" "<paths.cache>/sync-<basename>.md"` so the Curator works from a stable snapshot per the snapshot-first protocol in `protocols/orchestrator-actions.md`.
 2. **Dispatch Curator** with: the snapshot path, the Researcher's entity → link map, the target daily-note path, and these enrichment rules:
    - Typo correction: light hand only. Fix obvious typos in Chinese (漏字 / 错字 / 拼音错位) and English (autocomplete glitches). Do not rewrite voice, restructure sentences, or "improve" the text. If a phrase reads awkwardly but is unambiguous, leave it.
    - Backlinks: wrap exactly the entities returned in the link map. Do not invent new backlinks. Do not link generic words (`今天`, `早上`, `吃了`).
