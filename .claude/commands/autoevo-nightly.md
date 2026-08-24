@@ -37,7 +37,7 @@ Refuses to start the run. Implementation: step 1 gates. Triggers on any of:
 
 - session-active lock present and < 6h old
 - `$OV` not a git work tree
-- `$OV` working tree dirty
+- `$OV` working tree dirty inside an autoevo scope (sweep tiers, audit target, queue files)
 - `zettelm/` submodule dirty
 - `privacy_check.py --json` returns `hit_count > 0`
 
@@ -359,11 +359,13 @@ if [ -e "$GIT_INDEX_LOCK" ]; then
   # write audit log § Skipped, exit
 fi
 
-DIRTY=$(git -C "$OV" status --porcelain | wc -l | tr -d ' ')
+DIRTY=$(uv run --quiet python3 scripts/autoevo_preflight.py --dirty-scope)
 if [ "$DIRTY" -gt 0 ]; then
-  echo "abort: dirty $OV working tree ($DIRTY entries)"
+  echo "abort: $DIRTY Git status entries inside autoevo scopes (wip, research, reflections, agent-findings, _meta/autoevo_*.toml)"
   # write audit log, exit
 fi
+# Dirt elsewhere in $OV does not block: every bot commit stages explicit
+# paths and uses `--only`, so unrelated user edits cannot be swept in.
 ```
 
 ### 1c. Dirty zettelm submodule
@@ -734,25 +736,17 @@ fi
 6. **Commit:**
 
 ```bash
-# Compute cluster_hash for the tombstone mechanism (protocols/autoevo.md § Revert tombstones).
-CLUSTER_HASH=$(printf '%s\n' "${SOURCES[@]}" | sort -u | shasum -a 1 | cut -c1-12)
-
-git -C "$OV" commit --only -m "$(cat <<EOF
-[autoevo:redundant] <relative dir under \$OV>: merge <N> notes into <target slug>
-
-Source notes:
-- <peer1 relative path under \$OV/> (retrieval <score>, mtime <YYYY-MM-DD>)
-- <peer2 ...>
-- ...
-
-Auto-band: redundant-high (3+ peers ≥ 0.85, all > 30d cold, mode=<stub|real>, floor=<0.5|0.6>)
-cluster_hash: ${CLUSTER_HASH}
-Revert: git revert <future sha>
-
-Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
-EOF
-)" -- "${OP_PATHS[@]}"
-COMMIT_SHA=$(git -C "$OV" rev-parse HEAD)
+# scripts/autoevo_commit.py is the sole committer: it computes cluster_hash
+# (protocols/autoevo.md § Revert tombstones), renders the pinned message
+# shape, and commits --only the op's paths. Never hand-write the git call.
+MERGE_RESULT=$(uv run --quiet python3 scripts/autoevo_commit.py merge \
+  --scope "<relative dir under $OV>" --target-slug "<target slug>" \
+  --band "redundant-high (3+ peers ≥ 0.85, all > 30d cold, mode=<stub|real>, floor=<0.5|0.6>)" \
+  $(for src in "${SOURCES[@]}"; do printf ' --source %q' "$src"; done) \
+  $(for ev in "${SOURCE_EVIDENCE[@]}"; do printf ' --source-evidence %q' "$ev"; done) \
+  --paths "${OP_PATHS[@]}")
+COMMIT_SHA=$(printf '%s' "$MERGE_RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))')
+[ -n "$COMMIT_SHA" ] || { echo "merge commit failed: $MERGE_RESULT" >&2; false; }
 ```
 
 The `cluster_hash` line is the load-bearing signal the next night's run reads to detect "this cluster was reverted; skip" (per `protocols/autoevo.md` § Revert tombstones). Removing it breaks the tombstone safety mechanism.
@@ -804,18 +798,13 @@ mkdir -p "$OV/$ARCHIVE_REL_DIR"
 ```bash
 OP_PATHS=("$SOURCE_REL" "$TARGET_REL")
 git -C "$OV" mv -- "$SOURCE_REL" "$TARGET_REL"
-git -C "$OV" commit --only -m "$(cat <<'EOF'
-[autoevo:low-signal] archive: <slug> after <N> days inactive
-
-words: <N>, links_in: 0, tags: 0, mtime: <YYYY-MM-DD>
-Moved: <source path under $OV> -> <TARGET_REL>
-
-Auto-band: low-signal-high (all 5 Forgetter conditions + >365d cold)
-
-Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
-EOF
-)" -- "${OP_PATHS[@]}"
-COMMIT_SHA=$(git -C "$OV" rev-parse HEAD)
+ARCHIVE_RESULT=$(uv run --quiet python3 scripts/autoevo_commit.py archive \
+  --slug "<slug>" --days-inactive "<N>" \
+  --evidence "words: <N>, links_in: 0, tags: 0, mtime: <YYYY-MM-DD>" \
+  --source "$SOURCE_REL" --target "$TARGET_REL" \
+  --band "low-signal-high (all 5 Forgetter conditions + >365d cold)")
+COMMIT_SHA=$(printf '%s' "$ARCHIVE_RESULT" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sha",""))')
+[ -n "$COMMIT_SHA" ] || { echo "archive commit failed: $ARCHIVE_RESULT" >&2; false; }
 ```
 
 Append to audit log § "Auto-applied".
@@ -847,66 +836,27 @@ done
 
 ## Step 5: Append to pending queue
 
-Read existing `$OV/_meta/autoevo_pending.toml` (or initialize empty if missing). For each finding routed to the queue in step 3:
+Collect every finding routed to the queue in step 3 into one JSON list and hand it to the deterministic helper; do not emit TOML by hand. Each object carries the fields from `protocols/autoevo.md` § Pending queue:
 
-```toml
-[[pending]]
-id = "<RUN_TS>-<category>-<seq>"   # seq is per-run zero-padded counter
-category = "redundant" | "time-stale-A" | "time-stale-B" | "contradicted" | "low-signal"
-proposed_action = "<short imperative>"
-evidence_summary = "<one-line evidence>"
-peers = ["<relative paths under $OV/>"]   # for redundant; otherwise omit
-proposed_at = "<RUN_DATE>"
-last_surfaced = "<RUN_DATE>"
-surface_count = 0
-status = "pending"
+```json
+[{"id": "<RUN_TS>-<category>-<seq>", "category": "redundant", "proposed_action": "<short imperative>",
+  "evidence_summary": "<one-line evidence>", "peers": ["<relative paths under $OV/>"],
+  "proposed_at": "<RUN_DATE>", "last_surfaced": "<RUN_DATE>", "surface_count": 0, "status": "pending"}]
 ```
-
-Write the updated TOML atomically (write to a sibling `.tmp` then `mv` over the target). The TOML library available is `tomllib` (stdlib, read-only); for writes, emit TOML by hand WITH PROPER ESCAPING — evidence text routinely contains quoted phrases, paths with backslashes, or embedded newlines. An unescaped value produces invalid TOML and bricks `/autoevo-review` + the cue parser until the user repairs by hand.
-
-Minimal pattern the orchestrator follows for each new pending entry:
-
-```python
-# Inline pattern; no shared helper exists yet.
-def _escape_toml_basic_string(s: str) -> str:
-    """TOML basic-string escaping per https://toml.io/en/v1.0.0#string."""
-    return (
-        str(s)
-        .replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-    )
-
-def emit_pending_entry(entry: dict) -> str:
-    esc = _escape_toml_basic_string
-    lines = ["[[pending]]"]
-    for key in ("id", "category", "proposed_action", "evidence_summary",
-                "proposed_at", "last_surfaced", "status"):
-        v = entry[key]
-        lines.append(f'{key} = "{esc(v)}"')
-    lines.append(f"surface_count = {int(entry['surface_count'])}")
-    if entry.get("peers"):
-        peers = ", ".join(f'"{esc(p)}"' for p in entry["peers"])
-        lines.append(f"peers = [{peers}]")
-    return "\n".join(lines) + "\n\n"
-```
-
-Append the rendered block(s) to the existing file content, write to `autoevo_pending.toml.tmp`, then `mv` into place. Field order matches the schema in `protocols/autoevo.md` § Pending queue. After writing, sanity-check by re-parsing with `tomllib.loads(open(path).read())` — if parse fails, the write is rejected and the orchestrator logs to the audit log § Errors. This is the only commit-blocking validation on queue writes; tomllib's parse step is fast and catches every TOML-spec violation deterministically.
-
-Commit the queue update (this is a `_meta/` config change, not a destructive op, but still belongs in git history for queue-state audit):
 
 ```bash
-git -C "$OV" add -- _meta/autoevo_pending.toml
-git -C "$OV" commit --only -m "$(cat <<'EOF'
-[autoevo:queue] _meta: append <N> pending findings from <RUN_DATE> sweep
+PENDING_JSON="$PATHS_CACHE/autoevo-${RUN_TS}-pending.json"   # write the list here first
+uv run --quiet python3 scripts/autoevo_pending.py append --entries "$PENDING_JSON" --today "$RUN_DATE"
+```
 
-Categories: redundant=<n>, time-stale-A=<n>, time-stale-B=<n>, contradicted=<n>, low-signal=<n>
+The helper escapes, appends, and writes `$OV/_meta/autoevo_pending.toml` atomically. It skips any finding whose sorted `peers` match an entry that is still pending, or was resolved within the helper's dedupe window (`--dedupe-days`, default 90, anchored on `resolved_at`), and prints `{"appended": [...], "skipped": [...], "invalid": [...]}`. Record `len(skipped)` in audit § Notes as `pending-dedupe-skipped: <N>` and list `invalid` ids under § Errors (an invalid entry means the Forgetter envelope was malformed; fix the envelope, do not hand-edit the TOML). The Forgetter's same-tier peer rule (`forgetter.md` § Redundant step 1b) runs upstream; the helper's dedupe is the second line of defense against re-proposing what the user already declined.
 
-Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
-EOF
-)" -- _meta/autoevo_pending.toml
+Commit the queue update only when the helper reported a non-empty `appended` list; a dedupe-only night leaves the file unchanged and a commit would fail with nothing to commit (record `pending-dedupe-skipped` in § Notes and skip this block):
+
+```bash
+uv run --quiet python3 scripts/autoevo_commit.py queue \
+  --summary "append <N> pending findings from <RUN_DATE> sweep" \
+  --detail "Categories: redundant=<n>, time-stale-A=<n>, time-stale-B=<n>, contradicted=<n>, low-signal=<n>"
 ```
 
 ## Step 6: Run /lint and report
@@ -983,21 +933,13 @@ if [ ${#DECAY_REPORT_RELS[@]} -gt 0 ]; then
   FINAL_COMMIT_PATHS+=("${DECAY_REPORT_RELS[@]}")
 fi
 
-if [ -f "$OV/_meta/autoevo_quarantine.toml" ]; then
-  # The vault whitelist ignores new TOML files. Force-add only this declared
-  # bot-owned state file; never broaden the force-add path.
-  git -C "$OV" add -f -- "_meta/autoevo_quarantine.toml"
-  FINAL_COMMIT_PATHS+=("_meta/autoevo_quarantine.toml")
-fi
+# The quarantine TOML is whitelist-ignored; the audit subcommand force-adds
+# exactly that one declared bot-owned state file when present.
 
-git -C "$OV" commit --only -m "$(cat <<'EOF'
-[autoevo:audit] agent-findings: record nightly run <RUN_DATE>
-
-Auto-applied: <N>, Pending: <M>, Errors: <K>, Quarantined: <Q>
-
-Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
-EOF
-)" -- "${FINAL_COMMIT_PATHS[@]}"
+uv run --quiet python3 scripts/autoevo_commit.py audit \
+  --run-date "$RUN_DATE" --auto "<N>" --pending "<M>" --errors "<K>" --quarantined "<Q>" \
+  --paths "${FINAL_COMMIT_PATHS[@]}" \
+  $( [ -f "$OV/_meta/autoevo_quarantine.toml" ] && printf -- '--force-add _meta/autoevo_quarantine.toml' )
 ```
 
 Never remove an existing `index.lock`, reset the index, or otherwise repair Git
@@ -1051,7 +993,7 @@ The cue at next /hi surfaces the audit log's Skipped / Errors sections regardles
 - **Target path = no source path** (rare for redundant: when the orchestrator picks a new canonical slug not matching any source filename). In step 4a, write the new file, delete all sources, commit. The merged content is the canonical record.
 - **Curator refuses an op.** Curator's scope guards (wiki, daily-notes, non-working-tier) refuse with an error envelope. Log under § "Errors" with the refusal reason; continue to next op.
 - **Mid-run, $OV becomes dirty (external edit).** Unlikely at 5am but possible. Detect at each commit step: if `git diff --cached` includes paths the bot didn't touch, abort the auto-apply phase and dump everything remaining to the pending queue. Log under § "Errors".
-- **Queue TOML corrupted.** If reading the existing pending queue fails (parse error), do NOT overwrite. Write the proposed entries to a `autoevo_pending.toml.new` sidecar, log under § "Errors" with the parse error, and surface as a cue. User fixes manually.
+- **Queue TOML corrupted.** `scripts/autoevo_pending.py append` refuses to overwrite, parks the proposed entries in `autoevo_pending.toml.new`, and reports `{"error", "sidecar"}` (exit 2). Log both under § "Errors" and surface as a cue. User fixes manually; the helper never overwrites an existing sidecar (it picks a fresh `.new-N` name).
 
 ## What this command does NOT do
 

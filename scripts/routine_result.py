@@ -11,6 +11,9 @@ import sys
 import tomllib
 from datetime import datetime
 from pathlib import Path
+import sys as _s
+_s.path.insert(0, str(Path(__file__).resolve().parent))
+from _paths import tier_segments  # noqa: E402
 from typing import Any
 
 SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -36,7 +39,7 @@ def _safe_relative(value: str, *, field: str) -> Path:
 
 
 def _load_watch_record(vault: Path, routine: str) -> dict[str, Any]:
-    watch_path = vault / "_meta" / "routine_watch.toml"
+    watch_path = vault / tier_segments().get("meta", "_meta") / "routine_watch.toml"
     try:
         config = tomllib.loads(watch_path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:

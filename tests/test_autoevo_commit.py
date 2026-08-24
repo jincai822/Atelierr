@@ -1,0 +1,117 @@
+"""Pin the autoevo commit shapes now that a script owns them.
+
+Downstream consumers: the revert-tombstone walk greps `cluster_hash:` from
+commit bodies; `git log --grep='^\\[autoevo:'` is the operational index; the
+co-author trailer attributes bot commits. `--only` isolation is the safety
+property the scoped dirty gate relies on.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True,
+        env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+             "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"},
+    )
+
+
+def _run(vault: Path, *argv: str) -> dict:
+    proc = subprocess.run(
+        [sys.executable, "scripts/autoevo_commit.py", *argv],
+        cwd=REPO_ROOT, env={**os.environ, "OV": str(vault)},
+        capture_output=True, text=True, timeout=120,
+    )
+    payload = json.loads(proc.stdout)
+    payload["_exit"] = proc.returncode
+    return payload
+
+
+class AutoevoCommitTest(unittest.TestCase):
+    def _vault(self, tmp: str) -> Path:
+        vault = Path(tmp) / "vault"
+        (vault / "wip").mkdir(parents=True)
+        (vault / "wip" / "a.md").write_text("a\n", encoding="utf-8")
+        (vault / "wip" / "b.md").write_text("b\n", encoding="utf-8")
+        (vault / "wip" / "target.md").write_text("merged\n", encoding="utf-8")
+        _git(vault, "init", "-q")
+        _git(vault, "add", "-A")
+        _git(vault, "commit", "-q", "-m", "base")
+        return vault
+
+    def test_merge_commit_shape_and_only_isolation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = self._vault(tmp)
+            (vault / "wip" / "a.md").unlink()
+            (vault / "wip" / "target.md").write_text("merged a+b\n", encoding="utf-8")
+            # A stray user edit that must NOT enter the bot commit.
+            (vault / "wip" / "b.md").write_text("user edit in progress\n", encoding="utf-8")
+            out = _run(
+                vault, "merge", "--scope", "wip", "--target-slug", "target",
+                "--band", "redundant-high (3+ peers >= 0.85, all > 30d cold, mode=real, floor=0.6)",
+                "--source", "wip/a.md",
+                "--source-evidence", "wip/a.md (retrieval 0.91, mtime 2025-12-01)",
+                "--paths", "wip/a.md", "wip/target.md",
+            )
+            self.assertEqual(out["_exit"], 0, out)
+            body = _git(vault, "log", "-1", "--format=%B").stdout
+            self.assertIn("[autoevo:redundant] wip: merge 1 notes into target", body)
+            self.assertIn(f"cluster_hash: {out['cluster_hash']}", body)
+            self.assertIn("Co-Authored-By: Atelier Autoevo Bot", body)
+            changed = _git(vault, "show", "--name-only", "--format=", "HEAD").stdout.split()
+            self.assertIn("wip/target.md", changed)
+            self.assertNotIn("wip/b.md", changed, "--only isolation breached")
+
+    def test_cluster_hash_is_order_insensitive(self) -> None:
+        snippet = (
+            "import sys; sys.path.insert(0, 'scripts'); import autoevo_commit as a; "
+            "print(a.cluster_hash(['wip/b.md', 'wip/a.md']) == a.cluster_hash(['wip/a.md', 'wip/b.md']))"
+        )
+        proc = subprocess.run([sys.executable, "-c", snippet], cwd=REPO_ROOT,
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.stdout.strip(), "True", proc.stderr)
+
+    def test_audit_commit_with_force_added_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = self._vault(tmp)
+            (vault / ".gitignore").write_text("_meta/\n", encoding="utf-8")
+            _git(vault, "add", ".gitignore")
+            _git(vault, "commit", "-q", "-m", "ignore")
+            (vault / "agent-findings").mkdir()
+            (vault / "agent-findings" / "autoevo-applied-2099-01-02.md").write_text("## Autoevo Run\n", encoding="utf-8")
+            (vault / "_meta").mkdir()
+            (vault / "_meta" / "autoevo_quarantine.toml").write_text("version = 1\n", encoding="utf-8")
+            out = _run(
+                vault, "audit", "--run-date", "2099-01-02", "--auto", "0", "--pending", "2",
+                "--errors", "0", "--quarantined", "1",
+                "--paths", "agent-findings/autoevo-applied-2099-01-02.md",
+                "--force-add", "_meta/autoevo_quarantine.toml",
+            )
+            self.assertEqual(out["_exit"], 0, out)
+            body = _git(vault, "log", "-1", "--format=%B").stdout
+            self.assertIn("[autoevo:audit] agent-findings: record nightly run 2099-01-02", body)
+            self.assertIn("Auto-applied: 0, Pending: 2, Errors: 0, Quarantined: 1", body)
+            changed = _git(vault, "show", "--name-only", "--format=", "HEAD").stdout.split()
+            self.assertIn("_meta/autoevo_quarantine.toml", changed)
+
+    def test_failed_commit_reports_json_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = self._vault(tmp)  # clean tree: commit --only with no changes fails
+            out = _run(vault, "queue", "--summary", "append 0", "--detail", "Categories: none")
+            self.assertEqual(out["_exit"], 1)
+            self.assertIn("error", out)
+
+
+if __name__ == "__main__":
+    unittest.main()

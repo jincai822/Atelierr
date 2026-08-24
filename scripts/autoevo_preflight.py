@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -24,12 +25,53 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Callable
 
-from _paths import tier, vault_root
+from _paths import _resolve_segment, atomic_write, tier, tier_segments, vault_root
 from routine_claim import validate_cycle_id
 
 ATELIER_ROOT = Path(__file__).resolve().parents[1]
 SESSION_LOCK_TTL_SECONDS = 6 * 60 * 60
 GENERIC_RETRY_DELAY_SECONDS = 60 * 60
+
+# Paths autoevo may touch: the three sweep scopes, the audit write target,
+# and its queue files. The dirty-tree gate only looks here. The bot stages
+# explicit paths and commits with `--only`, so user edits elsewhere in the
+# vault cannot be swept into a bot commit; blocking on them only guaranteed
+# the bot never ran on a vault that is dirty by design because it syncs
+# through Drive.
+AUTOEVO_SCOPE_TIERS = ("wip", "research", "reflections", "agent_findings")
+# Any autoevo state file under _meta/ (pending queue, quarantine, tombstones,
+# and future siblings) is gate input; match the documented `_meta/autoevo_*.toml`
+# shape instead of enumerating names that can drift.
+AUTOEVO_SCOPE_FILE_PREFIX = "_meta/autoevo_"
+AUTOEVO_SCOPE_FILE_SUFFIX = ".toml"
+
+
+def autoevo_scope_prefixes(vault: Path) -> list[str]:
+    """Vault-relative prefixes the dirty gate inspects (posix, no trailing slash)."""
+    prefixes: list[str] = []
+    segments = tier_segments()
+    for name in AUTOEVO_SCOPE_TIERS:
+        segment = segments.get(name)
+        if not segment:
+            continue
+        resolved = _resolve_segment(segment)  # same resolver as tier(); never re-implement it
+        try:
+            rel = resolved.resolve().relative_to(vault.resolve()).as_posix()
+        except ValueError:
+            continue  # sandbox override outside the vault; not a git path here
+        prefixes.append(rel.rstrip("/"))
+    return prefixes
+
+
+def _in_scope(path: str, prefixes: list[str]) -> bool:
+    if path.startswith(AUTOEVO_SCOPE_FILE_PREFIX) and path.endswith(AUTOEVO_SCOPE_FILE_SUFFIX):
+        return True
+    return any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
+
+
+def _normalized_detail(detail: str) -> str:
+    """Blocker detail with volatile counts removed, for repeat detection."""
+    return re.sub(r"\d+", "#", detail)
 OWNED_AUDIT_STATE = "autoevo-preflight-owned-audit.json"
 
 
@@ -110,25 +152,41 @@ def _inside_worktree(vault: Path) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
-def _status_summary(vault: Path) -> tuple[int, dict[str, int]]:
-    result = _git(vault, "status", "--porcelain=v1", "-z")
+def _status_entries(vault: Path) -> list[tuple[str, str]]:
+    """Return (status code, vault-relative path) for every git status entry."""
+    result = _git(vault, "--no-optional-locks", "status", "--porcelain=v1", "-z")
     if result.returncode != 0:
         raise PreflightError(
             f"git status failed: {result.stderr.strip() or 'unknown error'}"
         )
+    prefix_result = _git(vault, "rev-parse", "--show-prefix")
+    prefix = prefix_result.stdout.strip() if prefix_result.returncode == 0 else ""
     records = [raw for raw in result.stdout.split("\0") if raw]
-    counts: Counter[str] = Counter()
-    entries = 0
+    entries: list[tuple[str, str]] = []
     index = 0
     while index < len(records):
         record = records[index]
         index += 1
         code = record[:2] if len(record) >= 2 else "??"
-        entries += 1
-        counts[code] += 1
-        if "R" in code or "C" in code:
+        raw_paths = [record[3:] if len(record) > 3 else ""]
+        if ("R" in code or "C" in code) and index < len(records):
+            # Renames and copies emit the original path as the next record.
+            # A `git mv wip/a.md personal/a.md` is in-scope dirt even though
+            # its new path is not; count both ends.
+            raw_paths.append(records[index])
             index += 1
-    return entries, dict(sorted(counts.items()))
+        for raw_path in raw_paths:
+            path = raw_path
+            if prefix and path.startswith(prefix):
+                path = path[len(prefix):]
+            entries.append((code, path))
+    return entries
+
+
+def _status_summary(vault: Path) -> tuple[int, dict[str, int]]:
+    entries = _status_entries(vault)
+    counts: Counter[str] = Counter(code for code, _ in entries)
+    return len(entries), dict(sorted(counts.items()))
 
 
 def _branch_health(vault: Path) -> dict[str, object]:
@@ -167,7 +225,13 @@ def _branch_health(vault: Path) -> dict[str, object]:
 
 
 def _lfs_health(vault: Path) -> dict[str, object]:
-    result = _git(vault, "lfs", "status", timeout=45)
+    try:
+        result = _git(vault, "lfs", "status", timeout=45)
+    except PreflightError as exc:
+        # `git lfs status` walks the worktree; on a cloud-synced vault it can
+        # exceed the timeout. LFS push state is informational here, so report
+        # it as unavailable instead of aborting the whole preflight.
+        return {"available": False, "objects_to_push": None, "detail": str(exc)[:240]}
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip()
         return {
@@ -292,6 +356,7 @@ def inspect_preflight(
         "git_index": "unknown",
         "git_index_lock": "unknown",
         "worktree_entries": None,
+        "worktree_entries_in_scope": None,
         "worktree_status_codes": {},
         "session_lock_age_seconds": None,
         "zettelm_entries": None,
@@ -356,14 +421,23 @@ def inspect_preflight(
             )
 
         if index_exists and not index_lock_exists:
-            entries, codes = _status_summary(vault)
+            status_entries = _status_entries(vault)
+            entries = len(status_entries)
+            codes = dict(sorted(Counter(code for code, _ in status_entries).items()))
             health["worktree_entries"] = entries
             health["worktree_status_codes"] = codes
-            if entries:
+            prefixes = autoevo_scope_prefixes(vault)
+            in_scope = [path for _, path in status_entries if _in_scope(path, prefixes)]
+            health["worktree_entries_in_scope"] = len(in_scope)
+            if in_scope:
+                sample = ", ".join(sorted(in_scope)[:3])
                 blockers.append(
                     {
                         "gate": "dirty_vault_worktree",
-                        "detail": f"$OV has {entries} Git status entries",
+                        "detail": (
+                            f"$OV has {len(in_scope)} changed paths inside autoevo "
+                            f"scopes (of {entries} total; a rename counts both ends), e.g. {sample}"
+                        ),
                     }
                 )
             health.update(_branch_health(vault))
@@ -452,6 +526,37 @@ def _owned_state_path() -> Path:
     return tier("cache") / OWNED_AUDIT_STATE
 
 
+def _load_owned_state(raw_state: str) -> tuple[Path, str]:
+    """Parse the owned-audit state; PreflightError on any malformed field.
+
+    Single implementation shared by `_owned_audit_is_unchanged` and
+    `recover_owned_audit`, so an edge-case fix lands in both.
+    """
+    try:
+        state = json.loads(raw_state)
+    except json.JSONDecodeError as exc:
+        raise PreflightError(f"managed audit state is not JSON: {exc}") from exc
+    audit_path = _safe_relative(vault_root(), state.get("path"))
+    expected_hash = state.get("sha256")
+    if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+        raise PreflightError("managed audit checksum is invalid")
+    return audit_path, expected_hash
+
+
+def _owned_audit_is_unchanged(audit_path: Path) -> bool:
+    try:
+        owned_path, expected_hash = _load_owned_state(
+            _owned_state_path().read_text(encoding="utf-8")
+        )
+        return (
+            owned_path == audit_path.resolve()
+            and audit_path.is_file()
+            and _sha256(audit_path) == expected_hash
+        )
+    except (OSError, PreflightError):
+        return False
+
+
 def _write_owned_state(audit_path: Path) -> None:
     vault = vault_root()
     relative = audit_path.resolve().relative_to(vault).as_posix()
@@ -461,10 +566,7 @@ def _write_owned_state(audit_path: Path) -> None:
         "written_at": datetime.now().astimezone().isoformat(),
     }
     destination = _owned_state_path()
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(state, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary, destination)
+    atomic_write(destination, json.dumps(state, sort_keys=True) + "\n")
 
 
 def _clear_owned_state() -> None:
@@ -499,20 +601,30 @@ def recover_owned_audit() -> dict[str, object]:
     if not state_path.is_file():
         return {"status": "none"}
     try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        vault = vault_root()
-        audit_path = _safe_relative(vault, state.get("path"))
-        expected_hash = state.get("sha256")
-        if not isinstance(expected_hash, str) or len(expected_hash) != 64:
-            raise PreflightError("managed audit checksum is invalid")
-    except (OSError, json.JSONDecodeError, PreflightError) as exc:
+        raw_state = state_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        # A cloud-synced cache (Drive File Provider) can refuse a read with
+        # EDEADLK / EAGAIN / EIO while a file is being materialized. That is
+        # an environment hiccup, not evidence the audit was tampered with;
+        # defer and let the next hourly check retry. (2026-08-22: this path
+        # marked the claim `failed` and stalled the routine until a human
+        # approved a retry.)
+        return {"status": "deferred", "detail": f"managed audit state unreadable: {exc}"}
+    try:
+        audit_path, expected_hash = _load_owned_state(raw_state)
+    except PreflightError as exc:
         return {"status": "invalid", "detail": str(exc)}
+    vault = vault_root()
     if not audit_path.is_file():
         return {
             "status": "missing",
             "detail": "managed audit file no longer exists; refusing recovery",
         }
-    if _sha256(audit_path) != expected_hash:
+    try:
+        actual_hash = _sha256(audit_path)
+    except OSError as exc:
+        return {"status": "deferred", "detail": f"managed audit unreadable: {exc}"}
+    if actual_hash != expected_hash:
         return {
             "status": "modified",
             "detail": "managed audit changed after autoevo wrote it; refusing recovery",
@@ -554,6 +666,25 @@ def recover_owned_audit() -> dict[str, object]:
     return {"status": "committed"}
 
 
+def environment_blocker(exc: BaseException, *, now: float | None = None) -> dict[str, object]:
+    """Blocked result for a preflight that could not even inspect the vault.
+
+    Timeouts and storage errors (git hanging on a cloud-synced tree, a file
+    the sync client has not materialized) are transient. They must become a
+    deferred claim with an hourly retry, never a `failed` claim that waits
+    for a human, because nothing a human does differently fixes them.
+    """
+    now = time.time() if now is None else now
+    return {
+        "ready": False,
+        "gate": "environment_unavailable",
+        "detail": f"preflight could not inspect the vault: {exc}"[:400],
+        "blockers": [{"gate": "environment_unavailable", "detail": str(exc)[:400]}],
+        "health": {"vault": str(vault_root()), "environment_error": str(exc)[:400]},
+        "retry_after_epoch": int(now) + GENERIC_RETRY_DELAY_SECONDS,
+    }
+
+
 def _health_lines(result: dict[str, object]) -> list[str]:
     health = result["health"]
     assert isinstance(health, dict)
@@ -572,7 +703,8 @@ def _health_lines(result: dict[str, object]) -> list[str]:
         f"- Git worktree: {health.get('git_worktree')}",
         f"- Git index: {health.get('git_index')}",
         f"- Git index lock: {health.get('git_index_lock')}",
-        f"- Worktree status entries: {health.get('worktree_entries')}",
+        f"- Worktree changed paths (renames count both ends): {health.get('worktree_entries')} "
+        f"(inside autoevo scopes: {health.get('worktree_entries_in_scope')})",
         f"- Branch: {branch}; upstream: {upstream}; {divergence}",
         f"- Git LFS objects pending push: {lfs_text}",
         f"- Session lock age: {health.get('session_lock_age_seconds')}s",
@@ -613,6 +745,22 @@ def record_blocker(
     gate = str(result.get("gate") or "unknown")
     detail = str(result.get("detail") or "no detail")
     relative = audit_path.resolve().relative_to(vault).as_posix()
+    repeated_blocker = False
+    try:
+        readable = audit_path.is_file() and audit_path.stat().st_size
+    except OSError:
+        readable = False  # cloud-sync hiccup; treat as a fresh section, never crash
+    if readable:
+        try:
+            existing = audit_path.read_text(encoding="utf-8")
+        except OSError:
+            existing = ""
+        latest_start = existing.rfind("## Autoevo Run:") if existing else -1
+        latest = existing[latest_start:] if latest_start >= 0 else ""
+        repeated_blocker = f"Cycle ID: {cycle}" in latest and any(
+            _normalized_detail(line.strip()) == _normalized_detail(f"- {gate}: {detail}")
+            for line in latest.splitlines()
+        )
     if audit_path.exists():
         path_status = _git(
             vault,
@@ -621,7 +769,9 @@ def record_blocker(
             "--",
             relative,
         )
-        if path_status.returncode != 0 or path_status.stdout.strip():
+        if (
+            path_status.returncode != 0 or path_status.stdout.strip()
+        ) and not (repeated_blocker and _owned_audit_is_unchanged(audit_path)):
             commit_detail = (
                 path_status.stderr.strip()
                 if path_status.returncode != 0
@@ -637,21 +787,17 @@ def record_blocker(
                 "audit_commit": "deferred",
                 "audit_commit_detail": commit_detail,
             }
-    if audit_path.is_file() and audit_path.stat().st_size:
-        existing = audit_path.read_text(encoding="utf-8")
-        latest_start = existing.rfind("## Autoevo Run:")
-        latest = existing[latest_start:] if latest_start >= 0 else ""
-        if f"Cycle ID: {cycle}" in latest and f"- {gate}: {detail}" in latest:
-            return {
-                **result,
-                "output_file": relative,
-                "summary": (
-                    f"preflight still blocked: {gate}; model not started; "
-                    "audit_commit=reused"
-                ),
-                "audit_commit": "reused",
-                "audit_commit_detail": "",
-            }
+    if repeated_blocker:
+        return {
+            **result,
+            "output_file": relative,
+            "summary": (
+                f"preflight still blocked: {gate}; model not started; "
+                "audit_commit=reused"
+            ),
+            "audit_commit": "reused",
+            "audit_commit_detail": "",
+        }
     timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
     block = "\n".join(
         [
@@ -729,10 +875,7 @@ def record_blocker(
 
 
 def _atomic_json(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+    atomic_write(path, json.dumps(payload, sort_keys=True) + "\n")
 
 
 def _result_payload(recorded: dict[str, object]) -> dict[str, object]:
@@ -761,7 +904,19 @@ def main() -> int:
         default=datetime.now().astimezone().strftime("%Y%m%d-%H%M%S"),
     )
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--dirty-scope",
+        action="store_true",
+        help="Print the count of Git status entries inside autoevo scopes and exit "
+        "(the command-side mirror of the deterministic dirty gate).",
+    )
     args = parser.parse_args()
+    if args.dirty_scope:
+        vault = vault_root().resolve()
+        prefixes = autoevo_scope_prefixes(vault)
+        in_scope = [path for _, path in _status_entries(vault) if _in_scope(path, prefixes)]
+        print(len(in_scope))
+        return 0
     try:
         _validate_run_identity(args.run_date, args.cycle)
         recovery = recover_owned_audit()
@@ -770,7 +925,21 @@ def main() -> int:
                 "managed audit recovery requires review: "
                 f"{recovery.get('detail', recovery['status'])}"
             )
-        result = inspect_preflight()
+        if recovery["status"] == "deferred":
+            # A bot-owned audit is still waiting to be committed and could not
+            # be recovered this cycle (unreadable state, missing index, lock).
+            # Running the sweep now would write a new audit section on top of
+            # it; defer the whole cycle instead of inspecting further.
+            result = environment_blocker(
+                PreflightError(f"managed audit recovery deferred: {recovery.get('detail', '')}")
+            )
+            result["gate"] = "audit_recovery_deferred"
+            result["blockers"][0]["gate"] = "audit_recovery_deferred"
+        else:
+            try:
+                result = inspect_preflight()
+            except (OSError, PreflightError) as exc:
+                result = environment_blocker(exc)
         result["owned_audit_recovery"] = recovery
         if args.record_blocker and result["ready"] is False:
             result = record_blocker(

@@ -170,7 +170,7 @@ the first mutation. Each abort surfaces as a cue at next `/hi`.
 | Git index | resolved Git index exists | A missing index makes `git status` resemble mass deletion plus untracked recreation. Do not misclassify it as ordinary dirtiness. |
 | Git index lock | resolved `index.lock` is absent | Never delete or replace a possibly live lock. |
 | Session-active lock | `<paths.cache>/atelier-session-lock` exists AND mtime < 6h | User may be mid-session; avoid collision. |
-| Dirty `$OV` working tree | `git -C "$OV" status --porcelain` non-empty | Don't compound user intent into bot commits. |
+| Dirty `$OV` working tree inside autoevo scopes | `scripts/autoevo_preflight.py --dirty-scope` > 0 (status entries under the sweep tiers, `<paths.agent_findings>/`, or `_meta/autoevo_*.toml`) | Don't compound user intent into bot commits. Dirt elsewhere is ignored because every bot commit stages explicit paths with `--only`. |
 | Dirty zettelm submodule | same check inside `<paths.zettelm>/` | User is mid mobile-capture digest. |
 | Privacy gate | `python3 scripts/privacy_check.py --json` returns `hit_count > 0` | Hard veto; never commit a leak. |
 | Semantic readiness | Offline real query exits 0 and returns JSON | Forgetter depends on semantic retrieval; fail before model launch if the cached model, environment, or Lance index is unavailable. |
@@ -202,7 +202,7 @@ earlier skip remains in history without preserving a stale warning.
 
 | Category | Threshold | Action |
 |---|---|---|
-| Redundant | 3+ peers ≥ 0.6 but below auto-band thresholds | Append to pending queue. |
+| Redundant | 3+ working-tier peers ≥ 0.6 but below auto-band thresholds (peers under papers, preprints, wiki, profile, or daily notes never count; see `forgetter.md` § Redundant) | Append to pending queue through `scripts/autoevo_pending.py append`, which skips clusters already pending, or resolved within its `--dedupe-days` window (default 90). |
 | Time-stale (era-stale, Forgetter heuristic B) | Always | Append to pending queue. Era judgments are intent-laden; never auto-act. |
 | Time-stale (content-stale, Forgetter heuristic A) | Always | Append to pending queue. |
 | Contradicted (real) | Challenger probe confirms genuine contradiction | Append to pending queue. Wiki rewrites need human approval. |
@@ -271,17 +271,20 @@ proposed_at = "2026-05-22"
 last_surfaced = "2026-05-22"
 surface_count = 0
 status = "pending"   # pending | applied | dismissed | auto-dismissed
+# Written by `scripts/autoevo_pending.py` on resolution (absent while pending):
+# resolved_at = "2026-06-21"              # decision date; anchors the 90-day dedupe window
+# dismiss_reason = "user skipped during /autoevo-review"
 ```
 
 Lifecycle:
 
-1. **Create**: `/autoevo-nightly` appends new entries for findings below the auto-band.
+1. **Create**: `/autoevo-nightly` appends new entries for findings below the auto-band via `scripts/autoevo_pending.py append` (deterministic escaping, atomic write, and dedupe: a finding whose sorted `peers` match an entry that is pending, or was applied, dismissed, or auto-dismissed within the helper's `--dedupe-days` window (default 90), is skipped and counted in the audit § Notes).
 2. **Surface**: `scripts/cues.py` `check_autoevo_pending` reads the queue; if any entries are `status = "pending"` and not snoozed, fires one cue at session start with a category breakdown.
 3. **Resolve**: `/autoevo-review` walks each pending entry; user picks apply / skip / defer / explain-more.
-   - Apply → dispatch Curator in approval mode; on confirm, write entry's status to `applied` and commit.
-   - Skip → set `status = "dismissed"`; record in audit log.
-   - Defer → increment `surface_count`; update `last_surfaced`; reuse `cue_snooze.json` for the snooze interval.
-4. **Auto-dismiss**: after 3 skips OR 30 days from `proposed_at` without resolution, set `status = "auto-dismissed"`, write one-line note to the audit log.
+   - Apply → dispatch Curator in approval mode; on confirm, `autoevo_pending.py resolve --status applied` and commit.
+   - Skip → `autoevo_pending.py resolve --status dismissed --reason ...`; record in audit log.
+   - Defer → `autoevo_pending.py defer` (bumps `surface_count` and `last_surfaced`); reuse `cue_snooze.json` for the snooze interval. The helper is the only queue writer; nothing hand-edits the TOML.
+4. **Auto-dismiss**: after 3 skips (`surface_count >= 3`, the helper's built-in threshold) OR `--max-age-days` (default 30) from `proposed_at` without resolution, `scripts/autoevo_pending.py auto-dismiss` sets `status = "auto-dismissed"` with a `dismiss_reason`; `/autoevo-review` writes the one-line note to the audit log. Dismissed clusters stay in the file so the next sweep does not re-propose them.
 
 ## Audit log: `<paths.agent_findings>/autoevo-applied-<YYYY-MM-DD>.md`
 

@@ -614,7 +614,43 @@ print(f"{source}\t{prompt}")
         fi
     fi
 
-    printf -v codex_prompt '%s\n\nThis is an unattended local Atelier routine, not an interactive user command. Invocation: `%s`. The wrapper has already completed owner, support, capability, dependency, launchd, and credential-guard preflight with profile `%s` (sandbox=%s, atelier_access=%s, web=%s, shell_network=%s, user_config=%s). Effective action permission allowlist: `%s`. Treat it as a strict model-level allowlist: skip every connector, CLI, web, or filesystem action not listed, even if an optional integration is installed. This is not a shell-level connector ACL. Read `%s/AGENTS.md` and `%s/CLAUDE.md` first, then read `%s/%s` completely and execute it in this process using the Codex adaptation table. Treat the Atelier repository as read-only unless atelier_access is read-write. Do not re-audit routine_profiles.toml, routine_runner.sh, remote-routines.md, launchd state, or the private watch registry; trust the wrapper preflight. This is operational work, not user-facing reflection; load only files required by the command and archived prompt after the mandatory session-start reads. The scheduled invocation authorizes only the autonomous writes and commits explicitly allowed by that command contract. Do not ask for interactive input. Ignore unrelated SessionStart cues. Stop safely if the command requires authority it does not grant. The final response must contain only JSON matching the supplied schema. Set outcome to delivered only after writing the canonical output artifact, noop only for an intentional documented no-op that still writes its audit artifact, or failed if the routine stops without a valid artifact. Report the canonical artifact path in output_file for delivered and noop outcomes.' "$codex_hint" "$COMMAND" "$ROUTINE_PROFILE" "$CODEX_SANDBOX" "$ATELIER_ACCESS_MODE" "$WEB_SEARCH_MODE" "$SHELL_NETWORK_MODE" "$USER_CONFIG_MODE" "$PERMISSION_ALLOWLIST" "$ATELIER_DIR" "$ATELIER_DIR" "$ATELIER_DIR" "$command_source"
+    # Named substitution: python str.format raises KeyError on any missing
+    # field, unlike bash printf which silently mis-slots on a %s/arg count
+    # mismatch (13 positional args lived here until 2026-08-23).
+    if ! codex_prompt=$(RP_HINT="$codex_hint" RP_COMMAND="$COMMAND" RP_PROFILE="$ROUTINE_PROFILE" \
+        RP_SANDBOX="$CODEX_SANDBOX" RP_ACCESS="$ATELIER_ACCESS_MODE" RP_WEB="$WEB_SEARCH_MODE" \
+        RP_SHELLNET="$SHELL_NETWORK_MODE" RP_USERCFG="$USER_CONFIG_MODE" RP_ALLOW="$PERMISSION_ALLOWLIST" \
+        RP_DIR="$ATELIER_DIR" RP_SOURCE="$command_source" python3 - <<'RPY'
+import os
+fields = {k[3:].lower(): os.environ[k] for k in (
+    "RP_HINT", "RP_COMMAND", "RP_PROFILE", "RP_SANDBOX", "RP_ACCESS", "RP_WEB",
+    "RP_SHELLNET", "RP_USERCFG", "RP_ALLOW", "RP_DIR", "RP_SOURCE")}
+print(
+    "{hint}\n\nThis is an unattended local Atelier routine, not an interactive user command. "
+    "Invocation: `{command}`. The wrapper has already completed owner, support, capability, dependency, "
+    "launchd, and credential-guard preflight with profile `{profile}` (sandbox={sandbox}, "
+    "atelier_access={access}, web={web}, shell_network={shellnet}, user_config={usercfg}). "
+    "Effective action permission allowlist: `{allow}`. Treat it as a strict model-level allowlist: "
+    "skip every connector, CLI, web, or filesystem action not listed, even if an optional integration "
+    "is installed. This is not a shell-level connector ACL. Read `{dir}/AGENTS.md` and `{dir}/CLAUDE.md` "
+    "first, then read `{dir}/{source}` completely and execute it in this process using the Codex "
+    "adaptation table. Treat the Atelier repository as read-only unless atelier_access is read-write. "
+    "Do not re-audit routine_profiles.toml, routine_runner.sh, remote-routines.md, launchd state, or "
+    "the private watch registry; trust the wrapper preflight. This is operational work, not user-facing "
+    "reflection; load only files required by the command and archived prompt after the mandatory "
+    "session-start reads. The scheduled invocation authorizes only the autonomous writes and commits "
+    "explicitly allowed by that command contract. Do not ask for interactive input. Ignore unrelated "
+    "SessionStart cues. Stop safely if the command requires authority it does not grant. The final "
+    "response must contain only JSON matching the supplied schema. Set outcome to delivered only after "
+    "writing the canonical output artifact, noop only for an intentional documented no-op that still "
+    "writes its audit artifact, or failed if the routine stops without a valid artifact. Report the "
+    "canonical artifact path in output_file for delivered and noop outcomes.".format(**fields)
+)
+RPY
+    ); then
+        echo "ERROR: failed to render the routine prompt (missing field)" >&2
+        return 2
+    fi
 
     # The resolved capability profile supplies the least-privilege sandbox,
     # web mode, and user-config policy. Maintenance work that must commit gets

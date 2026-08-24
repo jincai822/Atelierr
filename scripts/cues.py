@@ -52,7 +52,7 @@ from typing import Literal
 
 # Allow running as `uv run scripts/cues.py` from atelier root.
 sys.path.insert(0, str(Path(__file__).parent))
-from _paths import tier, vault_root  # type: ignore[import-not-found]  # noqa: E402
+from _paths import tier, tier_files, tier_segments, vault_root  # type: ignore[import-not-found]  # noqa: E402
 from routine_claim import validate_claim  # noqa: E402
 
 
@@ -80,9 +80,10 @@ def _resolve_output_runtime(requested: str) -> str:
 
         runtime, _ = resolve_runtime(load_registry())
         return runtime
-    except Exception:
-        # Cue checks are intentionally fail-open. The committed runtime default
-        # is Codex, so retain that surface if preference resolution is broken.
+    except (ImportError, OSError, RuntimeError, ValueError, KeyError) as exc:
+        # Cue rendering stays fail-open (wrong syntax beats a dead session
+        # start), but a broken registry should not be silent.
+        print(f"# warning: runtime resolution failed ({exc!r}); using codex", file=sys.stderr)
         return "codex"
 
 
@@ -90,14 +91,11 @@ def _format_runtime_message(message: str, runtime: str) -> str:
     """Render registered workflow references in the active runtime's syntax."""
     if runtime != "codex":
         return message
-    registry_path = Path(__file__).resolve().parents[1] / "harness" / "commands.toml"
     try:
-        commands = tomllib.loads(registry_path.read_text(encoding="utf-8")).get(
-            "commands", {}
-        )
-    except (OSError, tomllib.TOMLDecodeError):
-        return message
-    if not isinstance(commands, dict):
+        from registries import load_commands
+
+        commands = load_commands()
+    except Exception:  # noqa: BLE001  (cosmetic rendering stays fail-open)
         return message
     for name, entry in sorted(commands.items(), key=lambda item: -len(item[0])):
         if not isinstance(entry, dict):
@@ -109,6 +107,34 @@ def _format_runtime_message(message: str, runtime: str) -> str:
     return message
 
 
+
+def _meta_dir(ov: Path) -> Path:
+    """Operational-state root under the caller's vault, registry-renamable."""
+    return ov / tier_segments().get("meta", "_meta")
+
+
+def _touch_session_lock(verbose: bool, context: str) -> None:
+    """Touch the session-active marker unless the autoevo runtime asked us not to.
+
+    Shared by the SessionStart hook and the UserPromptSubmit `--touch-lock`
+    refresh; the two paths desynced once when the logic lived in two copies.
+    """
+    if os.environ.get("ATELIER_SKIP_LOCK_TOUCH"):
+        if verbose:
+            print(
+                f"# debug: {context} lock touch skipped (ATELIER_SKIP_LOCK_TOUCH set)",
+                file=sys.stderr,
+            )
+        return
+    try:
+        cache_dir = tier("cache")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / "atelier-session-lock").touch()
+    except OSError as exc:
+        if verbose:
+            print(f"# debug: session-lock touch failed: {exc!r}", file=sys.stderr)
+
+
 # --- individual checks ----------------------------------------------------
 
 
@@ -118,11 +144,10 @@ def check_weekly(ov: Path, today: date) -> tuple[Cue | None, str]:
     Hard floor: >10 days since last weekly, or no weekly ever.
     Soft cue: >6 days since last weekly AND today is Sunday or Monday.
     """
-    weekly_dir = tier("reflections")
-    if not weekly_dir.is_dir():
+    if not tier("reflections").is_dir():
         return None, "reflections dir missing; skip weekly cue"
 
-    weeklies = sorted(weekly_dir.glob("*-weekly.md"))
+    weeklies = tier_files("reflections", "*-weekly.md")
     if not weeklies:
         return (
             Cue(
@@ -175,6 +200,7 @@ def check_weekly(ov: Path, today: date) -> tuple[Cue | None, str]:
         )
 
     return None, f"days_since={days_since}, weekday={weekday}; fresh"
+
 
 
 def check_zettelm(ov: Path, today: date) -> tuple[Cue | None, str]:
@@ -338,9 +364,8 @@ def check_routine_outputs(ov: Path, today: date) -> tuple[Cue | None, str]:
     User mutes by updating that JSON after reading a report.
     """
     import json
-    import tomllib
 
-    config_path = ov / "_meta" / "routine_watch.toml"
+    config_path = _meta_dir(ov) / "routine_watch.toml"
     if not config_path.is_file():
         return None, "_meta/routine_watch.toml missing; skip"
 
@@ -353,7 +378,7 @@ def check_routine_outputs(ov: Path, today: date) -> tuple[Cue | None, str]:
     if not routines:
         return None, "no routines declared in routine_watch.toml"
 
-    ack_path = ov / "_meta" / "routine_acks.json"
+    ack_path = _meta_dir(ov) / "routine_acks.json"
     acks: dict[str, str] = {}
     if ack_path.is_file():
         try:
@@ -420,9 +445,8 @@ def check_routine_policy(ov: Path, today: date) -> tuple[Cue | None, str]:
     A routine missing both flags violates the policy without acknowledgment.
     Surfaces the count of non-compliant routines as a soft cue.
     """
-    import tomllib
 
-    config_path = ov / "_meta" / "routine_watch.toml"
+    config_path = _meta_dir(ov) / "routine_watch.toml"
     if not config_path.is_file():
         return None, "no routine_watch.toml; skip"
     try:
@@ -472,7 +496,7 @@ def _local_owner_start_date(ov: Path, config: dict) -> date | None:
     coordination = config.get("coordination", {})
     if not isinstance(coordination, dict) or coordination.get("backend") != "owner":
         return None
-    owner_path = ov / "_meta" / "routine_owner.toml"
+    owner_path = _meta_dir(ov) / "routine_owner.toml"
     try:
         owner = tomllib.loads(owner_path.read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError):
@@ -499,7 +523,7 @@ def _latest_local_claim(
     not_before: date | None = None,
 ) -> tuple[date, dict, Path] | None:
     """Load the latest dated claim for one local routine."""
-    routine_dir = ov / "_meta" / "routine_runs" / routine
+    routine_dir = _meta_dir(ov) / "routine_runs" / routine
     if not routine_dir.is_dir():
         return None
     candidates: list[tuple[date, Path]] = []
@@ -617,9 +641,8 @@ def check_routine_staleness(ov: Path, today: date) -> tuple[Cue | None, str]:
     cadence + tolerance. Catches silent Drive-write failures that
     check_routine_outputs (which only reports *new* files) cannot see.
     """
-    import tomllib
 
-    config_path = ov / "_meta" / "routine_watch.toml"
+    config_path = _meta_dir(ov) / "routine_watch.toml"
     if not config_path.is_file():
         return None, "_meta/routine_watch.toml missing; skip"
 
@@ -762,9 +785,8 @@ def check_routine_hitrate(
     (monthly, quarterly) don't accumulate enough samples for hit-rate math
     and are adequately covered by check_routine_staleness.
     """
-    import tomllib
 
-    config_path = ov / "_meta" / "routine_watch.toml"
+    config_path = _meta_dir(ov) / "routine_watch.toml"
     if not config_path.is_file():
         return None, "_meta/routine_watch.toml missing; skip"
 
@@ -941,9 +963,8 @@ def check_autoevo_pending(ov: Path, today: date) -> tuple[Cue | None, str]:
     Stays silent when the queue file is missing, empty, or all entries
     are already resolved (status != "pending").
     """
-    import tomllib
 
-    config_path = ov / "_meta" / "autoevo_pending.toml"
+    config_path = _meta_dir(ov) / "autoevo_pending.toml"
     if not config_path.is_file():
         return None, "_meta/autoevo_pending.toml missing; skip"
 
@@ -1072,27 +1093,54 @@ def check_autoevo_ran(
     # The bot runs at 05:00 local and writes its audit log with today's
     # RUN_DATE. After 06:00 today, today's audit file should exist.
     expected_name = f"autoevo-applied-{today.isoformat()}.md"
-    expected_path = findings_dir / expected_name
+    # `agent-findings/` is a fission-eligible tier: resolve today's audit
+    # anywhere under it, not only at the tier root.
+    matches = tier_files("agent_findings", expected_name)
+    expected_path = matches[-1] if matches else findings_dir / expected_name
+
+    def rel(path: Path) -> str:
+        for base in (ov, ov.resolve()):
+            try:
+                return str(path.relative_to(base))
+            except ValueError:
+                continue
+        return path.name
 
     # Branch 1: audit file missing entirely.
     if not expected_path.is_file():
         # If NO audit log exists at all under the dir, the bot was probably
         # never installed yet — stay silent rather than nag a user who hasn't
         # set it up.
-        any_audit = list(findings_dir.glob("autoevo-applied-*.md"))
+        any_audit = list(findings_dir.rglob("autoevo-applied-*.md"))
         if not any_audit:
             return None, "no audit logs ever; bot not installed yet"
+        # The runner's claim file knows why no audit was written (a crash
+        # before the audit step). Surface its status and error instead of a
+        # generic cause list so the fix is visible without reading /tmp logs.
+        claim_path = _meta_dir(ov) / "routine_runs" / "autoevo-nightly" / f"{today.isoformat()}.toml"
+        claim_hint = ""
+        if claim_path.is_file():
+            try:
+                claim = tomllib.loads(claim_path.read_text(encoding="utf-8"))
+            except (OSError, tomllib.TOMLDecodeError):
+                claim = {}
+            status = claim.get("status")
+            error = claim.get("error")
+            if status:
+                claim_hint = f" Claim status: `{status}`"
+                if error:
+                    claim_hint += f" (`{error}`)"
+                claim_hint += "; last stderr lines are in `/tmp/com.atelier.autoevo-nightly.err`."
         return (
             Cue(
                 key="autoevo_ran",
                 severity="soft",
                 command_path="scripts/launchd/README.md",
                 message=(
-                    f"Nightly autoevo did not run today ({today.isoformat()}). "
-                    f"Check `/tmp/com.atelier.autoevo-nightly.err` and "
-                    f"`~/Library/LaunchAgents/com.atelier.autoevo-nightly.plist`. "
-                    f"Common causes: $OV unset in launchd shell, expired Codex credentials, "
-                    f"or an unloaded LaunchAgent. A sleeping Mac should catch up on wake."
+                    f"Nightly autoevo did not run today ({today.isoformat()}).{claim_hint} "
+                    f"If no claim exists, check `~/Library/LaunchAgents/com.atelier.autoevo-nightly.plist` "
+                    f"($OV unset in launchd shell, expired credentials, unloaded LaunchAgent). "
+                    f"A sleeping Mac should catch up on wake."
                 ),
             ),
             f"expected {expected_name} missing",
@@ -1138,14 +1186,84 @@ def check_autoevo_ran(
     if errored:
         parts.append("Errors section populated")
     listing = " and ".join(parts)
+
+    # Escalation: the hourly retry schedule cannot clear a blocker that needs
+    # a human (dirty sweep scope, stale credentials, missing index). When the
+    # same gate has blocked the latest attempt for several consecutive days,
+    # stop whispering and name the fix; a soft cue let one gate block the
+    # bot for months.
+    def latest_gate(text: str) -> str | None:
+        starts = list(re.finditer(r"^##\s+(?:Autoevo Run|Run)\b", text, re.MULTILINE))
+        latest = text[starts[-1].start() :] if starts else text
+        m = re.search(
+            r"^###\s+Skipped.*?\n(.*?)(?=^###|^##|\Z)", latest, re.MULTILINE | re.DOTALL
+        )
+        if not m:
+            return None
+        for raw in m.group(1).splitlines():
+            line = raw.strip().lstrip("- ").strip()
+            if line and line != "(none)":
+                return line.split(":", 1)[0].strip()
+        return None
+
+    gate = latest_gate(latest_body)
+    streak = 0
+    if gate:
+        streak = 1
+        for back in range(1, 30):
+            prior_name = f"autoevo-applied-{(today - timedelta(days=back)).isoformat()}.md"
+            prior_matches = tier_files("agent_findings", prior_name)
+            if not prior_matches:
+                break
+            prior = prior_matches[-1]
+            try:
+                if latest_gate(prior.read_text()) != gate:
+                    break
+            except OSError:
+                break
+            streak += 1
+
+    # Keys MUST match the `gate` strings `autoevo_preflight.py` emits;
+    # tests/test_cues.py pins every key against that file's source.
+    gate_fixes = {
+        "dirty_vault_worktree": (
+            "commit or stash user edits under the sweep scopes, or check "
+            "`uv run scripts/autoevo_preflight.py --dirty-scope`"
+        ),
+        "dirty_zettelm_worktree": "finish or commit the mobile-capture digest in `<paths.zettelm>/`",
+        "session_lock_unreadable": "the session-lock file's metadata cannot be read; check `<paths.cache>/atelier-session-lock` permissions and disk health",
+        "session_active": "a stale `<paths.cache>/atelier-session-lock`; remove it if no session is open",
+        "git_index_lock_present": "a stale `.git/index.lock` in $OV; remove it only if no git process is running",
+        "git_index_missing": "the $OV git index is missing; restore it before the bot can classify files",
+        "git_not_worktree": "$OV is not a git worktree; re-init or fix the mount before the bot can commit",
+        "privacy_hits": "resolve the privacy_check.py finding in $OV",
+        "semantic_unavailable": "rebuild the semantic index or restore the cached model snapshot",
+        "environment_unavailable": "storage or git timeouts; check Drive sync health, then let the hourly retry clear it",
+        "audit_recovery_deferred": "an unrecovered bot audit; check `<paths.cache>/autoevo-preflight-owned-audit.json` readability",
+    }
+    if gate and streak >= 3:
+        fix = gate_fixes.get(gate, "see the audit file and scripts/launchd/README.md")
+        return (
+            Cue(
+                key="autoevo_ran",
+                severity="hard",
+                command_path=rel(expected_path),
+                message=(
+                    f"Nightly autoevo has been blocked by `{gate}` for {streak} consecutive days; "
+                    f"hourly retries cannot clear it. Fix: {fix}."
+                ),
+            ),
+            f"blocker {gate} streak={streak}; escalated to hard",
+        )
+
     return (
         Cue(
             key="autoevo_ran",
             severity="soft",
-            command_path=str(expected_path.relative_to(ov)),
+            command_path=rel(expected_path),
             message=(
                 f"Today's latest autoevo attempt has issues: {listing}. "
-                f"Read `{expected_path.relative_to(ov)}` for the audit details."
+                f"Read `{rel(expected_path)}` for the audit details."
             ),
         ),
         f"audit log present but {listing}",
@@ -1159,9 +1277,8 @@ def _recap_local_runs(ov: Path, today: date, verbose: bool = False) -> list[str]
     For completed runs, peeks at the corresponding audit log (if any) to extract
     counts. Returns a list of human-readable recap lines.
     """
-    import tomllib
 
-    runs_dir = ov / "_meta" / "routine_runs"
+    runs_dir = _meta_dir(ov) / "routine_runs"
     if not runs_dir.is_dir():
         return []
 
@@ -1282,13 +1399,12 @@ def check_local_routine_missed(
     Stays silent when no local routines are declared or `routine_runs/` is absent
     (bot never installed).
     """
-    import tomllib
 
     now = now or datetime.now().astimezone()
     if now.hour < 6:
         return None, "before 06:00 local; skip"
 
-    config_path = ov / "_meta" / "routine_watch.toml"
+    config_path = _meta_dir(ov) / "routine_watch.toml"
     if not config_path.is_file():
         return None, "_meta/routine_watch.toml missing; skip"
 
@@ -1302,7 +1418,7 @@ def check_local_routine_missed(
         return None, "no local routines declared"
 
     owner_start = _local_owner_start_date(ov, config)
-    runs_dir = ov / "_meta" / "routine_runs"
+    runs_dir = _meta_dir(ov) / "routine_runs"
     if not runs_dir.is_dir():
         return None, "routine_runs/ absent; never installed"
 
@@ -1451,11 +1567,10 @@ def check_career_growth(ov: Path, today: date) -> tuple[Cue | None, str]:
     except ValueError:
         plan_ref = plan_path.as_posix()
 
-    refl = tier("reflections")
-    if not refl.is_dir():
+    if not tier("reflections").is_dir():
         return None, "reflections dir missing; skip"
 
-    reviews = sorted(refl.glob("*-growth-review.md"))
+    reviews = tier_files("reflections", "*-growth-review.md")
     days_since: int | None = None
     if reviews:
         try:
@@ -1519,7 +1634,7 @@ CHECKS = [
 
 
 def _snooze_path(ov: Path) -> Path:
-    return ov / "_meta" / "cue_snooze.json"
+    return _meta_dir(ov) / "cue_snooze.json"
 
 
 def _load_snoozes(ov: Path) -> dict[str, str]:
@@ -1654,20 +1769,7 @@ def main(argv: list[str] | None = None) -> int:
     # night with "session-active lock fresh." The launchd runner exports
     # ATELIER_SKIP_LOCK_TOUCH=1 so the scheduled run bypasses the refresh.
     if args.touch_lock:
-        if os.environ.get("ATELIER_SKIP_LOCK_TOUCH"):
-            if args.verbose:
-                print(
-                    "# debug: lock touch skipped (ATELIER_SKIP_LOCK_TOUCH set)",
-                    file=sys.stderr,
-                )
-            return 0
-        try:
-            cache_dir = tier("cache")
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            (cache_dir / "atelier-session-lock").touch()
-        except Exception as exc:
-            if args.verbose:
-                print(f"# debug: session-lock touch failed: {exc!r}", file=sys.stderr)
+        _touch_session_lock(args.verbose, "UserPromptSubmit")
         return 0
 
     snoozes = _load_snoozes(ov)
@@ -1684,22 +1786,7 @@ def main(argv: list[str] | None = None) -> int:
     # UserPromptSubmit; without this guard, the bot would touch the lock
     # right before its own pre-flight gate reads it, aborting every run.
     if args.hook:
-        if os.environ.get("ATELIER_SKIP_LOCK_TOUCH"):
-            if args.verbose:
-                print(
-                    "# debug: SessionStart lock touch skipped (ATELIER_SKIP_LOCK_TOUCH set)",
-                    file=sys.stderr,
-                )
-        else:
-            try:
-                cache_dir = tier("cache")
-                cache_dir.mkdir(parents=True, exist_ok=True)
-                (cache_dir / "atelier-session-lock").touch()
-            except Exception as exc:
-                if args.verbose:
-                    print(
-                        f"# debug: session-lock touch failed: {exc!r}", file=sys.stderr
-                    )
+        _touch_session_lock(args.verbose, "SessionStart")
 
     fired: list[Cue] = []
     for name, fn in CHECKS:

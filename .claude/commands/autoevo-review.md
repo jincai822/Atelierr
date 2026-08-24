@@ -31,10 +31,10 @@ If filtered set is empty: print "queue empty (or fully resolved)" and exit 0.
 
 Before showing anything to the user, sweep for entries that triggered the auto-dismiss rule per `protocols/autoevo.md`:
 
-- `surface_count >= 3` (user skipped 3 times), OR
-- `proposed_at` is more than 30 days ago.
+- `surface_count >= 3` (the helper's built-in threshold), OR
+- `proposed_at` is older than the helper's `--max-age-days` (default 30).
 
-For each such entry: set `status = "auto-dismissed"`, append a one-line note to `<paths.agent_findings>/autoevo-applied-<RUN_DATE>.md` § "Auto-dismissed". Resolve the registry-backed path before committing so a future rename of the `agent_findings` segment in `harness/paths.toml` does not silently break the git add:
+Run `uv run --quiet python3 scripts/autoevo_pending.py auto-dismiss --today <RUN_DATE>`; it sets `status = "auto-dismissed"` with a `dismiss_reason` and prints the affected ids. For each, append a one-line note to `<paths.agent_findings>/autoevo-applied-<RUN_DATE>.md` § "Auto-dismissed". Resolve the registry-backed path before committing so a future rename of the `agent_findings` segment in `harness/paths.toml` does not silently break the git add:
 
 ```bash
 PATHS_FINDINGS=$(uv run --quiet python3 -c "from scripts._paths import tier; print(tier('agent_findings'))")
@@ -44,7 +44,7 @@ git -C "$OV" commit -m "$(cat <<'EOF'
 [autoevo:queue] _meta: auto-dismiss <N> stale pending entries
 
 Categories: <breakdown>
-Reason: surface_count >= 3 OR proposed_at > 30d ago
+Reason: surface_count >= 3 OR proposed_at older than --max-age-days
 
 Co-Authored-By: Atelier Autoevo Bot <noreply@atelier.local>
 EOF
@@ -99,16 +99,16 @@ Action? [a]pply | [s]kip | [d]efer | [e]xplain | [q]uit
 
 Dispatch the relevant agent in normal (approval-mode) Curator or Challenger flow. The user reviews the agent's proposal as usual — `/autoevo-review` does NOT shortcut Curator's content-preservation gates. Then:
 
-- On user-confirmed write: set `status = "applied"`, append to audit log § "Applied via /autoevo-review", commit.
-- On user-rejected proposal: set `status = "dismissed"` with reason "user rejected Curator proposal", commit.
+- On user-confirmed write: `uv run --quiet python3 scripts/autoevo_pending.py resolve --id <id> --status applied --today <RUN_DATE>`, append to audit log § "Applied via /autoevo-review", commit.
+- On user-rejected proposal: `uv run --quiet python3 scripts/autoevo_pending.py resolve --id <id> --status dismissed --reason "user rejected Curator proposal" --today <RUN_DATE>`, commit.
 
 ### Skip
 
-Set `status = "dismissed"`, append reason "user skipped during /autoevo-review", commit. Move to next item.
+Run `uv run --quiet python3 scripts/autoevo_pending.py resolve --id <id> --status dismissed --reason "user skipped during /autoevo-review" --today <RUN_DATE>`, commit. Move to next item. (Never hand-edit the TOML: the helper sets `resolved_at`, which anchors the nightly dedupe window.)
 
 ### Defer
 
-Increment `surface_count`. Update `last_surfaced = <today>`. Optional snooze: ask "snooze for how many days? (default 7)". On a snooze ≥ 1, also call:
+Run `uv run --quiet python3 scripts/autoevo_pending.py defer --id <id> --today <RUN_DATE>` (increments `surface_count`, sets `last_surfaced`). Optional snooze: ask "snooze for how many days? (default 7)". On a snooze ≥ 1, also call:
 
 ```bash
 uv run scripts/cues.py snooze autoevo_pending --days <N>
@@ -176,9 +176,9 @@ EOF
 ## Edge cases
 
 - **Queue file is corrupted.** Refuse to operate. Surface to user: "queue parse failed: <error>. Repair `$OV/_meta/autoevo_pending.toml` manually then re-run." Do not auto-rewrite.
-- **An entry's peers no longer exist** (user already manually deleted them between the nightly run and triage). Skip the entry, set `status = "dismissed"`, reason "peers no longer present". Log to audit.
+- **An entry's peers no longer exist** (user already manually deleted them between the nightly run and triage). Skip the entry via `autoevo_pending.py resolve --id <id> --status dismissed --reason "peers no longer present"`. Log to audit.
 - **Wiki entry path requested for compaction** (a contradicted finding's `wiki_path`). Triage routes the Apply action to Curator's normal wiki-update flow (full approval gate, Revision Log append). `/autoevo-review` does NOT shortcut the wiki update path.
-- **Daily note appears anywhere in a pending entry.** Reject the entry on load — write to audit log § "Errors" with the entry id, set `status = "auto-dismissed"`. The nightly run should never have queued a daily-note finding; if it did, treat as a bug to fix in Forgetter.
+- **Daily note appears anywhere in a pending entry.** Reject the entry on load — write to audit log § "Errors" with the entry id and run `uv run --quiet python3 scripts/autoevo_pending.py resolve --id <id> --status dismissed --reason "daily note in pending entry; nightly bug" --today <RUN_DATE>`. The nightly run should never have queued a daily-note finding; if it did, treat as a bug to fix in Forgetter.
 
 ## What this command does NOT do
 

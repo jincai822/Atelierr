@@ -1,0 +1,216 @@
+"""Tests for scripts/autoevo_pending.py (queue append dedupe + auto-dismiss).
+
+Glitch (2026-08-22): the nightly command hand-wrote TOML and re-proposed
+clusters the user had already dismissed; nothing deduped by peers. This
+helper owns the queue writes and is the only sanctioned writer.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import tomllib
+import unittest
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _run(vault: Path, queue: Path, *argv: str, stdin: str | None = None) -> dict:
+    proc = subprocess.run(
+        [sys.executable, "scripts/autoevo_pending.py", "--queue", str(queue), *argv],
+        cwd=REPO_ROOT,
+        env={**os.environ, "OV": str(vault)},
+        input=stdin,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if proc.returncode not in (0, 1):
+        raise AssertionError(proc.stderr)
+    return json.loads(proc.stdout)
+
+
+def _entry(eid: str, peers: list[str], proposed_at: str = "2099-01-01", status: str = "pending") -> dict:
+    return {
+        "id": eid,
+        "category": "redundant",
+        "proposed_action": 'merge "quoted" notes\nsecond line',
+        "evidence_summary": "3 peers, mode=real",
+        "peers": peers,
+        "proposed_at": proposed_at,
+        "last_surfaced": proposed_at,
+        "surface_count": 0,
+        "status": status,
+    }
+
+
+class PendingQueueTest(unittest.TestCase):
+    def test_append_escapes_and_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            queue = vault / "_meta" / "autoevo_pending.toml"
+            out = _run(vault, queue, "append", "--entries", "-", stdin=json.dumps([_entry("a", ["wip/x.md", "wip/y.md"])]))
+            self.assertEqual(out["appended"], ["a"])
+            data = tomllib.loads(queue.read_text(encoding="utf-8"))
+            self.assertEqual(data["pending"][0]["proposed_action"], 'merge "quoted" notes\nsecond line')
+            self.assertEqual(data["pending"][0]["peers"], ["wip/x.md", "wip/y.md"])
+
+    def test_append_skips_dismissed_cluster_within_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            queue = vault / "_meta" / "autoevo_pending.toml"
+            queue.parent.mkdir(parents=True)
+            queue.write_text(
+                'schema_version = 1\n\n[[pending]]\nid = "old"\ncategory = "redundant"\n'
+                'proposed_action = "merge"\nevidence_summary = "e"\nproposed_at = "2099-01-01"\n'
+                'last_surfaced = "2099-01-20"\nsurface_count = 0\nstatus = "dismissed"\n'
+                'peers = ["wip/y.md", "wip/x.md"]\n',
+                encoding="utf-8",
+            )
+            # Same peers in a different order, 30 days later: skipped.
+            out = _run(
+                vault, queue, "append", "--entries", "-", "--today", "2099-02-19",
+                stdin=json.dumps([_entry("new", ["wip/x.md", "wip/y.md"], "2099-02-19"), _entry("fresh", ["wip/z.md", "wip/w.md"], "2099-02-19")]),
+            )
+            self.assertEqual(out["appended"], ["fresh"])
+            self.assertEqual(out["skipped"][0]["id"], "new")
+            self.assertIn("old", out["skipped"][0]["reason"])
+            # Past the dedupe window the cluster may be proposed again.
+            out2 = _run(
+                vault, queue, "append", "--entries", "-", "--today", "2099-06-01",
+                stdin=json.dumps([_entry("later", ["wip/x.md", "wip/y.md"], "2099-06-01")]),
+            )
+            self.assertEqual(out2["appended"], ["later"])
+
+    def test_malformed_entries_json_returns_error_object(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            queue = vault / "_meta" / "autoevo_pending.toml"
+            proc = subprocess.run(
+                [sys.executable, "scripts/autoevo_pending.py", "--queue", str(queue), "append", "--entries", "-"],
+                cwd=REPO_ROOT, env={**os.environ, "OV": str(vault)}, input="{not json",
+                capture_output=True, text=True, timeout=60,
+            )
+            self.assertEqual(proc.returncode, 2)
+            out = json.loads(proc.stdout)
+            self.assertIn("error", out)
+            self.assertEqual(out["appended"], [])
+            self.assertFalse(queue.exists())
+            self.assertEqual(proc.stderr, "")
+
+    def test_corrupted_queue_refuses_with_json_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            queue = vault / "_meta" / "autoevo_pending.toml"
+            queue.parent.mkdir(parents=True)
+            queue.write_text("[[pending]\nbroken", encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, "scripts/autoevo_pending.py", "--queue", str(queue), "append", "--entries", "-"],
+                cwd=REPO_ROOT, env={**os.environ, "OV": str(vault)},
+                input=json.dumps([_entry("a", ["wip/x.md"])]),
+                capture_output=True, text=True, timeout=60,
+            )
+            self.assertEqual(proc.returncode, 2)
+            out = json.loads(proc.stdout)
+            self.assertIn("unreadable", out["error"])
+            self.assertEqual(queue.read_text(encoding="utf-8"), "[[pending]\nbroken")
+            sidecar = queue.parent / (queue.name + ".new")
+            self.assertTrue(sidecar.is_file(), "proposed entries must be parked in a sidecar")
+            self.assertIn('id = "a"', sidecar.read_text(encoding="utf-8"))
+            # A retry against the still-corrupt queue must not clobber the first sidecar.
+            proc2 = subprocess.run(
+                [sys.executable, "scripts/autoevo_pending.py", "--queue", str(queue), "append", "--entries", "-"],
+                cwd=REPO_ROOT, env={**os.environ, "OV": str(vault)},
+                input=json.dumps([_entry("b", ["wip/y.md"])]),
+                capture_output=True, text=True, timeout=60,
+            )
+            self.assertEqual(proc2.returncode, 2)
+            out2 = json.loads(proc2.stdout)
+            self.assertTrue(out2["sidecar"].endswith(".new-1"), out2)
+            self.assertIn('id = "a"', sidecar.read_text(encoding="utf-8"))
+            self.assertIn('id = "b"', Path(out2["sidecar"]).read_text(encoding="utf-8"))
+
+    def test_invalid_entry_is_reported_not_written(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            queue = vault / "_meta" / "autoevo_pending.toml"
+            bad = _entry("bad", ["wip/x.md"])
+            bad["category"] = "mystery"
+            proc = subprocess.run(
+                [sys.executable, "scripts/autoevo_pending.py", "--queue", str(queue), "append", "--entries", "-"],
+                cwd=REPO_ROOT, env={**os.environ, "OV": str(vault)}, input=json.dumps([bad]),
+                capture_output=True, text=True, timeout=60,
+            )
+            self.assertEqual(proc.returncode, 0)  # completed run; invalid is data, not an exit code
+            out = json.loads(proc.stdout)
+            self.assertEqual(out["appended"], [])
+            self.assertEqual(out["invalid"][0]["id"], "bad")
+            self.assertFalse(queue.exists())
+
+    def test_non_dict_entry_reported_invalid_not_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            queue = vault / "_meta" / "autoevo_pending.toml"
+            out = _run(vault, queue, "append", "--entries", "-",
+                       stdin=json.dumps(["just a string", _entry("ok", ["wip/x.md"])]))
+            self.assertEqual(out["appended"], ["ok"])
+            self.assertEqual(len(out["invalid"]), 1)
+            self.assertIn("not an object", out["invalid"][0]["problems"][0])
+
+    def test_auto_dismiss_by_age_and_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            queue = vault / "_meta" / "autoevo_pending.toml"
+            old = _entry("old", ["wip/a.md"], "2099-01-01")
+            skipped3 = _entry("skipped", ["wip/b.md"], "2099-02-01")
+            skipped3["surface_count"] = 3
+            fresh = _entry("fresh", ["wip/c.md"], "2099-02-01")
+            _run(vault, queue, "append", "--entries", "-", stdin=json.dumps([old, skipped3, fresh]))
+            out = _run(vault, queue, "auto-dismiss", "--today", "2099-02-05")
+            ids = sorted(d["id"] for d in out["auto_dismissed"])
+            self.assertEqual(ids, ["old", "skipped"])
+            data = tomllib.loads(queue.read_text(encoding="utf-8"))
+            by_id = {e["id"]: e for e in data["pending"]}
+            self.assertEqual(by_id["old"]["status"], "auto-dismissed")
+            self.assertEqual(by_id["fresh"]["status"], "pending")
+            self.assertIn("dismiss_reason", by_id["skipped"])
+
+
+class ResolutionTest(unittest.TestCase):
+    def test_resolve_anchors_dedupe_on_decision_date(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            queue = vault / "_meta" / "autoevo_pending.toml"
+            _run(vault, queue, "append", "--entries", "-", stdin=json.dumps([_entry("a", ["wip/x.md", "wip/y.md"], "2099-01-01")]))
+            out = _run(vault, queue, "resolve", "--id", "a", "--status", "dismissed", "--reason", "user skipped", "--today", "2099-03-01")
+            self.assertEqual(out["status"], "dismissed")
+            data = tomllib.loads(queue.read_text(encoding="utf-8"))
+            self.assertEqual(data["pending"][0]["resolved_at"], "2099-03-01")
+            self.assertEqual(data["pending"][0]["dismiss_reason"], "user skipped")
+            # 80 days after proposal but only 20 after the decision: still protected.
+            out2 = _run(vault, queue, "append", "--entries", "-", "--today", "2099-03-21",
+                        stdin=json.dumps([_entry("again", ["wip/y.md", "wip/x.md"], "2099-03-21")]))
+            self.assertEqual(out2["appended"], [])
+            self.assertIn("a (dismissed)", out2["skipped"][0]["reason"])
+            # Resolving twice is refused.
+            out3 = _run(vault, queue, "resolve", "--id", "a", "--status", "applied")
+            self.assertIn("error", out3)
+
+    def test_defer_increments_and_feeds_auto_dismiss(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp)
+            queue = vault / "_meta" / "autoevo_pending.toml"
+            _run(vault, queue, "append", "--entries", "-", stdin=json.dumps([_entry("a", ["wip/x.md"], "2099-02-01")]))
+            for day in ("2099-02-02", "2099-02-03", "2099-02-04"):
+                out = _run(vault, queue, "defer", "--id", "a", "--today", day)
+            self.assertEqual(out["surface_count"], 3)
+            out = _run(vault, queue, "auto-dismiss", "--today", "2099-02-05")
+            self.assertEqual([d["id"] for d in out["auto_dismissed"]], ["a"])
+
+
+if __name__ == "__main__":
+    unittest.main()

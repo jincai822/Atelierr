@@ -66,8 +66,9 @@ uv run scripts/semantic.py query "<note title; or, if title is generic, first ~2
 The default scan path is the vault root (`$OV/`), resolved internally by the script — do not pass `--path`. Read the JSON result rows, then:
 
 1. Drop self-matches (a row whose `path` resolves to the candidate's own path).
+1b. Drop rows outside the working tiers. Only peers under `<paths.wip>`, `<paths.research>`, `<paths.reflections>`, or `<paths.agent_findings>` count. Rows under `<paths.papers>`, `<paths.preprints>`, `<paths.wiki>` (and localized wikis), `profile/`, or `<paths.daily_notes>` are the note's subject, not its duplicate: a survey note retrieving the paper it summarizes, or a research note retrieving the wiki entry it was promoted into, is the intended shape of the vault.
 2. Of the remaining rows, count how many appear in the **top 5** with a score above a configurable retrieval-floor threshold. Default floor: stub mode `0.5`, real mode `0.6`. These are seed values; the first production sweeps will calibrate them. Treat the floor as a tuning knob, not a hard contract.
-3. Flag as Redundant when **at least 3 distinct peer notes** clear the floor and remain in the candidate's top 5 after self-match removal.
+3. Flag as Redundant when **at least 3 distinct working-tier peer notes** clear the floor and remain in the candidate's top 5 after the self-match and tier filters.
 
 **Evidence captured:** the candidate path, the 3-5 peer paths and their retrieval scores, the active mode (stub | real), the floor threshold used. Record mode and floor in the report Notes section so a future calibration pass can revisit thresholds without re-running.
 

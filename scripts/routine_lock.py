@@ -57,6 +57,10 @@ import time
 import tomllib
 from datetime import date, datetime, timezone
 from pathlib import Path
+
+import sys as _s
+_s.path.insert(0, str(Path(__file__).resolve().parent))
+from _paths import tier_segments  # noqa: E402
 from routine_owner import OwnershipError, coordination_backend, ownership_status
 
 TABLE_NAME = "atelier-routine-locks"
@@ -125,7 +129,7 @@ def _claim_path(routine: str, cycle: str) -> Path:
         raise ValueError("OV is not set")
     return (
         Path(raw_ov).expanduser()
-        / "_meta"
+        / tier_segments().get("meta", "_meta")
         / "routine_runs"
         / routine
         / f"{cycle}.toml"
@@ -695,7 +699,7 @@ def setup_table() -> int:
                 "AttributeName": "ttl",
             },
         )
-        print(f"TTL enabled on 'ttl' column. Table ready.")
+        print("TTL enabled on 'ttl' column. Table ready.")
         return 0
 
     except client.exceptions.ResourceInUseException:
