@@ -1,0 +1,24 @@
+# Atelierr - Flatnotes Web 界面部署 (MVP 2)
+#
+# 用法:
+#   cp .env.example .env   # 修改账号密码和数据目录
+#   docker compose up -d
+#   访问 http://localhost:8080
+
+services:
+  flatnotes:
+    image: dullage/flatnotes:latest
+    container_name: atelierr-flatnotes
+    ports:
+      - "${FLATNOTES_PORT:-8080}:8080"
+    environment:
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+      FLATNOTES_AUTH_TYPE: "${FLATNOTES_AUTH_TYPE:-password}"
+      FLATNOTES_USERNAME: "${FLATNOTES_USERNAME:-admin}"
+      FLATNOTES_PASSWORD: "${FLATNOTES_PASSWORD:?请在 .env 中设置 FLATNOTES_PASSWORD}"
+      FLATNOTES_SECRET_KEY: "${FLATNOTES_SECRET_KEY:?请在 .env 中设置 FLATNOTES_SECRET_KEY}"
+    volumes:
+      # 挂载记忆模块数据目录（$OV/memory）；默认使用本地 ./data 便于独立试用
+      - "${MEMORY_DATA_DIR:-./data}:/data"
+    restart: unless-stopped

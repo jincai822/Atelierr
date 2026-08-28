@@ -1,0 +1,35 @@
+# Atelierr 依赖包
+# 核心依赖（必需）
+pyyaml>=6.0
+watchdog>=2.1.0
+python-frontmatter>=1.0.0
+
+# OCR（图片处理）
+paddlepaddle>=2.5.0
+paddleocr>=2.6.0
+pillow>=9.0.0
+
+# 视频处理
+openai-whisper>=20230314
+ffmpeg-python>=0.2.0
+
+# PDF 处理
+PyMuPDF>=1.21.0
+
+# CLI 工具
+click>=8.0.0
+rich>=12.0.0
+tqdm>=4.65.0
+
+# 测试
+pytest>=7.0.0
+pytest-cov>=3.0.0
+pytest-mock>=3.10.0
+
+# 开发工具
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
+
+# Python 3.10 兼容性
+tomli>=2.0.0; python_version < '3.11'

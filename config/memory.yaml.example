@@ -1,0 +1,21 @@
+# 记忆模块配置（复制为 config/memory.yaml 后修改）
+# 语义契约见 docs/ACCEPTANCE-CRITERIA.md 与 docs/prd/ARCHITECTURE-LOCKED-V1.md (v1.1)
+
+memory:
+  # 三层目录的根路径（即 $OV/memory）
+  root: ~/atelierr-data/memory
+
+  # 分层阈值（confidence = 新鲜度，新笔记 = 1.0）
+  layers:
+    short_term_min: 0.7   # confidence ≥ 0.7        → short-term/
+    mid_term_min: 0.4     # 0.4 ≤ confidence < 0.7  → mid-term/
+                          # confidence < 0.4        → long-term/
+
+  decay:
+    rate: 0.95            # new_conf = old_conf * rate^未访问天数
+    access_boost: 0.05    # 每次访问 confidence +0.05（上限 1.0）
+    recent_days: 7        # 近 7 天内访问过视为活跃
+    delete_threshold: 0.1 # 低于此值仅标记待删除，绝不自动删除文件
+
+  # 衰减报告输出目录（相对 memory root）
+  reports_dir: reports

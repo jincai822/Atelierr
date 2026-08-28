@@ -1,0 +1,28 @@
+# 输入处理器配置（复制为 config/processors.yaml 后修改）
+
+processors:
+  image:
+    engine: paddleocr
+    lang: ch              # ch / en
+    use_gpu: false
+    timeout_s: 5          # 单张图片处理超时（验收标准 < 5s）
+
+  pdf:
+    engine: pymupdf
+    ocr_images: true      # 提取 PDF 内嵌图片并 OCR
+    generate_toc: true    # 生成目录
+
+  video:
+    engine: whisper
+    model: base           # tiny / base / small / medium / large
+    extract_keyframes: true
+
+  audio:
+    engine: whisper
+    model: base
+
+  wechat:
+    input_format: txt     # 微信导出格式
+
+  batch:
+    workers: 4            # 批量处理并行数

@@ -1,0 +1,14 @@
+# 存储配置（复制为 config/storage.yaml 后修改）
+
+storage:
+  # 原始附件目录（图片 / PDF / 视频 / 音频的原件）
+  attachments_dir: ~/atelierr-data/attachments
+
+  # 单文件大小上限（MB），超过则拒绝并提示
+  max_file_size_mb: 500
+
+  # 处理后是否保留原始文件
+  keep_originals: true
+
+  # 处理输出的临时工作目录
+  temp_dir: /tmp/atelierr

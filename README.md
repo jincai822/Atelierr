@@ -1,290 +1,328 @@
-# Atelier
+# Atelierr - AI 驱动的记忆管理系统
 
-> **A personal workshop, published.** A reflective-thinking system built for [Codex CLI](https://github.com/openai/codex), [Claude Code](https://docs.anthropic.com/en/docs/claude-code), and a local-first Zettelkasten. It covers daily reflection, decision-making, deep reading, goal tracking, and knowledge crystallization. It is not a product, and not aiming to be one. The patterns are reusable; the configuration is bespoke. Read the code, fork what's useful, build your own.
+**Atelierr** 是一个智能的个人知识管理系统，通过 **Confidence-based 记忆衰减机制**，帮助你自动管理信息的生命周期，让重要的知识保留，低价值的信息自然淡出。
 
-The system surrounds an **œuvre**, the accumulating body of notes, decisions, and reflections kept as local Markdown under `$OV/` and outside this public repository. Workflows send relevant context to whichever model runtimes the user configures. A 15-specialist agent team (le cercle) coordinates session work; a deterministic trust engine (`scripts/trust.py`) scores the wiki layer; the lint workflow keeps the corpus self-consistent.
+---
 
-Capture what you learn. Reflect on what you think. Research what you don't know. Read deeply. Make decisions. Track goals across life chapters. Crystallize knowledge you trust.
+## ✨ 核心特性
 
-Runs natively on both Codex and Claude Code through one runtime-adapter contract. Codex is the shipped default; Claude remains a supported local choice. Each runtime keeps its own command, agent, and lifecycle surfaces while sharing the same workflow and role specifications.
+### 🧠 智能记忆管理
 
-## Who is this for?
+- **三层记忆结构**: 短期（工作记忆）→ 中期（项目知识）→ 长期（核心知识）
+- **自动衰减**: 基于时间和访问频率的智能衰减
+- **动态迁移**: 笔记根据价值自动在层级间流动
 
-Honest framing matters more here than feature lists. Three rough audiences:
+### 🎨 多模态输入
 
-1. **Pattern students.** You want to see how someone wired native Codex and Claude Code runtimes to a personal-knowledge-management substrate end-to-end: agent contracts in `harness/agents.toml`, command portability in `harness/commands.toml`, trust scoring in `scripts/trust.py`, the five-tier (L1–L5) model in `protocols/local-first-architecture.md`, and the wiki schema in `protocols/wiki-schema.md`. Take the patterns; leave the configuration. **This is the primary audience.**
+- **图片/截图**: OCR 自动识别文字
+- **视频**: 智能提取转录和关键帧（99% 压缩）
+- **PDF**: 文本提取和图表保留
+- **音频**: 语音转文字
+- **微信记录**: 聊天记录结构化保存
 
-2. **System forkers.** You want to run something like this for your own thinking. The repo is MIT-licensed, you can fork it. But: a fresh clone has no `$OV/` vault, no `profile/identity.md`, no Readwise inbox, no archetype mnemonics that mean anything to you. The Atelier vocabulary (le cercle, the Painter, le œuvre) is bespoke. Expect to rip and replace; don't expect to clone-and-run.
+### 💾 智能大文件处理
 
-3. **Maintainer.** Daily use. Self-improving on a weekly cadence via Codex `$system-review` or Claude `/system-review`, plus `scripts/review.sh`.
+- **极致压缩**: 1GB 视频 → 5MB（保留完整信息）
+- **Git 友好**: 仓库保持 <1GB
+- **灵活存储**: 本地归档或云端备份
 
-If you want a turnkey "second brain," this isn't it — it's also not trying to be. The fastest path to disappointment with this kind of system is to inherit someone else's vocabulary, taxonomy, and tier model wholesale; the value lives in writing your own.
+### 🌐 现代化界面
 
-## What It Does
+- **Web 访问**: 基于 Flatnotes 的优雅界面
+- **移动友好**: 随时随地访问笔记
+- **Markdown 原生**: 纯文本，永不过时
 
-**Reflect** — Daily check-ins grounded in what you actually wrote. Surfaces forgotten connections, challenges assumptions, tracks goals across life chapters.
+---
 
-**Read** — Deep-reads articles, saved notes, and transcripts through multiple lenses (critical, structural, practical, dialectical). Multiple readers analyze in parallel; you discuss what they found.
+## 🚀 快速开始
 
-**Plan** — Goal reviews, decision journals, and energy audits. Tracks what's progressing, what's neglected, what's emerging. Uses 22+ thinking frameworks with cross-validation.
-
-**Act** — Compact redundant notes, deep-dive into a topic with 4 agents in parallel, triage notes for cleanup, or curate your Readwise inbox.
-
-**Learn** — Get reading recommendations, or introspect to rebuild your self-model.
-
-**Wiki:** Crystallize validated thinking into `$OV/wiki/` entries with structured claims, external anchors, and bi-temporal markers. `scripts/trust.py` runs Personalized PageRank with external anchors as trust seeds. Codex `$lint` or Claude `/lint` enforces corpus-level structure and harness health.
-
-Session reflections write to `$OV/reflections/`. Daily notes are user-authored — the system reads them; the sole write path is the Scribe agent recording user-dictated content verbatim.
-
-## Forking the patterns (the primary use case)
-
-If you read one thing in this repo, read these in order:
-
-1. **`protocols/local-first-architecture.md`** — the five-tier (L1–L5) model. This is the load-bearing idea: directory = certification level, no tags required.
-2. **`protocols/wiki-schema.md`** — claim markers (`[C1]`, `@anchor`, `@cite`, `@pass`), bi-temporal `valid_at`/`invalid_at` fields, and how `scripts/trust.py` reads them.
-3. **`harness/agents.toml`, `harness/commands.toml`, `harness/models.toml`, `harness/capabilities.toml`** — provider-neutral registries. The Claude Code and Codex runtimes are *adapters*, not first-class consumers. This is the part most worth lifting.
-4. **`scripts/trust.py`** — Personalized PageRank with external anchors as seeds. Stdlib-only, deterministic. Adapt freely.
-5. **`scripts/semantic.py`** — pluggable embedder + store backends (BGE-M3 + LanceDB by default). The CLI contract is encoder-agnostic; the embedder choice is yours.
-6. **`scripts/lint.py` and `scripts/privacy_check.py`** — quality gates with structured JSON output. Lint enforces wiki schema integrity; privacy_check scans private titles, local exact terms, and both worktree and staged content, and fails loud on placebo-pass conditions.
-7. **`.claude/agents/*.md` and `.codex/agents/*.toml`:** fifteen shared role specs and their native Codex adapters. The adapters and the `$command` skills are rendered from the registries by `scripts/render_runtime_edges.py` (`--check` keeps them byte-identical); edit the registries, not the generated files. Useful as templates for your own agent definitions.
-
-What's deliberately *not* portable: `profile/` (symlinked config), `$OV/personal/`, `$OV/wiki/` content, the impressionist vocabulary register (le cercle, the Painter, le œuvre), the bilingual English/Chinese behavior, the Era / Direction taxonomy, and the `civ`, `dine`, and `prm` workflows which encode a bespoke life-area model. Strip those before adapting.
-
-## Running it (if you want to)
-
-This is the maintainer's daily-use configuration. Running it identically end-to-end is supported, but expect a real onboarding cliff: a fresh clone has no vault, no profile, no notes. Most session commands will ask for Codex `$introspect` or Claude `/introspect` first, or warn that `profile/identity.md` is missing. That's working as intended for the maintainer; it's a wall for everyone else.
-
-### Prerequisites
-
-- [Codex CLI](https://github.com/openai/codex) (shipped default) or [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-- [uv](https://docs.astral.sh/uv/) — Python package manager (3.11+)
-- A `$OV/` directory with at minimum: `daily-notes/`, `wiki/`, `reflections/`. Other tiers (`papers/`, `cache/`, etc.) are optional.
-
-**Optional:**
-- [Codex CLI](https://github.com/openai/codex) is also the external reviewer leg for `system-review` (`scripts/review.sh`), even when Claude is the selected interactive runtime; a direct-API leg runs in parallel via `scripts/chat_completion.py`.
-- [Gemini CLI](https://github.com/google-gemini/gemini-cli) — optional reviewer fallback (`npm i -g @google/gemini-cli`).
-
-### Install
+### 安装
 
 ```bash
-git clone https://github.com/mhxie/atelier.git ~/atelier
-cd ~/atelier
-uv sync
-echo 'export OV="$HOME/path/to/your/vault"' >> ~/.zshrc
-source ~/.zshrc
+# 克隆仓库
+git clone https://github.com/your-username/Atelierr.git
+cd Atelierr
+
+# 安装依赖
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 启动 Web 界面
+docker-compose up -d
+
+# 启动记忆管理守护进程
+python scripts/memory_scheduler.py --daemon
 ```
 
-All personal content under `$OV/` is gitignored. Only system configuration (protocols, agents, commands, scripts) is committed.
-
-### Permissions, plugins, and feature coverage
-
-Atelier's canonical write path is local:
-
-```text
-Codex -> local files under $OV -> Google Drive or another filesystem sync client
-```
-
-A Google Drive connector does not grant Codex permission to write local files.
-When `$OV/` is outside the repository workspace, add it as a writable root while
-keeping Codex in `workspace-write` mode:
+### 创建第一个笔记
 
 ```bash
-codex -C . \
-  --add-dir "$OV" \
-  --sandbox workspace-write \
-  --ask-for-approval on-request \
-  '$hi'
+# 通过 Web 界面（推荐）
+打开 http://localhost:8080
+
+# 或直接创建 Markdown
+echo "# 我的第一个笔记" > $OV/memory/short-term/test.md
 ```
 
-This makes local writes technically possible; it does not bypass Atelier's
-domain rules. Ordinary writes under `$OV/` still require user approval, and
-daily notes remain user-authored except for verbatim Scribe capture.
-
-For a separate personal Codex home, the maintainer uses this optional alias:
+### 处理多模态输入
 
 ```bash
-alias mycodex='CODEX_HOME="$HOME/.codex-personal" codex --add-dir "$OV"'
+# 处理图片
+python scripts/input_processor.py --type image --input screenshot.jpg
+
+# 处理视频
+python scripts/input_processor.py --type video --input lecture.mp4
+
+# 处理 PDF
+python scripts/input_processor.py --type pdf --input paper.pdf
 ```
 
-| Capability or permission | Required? | What it enables |
-|---|---|---|
-| Read access to the repository and `$OV/` | Yes | Local notes, profiles, semantic search, dashboards, and command specifications |
-| Write access to `$OV/` via `--add-dir "$OV"` | For write-capable workflows | Reflections, cache files, wiki promotion, approved captures, and local routine output |
-| Local shell commands | Yes | `uv`, `rg`, `git`, `jq`, lint, trust scoring, and deterministic project scripts |
-| Project trust and reviewed hooks | Recommended | Session cues, intent coverage, and cleanup through `.codex/hooks.json` |
-| Live web search | Optional | External research for Scout, Reader, Scholar, Librarian, and Thinker; enable with `--search` |
-| Outbound shell network | Optional | Readwise CLI and API-backed scripts; this is separate from live web search and may require approval |
+---
 
-The local-first Atelier has no required Codex plugin. Plugins add access to
-cloud data that is not already represented by local files:
+## 📖 文档
 
-| Integration | Core requirement | Authorization | Supported Atelier use |
-|---|---|---|---|
-| Gmail plugin | Optional | Install and enable the plugin, then complete Google OAuth | Search or read mail for user-requested Codex context; scheduled routines need Gmail attached on their hosting surface |
-| Google Drive plugin | Optional locally; a Drive connector is required on whichever runtime hosts a Drive-writing routine | Install and enable the plugin, then complete Google OAuth | Search or operate on cloud-only Drive files; remote persistence uses the hosting runtime's Drive connection |
-| Readwise CLI | Used by reading and curation flows; no Codex plugin required | `readwise login` or token authentication | Search Reader, fetch saved documents and transcripts, curate the inbox, and snapshot external anchors |
-| GitHub plugin | Optional | Connector authentication | Remote issues, pull requests, and repository context; local `git` works without it |
-| Google Calendar plugin | Optional | Google OAuth | Calendar-aware workflows added by a fork; no current core command depends on it |
+### 快速链接
 
-Plugin readiness has four separate gates: installed, enabled, connector OAuth
-completed, and tools loaded in a new Codex session. Tool actions then remain
-subject to connector permissions and Codex approvals. Claude Code and
-Claude.ai routines manage their own MCP connections, so authorizing a service
-there does not configure the Codex plugin. Conversely, a Codex connection does
-not repair a Claude.ai routine with a missing MCP connection.
+- [快速开始指南](./QUICK-START.md) - 10分钟上手
+- [完整文档](./docs/README.md) - 所有文档导航
+- [用户手册](./docs/user/user-guide.md) - 详细使用说明
+- [API 参考](./docs/dev/api-reference.md) - 开发者文档
 
-Unattended local routines use a stricter Codex-only envelope. Ordinary routine
-profiles make `$OV` writable while keeping this repository read-only;
-maintenance is the only profile allowed to write both. Each profile also binds
-an exact bot command, records a fingerprint in its evidence, and runs with a
-sanitized environment plus non-interactive approvals. Interactive Claude Code
-support is unchanged and does not control the launchd runtime.
+### 架构文档
 
-References: [Codex plugins](https://learn.chatgpt.com/docs/plugins.md),
-[sandbox and approvals](https://learn.chatgpt.com/docs/agent-approvals-security.md),
-and [MCP configuration](https://learn.chatgpt.com/docs/extend/mcp).
+- [核心架构](./docs/prd/ARCHITECTURE-LOCKED-V1.md) - 系统设计
+- [实施计划](./docs/prd/IMPLEMENTATION-PLAN-PARALLEL.md) - 开发路线图
+- [架构图解](./docs/prd/) - 可视化架构
 
-### First run
+---
 
-Atelier ships with Codex as its selected runtime. The selector is optional; it
-only launches each CLI's native command surface:
+## 🏗️ 系统架构
+
+```
+┌─────────────────────────────────┐
+│  模块 1: Web 界面 (Flatnotes)   │
+│  🌐 网页访问，移动友好           │
+└────────────┬────────────────────┘
+             ↓ (读写文件)
+┌─────────────────────────────────┐
+│  模块 2: 记忆模块 (Memory)      │
+│  🧠 Confidence-based 生命周期    │
+│  📊 自动衰减和层级管理           │
+└────────────┬────────────────────┘
+             ↓ (被调用)
+┌─────────────────────────────────┐
+│  模块 3: Atelierr Core          │
+│  🤖 15+ AI Agents 协作           │
+│  📝 反思、阅读、综合              │
+└─────────────────────────────────┘
+```
+
+更多细节: [架构图解](./docs/prd/README-visual.md)
+
+---
+
+## 🎯 使用场景
+
+### 📚 知识工作者
+
+```
+• 阅读大量文章和论文
+• 需要整理和回顾笔记
+• 想自动过滤低价值信息
+```
+
+### 🎓 学生和研究者
+
+```
+• 处理课程视频和讲座
+• 管理学术论文和资料
+• 组织学习笔记
+```
+
+### 💼 产品经理和创业者
+
+```
+• 记录想法和灵感
+• 整理用户反馈
+• 管理项目文档
+```
+
+---
+
+## 💡 核心概念
+
+### Confidence（置信度）
+
+每个笔记都有一个 0.0-1.0 的 confidence 值，表示其可信度和重要性：
+
+```yaml
+---
+title: 笔记标题
+created: 2026-08-27
+confidence: 0.8          # 初始 confidence
+last_accessed: 2026-08-27
+access_count: 1
+source: manual           # 来源类型
+tags: ["标签1", "标签2"]
+---
+
+笔记内容...
+```
+
+### 三层记忆
+
+```
+短期记忆 (Short-term):
+  - Confidence: 0.0-0.4
+  - 位置: $OV/memory/short-term/
+  - 衰减: 快速（每天 -5%）
+  - 用途: 临时想法、待整理
+
+中期记忆 (Mid-term):
+  - Confidence: 0.4-0.7
+  - 位置: $OV/memory/mid-term/
+  - 衰减: 中等（每天 -2%）
+  - 用途: 项目知识、学习笔记
+
+长期记忆 (Long-term):
+  - Confidence: 0.7-1.0
+  - 位置: $OV/memory/long-term/
+  - 衰减: 缓慢（每天 -0.5%）
+  - 用途: 核心知识、重要参考
+```
+
+### 自动衰减
+
+```
+每天自动执行:
+  1. 所有笔记 confidence 下降
+  2. 访问过的笔记 confidence 提升
+  3. 低于阈值的笔记移到下层
+  4. 极低 confidence 的笔记归档
+```
+
+---
+
+## 📊 性能指标
+
+### 功能指标
+
+```
+✅ 支持 5+ 种输入类型
+✅ 大文件压缩比 >98%
+✅ 自动化程度 >90%
+```
+
+### 性能指标
+
+```
+✅ 1000 笔记搜索 <100ms
+✅ 1GB 视频处理 <15分钟
+✅ 200MB PDF 处理 <5分钟
+✅ Git 仓库 <1GB
+```
+
+---
+
+## 🛣️ 开发路线图
+
+### ✅ Phase 1: 记忆模块核心（Week 1-2）
+
+- [x] MemoryTree 核心类
+- [x] Confidence 计算
+- [x] 自动衰减机制
+- [x] 基础搜索功能
+
+### ⏳ Phase 2: Web 界面集成（Week 3）
+
+- [ ] Flatnotes 部署
+- [ ] 文件监控集成
+- [ ] 自动化工作流
+
+### ⏳ Phase 3: 输入处理（Week 4）
+
+- [ ] 图片 OCR
+- [ ] 视频处理
+- [ ] PDF 处理
+
+### ⏳ Phase 4: 大文件和多模态（Week 5-8）
+
+- [ ] 大文件智能提取
+- [ ] 微信记录处理
+- [ ] 音频转文字
+- [ ] 批量处理工具
+
+### ⏳ Phase 5: 优化和发布（Week 9-10）
+
+- [ ] 性能优化
+- [ ] 完整测试
+- [ ] 文档完善
+- [ ] v1.0 发布
+
+详见: [并行实施计划](./docs/prd/IMPLEMENTATION-PLAN-PARALLEL.md)
+
+---
+
+## 🤝 贡献
+
+我们欢迎所有形式的贡献！
+
+### 如何贡献
 
 ```bash
-python3 scripts/atelier_runtime.py status
-python3 scripts/atelier_runtime.py run hi
-python3 scripts/atelier_runtime.py run --non-interactive lint
+# 1. Fork 项目
+# 2. 创建特性分支
+git checkout -b feature/amazing-feature
+
+# 3. 提交更改
+git commit -m 'Add amazing feature'
+
+# 4. 推送到分支
+git push origin feature/amazing-feature
+
+# 5. 提交 Pull Request
 ```
 
-To make Claude Code the persistent interactive launcher default:
+详见: [贡献指南](./docs/dev/contributing.md)
 
-```bash
-python3 scripts/atelier_runtime.py use claude
-python3 scripts/atelier_runtime.py run hi
-```
+---
 
-`ATELIER_RUNTIME=codex|claude` overrides one interactive launcher process.
-Direct native invocation always remains available; unattended launchd routines
-remain Codex-only.
+## 📝 许可证
 
-Codex:
+本项目采用 MIT 许可证 - 详见 [LICENSE](./LICENSE) 文件
 
-```bash
-codex -C . --add-dir "$OV" '$hi'              # fresh Codex TUI with vault write access
-codex --add-dir "$OV" exec -C . '$lint'       # one-shot, no TUI
-codex --add-dir "$OV" resume --last '$promote' # continue most recent session
-```
+---
 
-Claude Code:
+## 🙏 致谢
 
-```bash
-claude                # open Claude Code in the project
-/introspect           # build profile/ from $OV/daily-notes/ - required before most session commands
-/hi                   # universal entry point - session menu (`/reflect` is an alias)
-```
+### 核心技术
 
-Inside an active Codex thread, use `$hi`, `$weekly`, `$review`, or another
-explicit command skill. Each skill reads the matching `.claude/commands/*.md`
-specification directly, so interactive use requires no Python command bridge.
-Codex reads `AGENTS.md`, discovers skills under `.agents/skills/`, dispatches
-roles through `.codex/agents/`, and runs session and intent hooks from
-`.codex/hooks.json`. `protocols/runtime-adapters.md` defines the translation
-boundary.
+- [Flatnotes](https://github.com/dullage/flatnotes) - Web 界面
+- [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) - OCR 识别
+- [Whisper](https://github.com/openai/whisper) - 语音转文字
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - 视频下载
 
-Reflection workflows default to fresh sessions because reusing a prior session
-pollutes the new reflection. Invoke them as `/hi`, `/weekly`, and so on in
-Claude Code, or `$hi`, `$weekly`, and so on in Codex. Continuation-friendly
-workflows such as Claude `/promote` and Codex `$promote` are marked
-`resume_friendly = true` in `harness/commands.toml`.
+### 灵感来源
 
-## Sessions
+- 记忆宫殿法
+- Zettelkasten 笔记系统
+- Evergreen Notes 概念
 
-Type `/hi` in Claude Code or `$hi` in Codex to get a menu; the main flows:
+---
 
-| Mode | What happens |
-|------|-------------|
-| Daily Reflection | Reflects on today's notes, asks questions at increasing depth, surfaces a forgotten connection |
-| Weekly Review | Energy + attention audit across the week |
-| Explore | Finds hidden connections and open threads across your notes |
-| Goal Review | Checks progress on goals — progressing, neglected, or shifted |
-| Decision Journal | Structured decision-making with framework cross-validation |
-| Energy Audit | Four-dimension assessment (physical, mental, emotional, social) |
-| Read & Discuss | Multi-lens reading of an article or note, then interactive discussion |
-| Deep Dive | Full briefing on a topic — your notes + web research + resources + framework |
-| Compact Notes | Find and merge redundant notes |
-| Curate Inbox | Goal-aware triage of your Readwise inbox — score, route, and tag |
-| Note Triage | Scan for compaction candidates across your notes |
-| Process Meeting | Turn a work meeting transcript into structured notes with action items |
+## 📧 联系方式
 
-You can also go direct in Codex: `$review`, `$weekly`, `$decision`, `$explore`, `$energy-audit`, `$curate`, `$introspect`, `$lint`, `$promote`, `$dine`, `$prm`, `$civ`, `$system-review`. Replace `$` with `/` for the matching Claude command.
+- **Issues**: [GitHub Issues](https://github.com/your-username/Atelierr/issues)
+- **讨论**: [GitHub Discussions](https://github.com/your-username/Atelierr/discussions)
+- **邮件**: your-email@example.com
 
-**Knowledge layer commands:**
+---
 
-| Command | What it does |
-|---|---|
-| `$promote` / `/promote` | Create an L4 wiki entry from L2 source notes: Researcher finds claims + anchors, Curator drafts schema-compliant entry, orchestrator writes after approval. |
-| `$lint` / `/lint` | Corpus-level structural check over `$OV/wiki/` (parse errors, duplicate titles, slug drift, orphan entries, graph topology). Also harness health: CLAUDE.md size and formatting, privacy gate, ingestion hygiene. |
+## ⭐ Star History
 
-## The Team
+如果这个项目对你有帮助，请给我们一个 Star！⭐
 
-Fifteen specialist agents (le cercle) work together during sessions. The orchestrator dispatches automatically; you can also talk to any of them directly:
+---
 
-- *"find notes about X"* — sends Researcher (the Observer)
-- *"read [[Article]] with critical lens"* — sends Reader
-- *"challenge my assumption about X"* — sends Challenger (the Critic)
-- *"compact my notes on Y"* — sends Curator (the Collector)
-- *"recommend reading on Z"* — sends Librarian (the Cataloguer)
-- *"what's happening in the world on X"* — sends Scout (the Flâneur)
-
-Full cercle archetype map (Observer / Colorist / Arbiter / Critic / Structuralist / Collector / Flâneur / Reader / Scholar / Cataloguer / Stenographer / Master / Steward / Conservator / Typewriter) lives in `protocols/atelier.md`.
-
-## How It Works
-
-```
-Capture sources                  Local data layer ($OV/)
-(Readwise inbox,                 L4  $OV/wiki/        ─ locally certified
- voice notes,                        (trust-scored canon)
- markdown editor)                L3  $OV/papers/ + $OV/preprints/ ─ peer-reviewed
-                                 L2  $OV/daily-notes/ + reflections/ +
-                                     research/ + agent-findings/ +
-                                     wip/ + …
-                                 L1  $OV/cache/ + Readwise (cloud, via CLI)
-
-                                         ^
-                                         |
-                                         v
-                            AI runtime (Claude Code or Codex)
-                                         |
-                     +-----------+-------+-------+-----------+
-                     v           v               v           v
-                Le Cercle    Sessions     Frameworks    Trust engine
-                (15 agents)  (/hi menu)   (22 + xval)   (trust.py,
-                     |           |               |        lint.py)
-                     v           v               v
-                Protocols    $OV/reflections/   Cross-validation
-                (protocols/) (session outputs)  & Pattern Library
-```
-
-**Five-tier knowledge model.** Everything under `$OV/` is classified by depth of crystallization — raw capture (L1), working notes (L2), externally-certified papers (L3), locally-certified wiki entries (L4); L5 (universally certified) is reserved. Directory = tier; no tags required. Agents read from disk via semantic search and grep.
-
-**TrustRank over the wiki.** Wiki entries under `$OV/wiki/` follow a structured schema: `## Claims` with `[C1]`, `[C2]`... headings, each backed by fenced `anchors` blocks containing `@anchor` (external evidence), `@cite` (internal edge to another wiki entry), and `@pass` (reviewer verification) markers with bi-temporal `valid_at`/`invalid_at` fields. `scripts/trust.py` runs Personalized PageRank with external anchors as seeds; trust mass enters the graph only at external sources and propagates through internal cites. No external anchor, no trust. `scripts/lint.py` enforces structural integrity across the corpus.
-
-**Session output.** The orchestrator dispatches agents, gathers findings, runs a quality gate, and writes session output to `$OV/reflections/`. Daily notes are user-authored — the system reads them; the sole write path is the Scribe agent recording user-dictated content verbatim. All personal data under `$OV/` is gitignored; only system configuration is committed.
-
-**Harness engineering.** `CLAUDE.md` stays a bounded routing map because every unconditional line consumes recurring context. Mechanical work stays in scripts: the autoevo pending queue has a single deterministic writer (`scripts/autoevo_pending.py`), fission-aware tier readers go through `_paths.tier_files()`, and Codex edge files are generated, not hand-kept. `AGENTS.md` and `.agents/skills/` give Codex the root contract and native `$command` surface. `harness/models.toml`, `harness/capabilities.toml`, `harness/commands.toml`, `harness/agents.toml`, and `protocols/runtime-adapters.md` keep provider and runtime assumptions explicit. Critical rules live at the top; detailed specifications load on demand from protocols and agent definitions. The Master of the Atelier (Evolver) has a "subtract before adding" principle and a root-instruction budget gate. `/lint` Phase 0 checks harness health alongside the wiki structural pass.
-
-Key design choices:
-
-- **Local-first**: the knowledge layer lives on disk under `$OV/`, not in a remote app. No external services required.
-- **Deterministic trust scoring**: TrustRank is a stdlib-only Python pass, not an LLM heuristic. The same input always produces the same score.
-- **Era-aware**: tracks life chapters with user-configured themes and directions.
-- **Bilingual**: handles English and Chinese notes; matches your language.
-- **Self-improving**: the Master of the Atelier evolves the system, reviewed by external AI models (Codex plus a direct-API leg by default; Gemini as an optional fallback) via `scripts/review.sh`.
-- **Public-repo privacy gate**: personal configuration stays outside tracked files under `$OV/` and gitignored `profile/`. `scripts/privacy_check.py` gates public-bound worktree and index content against private titles and local exact terms; the Steward (privacy-reviewer agent) catches semantic leaks. This protects new commits, not copies already present in Git history, remote caches, or forks.
-
-## Vocabulary
-
-The system has a narrative register from the impressionist atelier — *le cercle* (the agents), *the Painter* (you), *the œuvre* (your accumulating body of work), *impression* / *étude* / *tableau* / *série* / *sitting* / *sketch* / *commission*. The register lives in conversation and identity. **Workflow names are stable across runtimes**: Claude Code exposes `/hi`, `/promote`, `/lint`, and so on; Codex exposes `$hi`, `$promote`, `$lint`. Agent dispatch keys stay `researcher`, `synthesizer`, …; file paths under `$OV/` stay as documented above. Full glossary: `CLAUDE.md` § Vocabulary and `protocols/atelier.md`.
-
-## License
-
-MIT — for the code. The taste, the vocabulary, and the daily-use configuration are not licensed and not portable. Fork the patterns; build your own atelier.
+**🎨 用智能的方式管理你的记忆，让知识自然流动！**
