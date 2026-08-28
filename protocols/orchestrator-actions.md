@@ -19,9 +19,9 @@ The user can request these actions during or after any session:
 ### Research Operations (→ Researcher)
 | User Says | Action | Agent |
 |-----------|--------|-------|
-| "Find notes about X" | `Bash: uv run scripts/semantic.py query "X" --top 10 --context --format json` (bounded local `active` search) then `Grep` for exact-string follow-ups | Researcher |
+| "Find notes about X" | `Bash: uv run scripts/atelier/semantic.py query "X" --top 10 --context --format json` (bounded local `active` search) then `Grep` for exact-string follow-ups | Researcher |
 | "What did I write about X last year?" | Filename-date filter on `<paths.daily_notes>/` + `Grep`. Report the gap if a date range is missing locally. | Researcher |
-| "Are there related notes I'm forgetting?" | `Bash: uv run scripts/semantic.py query "<concept>" --top 10 --context --format json`; reframe once if thin, then select a deeper scope only when the intent requires it. | Researcher |
+| "Are there related notes I'm forgetting?" | `Bash: uv run scripts/atelier/semantic.py query "<concept>" --top 10 --context --format json`; reframe once if thin, then select a deeper scope only when the intent requires it. | Researcher |
 | "Show me everything tagged #X" | `Grep "#X"` over `$OV/` | Researcher |
 
 ### Meeting Operations (→ Meeting)

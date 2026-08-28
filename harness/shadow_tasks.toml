@@ -1,4 +1,4 @@
-# Per-task-type verdict-token extraction rules for `scripts/shadow.py report`.
+# Per-task-type verdict-token extraction rules for `scripts/atelier/shadow.py report`.
 #
 # Schema:
 #   verdict_pattern         Python regex; word-boundary anchored

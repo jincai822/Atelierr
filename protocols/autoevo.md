@@ -6,7 +6,7 @@ calendar event or deferred attempt. It sweeps the working tiers for decay using 
 heuristics, auto-applies the high-confidence band, logs uncertain findings to
 a pending queue, and commits every destructive operation to git so `git
 revert` is the recovery path. Surfaces unresolved items at the next `/hi` via
-`scripts/cues.py`.
+`scripts/atelier/cues.py`.
 
 Companion docs:
 - `.claude/agents/forgetter.md` — the four decay categories + firing heuristics this protocol acts on.
@@ -49,7 +49,7 @@ read-only, while autoevo's recovery contract requires one Git commit per
 destructive operation. This is a deliberate high-trust exception for this
 local bot, not the default permission profile for interactive Atelier work.
 The maintenance profile gives the complete sequential sweep a two-hour
-wall-clock ceiling. `scripts/command_timeout.py` measures epoch time, so sleep
+wall-clock ceiling. `scripts/atelier/command_timeout.py` measures epoch time, so sleep
 does not pause or extend that ceiling.
 
 Before launching Codex, the runner rebuilds its environment from an empty base
@@ -71,7 +71,7 @@ Reversible: `launchctl unload <plist>` + `pmset repeat cancel`.
 
 ### Deterministic preflight boundary
 
-`scripts/autoevo_preflight.py` runs after the cycle claim and before Codex.
+`scripts/atelier/autoevo_preflight.py` runs after the cycle claim and before Codex.
 This separates invariant checks from judgment-heavy decay work:
 
 1. Recover an unchanged checksum-owned audit left by a prior Git blocker.
@@ -98,7 +98,7 @@ uncertain cycle.
 
 Before 05:00, catch-up selects the previous cycle. Quarantine filtering and
 state updates both evaluate expiry against that selected cycle date, not the
-wall date, through `scripts/autoevo_quarantine.py`. The wrapper validates that
+wall date, through `scripts/atelier/autoevo_quarantine.py`. The wrapper validates that
 cycle, passes it to deterministic preflight as `--run-date`, and exposes it to
 the sanitized model process as `ATELIER_ROUTINE_CYCLE`. The command fails
 closed if an unattended invocation omits it. Preflight independently requires
@@ -128,7 +128,7 @@ applies even when unrelated worktree dirtiness is the blocker.
 
 ### Completion verification
 
-`python3 scripts/autoevo_verify.py --cycle <YYYY-MM-DD> --json` is the
+`python3 scripts/atelier/autoevo_verify.py --cycle <YYYY-MM-DD> --json` is the
 authoritative clean-cycle verifier. The runner invokes it automatically after
 delivery and lock release. During this check the claim is
 `completion-uncertain` with `verification = "pending"`; only a passing result
@@ -170,9 +170,9 @@ the first mutation. Each abort surfaces as a cue at next `/hi`.
 | Git index | resolved Git index exists | A missing index makes `git status` resemble mass deletion plus untracked recreation. Do not misclassify it as ordinary dirtiness. |
 | Git index lock | resolved `index.lock` is absent | Never delete or replace a possibly live lock. |
 | Session-active lock | `<paths.cache>/atelier-session-lock` exists AND mtime < 6h | User may be mid-session; avoid collision. |
-| Dirty `$OV` working tree inside autoevo scopes | `scripts/autoevo_preflight.py --dirty-scope` > 0 (status entries under the sweep tiers, `<paths.agent_findings>/`, or `_meta/autoevo_*.toml`) | Don't compound user intent into bot commits. Dirt elsewhere is ignored because every bot commit stages explicit paths with `--only`. |
+| Dirty `$OV` working tree inside autoevo scopes | `scripts/atelier/autoevo_preflight.py --dirty-scope` > 0 (status entries under the sweep tiers, `<paths.agent_findings>/`, or `_meta/autoevo_*.toml`) | Don't compound user intent into bot commits. Dirt elsewhere is ignored because every bot commit stages explicit paths with `--only`. |
 | Dirty zettelm submodule | same check inside `<paths.zettelm>/` | User is mid mobile-capture digest. |
-| Privacy gate | `python3 scripts/privacy_check.py --json` returns `hit_count > 0` | Hard veto; never commit a leak. |
+| Privacy gate | `python3 scripts/atelier/privacy_check.py --json` returns `hit_count > 0` | Hard veto; never commit a leak. |
 | Semantic readiness | Offline real query exits 0 and returns JSON | Forgetter depends on semantic retrieval; fail before model launch if the cached model, environment, or Lance index is unavailable. |
 
 Every abort attempts to write the cue-visible audit file. A pre-existing dirty
@@ -202,7 +202,7 @@ earlier skip remains in history without preserving a stale warning.
 
 | Category | Threshold | Action |
 |---|---|---|
-| Redundant | 3+ working-tier peers ≥ 0.6 but below auto-band thresholds (peers under papers, preprints, wiki, profile, or daily notes never count; see `forgetter.md` § Redundant) | Append to pending queue through `scripts/autoevo_pending.py append`, which skips clusters already pending, or resolved within its `--dedupe-days` window (default 90). |
+| Redundant | 3+ working-tier peers ≥ 0.6 but below auto-band thresholds (peers under papers, preprints, wiki, profile, or daily notes never count; see `forgetter.md` § Redundant) | Append to pending queue through `scripts/atelier/autoevo_pending.py append`, which skips clusters already pending, or resolved within its `--dedupe-days` window (default 90). |
 | Time-stale (era-stale, Forgetter heuristic B) | Always | Append to pending queue. Era judgments are intent-laden; never auto-act. |
 | Time-stale (content-stale, Forgetter heuristic A) | Always | Append to pending queue. |
 | Contradicted (real) | Challenger probe confirms genuine contradiction | Append to pending queue. Wiki rewrites need human approval. |
@@ -266,20 +266,20 @@ proposed_at = "2026-05-22"
 last_surfaced = "2026-05-22"
 surface_count = 0
 status = "pending"   # pending | applied | dismissed | auto-dismissed
-# Written by `scripts/autoevo_pending.py` on resolution (absent while pending):
+# Written by `scripts/atelier/autoevo_pending.py` on resolution (absent while pending):
 # resolved_at = "2026-06-21"              # decision date; anchors the 90-day dedupe window
 # dismiss_reason = "user skipped during /autoevo-review"
 ```
 
 Lifecycle:
 
-1. **Create**: `/autoevo-nightly` appends new entries for findings below the auto-band via `scripts/autoevo_pending.py append` (deterministic escaping, atomic write, and dedupe: a finding whose sorted `peers` match an entry that is pending, or was applied, dismissed, or auto-dismissed within the helper's `--dedupe-days` window (default 90), is skipped and counted in the audit § Notes).
-2. **Surface**: `scripts/cues.py` `check_autoevo_pending` reads the queue; if any entries are `status = "pending"` and not snoozed, fires one cue at session start with a category breakdown.
+1. **Create**: `/autoevo-nightly` appends new entries for findings below the auto-band via `scripts/atelier/autoevo_pending.py append` (deterministic escaping, atomic write, and dedupe: a finding whose sorted `peers` match an entry that is pending, or was applied, dismissed, or auto-dismissed within the helper's `--dedupe-days` window (default 90), is skipped and counted in the audit § Notes).
+2. **Surface**: `scripts/atelier/cues.py` `check_autoevo_pending` reads the queue; if any entries are `status = "pending"` and not snoozed, fires one cue at session start with a category breakdown.
 3. **Resolve**: `/autoevo-review` walks each pending entry; user picks apply / skip / defer / explain-more.
    - Apply → dispatch Curator in approval mode; on confirm, `autoevo_pending.py resolve --status applied` and commit.
    - Skip → `autoevo_pending.py resolve --status dismissed --reason ...`; record in audit log.
    - Defer → `autoevo_pending.py defer` (bumps `surface_count` and `last_surfaced`); reuse `cue_snooze.json` for the snooze interval. The helper is the only queue writer; nothing hand-edits the TOML.
-4. **Auto-dismiss**: after 3 skips (`surface_count >= 3`, the helper's built-in threshold) OR `--max-age-days` (default 30) from `proposed_at` without resolution, `scripts/autoevo_pending.py auto-dismiss` sets `status = "auto-dismissed"` with a `dismiss_reason`; `/autoevo-review` writes the one-line note to the audit log. Dismissed clusters stay in the file so the next sweep does not re-propose them.
+4. **Auto-dismiss**: after 3 skips (`surface_count >= 3`, the helper's built-in threshold) OR `--max-age-days` (default 30) from `proposed_at` without resolution, `scripts/atelier/autoevo_pending.py auto-dismiss` sets `status = "auto-dismissed"` with a `dismiss_reason`; `/autoevo-review` writes the one-line note to the audit log. Dismissed clusters stay in the file so the next sweep does not re-propose them.
 
 ## Audit log: `<paths.agent_findings>/autoevo-applied-<YYYY-MM-DD>.md`
 
@@ -316,14 +316,14 @@ If the bot bails at a pre-flight gate, the file is still written with the Skippe
 Touched (`touch <file>`) by two hook paths wired at both runtime edges in
 `.claude/settings.json` and `.codex/hooks.json`:
 
-- **SessionStart hook** → runs `uv run scripts/cues.py --hook`, which touches the lock before running cue checks. Fires once per new interactive session.
-- **UserPromptSubmit hook** → runs `uv run scripts/cues.py --touch-lock 2>/dev/null || true`, which refreshes the lock and exits without running any cue check (the lock path resolves via the paths registry). Fires on every user prompt so long-running sessions refresh the lock per prompt.
+- **SessionStart hook** → runs `uv run scripts/atelier/cues.py --hook`, which touches the lock before running cue checks. Fires once per new interactive session.
+- **UserPromptSubmit hook** → runs `uv run scripts/atelier/cues.py --touch-lock 2>/dev/null || true`, which refreshes the lock and exits without running any cue check (the lock path resolves via the paths registry). Fires on every user prompt so long-running sessions refresh the lock per prompt.
 
 `/autoevo-nightly` reads the mtime; if mtime is within the last 6h, abort with reason "session-active lock fresh."
 
 Six hours is the bound: with the UserPromptSubmit hook in place, an actively-used session refreshes the lock per prompt, so the only way to cross the 6h window is to leave a session genuinely idle for 6 hours. If the lock file is absent (fresh install, never run an interactive session), the bot interprets this as "no recent session" and proceeds — the permissive default for first-run cases.
 
-If the lock-touch fails (cache dir unwritable, disk full), `cues.py` logs to stderr in `--verbose` mode but never breaks the hook. A persistently-failing lock leaves the 6h window operating on stale mtime; surface this by running `uv run scripts/cues.py --hook --verbose` manually to inspect.
+If the lock-touch fails (cache dir unwritable, disk full), `cues.py` logs to stderr in `--verbose` mode but never breaks the hook. A persistently-failing lock leaves the 6h window operating on stale mtime; surface this by running `uv run scripts/atelier/cues.py --hook --verbose` manually to inspect.
 
 ## Recovery surfaces
 
@@ -333,7 +333,7 @@ If the lock-touch fails (cache dir unwritable, disk full), `cues.py` logs to std
 | `git revert <sha>` | Undo one specific op. The bot's next run detects the revert and tombstones the cluster (see Revert tombstones below) so it does not re-merge the same notes. |
 | `git revert <range>` | Undo a whole night. |
 | `<paths.archive>/decayed/` | Recover a low-signal note that was auto-archived (still a regular file; `mv` back). |
-| `<paths.agent_findings>/autoevo-applied-<date>.md` | At-a-glance summary without `git log`. Skipped/Errors sections also surface as a cue at next /hi (via `check_autoevo_ran` in `scripts/cues.py`). |
+| `<paths.agent_findings>/autoevo-applied-<date>.md` | At-a-glance summary without `git log`. Skipped/Errors sections also surface as a cue at next /hi (via `check_autoevo_ran` in `scripts/atelier/cues.py`). |
 
 The archive directory is the asymmetric safety: deletions are revert-only; archive moves are revert + manual `mv` (both work). Low-signal ops use archive rather than `rm` because the recovery surface is friendlier than reading a git-revert diff to recreate the note.
 
@@ -376,12 +376,12 @@ The auto-detection check above takes precedence; explicit tombstones are an addi
 - **Wiki rewrites.** Contradicted findings against L4 are always pending-queue, never auto-applied. The Curator wiki-edit path requires human approval.
 - **Re-indexing decisions.** Autoevo does not mutate the semantic index inline.
   The owner-gated `com.atelier.semantic-index` launchd job detects corpus drift
-  and runs `scripts/semantic.py index --if-stale`. Query remains read-only; a
+  and runs `scripts/atelier/semantic.py index --if-stale`. Query remains read-only; a
   full `--rebuild` remains a manual recovery action.
 
 ## Related
 
-- `protocols/remote-routines.md`: shared scheduler, ownership, capability-profile, claim, and recovery contract. Autoevo uses its local Codex path because the decay stack (`scripts/semantic.py`, `scripts/lint.py`, `scripts/trust.py`, Forgetter, Curator) is local-only.
+- `protocols/remote-routines.md`: shared scheduler, ownership, capability-profile, claim, and recovery contract. Autoevo uses its local Codex path because the decay stack (`scripts/atelier/semantic.py`, `scripts/atelier/lint.py`, `scripts/atelier/trust.py`, Forgetter, Curator) is local-only.
 - `protocols/repo-conventions.md` § "$OV git push policy" — the policy this carve-out partially overrides.
 - `protocols/local-first-architecture.md` — tier model the trust bands key off.
 - `.claude/agents/forgetter.md` — heuristic source.

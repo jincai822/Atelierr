@@ -8,7 +8,7 @@ Agents that parse `$OV` markdown must recognize these tags. Free-form tags outsi
 
 Wikilinks (`[[Foo]]`) only resolve to other notes. Semantic markers like "Side Notes" are not notes — they label sections inline. Tags (`#side-notes`) render in most markdown viewers and on GitHub, are search-indexable, and don't pollute the link graph.
 
-The `scripts/wikilink_to_md.py` converter rewrites unresolved `[[Foo]]` to `#foo-slug` automatically; semantic markers fall out as tags by virtue of having no target file.
+The `scripts/atelier/wikilink_to_md.py` converter rewrites unresolved `[[Foo]]` to `#foo-slug` automatically; semantic markers fall out as tags by virtue of having no target file.
 
 ## Documented semantic tags
 

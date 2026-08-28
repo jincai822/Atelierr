@@ -46,7 +46,7 @@ Stale-goal floor: if `directions.md` lists goals older than 1 year with no progr
 ## Context Loading
 
 1. Reuse the current `review` context projection from `$hi`; for direct
-   invocation, run `uv run scripts/context_bundle.py --intent review
+   invocation, run `uv run scripts/atelier/context_bundle.py --intent review
    --byte-budget 20480 --format json`.
 
 2. Use the projected reflection headings and closing sections as the continuity
@@ -135,7 +135,7 @@ After discussing, write a review file:
 ## Session Log
 
 After writing the review file, emit a session log:
-1. `Bash: uv run scripts/session_log.py --type review --duration <minutes>`
+1. `Bash: uv run scripts/atelier/session_log.py --type review --duration <minutes>`
 2. `Edit` the created file to populate sections from session data (agents dispatched, searches, questions, frameworks, anomalies). The canonical fill-in guide lives in `protocols/session-log.md` § "Section Guidance". Leave empty sections with headers only. If the write fails, warn and continue.
 
 ## Wrap Up

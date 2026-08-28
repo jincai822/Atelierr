@@ -50,7 +50,7 @@ Run these searches in parallel over the local `$OV/` vault. Local grep is instan
 11. `Read <paths.daily_notes>/YYYY/MM/<yesterday>.md` — yesterday
 12. Recent planning: `Bash: find "$OV"/daily-notes "$OV"/reflections "$OV"/gtd -type f -name "*.md" -mtime -30 | xargs grep -l -i "plan" 2>/dev/null`
 
-Deduplicate results by file path. Prioritize files with recent mtimes. **Semantic pass:** for conceptual angles grep cannot phrase ("curiosity vectors", "intellectual taste", "what am I drawn to"), run `Bash: uv run scripts/semantic.py query "<concept>" --top 10`. Reframe and retry if thin.
+Deduplicate results by file path. Prioritize files with recent mtimes. **Semantic pass:** for conceptual angles grep cannot phrase ("curiosity vectors", "intellectual taste", "what am I drawn to"), run `Bash: uv run scripts/atelier/semantic.py query "<concept>" --top 10`. Reframe and retry if thin.
 
 ### Step 2: Read Full Content
 
@@ -163,7 +163,7 @@ Present divergences to the user — these are the interesting findings.
 ### Session Log
 
 After writing profile files, emit a session log:
-1. `Bash: uv run scripts/session_log.py --type introspect --duration <minutes>`
+1. `Bash: uv run scripts/atelier/session_log.py --type introspect --duration <minutes>`
 2. `Edit` the created file to populate sections from session data (agents dispatched, searches, questions, frameworks, anomalies). The canonical fill-in guide lives in `protocols/session-log.md` § "Section Guidance". Leave empty sections with headers only. If the write fails, warn and continue.
 
 ### Step 7: Report

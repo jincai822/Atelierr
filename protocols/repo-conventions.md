@@ -83,18 +83,18 @@ The 32 threshold is hard, not "rough". A directory at 32 should be split before 
 File moves break standard markdown links `[X](path.md)` and image embeds `![](path)`. The relink contract makes reorganization non-destructive:
 
 ```
-1. Move files via any tool         (scripts/fission.py / manual mv / one-off scripts)
-2. uv run scripts/relink.py --apply   ← auto-fixes broken refs
+1. Move files via any tool         (scripts/atelier/fission.py / manual mv / one-off scripts)
+2. uv run scripts/atelier/relink.py --apply   ← auto-fixes broken refs
 3. Commit
 ```
 
-`scripts/relink.py` builds a global filename → location index across all tracked `.md`/image files, scans every `[text](path)` and `![alt](path)` reference, and rewrites broken paths to the file's current location. Since refs track filename (not path), any reorganization that doesn't rename files is fully recoverable. Use `--dry-run` first to preview changes.
+`scripts/atelier/relink.py` builds a global filename → location index across all tracked `.md`/image files, scans every `[text](path)` and `![alt](path)` reference, and rewrites broken paths to the file's current location. Since refs track filename (not path), any reorganization that doesn't rename files is fully recoverable. Use `--dry-run` first to preview changes.
 
-The wikilink converter (`scripts/wikilink_to_md.py`) handles `[[...]]` → standard markdown link conversion when needed. `relink.py` is the steady-state tool for all path moves once links are standard markdown.
+The wikilink converter (`scripts/atelier/wikilink_to_md.py`) handles `[[...]]` → standard markdown link conversion when needed. `relink.py` is the steady-state tool for all path moves once links are standard markdown.
 
 ### Tier-specific semantic restructures
 
-For one-off semantic reorgs of a single tier, copy `scripts/fission.py` as a starting point and adjust the bucket map. One-off scripts that hardcode private vault content (TOPIC_MAPs, lab lists, wiki entry titles) live in `scripts/oneoff/` (gitignored) and cannot be referenced from committed protocols. The generic reusable tools stay at `scripts/fission.py` and `scripts/relink.py`.
+For one-off semantic reorgs of a single tier, copy `scripts/atelier/fission.py` as a starting point and adjust the bucket map. One-off scripts that hardcode private vault content (TOPIC_MAPs, lab lists, wiki entry titles) live in `scripts/oneoff/` (gitignored) and cannot be referenced from committed protocols. The generic reusable tools stay at `scripts/atelier/fission.py` and `scripts/atelier/relink.py`.
 
 ### Cascading splits
 
@@ -132,9 +132,9 @@ Reviewer-side detection of violations: `protocols/antipatterns.md` § 8 (Scope c
 
 ## Lint enforcement
 
-Atelier-side lint runs via `uv run scripts/harness_lint.py` (registered names, path-literal templating, doc-indirection cycles, etc.) and `uv run scripts/privacy_check.py` (public-bound pathnames and content checked against private titles, wikilinks, local exact terms, and divergent staged blobs). Both fire in `/lint` and `/system-review`. Personal exact terms live only in gitignored `profile/private_terms.txt`; the committed allowlist is reserved for deliberately public literals and is honored by both mechanical and semantic privacy gates.
+Atelier-side lint runs via `uv run scripts/atelier/harness_lint.py` (registered names, path-literal templating, doc-indirection cycles, etc.) and `uv run scripts/atelier/privacy_check.py` (public-bound pathnames and content checked against private titles, wikilinks, local exact terms, and divergent staged blobs). Both fire in `/lint` and `/system-review`. Personal exact terms live only in gitignored `profile/private_terms.txt`; the committed allowlist is reserved for deliberately public literals and is honored by both mechanical and semantic privacy gates.
 
-Vault-side lint for the conventions in this doc (folder fission, image placement, image naming, ISO date strings) is currently manual. A consolidated `scripts/vault_lint.py` is deferred until two distinct conventions need automated enforcement at once; until then, the fission rule is enforced by `scripts/aggregate_freshness.py` only for self-declaring aggregates, and image / date conventions are honored by hand.
+Vault-side lint for the conventions in this doc (folder fission, image placement, image naming, ISO date strings) is currently manual. A consolidated `scripts/vault_lint.py` is deferred until two distinct conventions need automated enforcement at once; until then, the fission rule is enforced by `scripts/atelier/aggregate_freshness.py` only for self-declaring aggregates, and image / date conventions are honored by hand.
 
 ## $OV git push policy
 

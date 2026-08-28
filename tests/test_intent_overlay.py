@@ -34,7 +34,7 @@ class IntentOverlayTest(unittest.TestCase):
             )
             snippet = (
                 "import sys, json\n"
-                "sys.path.insert(0, 'scripts')\n"
+                "sys.path.insert(0, 'scripts/atelier')\n"
                 "import intent_coverage as ic\n"
                 f"ic.ROOT = __import__('pathlib').Path({str(root)!r})\n"
                 "intents = ic.load_intents()\n"
@@ -65,7 +65,7 @@ class IntentOverlayTest(unittest.TestCase):
             (root / "harness" / "intents.local.toml").write_text("[broken", encoding="utf-8")
             snippet = (
                 "import sys\n"
-                "sys.path.insert(0, 'scripts')\n"
+                "sys.path.insert(0, 'scripts/atelier')\n"
                 "import intent_coverage as ic\n"
                 f"ic.ROOT = __import__('pathlib').Path({str(root)!r})\n"
                 "print(len(ic.load_intents()))\n"

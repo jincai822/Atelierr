@@ -21,7 +21,7 @@ Run a reflection session grounded in your notes and goals.
    the selected workflow context:
 
    ```bash
-   uv run scripts/context_bundle.py \
+   uv run scripts/atelier/context_bundle.py \
      --intent reflection \
      --component profile \
      --component session \
@@ -38,12 +38,12 @@ Run a reflection session grounded in your notes and goals.
    the explicitly requested current-capture component. If an omission is
    relevant, retrieve that source or section deliberately.
 3. For recent activity related to the active themes, run
-   `Bash: uv run scripts/semantic.py query "<theme>" --after "<7 days ago, YYYY-MM-DD>" --top 5 --context --format json`.
+   `Bash: uv run scripts/atelier/semantic.py query "<theme>" --after "<7 days ago, YYYY-MM-DD>" --top 5 --context --format json`.
    For structural follow-up such as exact strings, known tags, or dates, use
    `Grep` against the relevant paths.
 
 4. **Load open TODO state (silent, orchestrator working memory):**
-   - `Bash: uv run scripts/todos.py list --json` — parse and hold the open list throughout the session. Source files (`source` field) are needed at session end for closure write-back.
+   - `Bash: uv run scripts/atelier/todos.py list --json` — parse and hold the open list throughout the session. Source files (`source` field) are needed at session end for closure write-back.
    - Don't display this output to the user. It's context for the orchestrator's decisions in Step 0 (digest), mid-conversation (topic matching), and Step 7 (resurface vs generate).
    - **Fallback:** if the command exits non-zero, fails to parse as JSON, or returns `[]`, proceed with empty TODO context for this session and note "TODO context unavailable" under Anomalies in the wrap-up. The TODO Awareness rules below all degrade silently to no-op when the queue is empty.
 
@@ -67,7 +67,7 @@ Based on the loaded context, run an interactive reflection.
 
 ### 0. Continuity Check (if not the first session)
 
-Run `Bash: uv run scripts/todos.py digest` to fetch:
+Run `Bash: uv run scripts/atelier/todos.py digest` to fetch:
 - Last reflection's open Next Actions
 - Closure candidates (TODOs mentioned with "已完成 X" / 等 closure language in recent daily notes)
 - Top stale items (≥30d, kill-or-promote prompts)
@@ -114,7 +114,7 @@ Each question should:
 - Match the user's language (Chinese for Chinese goals)
 
 ### 3. Forgotten Connection (Semantic Discovery)
-Use `Bash: uv run scripts/semantic.py query "<concept>" --before "<3 months ago, YYYY-MM-DD>" --top 10 --context --format json` to find a semantically related note the user may have forgotten. Reframe and retry if thin.
+Use `Bash: uv run scripts/atelier/semantic.py query "<concept>" --before "<3 months ago, YYYY-MM-DD>" --top 10 --context --format json` to find a semantically related note the user may have forgotten. Reframe and retry if thin.
 - Search with a concept from the conversation, not just keywords
 - Go back at least 3 months for genuine surprise
 - Present as a provocation, not a summary:
@@ -224,7 +224,7 @@ The orchestrator accumulates pending Scribe operations during the session (it do
 | Step 6 Dining Pulse, ordinary meal | `dining_row` | User shared a restaurant visit without an explicit trip association |
 | Step 6 Dining Pulse, explicitly trip-associated meal | `/dine` Intent C | Route immediately to Intent C's confirmation gate; do not accumulate a Scribe operation |
 | Any step where user dictates a daily-note-style narrative for a date | `daily_note` | Narrative covers events for a date whose daily-note file is missing or lacks the new content |
-| Any step where a person is mentioned with bio context AND no person note exists | `people_stub` | Verify with `uv run scripts/people.py "<name>"` before adding; only accumulate if no match returned |
+| Any step where a person is mentioned with bio context AND no person note exists | `people_stub` | Verify with `uv run scripts/atelier/people.py "<name>"` before adding; only accumulate if no match returned |
 | User explicitly says "save this" / "记一下" with no typed slot fit | `generic` | Orchestrator picks a `<paths.wip>/` path and confirms with user before adding to pending list |
 
 **Skip condition (per op):** the corresponding file already captures the content, or the user provided only reflection-mode input (questions, feelings, abstract discussion) for that surface. Do not invent content.
@@ -298,7 +298,7 @@ After writing the reflection file, emit a session log. Two steps:
 
 **Step 1: Create skeleton.**
 ```
-Bash: uv run scripts/session_log.py --type reflection --duration <minutes>
+Bash: uv run scripts/atelier/session_log.py --type reflection --duration <minutes>
 ```
 The script prints the file path (e.g., `<paths.sessions>/2026-04-11-reflection.md`). It handles the late-sleep date rule and collision auto-increment.
 

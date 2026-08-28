@@ -53,7 +53,7 @@ Each Scout instance states its assigned direction in the output.
 
 ### Phase 1: Contextualize
 Before searching the web, check the user's local vault for context.
-- `Bash: uv run scripts/semantic.py query "<topic>" --top 5` — primary conceptual lookup across `$OV/`
+- `Bash: uv run scripts/atelier/semantic.py query "<topic>" --top 5` — primary conceptual lookup across `$OV/`
 - For Readwise saves (cloud-only L1; not covered by semantic.py over `$OV/`), use `readwise reader-search-documents --query "<topic keywords>"` to find what the user has already saved from the web
 - This prevents you from surfacing things the user already knows
 

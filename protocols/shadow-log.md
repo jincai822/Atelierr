@@ -18,16 +18,16 @@ Deferred: the quantitative-claim fact-check gate is not yet instrumented; `harne
 
 | Component | Where | What it does |
 |---|---|---|
-| Cost catalog | `harness/model_costs.toml` (committed) + `profile/model_costs.toml` (gitignored override) | Per-model USD prices with `last_verified` date. Used by report at compute time; `scripts/shadow.py report` fails closed when any aggregated model is >90d stale, unless `--accept-stale-costs`. |
-| Log schema | `scripts/chat_completion.py` (auto-logs direct-API calls) | Adds `shadow_group_id`, `task_type`, `task_dispatch_kind` fields. Reads env `ATELIER_SHADOW_GROUP` / `ATELIER_TASK_TYPE`; explicit `--shadow-group` / `--task-type` flags override. Writes to `~/.cache/atelier/llm_calls/<date>.jsonl` (full) + `$OV/_meta/shadow_logs/<date>.jsonl` (skeleton). |
-| Group manager | `scripts/shadow.py group-start` | Issues a UUID, writes witness file at `~/.cache/atelier/shadow_groups/<uuid>.json` declaring expected dispatches `[{model, leg}]`. Prints shell-eval-able env exports. |
-| Native-leg identity | `scripts/shadow.py native-model --agent <role>` | Resolves the active runtime before correlation. Claude returns the role's `voices.native` identity; Codex returns the dynamic `codex_native` slot. This prevents Codex output from inheriting false Anthropic pricing. |
-| Native-leg logger | `scripts/shadow.py log --leg native` | Called in-band by the orchestrator after each native project-agent dispatch at a multi-leg call site. Accepts `--prompt-text` / `--response-text` for inline content (no temp files needed). Writes synthetic JSONL with `usage_estimate.method = "char_approx"`. |
-| Hook replay helper | `scripts/shadow.py log-from-hook` | Accepts PostToolUse-style payloads for fixtures, replay, and possible future hook support. It is not wired in production; native legs are logged in-band via `shadow.py log`. |
-| Session cleanup | `scripts/shadow.py gc` (Claude `SessionEnd`; Codex `Stop`) | Removes orphaned witnesses older than `--witness-min` (default 30, mirroring the recency window) and rotates `~/.cache/atelier/llm_calls/` files older than `--retention-days` (default 90). The `$OV/_meta/shadow_logs/` mirror skeleton is not rotated; that is the durable record. Silent best-effort. Claude runs it at session close; Codex runs it at turn stop because Codex has no `SessionEnd` event. Defends against orphaned witnesses left by crashed sessions and bounds primary-log growth. |
+| Cost catalog | `harness/model_costs.toml` (committed) + `profile/model_costs.toml` (gitignored override) | Per-model USD prices with `last_verified` date. Used by report at compute time; `scripts/atelier/shadow.py report` fails closed when any aggregated model is >90d stale, unless `--accept-stale-costs`. |
+| Log schema | `scripts/atelier/chat_completion.py` (auto-logs direct-API calls) | Adds `shadow_group_id`, `task_type`, `task_dispatch_kind` fields. Reads env `ATELIER_SHADOW_GROUP` / `ATELIER_TASK_TYPE`; explicit `--shadow-group` / `--task-type` flags override. Writes to `~/.cache/atelier/llm_calls/<date>.jsonl` (full) + `$OV/_meta/shadow_logs/<date>.jsonl` (skeleton). |
+| Group manager | `scripts/atelier/shadow.py group-start` | Issues a UUID, writes witness file at `~/.cache/atelier/shadow_groups/<uuid>.json` declaring expected dispatches `[{model, leg}]`. Prints shell-eval-able env exports. |
+| Native-leg identity | `scripts/atelier/shadow.py native-model --agent <role>` | Resolves the active runtime before correlation. Claude returns the role's `voices.native` identity; Codex returns the dynamic `codex_native` slot. This prevents Codex output from inheriting false Anthropic pricing. |
+| Native-leg logger | `scripts/atelier/shadow.py log --leg native` | Called in-band by the orchestrator after each native project-agent dispatch at a multi-leg call site. Accepts `--prompt-text` / `--response-text` for inline content (no temp files needed). Writes synthetic JSONL with `usage_estimate.method = "char_approx"`. |
+| Hook replay helper | `scripts/atelier/shadow.py log-from-hook` | Accepts PostToolUse-style payloads for fixtures, replay, and possible future hook support. It is not wired in production; native legs are logged in-band via `shadow.py log`. |
+| Session cleanup | `scripts/atelier/shadow.py gc` (Claude `SessionEnd`; Codex `Stop`) | Removes orphaned witnesses older than `--witness-min` (default 30, mirroring the recency window) and rotates `~/.cache/atelier/llm_calls/` files older than `--retention-days` (default 90). The `$OV/_meta/shadow_logs/` mirror skeleton is not rotated; that is the durable record. Silent best-effort. Claude runs it at session close; Codex runs it at turn stop because Codex has no `SessionEnd` event. Defends against orphaned witnesses left by crashed sessions and bounds primary-log growth. |
 | Verdict-token config | `harness/shadow_tasks.toml` | Per-task regex (word-boundary, case-aware, last-match-wins) for extracting structured verdicts from leg responses. |
-| Report | `scripts/shadow.py report` | Aggregates logs, dedups, groups by UUID, extracts verdicts, computes cost retroactively from current catalog, emits per-task-type-per-leg-pair agreement + cost ratio + latency. Output prefixed with permanent SCOPE banner naming the 10-20% coverage caveat. |
-| Lint guard | `scripts/harness_lint.py check_shadow_group_start` | Greps known multi-leg call sites for `shadow.py group-start` invocation; fails ERROR if missing. Catches the outer-discipline regression that would silently empty the report. |
+| Report | `scripts/atelier/shadow.py report` | Aggregates logs, dedups, groups by UUID, extracts verdicts, computes cost retroactively from current catalog, emits per-task-type-per-leg-pair agreement + cost ratio + latency. Output prefixed with permanent SCOPE banner naming the 10-20% coverage caveat. |
+| Lint guard | `scripts/atelier/harness_lint.py check_shadow_group_start` | Greps known multi-leg call sites for `shadow.py group-start` invocation; fails ERROR if missing. Catches the outer-discipline regression that would silently empty the report. |
 
 ## Per-call-site recipe
 
@@ -36,14 +36,14 @@ Two patterns depending on whether shell state persists across dispatch steps:
 ### Pattern A: persistent shell (review.sh, any long-running script)
 
 ```bash
-NATIVE_MODEL=$(python3 scripts/shadow.py native-model --agent privacy-reviewer)
-eval "$(python3 scripts/shadow.py group-start \
+NATIVE_MODEL=$(python3 scripts/atelier/shadow.py native-model --agent privacy-reviewer)
+eval "$(python3 scripts/atelier/shadow.py group-start \
   --task system-review \
   --expected '[{"model":"'"$NATIVE_MODEL"'","leg":"native"},{"model":"deepseek_pro_max","leg":"direct"}]')"
-trap 'python3 scripts/shadow.py group-close --group "$ATELIER_SHADOW_GROUP" 2>/dev/null || true' EXIT
+trap 'python3 scripts/atelier/shadow.py group-close --group "$ATELIER_SHADOW_GROUP" 2>/dev/null || true' EXIT
 
 # Bash legs auto-inherit env (ATELIER_SHADOW_GROUP / ATELIER_TASK_TYPE):
-uv run scripts/chat_completion.py --model deepseek_pro_max --prompt-file <path> ...
+uv run scripts/atelier/chat_completion.py --model deepseek_pro_max --prompt-file <path> ...
 ```
 
 The task name above is illustrative: the live Pattern A site, `scripts/review.sh`, dispatches `--task external-review`; `system-review` is a reserved task type in `harness/shadow_tasks.toml` with no current producer.
@@ -54,7 +54,7 @@ Claude Code and Codex run each shell tool call in a separate subprocess. Env var
 
 **Step 1 (before dispatch):** Run `group-start` in one Bash call. Parse the UUID from stdout.
 ```bash
-python3 scripts/shadow.py group-start --task privacy-review --agent privacy-reviewer
+python3 scripts/atelier/shadow.py group-start --task privacy-review --agent privacy-reviewer
 # --agent derives expected legs from harness/agents.toml voices + the
 # runtime-aware native identity, and prints ATELIER_DIRECT_MODEL for leg B.
 # Hand-built --expected stays available for call sites without a registered
@@ -64,16 +64,16 @@ The output contains `export ATELIER_SHADOW_GROUP="<uuid>"`. The orchestrator rem
 
 **Step 2 (dispatch):** Send the native project-agent and direct-API shell legs in parallel. Pass the UUID explicitly to the direct leg:
 ```bash
-uv run scripts/chat_completion.py --model deepseek_pro_max --shadow-group "<uuid>" --task-type privacy-review --prompt -
+uv run scripts/atelier/chat_completion.py --model deepseek_pro_max --shadow-group "<uuid>" --task-type privacy-review --prompt -
 ```
 
 **Step 3 (after dispatch):** Log the native leg in-band, then close the witness:
 ```bash
-python3 scripts/shadow.py log \
+python3 scripts/atelier/shadow.py log \
   --group "<uuid>" --task privacy-review --model "$NATIVE_MODEL" --leg native \
   --prompt-text "<agent prompt summary>" \
   --response-text "<full agent response>"
-python3 scripts/shadow.py group-close --group "<uuid>"
+python3 scripts/atelier/shadow.py group-close --group "<uuid>"
 ```
 
 Native legs must be logged in-band by the orchestrator after the project agent returns. The identity helper prefers the selector's `ATELIER_ACTIVE_RUNTIME`, then runtime-specific session signals, then the local or committed runtime selection. Callers can pass `--runtime claude` or `--runtime codex` when an explicit edge is safer than auto-detection.
@@ -136,7 +136,7 @@ The R1 shadow-log infrastructure scaffolds M2 by providing the prompt corpus (`~
 ```
 PostToolUse hook (matcher: "Agent")
   ↓
-scripts/shadow.py log-from-hook
+scripts/atelier/shadow.py log-from-hook
   ├─ read PostToolUse stdin JSON: tool_name, tool_input, tool_output, session_id
   ├─ filter to tool_name == "Agent" (defensive; matcher already does this)
   ├─ extract subagent_type + prompt + response text
@@ -169,7 +169,7 @@ For Pattern A (persistent shell), the `flow exit` step is wired via an `EXIT tra
 
 1. **Session-correlation via on-disk witness, not env vars.** `ATELIER_SHADOW_GROUP` does not propagate into hook subshells. Two layers of disambiguation: explicit `group-close` from the call site (primary lifecycle — `EXIT trap` in Pattern A, explicit final Bash step in Pattern B), plus the 30-min recency window (staleness guard for crash / abort cases).
 
-2. **Agent → leg mapping via `harness/agents.toml` voices.** The hook reads the canonical voice binding (`agents.<name>.voices.native`). Couples the hook to that registry's shape; lints in `scripts/harness_lint.py` already enforce voice schema integrity.
+2. **Agent → leg mapping via `harness/agents.toml` voices.** The hook reads the canonical voice binding (`agents.<name>.voices.native`). Couples the hook to that registry's shape; lints in `scripts/atelier/harness_lint.py` already enforce voice schema integrity.
 
 3. **`subagent_type` in `expected_dispatches` defeats cross-task contamination.** Multiple agents share native model identities (e.g., `thinker`, `evolver`, `scholar` all → `opus`). When the orchestrator declares `expected_dispatches[].subagent_type` at `group-start`, the hook requires the dispatch's `subagent_type` to match exactly. Entries without `subagent_type` fall back to model+leg matching (backward compat).
 
@@ -195,7 +195,7 @@ If the hook were shipped it would become the production default; until then, the
 - `protocols/backend-taxonomy.md` — backend role + SOT + failure mode + identifier-leakage contract
 - `protocols/voice-dispatch.md` — multi-leg call-site enumeration
 - `protocols/intent-coverage.md` § Producer side — UserPromptSubmit hook precedent for out-of-band logging
-- `scripts/chat_completion.py` docstring — log event schema
-- `scripts/shadow.py --help` — subcommand reference
+- `scripts/atelier/chat_completion.py` docstring — log event schema
+- `scripts/atelier/shadow.py --help` — subcommand reference
 - `harness/model_costs.toml` — cost catalog (refresh quarterly)
 - `harness/shadow_tasks.toml` — verdict-token extraction rules

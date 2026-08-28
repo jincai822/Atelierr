@@ -25,4 +25,4 @@ through `$hi <user-text>`.
 
 ## Maintenance
 
-The intent's `patterns` list and shape-detector documentation in `harness/intents.toml` describe what counts as capture. If you change the *concept* of capture there (e.g., narrow it to dining only, broaden it to include inbox-clip pasting), update this skill's frontmatter description so semantic triggering stays aligned. `scripts/harness_lint.py` checks structural invariants (description present, `/hi` mentioned, intent row exists) but does not — and should not — substring-check trigger phrases; the trigger surface is LLM-judged prose, not a list.
+The intent's `patterns` list and shape-detector documentation in `harness/intents.toml` describe what counts as capture. If you change the *concept* of capture there (e.g., narrow it to dining only, broaden it to include inbox-clip pasting), update this skill's frontmatter description so semantic triggering stays aligned. `scripts/atelier/harness_lint.py` checks structural invariants (description present, `/hi` mentioned, intent row exists) but does not — and should not — substring-check trigger phrases; the trigger surface is LLM-judged prose, not a list.

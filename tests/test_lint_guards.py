@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _run_py(body: str, env_extra: dict | None = None) -> dict:
-    code = "import json, sys\nsys.path.insert(0, 'scripts')\nimport harness_lint as h\nfrom pathlib import Path\n" + textwrap.dedent(body)
+    code = "import json, sys\nsys.path.insert(0, 'scripts/atelier')\nimport harness_lint as h\nfrom pathlib import Path\n" + textwrap.dedent(body)
     proc = subprocess.run(
         [sys.executable, "-c", code],
         cwd=REPO_ROOT,
@@ -79,7 +79,7 @@ class AliasedFlatGlobGuardTest(unittest.TestCase):
                 if (REPO_ROOT / extra).exists():
                     shutil.copytree(REPO_ROOT / extra, root / extra, ignore=shutil.ignore_patterns("__pycache__"))
             shutil.copy(REPO_ROOT / ".gitignore", root / ".gitignore")
-            (root / "scripts").mkdir()
+            (root / "scripts" / "atelier").mkdir(parents=True)
             (root / "scripts" / "victim.py").write_text(
                 'from _paths import tier\n'
                 'refl = tier("reflections")\n'
@@ -150,7 +150,7 @@ class ThresholdSourceOfTruthTest(unittest.TestCase):
 
     def test_defaults_and_prose_agree(self) -> None:
         import re
-        helper = (REPO_ROOT / "scripts" / "autoevo_pending.py").read_text(encoding="utf-8")
+        helper = (REPO_ROOT / "scripts" / "atelier" / "autoevo_pending.py").read_text(encoding="utf-8")
         dedupe = re.search(r'"--dedupe-days", type=int, default=(\d+)', helper)
         max_age = re.search(r'"--max-age-days", type=int, default=(\d+)', helper)
         self.assertIsNotNone(dedupe)

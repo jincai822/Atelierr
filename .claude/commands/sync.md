@@ -55,7 +55,7 @@ If zettelm is empty, print "zettelm 已清空 — 没什么要 digest." and stop
 
 For each markdown file, read its content. Across the batch, collect candidate entities (names, restaurants, places, concepts). Dispatch a single **Researcher** with the entity list and these targets to search:
 
-- `<paths.people>/` — for person backlinks (verify via `uv run scripts/people.py "<name>"` rather than raw grep, so DL-tagged file names are resolved correctly)
+- `<paths.people>/` — for person backlinks (verify via `uv run scripts/atelier/people.py "<name>"` rather than raw grep, so DL-tagged file names are resolved correctly)
 - `<paths.wiki>/` and any localized shadow wikis from `[paths.wiki_localized]` — for concept / place backlinks
 - the user's dining-log file under `<paths.travel>/` — for restaurant rows (existing 餐厅 rows → backlink target)
 - `<paths.papers>/`, `<paths.preprints>/` — only if a paper title is mentioned

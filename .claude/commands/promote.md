@@ -15,7 +15,7 @@ Two-step workflow to promote existing L2 working notes (daily notes, reflections
 
 1. Source notes must already exist under `$OV/` (any tier except L4).
 2. `protocols/wiki-schema.md` defines the target format.
-3. `scripts/trust.py` validates structural integrity after creation.
+3. `scripts/atelier/trust.py` validates structural integrity after creation.
 
 ## Arguments
 
@@ -38,7 +38,7 @@ claims suitable for L4 promotion. For each candidate:
   - Report the validation depth of each source note (L1 raw, L2 working, L3 external)
 
 Search strategy:
-  1. scripts/semantic.py query "[topic]" --top 20  (primary)
+  1. scripts/atelier/semantic.py query "[topic]" --top 20  (primary)
   2. Grep for exact terms across $OV/ (structural follow-up)
   3. Read candidate files in full
   4. Cross-reference against existing <paths.wiki>/ entries via trust.py --json
@@ -91,11 +91,11 @@ Instructions:
 
 1. **Present the draft** to the user for review. Show the full markdown.
 2. On user approval, **write the file** to `<paths.wiki>/<Title>.md` (title-case with spaces, matching the H1).
-3. Run `scripts/trust.py --note "<paths.wiki>/<Title>.md"` to verify structural integrity.
+3. Run `scripts/atelier/trust.py --note "<paths.wiki>/<Title>.md"` to verify structural integrity.
    - If errors: show them, ask the user if they want to fix or abort.
    - If clean: report the initial trust score (will be raw PageRank, no floor until a reviewer pass).
-4. Run `scripts/lint.py` to check for corpus-level issues (shared anchors, etc.).
-5. Regenerate the wiki index: `scripts/trust.py --index`.
+4. Run `scripts/atelier/lint.py` to check for corpus-level issues (shared anchors, etc.).
+5. Regenerate the wiki index: `scripts/atelier/trust.py --index`.
 
 ### Phase 4: Localized Shadows
 

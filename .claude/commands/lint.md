@@ -7,7 +7,7 @@ description: Run harness, privacy, structural, and staleness checks.
 > `/hi wiki orphans`). See `harness/intents.toml` `[intents.lint]` for the full pattern
 > list. Both paths execute this same procedure.
 
-Deterministic Python pass. The LLM never hand-checks structure — `scripts/lint.py` is the single source of truth, mirroring the `scripts/trust.py` pattern.
+Deterministic Python pass. The LLM never hand-checks structure — `scripts/atelier/lint.py` is the single source of truth, mirroring the `scripts/atelier/trust.py` pattern.
 
 **Scope:** Three passes. (0) Harness portability, $OV ingestion hygiene, and privacy checks. (1) Structural: everything under `<paths.wiki>/`. (2) Staleness: L2 working-layer directories (`<paths.agent_findings>/`, `<paths.wip>/`, `<paths.gtd>/`, `<paths.preprints>/`, `<paths.reflections>/`, `<paths.research>/`). Structural lint enforces the wiki schema; staleness lint surfaces L2 notes that need attention (archival, compaction, or promotion to L4).
 
@@ -15,21 +15,21 @@ Deterministic Python pass. The LLM never hand-checks structure — `scripts/lint
 
 | Check | Severity | Source |
 |---|---|---|
-| Per-note parse errors — items 1-10 of `protocols/wiki-schema.md`, plus dangling `@cite` targets (both surface under the `parse-error` code) | ERROR | `scripts/trust.py` parser + resolver |
-| Duplicate titles across wiki entries (breaks `@cite` resolution) | ERROR | `scripts/lint.py` |
-| Slug ↔ title alignment (filename stem matches H1 title) | WARN | `scripts/lint.py` |
-| Orphan entry — no inbound `@cite` from any other wiki entry (trust cannot propagate to it) | WARN | `scripts/lint.py` graph topology |
-| No outbound cite — entry does not `@cite` any other wiki entry | INFO | `scripts/lint.py` graph topology |
-| Shared anchor, no cite — two entries reference the same `@anchor` but lack a `@cite` edge | INFO | `scripts/lint.py` graph topology |
-| `url:` or `gist:` anchor missing `readwise:` field (`readwise-missing`) | WARN | `scripts/lint.py` — save to Readwise with `anchor-evidence` tag and backfill the document ID; fix via `uv run scripts/snapshot_anchors.py --apply --note "<paths.wiki>/<Title>.md"` |
-| Technical term in claim body not in vocabulary allowlist and not matching any wiki entry title (`unfounded-term`) | INFO | `scripts/lint.py` — add term to `scripts/wiki_vocabulary.txt` if common knowledge, or add a wiki entry, or add a parenthetical definition inline |
-| Localized shadow missing for a configured language (`shadow-missing`) | WARN | `scripts/lint.py` — run /promote Phase 4 or regenerate the shadow manually. Configured shadow paths live under `[paths.wiki_localized]` in `harness/paths.local.toml`. |
-| Localized shadow older than English source (`shadow-stale`) | WARN | `scripts/lint.py` — re-translate the localized shadow to match the updated English source |
-| Claude/Codex harness portability (`missing-agents-md`, `models-agent-missing`, `capability-agent-missing`, `agents-registry-entry-missing`, `commands-entry-missing`, `skill-missing`, etc.) | ERROR/WARN/INFO | `scripts/harness_lint.py` |
-| `$OV` ingestion hygiene (missing READMEs, raw-without-digest, archive↔working-tier overlap, root-level orphans, empty .md files, suspicious top-level dirs) | INFO (advisory) | `scripts/zk_audit.py` — see `protocols/drive-zk-ingestion.md` § Post-ingestion verification |
-| Auto-memory hygiene (`dead-link`, `orphan-file`, `index-bloat`, `stale-mtime`, `provisional-marker`, `frontmatter-missing`) | WARN/INFO (advisory) | `scripts/auto_memory_audit.py` — capability-side check on `~/.claude-personal/projects/<encoded-cwd>/memory/`; surfaces entries the recall pipeline can't reach (orphan/dead-link), entries past the index truncation horizon (>200 lines), and entries the human should re-verify (mtime/provisional). The (A) path of bi-temporal forgetting; frontmatter-level expiry is (B). |
-| Claim missing `^cn` block ID (`block-id-missing`, deferred — Phase D) | WARN | `scripts/lint.py` — regex `\^c[0-9]+$` on last line of each claim body; absent marker is a nudge, not a reject (per `protocols/wiki-schema.md` §"When `^cn` is recommended") |
-| Non-`^cn` block ID inside a wiki entry (`block-id-violation`, deferred — Phase D) | ERROR | `scripts/lint.py` — any `^<token>` that does not match `\^c[0-9]+$` is a schema violation (no `^summary`, `^fig1`, `^revlog-*`, etc.) |
+| Per-note parse errors — items 1-10 of `protocols/wiki-schema.md`, plus dangling `@cite` targets (both surface under the `parse-error` code) | ERROR | `scripts/atelier/trust.py` parser + resolver |
+| Duplicate titles across wiki entries (breaks `@cite` resolution) | ERROR | `scripts/atelier/lint.py` |
+| Slug ↔ title alignment (filename stem matches H1 title) | WARN | `scripts/atelier/lint.py` |
+| Orphan entry — no inbound `@cite` from any other wiki entry (trust cannot propagate to it) | WARN | `scripts/atelier/lint.py` graph topology |
+| No outbound cite — entry does not `@cite` any other wiki entry | INFO | `scripts/atelier/lint.py` graph topology |
+| Shared anchor, no cite — two entries reference the same `@anchor` but lack a `@cite` edge | INFO | `scripts/atelier/lint.py` graph topology |
+| `url:` or `gist:` anchor missing `readwise:` field (`readwise-missing`) | WARN | `scripts/atelier/lint.py` — save to Readwise with `anchor-evidence` tag and backfill the document ID; fix via `uv run scripts/atelier/snapshot_anchors.py --apply --note "<paths.wiki>/<Title>.md"` |
+| Technical term in claim body not in vocabulary allowlist and not matching any wiki entry title (`unfounded-term`) | INFO | `scripts/atelier/lint.py` — add term to `scripts/wiki_vocabulary.txt` if common knowledge, or add a wiki entry, or add a parenthetical definition inline |
+| Localized shadow missing for a configured language (`shadow-missing`) | WARN | `scripts/atelier/lint.py` — run /promote Phase 4 or regenerate the shadow manually. Configured shadow paths live under `[paths.wiki_localized]` in `harness/paths.local.toml`. |
+| Localized shadow older than English source (`shadow-stale`) | WARN | `scripts/atelier/lint.py` — re-translate the localized shadow to match the updated English source |
+| Claude/Codex harness portability (`missing-agents-md`, `models-agent-missing`, `capability-agent-missing`, `agents-registry-entry-missing`, `commands-entry-missing`, `skill-missing`, etc.) | ERROR/WARN/INFO | `scripts/atelier/harness_lint.py` |
+| `$OV` ingestion hygiene (missing READMEs, raw-without-digest, archive↔working-tier overlap, root-level orphans, empty .md files, suspicious top-level dirs) | INFO (advisory) | `scripts/atelier/zk_audit.py` — see `protocols/drive-zk-ingestion.md` § Post-ingestion verification |
+| Auto-memory hygiene (`dead-link`, `orphan-file`, `index-bloat`, `stale-mtime`, `provisional-marker`, `frontmatter-missing`) | WARN/INFO (advisory) | `scripts/atelier/auto_memory_audit.py` — capability-side check on `~/.claude-personal/projects/<encoded-cwd>/memory/`; surfaces entries the recall pipeline can't reach (orphan/dead-link), entries past the index truncation horizon (>200 lines), and entries the human should re-verify (mtime/provisional). The (A) path of bi-temporal forgetting; frontmatter-level expiry is (B). |
+| Claim missing `^cn` block ID (`block-id-missing`, deferred — Phase D) | WARN | `scripts/atelier/lint.py` — regex `\^c[0-9]+$` on last line of each claim body; absent marker is a nudge, not a reject (per `protocols/wiki-schema.md` §"When `^cn` is recommended") |
+| Non-`^cn` block ID inside a wiki entry (`block-id-violation`, deferred — Phase D) | ERROR | `scripts/atelier/lint.py` — any `^<token>` that does not match `\^c[0-9]+$` is a schema violation (no `^summary`, `^fig1`, `^revlog-*`, etc.) |
 
 **Not checked:** cross-note `@anchor` date consistency. Per `protocols/wiki-schema.md`, `valid_at` is the day the marker was added to its home note, so the same source being anchored from two notes on different days is the normal case. `/lint` used to flag this and was wrong about it.
 
@@ -40,7 +40,7 @@ Exit code: 0 if no ERROR-level findings, 1 otherwise. WARN and INFO never fail t
 ### Phase 0: Harness health
 
 ```
-Bash: python3 scripts/harness_lint.py --json
+Bash: python3 scripts/atelier/harness_lint.py --json
 ```
 
 Parse the JSON. Shape:
@@ -72,7 +72,7 @@ If count > 0, emit INFO: "CLAUDE.md contains [N] bold markers. Bold has no seman
 ### Phase 0b: $OV ingestion hygiene audit
 
 ```
-Bash: uv run scripts/zk_audit.py --json
+Bash: uv run scripts/atelier/zk_audit.py --json
 ```
 
 Parse the JSON. Shape:
@@ -92,12 +92,12 @@ Parse the JSON. Shape:
 }
 ```
 
-Advisory only: never blocks the run. Exit code 0 unless $OV is missing (exit 2). Surface a one-line summary per non-empty category. Detailed listings are read on demand via `uv run scripts/zk_audit.py` (no `--json`). Source of truth: `protocols/drive-zk-ingestion.md` § Post-ingestion verification.
+Advisory only: never blocks the run. Exit code 0 unless $OV is missing (exit 2). Surface a one-line summary per non-empty category. Detailed listings are read on demand via `uv run scripts/atelier/zk_audit.py` (no `--json`). Source of truth: `protocols/drive-zk-ingestion.md` § Post-ingestion verification.
 
 ### Phase 0c: Privacy leak scan
 
 ```
-Bash: uv run scripts/privacy_check.py --json
+Bash: uv run scripts/atelier/privacy_check.py --json
 ```
 
 `--json` mode emits a document on every run regardless of exit code. Route on its `action` field: `"proceed"` → pass (WARN first on any `coverage_warnings`); `"soft_skip"` → note "privacy gate skipped (<reason>)" and continue; `"abort"` → ERROR, block and present each `hits` entry verbatim. No JSON / exit ≥ 2 without JSON → real script error: surface stderr, soft-skip.
@@ -135,7 +135,7 @@ claiming exact identity or preference coverage.
 ### Phase 0d: Auto-memory hygiene
 
 ```
-Bash: uv run scripts/auto_memory_audit.py --json
+Bash: uv run scripts/atelier/auto_memory_audit.py --json
 ```
 
 Parse the JSON. Shape:
@@ -154,12 +154,12 @@ Parse the JSON. Shape:
 }
 ```
 
-Advisory only: never blocks the run. Exit code 0 always; missing memory dir produces a single `memory-dir-missing` INFO finding so the JSON parse path stays uniform on first-run setups. Surface a one-line summary per non-zero finding code. Detailed listings on demand via `uv run scripts/auto_memory_audit.py` (no `--json`). The memory dir auto-discovers from CWD; override via `CLAUDE_MEMORY_DIR` or `--dir`. WARN-level findings (`dead-link`, `orphan-file`, `index-bloat`) point at concrete recall-pipeline breakage; INFO-level (`stale-mtime`, `provisional-marker`, `frontmatter-missing`, `memory-dir-missing`) are nudges to re-verify or invalidate. Source of truth: `protocols/local-first-architecture.md` (auto-memory as L1 fallback).
+Advisory only: never blocks the run. Exit code 0 always; missing memory dir produces a single `memory-dir-missing` INFO finding so the JSON parse path stays uniform on first-run setups. Surface a one-line summary per non-zero finding code. Detailed listings on demand via `uv run scripts/atelier/auto_memory_audit.py` (no `--json`). The memory dir auto-discovers from CWD; override via `CLAUDE_MEMORY_DIR` or `--dir`. WARN-level findings (`dead-link`, `orphan-file`, `index-bloat`) point at concrete recall-pipeline breakage; INFO-level (`stale-mtime`, `provisional-marker`, `frontmatter-missing`, `memory-dir-missing`) are nudges to re-verify or invalidate. Source of truth: `protocols/local-first-architecture.md` (auto-memory as L1 fallback).
 
 ### Phase 1a: Structural lint
 
 ```
-Bash: python3 scripts/lint.py --json
+Bash: python3 scripts/atelier/lint.py --json
 ```
 
 Parse the JSON. It has the shape:
@@ -177,7 +177,7 @@ Parse the JSON. It has the shape:
 ### Phase 1b: Staleness lint
 
 ```
-Bash: python3 scripts/staleness.py --json
+Bash: python3 scripts/atelier/staleness.py --json
 ```
 
 Parse the JSON. Shape:
@@ -196,7 +196,7 @@ Staleness findings are always advisory (no ERROR level). They surface L2 notes t
 
 Group findings by severity. If the corpus is clean, say so and stop.
 
-For each ERROR-level finding: show the code, file path, and message verbatim. Do not rephrase the message — `scripts/trust.py` and `scripts/lint.py` emit precise line numbers that the user needs.
+For each ERROR-level finding: show the code, file path, and message verbatim. Do not rephrase the message — `scripts/atelier/trust.py` and `scripts/atelier/lint.py` emit precise line numbers that the user needs.
 
 For WARN-level findings: show them but mark them as non-blocking.
 
@@ -227,7 +227,7 @@ If any user-driven fixes were made, suggest rerunning `/lint` manually to confir
 
 ## Rules
 
-1. **Never hand-check structure.** Always call `scripts/lint.py`. If the script is missing or errors, fix the script — do not re-derive the checks in the LLM.
-2. **Ask before fixing.** All fixes route back to the user; `scripts/lint.py` is advisory-only.
+1. **Never hand-check structure.** Always call `scripts/atelier/lint.py`. If the script is missing or errors, fix the script — do not re-derive the checks in the LLM.
+2. **Ask before fixing.** All fixes route back to the user; `scripts/atelier/lint.py` is advisory-only.
 3. **ERROR findings block further wiki work.** If a wiki entry has a parse error, do not cite it from new entries, do not score it — fix it first.
 4. **WARN findings are advisory.** The system keeps working; the user decides whether to act.

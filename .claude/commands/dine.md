@@ -84,13 +84,13 @@ Resolve the following roles through `profile/diet.md § Catalog files`. Paths ar
 **Missing-file fallback:** if any of these is absent, skip it silently and note the gap in the closing line ("scored without [missing source]"). The recommendation still produces; the user can decide whether to recreate the catalog.
 
 **Log-side aggregates (deterministic):** run
-`uv run scripts/dine_rank.py --avoid-days <window>` first; it returns
+`uv run scripts/atelier/dine_rank.py --avoid-days <window>` first; it returns
 per-restaurant visit counts, last-visit recency, `评分` averages, `再去`
 state, the log-derived score component, and the avoid-window exclusions.
 Do not re-read the meal-history tracker row by row; combine the returned
 `log_score` with the catalog-side factors below.
 
-**Integrity preflight:** when running from the Atelier repo, execute `python3 scripts/dining_audit.py --json`. If it reports errors, exclude the affected rows or source from scoring and disclose the degraded input. Warnings such as missing legacy values do not block recommendations.
+**Integrity preflight:** when running from the Atelier repo, execute `python3 scripts/atelier/dining_audit.py --json`. If it reports errors, exclude the affected rows or source from scoring and disclose the degraded input. Warnings such as missing legacy values do not block recommendations.
 
 ## Step 3: Filter + score
 
@@ -293,12 +293,12 @@ User says `yes` → apply all. Partial → apply only the listed numbers. A part
 
 For the meal log: use `Edit` to insert the new row in ascending event-date order. Insert before the next-newer-date row, or append after the last row when it is newest. Never append a backfill at the end merely because it was captured today. Bump `Last updated:` line. For the gift-card catalog: same `Edit` pattern.
 
-After writing the meal row, run `python3 scripts/dining_audit.py --json` when available. If the audit fails, repair only the row or invariant introduced by this capture before reporting success. If the audit cannot pass, or the repair removes or rolls back the new meal row, do not write the trip reference.
+After writing the meal row, run `python3 scripts/atelier/dining_audit.py --json` when available. If the audit fails, repair only the row or invariant introduced by this capture before reporting success. If the audit cannot pass, or the repair removes or rolls back the new meal row, do not write the trip reference.
 
 For a selected trip-log reference: write it only after the meal row was successfully written and the dining audit passed with that row intact. Do not use `Edit` directly. Invoke the helper with the already-resolved values; it canonicalizes the trip-note path and derives its trusted cache lock path internally:
 
 ```bash
-python3 scripts/trip_reference.py \
+python3 scripts/atelier/trip_reference.py \
   --trip-note "<resolved-trip-note-path>" \
   --section-heading "<exact-section-heading>" \
   --section-sha256 "<captured-section-sha256>" \

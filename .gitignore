@@ -3,6 +3,7 @@
 
 # Org-specific config (contains private domain names)
 scripts/readwise_skip_domains.txt
+scripts/atelier/readwise_skip_domains.txt
 
 # Private eval data (filenames-from-$OV as literal test fixtures)
 scripts/_evalset.json
@@ -12,6 +13,20 @@ scripts/_results_*/
 scripts/_results_*.log
 scripts/_results_*.summary
 scripts/_eval_sweep.sh
+scripts/atelier/_evalset.json
+scripts/atelier/_evalset_v1.json
+scripts/atelier/_*.json
+scripts/atelier/_results_*/
+scripts/atelier/_results_*.log
+scripts/atelier/_results_*.summary
+scripts/atelier/_eval_sweep.sh
+
+# Atelierr local config (copy from *.example; may contain local paths/credentials)
+config/*.yaml
+!config/*.yaml.example
+docker/.env
+docker/data/
+logs/
 
 # Personal data (PRIVATE — never commit)
 # Raw note snapshots
@@ -48,7 +63,7 @@ semantic.toml
 
 # Per-user path registry overrides (localized wikis, sandbox vaults, etc.)
 # Canonical names ship in harness/paths.toml; user overrides go here.
-# Loaded by scripts/_paths.py.
+# Loaded by scripts/atelier/_paths.py.
 harness/paths.local.toml
 harness/intents.local.toml
 
@@ -62,7 +77,7 @@ harness/routine_owner.local.toml
 harness/.routine_owner.local.toml.*
 
 # Per-user environment overrides for headless launchd invocations (export OV=..., etc.).
-# Sourced by scripts/launchd/com.atelier.autoevo-nightly.plist. Contains the user's
+# Sourced by scripts/atelier/launchd/com.atelier.autoevo-nightly.plist. Contains the user's
 # absolute vault path; should never be committed.
 harness/env.local.sh
 
@@ -79,8 +94,9 @@ cache/
 
 # One-off / migration scripts that hardcode private vault content
 # (TOPIC_MAPs, lab lists, wiki entry titles). The steady-state generic
-# tools live at scripts/fission.py and scripts/relink.py.
+# tools live at scripts/atelier/fission.py and scripts/atelier/relink.py.
 scripts/oneoff/
+scripts/atelier/oneoff/
 
 # Local-first data layer (symlink or subdir; never commit the vault)
 zk

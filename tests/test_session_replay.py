@@ -15,8 +15,8 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "session_replay.py"
-sys.path.insert(0, str(ROOT / "scripts"))
+SCRIPT = ROOT / "scripts" / "atelier" / "session_replay.py"
+sys.path.insert(0, str(ROOT / "scripts" / "atelier"))
 import session_replay  # noqa: E402
 
 

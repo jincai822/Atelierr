@@ -43,7 +43,7 @@ Turn a session insight into a standalone local note under the appropriate tier (
 
 ### Wiki Entry Creation (L4)
 
-Wiki entries are L4 knowledge: schema-structured, anchored, scored by `scripts/trust.py`. They live as files under `<paths.wiki>/*.md`.
+Wiki entries are L4 knowledge: schema-structured, anchored, scored by `scripts/atelier/trust.py`. They live as files under `<paths.wiki>/*.md`.
 
 **Process:**
 1. **Gather anchor sources.** Confirm the user has the external receipts the note will cite (arxiv/s2/doi/isbn/url/gist IDs). A wiki entry with zero `@anchor` markers parses but scores 0.0; allowed, but tell the user.
@@ -54,7 +54,7 @@ Wiki entries are L4 knowledge: schema-structured, anchored, scored by `scripts/t
    - `@cite` markers placed **outside** the fenced block (after the closing ` ``` `): `@cite: [[Note Title#^cn]] | valid_at: YYYY-MM-DD`
    - `## Revision Log` at the bottom
 3. Present the full content with `target_path: <paths.wiki>/<Title>.md` (title-case with spaces, matching the H1). The orchestrator writes the file after user approval.
-4. After the orchestrator writes the file, it will run `Bash: scripts/trust.py --note "<paths.wiki>/<Title>.md"` and report structural-integrity result plus initial claim scores. If parse errors appear, fix the draft and loop.
+4. After the orchestrator writes the file, it will run `Bash: scripts/atelier/trust.py --note "<paths.wiki>/<Title>.md"` and report structural-integrity result plus initial claim scores. If parse errors appear, fix the draft and loop.
 
 **When NOT to create a wiki entry:** if the content is exploratory, unsourced, or a session insight, propose a regular note via Create Note from Session instead. Wiki entries are for claims with external receipts and reuse value.
 
@@ -66,7 +66,7 @@ Draft an updated version of an existing local note.
 1. Read the current note from the local mirror (`Grep` for the title in `$OV/` → `Read` the file).
 2. Apply the requested changes.
 3. Present the diff to the user.
-4. The orchestrator applies the change via `Edit` (small substring fix) or `Write` (whole-body rewrite). For renames, the orchestrator runs `mv` plus a wikilink-rewrite pass (`scripts/wikilink_to_md.py` or grep + Edit) to fix inbound `[[Old Title]]` references.
+4. The orchestrator applies the change via `Edit` (small substring fix) or `Write` (whole-body rewrite). For renames, the orchestrator runs `mv` plus a wikilink-rewrite pass (`scripts/atelier/wikilink_to_md.py` or grep + Edit) to fix inbound `[[Old Title]]` references.
 
 Daily notes (`<paths.daily_notes>/YYYY/MM/YYYY-MM-DD.md`) are user-authored; the Curator does not propose edits to them.
 

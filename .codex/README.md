@@ -15,14 +15,14 @@ codex -C . --sandbox workspace-write
 Atelier's shared runtime selector also ships with Codex selected:
 
 ```bash
-python3 scripts/atelier_runtime.py status
-python3 scripts/atelier_runtime.py run hi
+python3 scripts/atelier/atelier_runtime.py status
+python3 scripts/atelier/atelier_runtime.py run hi
 ```
 
 The selector only launches the native CLI surface. It does not generate a
 prompt or start a nested process inside an active Codex thread. A user can
 persist Claude as the launcher and launchd default with
-`python3 scripts/atelier_runtime.py use claude`.
+`python3 scripts/atelier/atelier_runtime.py use claude`.
 
 Inside an active Codex thread, use explicit skills as the counterpart to
 Claude slash commands:
@@ -79,5 +79,5 @@ codex review --uncommitted
 Before harness changes are finished:
 
 ```bash
-python3 scripts/harness_lint.py
+python3 scripts/atelier/harness_lint.py
 ```

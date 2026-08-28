@@ -18,7 +18,7 @@ def _run(env_ov: str | None, *argv: str) -> subprocess.CompletedProcess[str]:
     if env_ov is not None:
         env["OV"] = env_ov
     return subprocess.run(
-        [sys.executable, "scripts/privacy_check.py", "--json", *argv],
+        [sys.executable, "scripts/atelier/privacy_check.py", "--json", *argv],
         cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=300,
     )
 
@@ -37,7 +37,7 @@ class PrivacyActionTest(unittest.TestCase):
         import io
         import sys as _sys
 
-        _sys.path.insert(0, str(REPO_ROOT / "scripts"))
+        _sys.path.insert(0, str(REPO_ROOT / "scripts" / "atelier"))
         import privacy_check as pc
 
         with tempfile.TemporaryDirectory(prefix="atelier-priv-") as tmp:

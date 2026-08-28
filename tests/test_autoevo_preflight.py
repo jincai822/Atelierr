@@ -83,7 +83,7 @@ def _run_py(vault: Path, body: str) -> dict:
 
 PRELUDE = """
 import json, sys
-sys.path.insert(0, 'scripts')
+sys.path.insert(0, 'scripts/atelier')
 import autoevo_preflight as ap
 from pathlib import Path
 ok_probe = lambda: {"hits": 0, "detail": ""}
@@ -137,7 +137,7 @@ class DirtyGateScopeTest(unittest.TestCase):
             (vault / "personal" / "diary.md").write_text("edited\n", encoding="utf-8")
             (vault / "research" / "new.md").write_text("draft\n", encoding="utf-8")
             proc = subprocess.run(
-                [sys.executable, "scripts/autoevo_preflight.py", "--dirty-scope"],
+                [sys.executable, "scripts/atelier/autoevo_preflight.py", "--dirty-scope"],
                 cwd=REPO_ROOT,
                 env={**os.environ, "OV": str(vault)},
                 capture_output=True,
@@ -243,7 +243,7 @@ class TransientErrorsDeferTest(unittest.TestCase):
             state.chmod(0)
             try:
                 proc = subprocess.run(
-                    [sys.executable, "scripts/autoevo_preflight.py", "--json", "--run-date", "2099-01-02", "--cycle", "2099-01-02"],
+                    [sys.executable, "scripts/atelier/autoevo_preflight.py", "--json", "--run-date", "2099-01-02", "--cycle", "2099-01-02"],
                     cwd=REPO_ROOT, env={**os.environ, "OV": str(vault)}, capture_output=True, text=True, timeout=120,
                 )
             finally:

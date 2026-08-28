@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 def _run(vault: Path, *argv: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "scripts/autoevo_run.py", *argv],
+        [sys.executable, "scripts/atelier/autoevo_run.py", *argv],
         cwd=REPO_ROOT,
         env={**os.environ, "OV": str(vault)},
         capture_output=True,

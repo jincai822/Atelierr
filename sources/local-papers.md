@@ -23,7 +23,7 @@ or `<paths.preprints>/`, then materialize reusable text before dispatching a
 Reader or Scholar:
 
 ```bash
-python3 scripts/paper_cache.py "$OV/papers/<file>.pdf"
+python3 scripts/atelier/paper_cache.py "$OV/papers/<file>.pdf"
 ```
 
 The helper returns `<paths.cache>/<paper-slug>/`, reuses a fresh extraction,
@@ -46,7 +46,7 @@ Legacy `<slugified-title>.pdf` and `<source>-<id>.pdf` files are tolerated on re
 
 ## Local extraction
 
-`scripts/paper_cache.py` is the single extraction entrypoint. It is stdlib-only
+`scripts/atelier/paper_cache.py` is the single extraction entrypoint. It is stdlib-only
 and invokes Poppler's `pdftotext -layout`; no network API is involved. It
 refuses PDFs outside `<paths.papers>/` and `<paths.preprints>/` so a web-fetched
 paper must first be placed in its canonical L3 store.

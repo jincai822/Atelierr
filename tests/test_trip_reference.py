@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "atelier"))
 
 import trip_reference
 import _paths
@@ -49,8 +49,8 @@ class TripReferenceTests(unittest.TestCase):
         scripts.mkdir(parents=True)
         harness.mkdir()
         source_root = Path(__file__).resolve().parents[1]
-        shutil.copy2(source_root / "scripts" / "trip_reference.py", scripts)
-        shutil.copy2(source_root / "scripts" / "_paths.py", scripts)
+        shutil.copy2(source_root / "scripts" / "atelier" / "trip_reference.py", scripts)
+        shutil.copy2(source_root / "scripts" / "atelier" / "_paths.py", scripts)
         shutil.copy2(source_root / "harness" / "paths.toml", harness)
         return scripts / "trip_reference.py"
 

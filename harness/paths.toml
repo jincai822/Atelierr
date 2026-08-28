@@ -65,6 +65,10 @@ routine_prompts = "_routine_prompts"
 inbox           = "inbox"
 cache           = "cache"
 
+# Atelierr memory module (three-layer note storage: short-term / mid-term /
+# long-term). Managed by scripts/memory/; served to Flatnotes via Docker mount.
+memory          = "memory"
+
 # Private operational extensions. This surface is excluded from semantic
 # retrieval because `_tools` is an operational directory at any depth.
 private_features = "_tools/features"

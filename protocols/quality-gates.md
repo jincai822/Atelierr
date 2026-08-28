@@ -50,7 +50,7 @@ Defines checkpoints that must pass before output reaches the user. Each gate has
 
 Mode invariants enforced here (not in reviewer.md):
 
-- The privacy gate (`/system-review` Phase 1b, mirrored from `/lint` Phase 0c) precedes scoring. Non-empty `scripts/privacy_check.py` hits force `NEEDS_REVISION` before dispatch, regardless of any score the reviewers would otherwise emit.
+- The privacy gate (`/system-review` Phase 1b, mirrored from `/lint` Phase 0c) precedes scoring. Non-empty `scripts/atelier/privacy_check.py` hits force `NEEDS_REVISION` before dispatch, regardless of any score the reviewers would otherwise emit.
 - **Gate keeper:** Reviewer.
 - **Max revision rounds:** Session = 2 (after 2 failed revisions, deliver with all caveats). System = unlimited (Evolver may escalate to user after 2 rounds without progress).
 

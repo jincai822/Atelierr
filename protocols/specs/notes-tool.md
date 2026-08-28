@@ -121,8 +121,8 @@ Two exceptions:
 
 - `/lint` will call `notes.py check` (once implemented) and surface broken links + wikilink violations as a corpus-level pass.
 - The orchestrator does NOT call `mv` or `rename` autonomously. These are user-initiated. Agents may *suggest* moves (Forgetter, Curator) but execution is user-approved.
-- `scripts/semantic.py` is unaffected — it operates on file content, not paths. Index drift from a move is corrected on next semantic-index rebuild.
-- `scripts/people.py` resolution by name continues to work — name-to-path lookup is filename-stem based, not link-based.
+- `scripts/atelier/semantic.py` is unaffected — it operates on file content, not paths. Index drift from a move is corrected on next semantic-index rebuild.
+- `scripts/atelier/people.py` resolution by name continues to work — name-to-path lookup is filename-stem based, not link-based.
 
 ## What this tool does NOT do
 
@@ -137,4 +137,4 @@ Two exceptions:
 - [[local-first-architecture.md]] — `$OV/` tier model
 - [[raw-indexing.md]] — wikilink-style indexes (separate convention; this tool does not produce them)
 - [[drive-zk-ingestion.md]] — file movement during ingestion uses `mv`-default rules; this tool inherits the same atomicity contract
-- `scripts/lint.py` — corpus-level lint; will call `notes.py check` once the implementation lands
+- `scripts/atelier/lint.py` — corpus-level lint; will call `notes.py check` once the implementation lands

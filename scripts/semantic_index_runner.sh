@@ -53,5 +53,5 @@ SEMANTIC_TIMEOUT_SECONDS="${ATELIER_SEMANTIC_INDEX_TIMEOUT_SECONDS:-7200}"
     python3 "$SCRIPTS_DIR/command_timeout.py" \
     --seconds "$SEMANTIC_TIMEOUT_SECONDS" \
     -- \
-    uv run --offline --frozen scripts/semantic.py index --if-stale
+    uv run --offline --frozen scripts/atelier/semantic.py index --if-stale
 echo "[$(date -Iseconds)] semantic index maintenance completed"

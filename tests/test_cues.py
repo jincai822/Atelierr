@@ -1,4 +1,4 @@
-"""Regression tests for the autoevo cue in scripts/cues.py.
+"""Regression tests for the autoevo cue in scripts/atelier/cues.py.
 
 Glitches (2026-08-22): the nightly bot was blocked 73 of 103 attempts by the
 same gate while the cue stayed soft; and when the runner crashed before the
@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 PRELUDE = """
 import json, sys
-sys.path.insert(0, 'scripts')
+sys.path.insert(0, 'scripts/atelier')
 import cues
 from datetime import date, datetime
 from pathlib import Path
@@ -95,23 +95,23 @@ class AutoevoCueTest(unittest.TestCase):
     def test_gate_fix_keys_match_preflight_gate_strings(self) -> None:
         """Producer/consumer pin: every gate_fixes key must exist in autoevo_preflight.py."""
         import re
-        cues_src = (REPO_ROOT / "scripts" / "cues.py").read_text(encoding="utf-8")
+        cues_src = (REPO_ROOT / "scripts" / "atelier" / "cues.py").read_text(encoding="utf-8")
         block = cues_src.split("gate_fixes = {", 1)[1].split("}", 1)[0]
         keys = re.findall(r'^\s*"([a-z_]+)":', block, re.MULTILINE)
         self.assertGreaterEqual(len(keys), 8, keys)
-        preflight_src = (REPO_ROOT / "scripts" / "autoevo_preflight.py").read_text(encoding="utf-8")
+        preflight_src = (REPO_ROOT / "scripts" / "atelier" / "autoevo_preflight.py").read_text(encoding="utf-8")
         for key in keys:
             self.assertIn(f'"{key}"', preflight_src, f"gate_fixes key {key!r} not emitted by autoevo_preflight.py")
 
     def test_every_emitted_gate_has_a_fix_entry(self) -> None:
         """Reverse pin: a NEW preflight gate must not fall back to generic text."""
         import re
-        preflight_src = (REPO_ROOT / "scripts" / "autoevo_preflight.py").read_text(encoding="utf-8")
+        preflight_src = (REPO_ROOT / "scripts" / "atelier" / "autoevo_preflight.py").read_text(encoding="utf-8")
         emitted = set(re.findall(r'"gate": "([a-z_]+)"', preflight_src))
         # dynamic result["gate"] assignments too
         emitted |= set(re.findall(r'result\["gate"\] = "([a-z_]+)"', preflight_src))
         self.assertGreaterEqual(len(emitted), 9, emitted)
-        cues_src = (REPO_ROOT / "scripts" / "cues.py").read_text(encoding="utf-8")
+        cues_src = (REPO_ROOT / "scripts" / "atelier" / "cues.py").read_text(encoding="utf-8")
         block = cues_src.split("gate_fixes = {", 1)[1].split("}", 1)[0]
         keys = set(re.findall(r'"([a-z_]+)":', block))
         missing = emitted - keys - {"unknown"}

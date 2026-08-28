@@ -38,7 +38,7 @@ Applies to: periodic (monthly or quarterly) free-writes the user does deliberate
 
 Search includes notes regardless of `#ai-reflection` or `#ai-generated` tags. These tags are alloy markers, not exclusion criteria. Reflection write-backs are alloy by default and are citable like any other note.
 
-Trust scores from `scripts/trust.py`, not tag-based filtering, weight what comes back from search. Wiki entries with high trust rank above alloy notes; alloy notes with no contradicting evidence remain visible and weighted accordingly.
+Trust scores from `scripts/atelier/trust.py`, not tag-based filtering, weight what comes back from search. Wiki entries with high trust rank above alloy notes; alloy notes with no contradicting evidence remain visible and weighted accordingly.
 
 ## The Failure Modes the Design is Bounded By
 
@@ -107,7 +107,7 @@ This is fine. The taxonomy is honest about it. The point of `#solo-flight` is no
 
 ## How This Connects to the Rest of the System
 
-- **Tag taxonomy** lives here. The wiki schema (`wiki-schema.md`) defines the structure for files under `<paths.wiki>/`. The trust engine (`scripts/trust.py`) reads only the `<paths.wiki>/` subtree.
+- **Tag taxonomy** lives here. The wiki schema (`wiki-schema.md`) defines the structure for files under `<paths.wiki>/`. The trust engine (`scripts/atelier/trust.py`) reads only the `<paths.wiki>/` subtree.
 - **Knowledge tiers (L1–L5)** are defined in `local-first-architecture.md` and describe *where* a note lives. They are orthogonal to the validation-depth categories above. Wiki entries live at L4 (`<paths.wiki>/`). Alloy notes live anywhere from L1 to L3 (daily notes, session reflections, the rest of the vault, curated receipts). `#solo-flight` notes are usually captured in the L2 daily-note layer. To avoid confusion: the L1–L5 axis is "knowledge storage / certification level," the alloy / wiki entry / `#solo-flight` axis is "validation depth."
 - **Search behavior** changes: no exclusion rule based on `#ai-reflection`. Use trust scores (when available) or recency + relevance (when not).
 - **Curator and Researcher** behavior: Curator drafts wiki entries to `<paths.wiki>/`; Researcher routes wiki queries to the local layer.

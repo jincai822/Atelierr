@@ -3,7 +3,7 @@
 # Claude Code uses `.claude/agents/*.md` as native subagent specs.
 # Codex uses project-scoped `.codex/agents/*.toml` adapters. Each adapter
 # exposes this registry's description and routes the native subagent back to
-# the same `.claude/agents/*.md` role brief. `scripts/harness_lint.py` enforces
+# the same `.claude/agents/*.md` role brief. `scripts/atelier/harness_lint.py` enforces
 # the mapping so the adapter edge cannot become a second role source.
 #
 # Each agent declares a `voices` keyed inline table mapping leg name to
@@ -14,7 +14,7 @@
 #           `.codex/agents/<name>.toml`. The runtime adapter controls the
 #           concrete model and reasoning effort.
 #   direct  OpenAI-compatible direct-api leg, dispatched via
-#           `uv run scripts/chat_completion.py --model <identity>`.
+#           `uv run scripts/atelier/chat_completion.py --model <identity>`.
 #   codex   Explicit external Codex CLI reviewer leg, dispatched via
 #           `codex exec -m <identity>` independently of the selected runtime.
 #           Reserved for the external-reviewer role today.
@@ -85,7 +85,7 @@
 # `used_by` lists intents (`intents.<name>` from `harness/intents.toml`)
 # and commands (`commands.<name>` from `harness/commands.toml`) that
 # dispatch the agent. Empty `used_by` is an orphan signal (lint WARN).
-# `python3 scripts/harness_lint.py --fix-used-by` regenerates from the walk.
+# `python3 scripts/atelier/harness_lint.py --fix-used-by` regenerates from the walk.
 
 [agents.challenger]
 source = ".claude/agents/challenger.md"
@@ -303,7 +303,7 @@ voices = { native = "sonnet", direct = "deepseek_pro" }
 kinds = ["system"]
 dispatch_rationale = ["tool-isolation"]
 status = "portable-adapted"
-description = "Semantic privacy scanner for committed-file diffs. Catches leaks the mechanical scripts/privacy_check.py misses. Le cercle archetype: The Steward."
+description = "Semantic privacy scanner for committed-file diffs. Catches leaks the mechanical scripts/atelier/privacy_check.py misses. Le cercle archetype: The Steward."
 codex_prompt = "Run the Privacy Reviewer role through native Codex agent `privacy-reviewer`; `.claude/agents/privacy-reviewer.md` remains authoritative."
 pattern = "generator-verifier"
 used_by = [

@@ -16,7 +16,7 @@ Read the current session context or user request. What topic are they exploring?
 
 ### Step 2: Check Existing Reading
 Search the user's local vault for what they've already read.
-- `Bash: uv run scripts/semantic.py query "<specific topic>" --top 10` — primary for conceptual topic matches
+- `Bash: uv run scripts/atelier/semantic.py query "<specific topic>" --top 10` — primary for conceptual topic matches
 - Also scan `<paths.papers>/` and `<paths.preprints>/` for papers already in the corpus
 - For Readwise content (cloud-only L1, no local mirror), use `readwise reader-search-documents --query "<topic keywords>"` to find what the user has already saved
 - Don't recommend what they've already read (unless re-reading is warranted)

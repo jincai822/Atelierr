@@ -12,7 +12,7 @@ Route the request before loading continuity context. Then build a bounded
 projection for the selected intent:
 
 ```bash
-uv run scripts/context_bundle.py --intent "<intent>" --format json
+uv run scripts/atelier/context_bundle.py --intent "<intent>" --format json
 ```
 
 The default projection contains only:

@@ -76,7 +76,7 @@ Schema:
 }
 ```
 
-Field key for `ambiguity_candidates[].matched_pattern` deliberately matches the key produced by `scripts/intent_coverage.py intent --json` (the matcher returns `matched_pattern`, never `pattern`); the orchestrator passes candidates straight through without renaming. `ambiguity_candidates`, `ambiguity_candidates_raw`, `clarified_to`, `final_dispatch`, and `notes` are all optional. `initial_match.name/priority/matched_pattern` may be null when the orchestrator didn't have a clean initial match to attribute (rare; usually present even for fallback). `priority` is dropped to null silently when `--initial-priority` fails to parse as int.
+Field key for `ambiguity_candidates[].matched_pattern` deliberately matches the key produced by `scripts/atelier/intent_coverage.py intent --json` (the matcher returns `matched_pattern`, never `pattern`); the orchestrator passes candidates straight through without renaming. `ambiguity_candidates`, `ambiguity_candidates_raw`, `clarified_to`, `final_dispatch`, and `notes` are all optional. `initial_match.name/priority/matched_pattern` may be null when the orchestrator didn't have a clean initial match to attribute (rare; usually present even for fallback). `priority` is dropped to null silently when `--initial-priority` fails to parse as int.
 
 ## Producer side: route plus dual-path logging
 
@@ -104,7 +104,7 @@ For the low-confidence branch, use this best-effort in-band shape after the
 route is clarified:
 
 ```bash
-uv run scripts/intent_coverage.py intent-log \
+uv run scripts/atelier/intent_coverage.py intent-log \
   --input "<raw hi text>" \
   --match-kind low_confidence \
   --runtime <claude-code-or-codex> \
@@ -119,17 +119,17 @@ The shared hook entry is wired with the runtime label appropriate to each edge:
 
 ```
 {"type": "command",
- "command": "uv run scripts/intent_coverage.py intent-hook --runtime claude-code",
+ "command": "uv run scripts/atelier/intent_coverage.py intent-hook --runtime claude-code",
  "timeout": 5}
 
 {"type": "command",
- "command": "uv run scripts/intent_coverage.py intent-hook --runtime codex",
+ "command": "uv run scripts/atelier/intent_coverage.py intent-hook --runtime codex",
  "timeout": 5}
 ```
 
 The first lives in `.claude/settings.json`; the second lives in `.codex/hooks.json`.
 
-Route injection and miss-log writes fail independently. The write is best-effort — `scripts/intent_coverage.py intent-log` always returns exit code 0 (orchestrator Bash calls can ignore the exit code with confidence):
+Route injection and miss-log writes fail independently. The write is best-effort — `scripts/atelier/intent_coverage.py intent-log` always returns exit code 0 (orchestrator Bash calls can ignore the exit code with confidence):
 
 - An empty `--input`, a malformed `--candidates` JSON, or a non-int `--initial-priority` each degrade silently (warning to stderr) without aborting the call. Malformed candidates are preserved verbatim under `ambiguity_candidates_raw` so a later batch-review can still see the orchestrator's intent.
 - The script silently no-ops on OSError so a slow or unmounted `$OV` never blocks a live hi invocation.
@@ -139,7 +139,7 @@ Route injection and miss-log writes fail independently. The write is best-effort
 ## Consumer side — batch review
 
 ```
-uv run scripts/intent_coverage.py intent-misses [--since YYYY-MM-DD] [--match-kind <kind>] [--runtime claude-code|codex] [--top N] [--json]
+uv run scripts/atelier/intent_coverage.py intent-misses [--since YYYY-MM-DD] [--match-kind <kind>] [--runtime claude-code|codex] [--top N] [--json]
 ```
 
 `--since` filters at **file-date** granularity (the log file's `YYYY-MM-DD` stem), not at event-timestamp granularity. A TZ-skewed event near midnight is grouped with its file's date, so `--since 2026-05-15` reads the whole `2026-05-15.jsonl` file even when only late-evening events are wanted.
@@ -148,7 +148,7 @@ Output:
 
 - Counts by `match_kind` (how often we fall back vs disambiguate).
 - Top distinct phrases (lowercased, ≤200 chars) with count, distinct days, and which kinds they hit.
-- Coverage signal: phrases recurring across at least the distinct-days threshold defined in `scripts/intent_coverage.py` as `INTENT_MISS_DISTINCT_DAYS_THRESHOLD` (currently 3) are flagged as candidate triggers — strong enough that user is hitting the gap repeatedly, not just once.
+- Coverage signal: phrases recurring across at least the distinct-days threshold defined in `scripts/atelier/intent_coverage.py` as `INTENT_MISS_DISTINCT_DAYS_THRESHOLD` (currently 3) are flagged as candidate triggers — strong enough that user is hitting the gap repeatedly, not just once.
 - A note line `(N event(s) had empty raw_input — counted in by-kind totals, omitted from the phrase table)` appears when applicable; `kind_counts` and `phrase_stats` deliberately disagree by N in that case so a fire-time logging glitch is visible in the audit, not silently dropped.
 
 Run cadence: opportunistic. No automated cue exists; check during
@@ -175,5 +175,5 @@ The log accumulates indefinitely. There is no rotation / compaction policy yet �
 - `harness/intents.toml` — canonical intent registry; misses feed pattern additions here.
 - `.claude/commands/hi.md` § Contextual routing — heuristic for when to flag as `low_confidence`.
 - This protocol's producer section — exact `intent-log` command shape.
-- `scripts/intent_coverage.py` — `intent-log` and `intent-misses` subcommands; source of truth for the path and the distinct-days threshold. `intent-misses --propose` renders candidate rows for the gitignored `harness/intents.local.toml` overlay (patterns merge into existing intents at load; the overlay cannot invent new intents). `cues.py check_intent_misses` surfaces 5+ misses in 14 days at session start, closing the loop that ran producer-only for three months.
+- `scripts/atelier/intent_coverage.py` — `intent-log` and `intent-misses` subcommands; source of truth for the path and the distinct-days threshold. `intent-misses --propose` renders candidate rows for the gitignored `harness/intents.local.toml` overlay (patterns merge into existing intents at load; the overlay cannot invent new intents). `cues.py check_intent_misses` surfaces 5+ misses in 14 days at session start, closing the loop that ran producer-only for three months.
 - `protocols/shadow-log.md` — sibling JSONL-append + report system. Different write target (canonical to `$OV/` here, redacted mirror skeleton there) but a useful precedent if this log ever grows multi-leg / verdict-aggregation needs.

@@ -36,4 +36,4 @@ through `$hi <user-text>`.
 
 ## Maintenance
 
-If the *concept* of the reading intent changes in `harness/intents.toml` (e.g., separating long-form papers from short articles, adding a new lens), update this skill's frontmatter description so semantic triggering stays aligned. `scripts/harness_lint.py` checks structural invariants (description present, `/hi` mentioned, `intents.reading` row exists) but does not substring-check trigger phrases.
+If the *concept* of the reading intent changes in `harness/intents.toml` (e.g., separating long-form papers from short articles, adding a new lens), update this skill's frontmatter description so semantic triggering stays aligned. `scripts/atelier/harness_lint.py` checks structural invariants (description present, `/hi` mentioned, `intents.reading` row exists) but does not substring-check trigger phrases.

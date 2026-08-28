@@ -5,7 +5,7 @@ description: Autonomous nightly decay sweep with auto-commit; primary macOS laun
 
 Fired by macOS `launchd` at 05:00 local, with hourly lightweight checks for a
 missed or deferred cycle and wake/login catch-up. Contract:
-`protocols/autoevo.md`. Deterministic mechanics: `scripts/autoevo_run.py`.
+`protocols/autoevo.md`. Deterministic mechanics: `scripts/atelier/autoevo_run.py`.
 
 Headless invocation goes through `scripts/routine_runner.sh` (always Codex, so
 the unattended sandbox and approval policy are enforceable). The run
@@ -88,7 +88,7 @@ if [ -n "${ATELIER_ROUTINE_PROFILE:-}" ] && [ -z "${ATELIER_ROUTINE_CYCLE:-}" ];
   exit 1
 fi
 if [ -n "${ATELIER_ROUTINE_CYCLE:-}" ]; then
-  RUN_DATE=$(python3 scripts/routine_claim.py autoevo-nightly \
+  RUN_DATE=$(python3 scripts/atelier/routine_claim.py autoevo-nightly \
     --validate-cycle "$ATELIER_ROUTINE_CYCLE")
 else
   # Current-date fallback is only for an explicit interactive invocation.
@@ -100,7 +100,7 @@ echo "autoevo-nightly run started $RUN_TS"
 ## Step 1: Plan (gates + paths + rotation + quarantine filter)
 
 ```bash
-uv run --quiet python3 scripts/autoevo_run.py plan --run-ts "$RUN_TS" --run-date "$RUN_DATE"
+uv run --quiet python3 scripts/atelier/autoevo_run.py plan --run-ts "$RUN_TS" --run-date "$RUN_DATE"
 ```
 
 One JSON object. Bind for the rest of the run: `paths.cache` → `$PATHS_CACHE`,
@@ -124,7 +124,7 @@ canonical resolution.
 
 ## Step 2: Forgetter sweep + persist reports
 
-Optional accelerator: `uv run scripts/decay_scan.py --redundant --scope <tier>`
+Optional accelerator: `uv run scripts/atelier/decay_scan.py --redundant --scope <tier>`
 precomputes the low-signal and redundant bands; pass its JSON in the dispatch
 prompt so the agent verifies instead of recomputing.
 
@@ -150,7 +150,7 @@ Agent (subagent_type=forgetter) with:
    `envelope_returned`; only a missing envelope is `forgetter_no_envelope`):
 
 ```bash
-uv run --quiet python3 scripts/autoevo_run.py outcome \
+uv run --quiet python3 scripts/atelier/autoevo_run.py outcome \
   --file "$OUTCOMES_FILE" --scope "<dispatch.scope>" --result "<envelope_returned | forgetter_no_envelope>"
 ```
 
@@ -204,7 +204,7 @@ finding:
 ### 4.0 Tombstone check
 
 ```bash
-uv run --quiet python3 scripts/autoevo_run.py tombstone-check \
+uv run --quiet python3 scripts/atelier/autoevo_run.py tombstone-check \
   $(for src in "${SOURCES[@]}"; do printf ' --source %q' "$src"; done) --today "$RUN_DATE"
 ```
 
@@ -215,7 +215,7 @@ queue with the returned `reason` and continue.
 ### 4.1 Snapshot
 
 ```bash
-uv run --quiet python3 scripts/autoevo_run.py snapshot --run-ts "$RUN_TS" \
+uv run --quiet python3 scripts/atelier/autoevo_run.py snapshot --run-ts "$RUN_TS" \
   $(for src in "${SOURCES[@]}"; do printf ' --source %q' "$src"; done)
 ```
 
@@ -245,7 +245,7 @@ Agent (subagent_type=curator) with:
 3. Stage with the sanity check (never `git add -A`):
 
 ```bash
-uv run --quiet python3 scripts/autoevo_run.py stage-merge --target "<target_rel>" \
+uv run --quiet python3 scripts/atelier/autoevo_run.py stage-merge --target "<target_rel>" \
   $(for src in "${SOURCES[@]}"; do printf ' --source %q' "$src"; done)
 ```
 
@@ -255,7 +255,7 @@ uv run --quiet python3 scripts/autoevo_run.py stage-merge --target "<target_rel>
    `cluster_hash`, renders the pinned message shape, and commits `--only`):
 
 ```bash
-MERGE_RESULT=$(uv run --quiet python3 scripts/autoevo_commit.py merge \
+MERGE_RESULT=$(uv run --quiet python3 scripts/atelier/autoevo_commit.py merge \
   --scope "<relative dir under $OV>" --target-slug "<target slug>" \
   --band "redundant-high (3+ peers ≥ 0.85, all > 30d cold, mode=<stub|real>, floor=<0.5|0.6>)" \
   $(for src in "${SOURCES[@]}"; do printf ' --source %q' "$src"; done) \
@@ -275,7 +275,7 @@ COMMIT_SHA=$(printf '%s' "$MERGE_RESULT" | python3 -c 'import json,sys; print(js
 2. Derive and validate the archive target:
 
 ```bash
-uv run --quiet python3 scripts/autoevo_run.py archive-target \
+uv run --quiet python3 scripts/atelier/autoevo_run.py archive-target \
   --source "<source_rel>" --run-date "$RUN_DATE"
 ```
 
@@ -289,7 +289,7 @@ uv run --quiet python3 scripts/autoevo_run.py archive-target \
 
 ```bash
 git -C "$OV" mv -- "<source_rel>" "<target_rel>"
-ARCHIVE_RESULT=$(uv run --quiet python3 scripts/autoevo_commit.py archive \
+ARCHIVE_RESULT=$(uv run --quiet python3 scripts/atelier/autoevo_commit.py archive \
   --slug "<slug>" --days-inactive "<N>" \
   --evidence "words: <N>, links_in: 0, tags: 0, mtime: <YYYY-MM-DD>" \
   --source "<source_rel>" --target "<target_rel>" \
@@ -311,7 +311,7 @@ If any commit fails (hook error, permission, disk full, signing prompt):
    it):
 
 ```bash
-uv run --quiet python3 scripts/autoevo_run.py rollback --run-ts "$RUN_TS" \
+uv run --quiet python3 scripts/atelier/autoevo_run.py rollback --run-ts "$RUN_TS" \
   --paths "<every path this op touched>" \
   $(for src in "${SOURCES[@]}"; do printf ' --source %q' "$src"; done)
 ```
@@ -336,7 +336,7 @@ Collect every queued finding into one JSON list; the helper owns the TOML
 
 ```bash
 PENDING_JSON="$PATHS_CACHE/autoevo-${RUN_TS}-pending.json"   # write the list here first
-uv run --quiet python3 scripts/autoevo_pending.py append --entries "$PENDING_JSON" --today "$RUN_DATE"
+uv run --quiet python3 scripts/atelier/autoevo_pending.py append --entries "$PENDING_JSON" --today "$RUN_DATE"
 ```
 
 The helper appends atomically and dedupes against pending + recently-resolved
@@ -350,7 +350,7 @@ Commit only when `appended` is non-empty (a dedupe-only night leaves the file
 unchanged and the commit would fail empty):
 
 ```bash
-uv run --quiet python3 scripts/autoevo_commit.py queue \
+uv run --quiet python3 scripts/atelier/autoevo_commit.py queue \
   --summary "append <N> pending findings from <RUN_DATE> sweep" \
   --detail "Categories: redundant=<n>, time-stale-A=<n>, time-stale-B=<n>, contradicted=<n>, low-signal=<n>"
 ```
@@ -358,7 +358,7 @@ uv run --quiet python3 scripts/autoevo_commit.py queue \
 ## Step 6: Run /lint and report
 
 ```bash
-uv run scripts/lint.py --json > "$PATHS_CACHE/autoevo-${RUN_TS}-lint.json"
+uv run scripts/atelier/lint.py --json > "$PATHS_CACHE/autoevo-${RUN_TS}-lint.json"
 ```
 
 Append severity counts to audit § Lint. Do not auto-fix. ERROR findings that
@@ -415,12 +415,12 @@ TOML escaping, and section placement):
 
 ```bash
 QUARANTINE_COUNT_FILE="$PATHS_CACHE/autoevo-${RUN_TS}-quarantine-count.txt"
-uv run --quiet python3 scripts/autoevo_quarantine.py update \
+uv run --quiet python3 scripts/atelier/autoevo_quarantine.py update \
   --outcomes "$OUTCOMES_FILE" \
   --state "$OV/_meta/autoevo_quarantine.toml" \
   --count-file "$QUARANTINE_COUNT_FILE" \
   --today "$RUN_DATE"
-uv run --quiet python3 scripts/autoevo_quarantine.py insert-skipped \
+uv run --quiet python3 scripts/atelier/autoevo_quarantine.py insert-skipped \
   --audit "$OV/$AUDIT_REL" \
   --skipped-lines "$QUARANTINE_SKIPPED"
 ```
@@ -444,7 +444,7 @@ fi
 
 # The quarantine TOML is whitelist-ignored; the audit subcommand force-adds
 # exactly that one declared bot-owned state file when present.
-uv run --quiet python3 scripts/autoevo_commit.py audit \
+uv run --quiet python3 scripts/atelier/autoevo_commit.py audit \
   --run-date "$RUN_DATE" --auto "<N>" --pending "<M>" --errors "<K>" --quarantined "<Q>" \
   --paths "${FINAL_COMMIT_PATHS[@]}" \
   $( [ -f "$OV/_meta/autoevo_quarantine.toml" ] && printf -- '--force-add _meta/autoevo_quarantine.toml' )
@@ -457,7 +457,7 @@ file directly). On a normal run that passed the clean-tree gate, an audit
 commit failure is fatal.
 
 After delivery and lock release the runner calls
-`scripts/autoevo_verify.py --cycle <RUN_DATE> --json`; the claim stays
+`scripts/atelier/autoevo_verify.py --cycle <RUN_DATE> --json`; the claim stays
 `completion-uncertain` until it passes, then becomes `completed` with
 `verification = "passed"`.
 
@@ -506,12 +506,12 @@ either way.
 - Does not edit daily notes; does not auto-apply on `<paths.wiki>/`.
 - Does not run synthesis, reflection, or user-facing output beyond the audit log.
 - Does not re-index the semantic store inline; the owner-gated
-  `com.atelier.semantic-index` job runs `scripts/semantic.py index --if-stale`.
+  `com.atelier.semantic-index` job runs `scripts/atelier/semantic.py index --if-stale`.
 
 ## Related
 
 - `protocols/autoevo.md` — the load-bearing contract (trust bands, tombstones, queue).
-- `scripts/autoevo_run.py` — deterministic mechanics (plan, tombstones, snapshots, staging, rollback).
-- `scripts/autoevo_commit.py` / `scripts/autoevo_pending.py` / `scripts/autoevo_quarantine.py` — sole writers.
+- `scripts/atelier/autoevo_run.py` — deterministic mechanics (plan, tombstones, snapshots, staging, rollback).
+- `scripts/atelier/autoevo_commit.py` / `scripts/atelier/autoevo_pending.py` / `scripts/atelier/autoevo_quarantine.py` — sole writers.
 - `.claude/agents/forgetter.md` — decay heuristics; `.claude/agents/curator.md` — op executor.
 - `.claude/commands/autoevo-review.md` — companion morning triage.

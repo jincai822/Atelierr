@@ -15,7 +15,7 @@
 # (no /hi routing) declare `direct_only = true`. These are typically:
 #   - dashboards (read-only, on-demand)
 #   - destructive / audit operations (need explicit user trigger)
-# `scripts/harness_lint.py` checks that every entry here either has an
+# `scripts/atelier/harness_lint.py` checks that every entry here either has an
 # intents.toml row OR declares `direct_only = true`.
 # User-facing rows also require a matching Codex `$command` skill. Bot-only
 # rows declare `user_facing = false`.

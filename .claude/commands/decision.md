@@ -20,7 +20,7 @@ User says something like:
 ## Prerequisites
 
 1. Reuse the current `decision` context projection from `$hi`; for direct
-   invocation, run `uv run scripts/context_bundle.py --intent decision
+   invocation, run `uv run scripts/atelier/context_bundle.py --intent decision
    --format json`.
 2. Read `frameworks/cross-validation.md` for framework selection.
 
@@ -47,7 +47,7 @@ This determines how much analysis is appropriate.
 ### Step 3: Search for Relevant History
 
 Pull prior thinking from the local vault.
-- `Bash: uv run scripts/semantic.py query "<decision topic>" --top 10 --context --format json` — **primary**: has the user thought about adjacent versions of this before? Reframe and retry if thin.
+- `Bash: uv run scripts/atelier/semantic.py query "<decision topic>" --top 10 --context --format json` — **primary**: has the user thought about adjacent versions of this before? Reframe and retry if thin.
 - `Grep(pattern: "<key terms>", path: "$OV/")` — exact-match related notes for structural follow-up. Try both languages.
 - `Grep(pattern: "<goal keyword>", path: "<paths.gtd>/")` AND `Grep(pattern: "<goal keyword>", path: "<paths.wiki>/")` — two separate calls; `Grep`'s `path` takes a single root, not a space-separated list. Checks which active goals (gtd) and which certified directions (wiki) are affected by this decision.
 
@@ -69,7 +69,7 @@ Based on the decision type, select the right pairing from `frameworks/cross-vali
 **Before dispatch — shadow group setup (best-effort):** Run a single Bash call to create the witness file. Parse the UUID from the output line `export ATELIER_SHADOW_GROUP="<uuid>"` and **remember it** for the direct-API leg and for cleanup. Best-effort: if the call fails, proceed without correlation.
 
 ```bash
-python3 scripts/shadow.py group-start --task decision --agent thinker
+python3 scripts/atelier/shadow.py group-start --task decision --agent thinker
 ```
 
 `--agent` derives both expected legs from `harness/agents.toml` voices plus the runtime-aware native identity, and also prints `export ATELIER_DIRECT_MODEL="<direct identity>"` for the direct-leg dispatch.
@@ -92,7 +92,7 @@ python3 scripts/shadow.py group-start --task decision --agent thinker
     cat "$REPO/$PRIMARY"
     printf '\n\n--- CROSS-VALIDATION FRAMEWORK (%s) ---\n' "$CROSS"
     cat "$REPO/$CROSS"
-  } | uv run scripts/chat_completion.py --model "$DIRECT_MODEL" --max-tokens 0 --shadow-group "<SHADOW_UUID>" --task-type decision --prompt -
+  } | uv run scripts/atelier/chat_completion.py --model "$DIRECT_MODEL" --max-tokens 0 --shadow-group "<SHADOW_UUID>" --task-type decision --prompt -
   ```
 
 Replace `<SHADOW_UUID>` with the UUID captured from `group-start` output. If group-start failed or was skipped, omit `--shadow-group` and `--task-type`.
@@ -100,12 +100,12 @@ Replace `<SHADOW_UUID>` with the UUID captured from `group-start` output. If gro
 **After both legs return — log native leg and close the shadow group (best-effort):**
 
 ```bash
-NATIVE_MODEL=$(python3 scripts/shadow.py native-model --agent thinker)
-python3 scripts/shadow.py log \
+NATIVE_MODEL=$(python3 scripts/atelier/shadow.py native-model --agent thinker)
+python3 scripts/atelier/shadow.py log \
   --group "<SHADOW_UUID>" --task decision --model "$NATIVE_MODEL" --leg native \
   --prompt-text "<agent prompt summary>" \
   --response-text "<full agent response text>"
-python3 scripts/shadow.py group-close --group "<SHADOW_UUID>" --mark-closed
+python3 scripts/atelier/shadow.py group-close --group "<SHADOW_UUID>" --mark-closed
 ```
 
 Replace `<agent prompt summary>` with a short summary of the dispatch prompt, and `<full agent response text>` with the project agent's actual response. If group-start was skipped, skip this step too.
@@ -184,7 +184,7 @@ Note: Slugify the topic for the filename — lowercase, replace spaces with hyph
 ## Session Log
 
 After writing the decision file, emit a session log:
-1. `Bash: uv run scripts/session_log.py --type decision --duration <minutes>`
+1. `Bash: uv run scripts/atelier/session_log.py --type decision --duration <minutes>`
 2. `Edit` the created file to populate sections from session data (agents dispatched, searches, questions, frameworks, anomalies). The canonical fill-in guide lives in `protocols/session-log.md` § "Section Guidance". Leave empty sections with headers only. If the write fails, warn and continue.
 
 ## Wrap Up

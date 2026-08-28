@@ -42,10 +42,10 @@ Every flag cites (a) the category, (b) the firing heuristic, (c) concrete eviden
 
 ### 1. Redundant
 
-**Deterministic pre-pass:** `uv run scripts/decay_scan.py --redundant --scope <tier>` computes the retrieval-overlap band (self-matches dropped, working-tier peers only, floor applied). When scan results are supplied in your dispatch, verify a sample instead of recomputing every candidate.
+**Deterministic pre-pass:** `uv run scripts/atelier/decay_scan.py --redundant --scope <tier>` computes the retrieval-overlap band (self-matches dropped, working-tier peers only, floor applied). When scan results are supplied in your dispatch, verify a sample instead of recomputing every candidate.
 
 When scanning manually, per candidate run
-`uv run scripts/semantic.py query "<title, or first ~200 chars if generic>" --top 5 --format json --sources local`
+`uv run scripts/atelier/semantic.py query "<title, or first ~200 chars if generic>" --top 5 --format json --sources local`
 (default scan path is the vault root; no `--path`), then:
 
 1. Drop self-matches by exact `path` (never by title — titles collide; the candidate reliably tops its own retrieval).
@@ -59,7 +59,7 @@ Score semantics: stub mode is lexical token overlap (treat a stub flag as "worth
 
 ### 2. Time-stale
 
-**Heuristic A — content-stale:** past date references ("by end of Q3 2025", "before April") with no later note closing the same goal — probe with `uv run scripts/semantic.py query "<closure phrasing>" --sources local`; no follow-up → flag.
+**Heuristic A — content-stale:** past date references ("by end of Q3 2025", "before April") with no later note closing the same goal — probe with `uv run scripts/atelier/semantic.py query "<closure phrasing>" --sources local`; no follow-up → flag.
 **Heuristic B — era-stale:** an era marker (`#era-<name>` tag or frontmatter) contradicting the current era in `profile/directions.md` `## Era` (read once at sweep start; cache it).
 
 **Evidence:** the firing heuristic, the quoted dated phrase or era mismatch, the gap or contradiction.
@@ -70,7 +70,7 @@ Score semantics: stub mode is lexical token overlap (treat a stub flag as "worth
 The only category that touches L4 — and even here the proposed action is "probe", not "delete".
 
 1. Extract claim text from each `### [C1..N]` heading of wiki entries in scope.
-2. `uv run scripts/semantic.py query "<claim text>" --top 5 --sources local`; read the top L2 peer.
+2. `uv run scripts/atelier/semantic.py query "<claim text>" --top 5 --sources local`; read the top L2 peer.
 3. Contradiction signal: explicit correction language (`not`, `wasn't`, `没有`, `actually`, `wrong`, `now believe`, `事实上`, "changed my mind") within ~3 sentences of the claim's phrasing. A peer merely restating or disagreeing stylistically is not a contradiction.
 4. The peer's `last_modified` must be **newer** than the most recent `valid_at` among the claim's `@anchor`/`@cite` markers (fallback: the wiki file's `last_modified`). An older peer is historical context the entry already accounts for.
 
@@ -79,7 +79,7 @@ The only category that touches L4 — and even here the proposed action is "prob
 
 ### 4. Low-signal
 
-**Deterministic pre-pass:** `uv run scripts/decay_scan.py` computes this band without a model (ALL five conjunctive conditions: words < 150; zero inbound wikilinks; zero `#`-tags; mtime > 90d; resides under `<paths.wip>/`). When scan output is supplied, verify a sample; otherwise apply the same five conditions yourself.
+**Deterministic pre-pass:** `uv run scripts/atelier/decay_scan.py` computes this band without a model (ALL five conjunctive conditions: words < 150; zero inbound wikilinks; zero `#`-tags; mtime > 90d; resides under `<paths.wip>/`). When scan output is supplied, verify a sample; otherwise apply the same five conditions yourself.
 
 The conjunction is the false-positive guard — each condition alone catches deliberate stubs, brand-new notes, or intentional archives. Four-of-five is a working note, not a flag.
 

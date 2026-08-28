@@ -1,7 +1,7 @@
 """Regression tests for bucket-aware tier readers.
 
 Glitch (2026-08-22): `reflections/` was split into `YYYY-MM/` buckets by
-`scripts/fission.py`, but several readers still used non-recursive
+`scripts/atelier/fission.py`, but several readers still used non-recursive
 `tier("reflections").glob(...)`. `cues.py` then raised a hard "never ran
 weekly" cue every session although weekly files existed, and
 `todos.py digest` found no prior reflection. `harness_smoke.py` did not catch
@@ -24,7 +24,7 @@ from datetime import date
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPTS = REPO_ROOT / "scripts"
+SCRIPTS = REPO_ROOT / "scripts" / "atelier"
 
 
 def _make_vault(root: Path, weekly_date: str) -> Path:
@@ -47,7 +47,7 @@ class TierFilesTest(unittest.TestCase):
         # Run in a subprocess: `_paths` caches $OV process-wide and importing
         # it in-process would leak the fixture vault into later test modules.
         snippet = (
-            "import sys; sys.path.insert(0, 'scripts'); import _paths, json; "
+            "import sys; sys.path.insert(0, 'scripts/atelier'); import _paths, json; "
             "print(json.dumps({"
             "'weekly': [p.name for p in _paths.tier_files('reflections', '*-weekly.md')], "
             "'last': _paths.tier_files('reflections', '*.md')[-1].name, "
@@ -83,7 +83,7 @@ class StalenessBucketedScanTest(unittest.TestCase):
             for rel in ("wiki", "daily-notes", "wip", "gtd", "preprints", "agent-findings"):
                 (vault / rel).mkdir(parents=True, exist_ok=True)
             proc = subprocess.run(
-                [sys.executable, "scripts/staleness.py", "--json"],
+                [sys.executable, "scripts/atelier/staleness.py", "--json"],
                 cwd=REPO_ROOT,
                 env={**os.environ, "OV": str(vault)},
                 capture_output=True,
@@ -112,7 +112,7 @@ class BucketedReadersTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="atelier-cues-") as tmp:
             today = date.today().isoformat()
             vault = _make_vault(Path(tmp), today)
-            proc = self._run(vault, "scripts/cues.py", "--json")
+            proc = self._run(vault, "scripts/atelier/cues.py", "--json")
             self.assertEqual(proc.returncode, 0, proc.stderr)
             payload = json.loads(proc.stdout or "{}")
             cues = payload.get("cues", payload) if isinstance(payload, dict) else payload
@@ -122,7 +122,7 @@ class BucketedReadersTest(unittest.TestCase):
     def test_todos_digest_finds_bucketed_reflection(self) -> None:
         with tempfile.TemporaryDirectory(prefix="atelier-todos-") as tmp:
             vault = _make_vault(Path(tmp), "2099-01-05")
-            proc = self._run(vault, "scripts/todos.py", "digest")
+            proc = self._run(vault, "scripts/atelier/todos.py", "digest")
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertNotIn("No prior reflection", proc.stdout)
             self.assertIn("do the thing", proc.stdout)

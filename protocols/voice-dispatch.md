@@ -8,7 +8,7 @@ Canonical for per-role voice legs and the multi-leg call-site list.
 Every role declares a `voices` keyed inline table in `harness/agents.toml` mapping leg name to model identity. Three leg types:
 
 - **`native`** - project-agent leg in the selected interactive runtime. Claude Code dispatches the role's `.claude/agents/<role>.md`; Codex dispatches `.codex/agents/<role>.toml`. Claude uses role frontmatter for its model. Codex inherits the selected session model and maps the native voice identity's `reasoning_tier` from `harness/models.toml` to `model_reasoning_effort`.
-- **`direct`** - direct-api leg dispatched via `uv run scripts/chat_completion.py --model <identity> --max-tokens 0 --prompt -` with the prompt on stdin.
+- **`direct`** - direct-api leg dispatched via `uv run scripts/atelier/chat_completion.py --model <identity> --max-tokens 0 --prompt -` with the prompt on stdin.
 - **`codex`** - explicit external Codex CLI reviewer leg dispatched via `codex exec`, independently of the selected interactive runtime. Today it is used only by `external-reviewer` through `scripts/review.sh`.
 
 Schema split:

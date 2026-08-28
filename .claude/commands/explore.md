@@ -12,7 +12,7 @@ Free-form exploration session for when the user doesn't have a specific question
 ## Prerequisites
 
 1. Reuse the current `explore` context projection from `$hi`; for direct
-   invocation, run `uv run scripts/context_bundle.py --intent explore
+   invocation, run `uv run scripts/atelier/context_bundle.py --intent explore
    --format json`.
 2. Treat its bounded reflection excerpts as the continuity seed. Read a
    complete reflection only if a selected thread requires it.
@@ -23,7 +23,7 @@ Free-form exploration session for when the user doesn't have a specific question
 
 Semantic search leads; lexical grep fails by design for exploration. Run 3-4 diverse searches over `$OV/`:
 
-1. **Semantic search on a recent theme:** `Bash: uv run scripts/semantic.py query "<recent topic>" --top 10 --context --format json` (conceptual neighbors). If results are thin, reframe and retry.
+1. **Semantic search on a recent theme:** `Bash: uv run scripts/atelier/semantic.py query "<recent topic>" --top 10 --context --format json` (conceptual neighbors). If results are thin, reframe and retry.
 2. **Tag exploration:** `Bash: grep -rohE '#[A-Za-z][A-Za-z0-9_-]*' "$OV"/ | sort | uniq -c | sort -rn | head -40` → pick a tag the user hasn't engaged with recently → `Grep(pattern: "#<tag>", path: "$OV/")`.
 3. **Time-shifted search:** `Bash: find "$OV"/daily-notes "$OV"/reflections -type f -name "*.md" -newermt "<12 months ago>" ! -newermt "<6 months ago>"` → `Grep` for the current interest inside that set. What were they thinking about this 6-12 months ago?
 4. **Cross-domain search:** `Grep` for a term from one life area in another. E.g., if career-focused recently, grep for "health" or "learning" inside `$OV/`.
@@ -55,7 +55,7 @@ Don't summarize — provoke. Present 3-4 "sparks":
 ### Step 4: Follow the Thread
 
 Let the user pick which spark interests them. Then:
-- Pull more related notes via `uv run scripts/semantic.py query` (or `Grep` once the concept has a name)
+- Pull more related notes via `uv run scripts/atelier/semantic.py query` (or `Grep` once the concept has a name)
 - Apply a relevant framework if appropriate
 - Ask deepening questions (use Challenger's question taxonomy)
 
@@ -91,7 +91,7 @@ Let the user pick which spark interests them. Then:
 ## Session Log
 
 After writing the exploration file, emit a session log:
-1. `Bash: uv run scripts/session_log.py --type exploration --duration <minutes>`
+1. `Bash: uv run scripts/atelier/session_log.py --type exploration --duration <minutes>`
 2. `Edit` the created file to populate sections from session data (agents dispatched, searches, questions, frameworks, anomalies). The canonical fill-in guide lives in `protocols/session-log.md` § "Section Guidance". Leave empty sections with headers only. If the write fails, warn and continue.
 
 ## Wrap Up

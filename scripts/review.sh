@@ -70,14 +70,14 @@ fi
 # writes to $OV/cache/review-$TS-codex.md and is ingested at report time.
 # See protocols/shadow-log.md for the full mechanism. Best-effort: any
 # failure here (script missing, $OV not configured) is silently skipped.
-if [ -f "$REPO_ROOT/scripts/shadow.py" ]; then
+if [ -f "$REPO_ROOT/scripts/atelier/shadow.py" ]; then
   EXPECTED='[{"model":"'"$DIRECT_MODEL"'","leg":"direct"},{"model":"'"$CODEX_MODEL"'","leg":"codex"}]'
-  eval "$(python3 "$REPO_ROOT/scripts/shadow.py" group-start \
+  eval "$(python3 "$REPO_ROOT/scripts/atelier/shadow.py" group-start \
     --task external-review --expected "$EXPECTED" 2>/dev/null || true)"
   # ${VAR:-} guard: if group-start failed above, the variable is unset and a
   # bare dereference would abort the trap under `set -u` (group-close already
   # no-ops on an empty group).
-  trap 'python3 "$REPO_ROOT/scripts/shadow.py" group-close --group "${ATELIER_SHADOW_GROUP:-}" 2>/dev/null || true; unset ATELIER_SHADOW_GROUP ATELIER_TASK_TYPE 2>/dev/null || true' EXIT
+  trap 'python3 "$REPO_ROOT/scripts/atelier/shadow.py" group-close --group "${ATELIER_SHADOW_GROUP:-}" 2>/dev/null || true; unset ATELIER_SHADOW_GROUP ATELIER_TASK_TYPE 2>/dev/null || true' EXIT
 fi
 
 # For the codex leg we also need the codex-side model id and reasoning effort
@@ -251,7 +251,7 @@ run_direct_api() {
   # silently truncates real findings; that is the worst trade in this codebase.
   local body
   body="$PROMPT"$'\n\n'"$(build_diff)"
-  printf '%s' "$body" | python3 "$REPO_ROOT/scripts/chat_completion.py" \
+  printf '%s' "$body" | python3 "$REPO_ROOT/scripts/atelier/chat_completion.py" \
       --model "$DIRECT_MODEL" --max-tokens 0 --prompt - > "$out" 2> "$err"
   local rc=$?
   if [ $rc -eq 1 ] && grep -q "empty completion" "$err" 2>/dev/null; then
@@ -262,7 +262,7 @@ run_direct_api() {
     local fallback="${DIRECT_MODEL%_max}"
     if [ "$fallback" != "$DIRECT_MODEL" ] && grep -qF "[models.$fallback]" "$REPO_ROOT/harness/models.toml"; then
       echo "[direct-api] empty completion from $DIRECT_MODEL (reasoning budget exhausted); retrying once with $fallback" >&2
-      printf '%s' "$body" | python3 "$REPO_ROOT/scripts/chat_completion.py" \
+      printf '%s' "$body" | python3 "$REPO_ROOT/scripts/atelier/chat_completion.py" \
           --model "$fallback" --max-tokens 0 --prompt - > "$out" 2>> "$err"
       rc=$?
       if [ $rc -eq 1 ] && grep -q "empty completion" "$err" 2>/dev/null; then

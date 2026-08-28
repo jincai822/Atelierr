@@ -71,7 +71,7 @@ Present as a table. Flag data gaps (missing categorization, missing company).
 
 ### Step 2: Support Type Mapping
 
-Dispatch **Researcher** to scan daily notes for DL0-DL1 people mentions. The Researcher uses `Bash: uv run scripts/semantic.py query "<person name> interaction" --after "<90 days ago, YYYY-MM-DD>" --top 10` as primary search, then `Grep` for exact name matches as structural follow-up.
+Dispatch **Researcher** to scan daily notes for DL0-DL1 people mentions. The Researcher uses `Bash: uv run scripts/atelier/semantic.py query "<person name> interaction" --after "<90 days ago, YYYY-MM-DD>" --top 10` as primary search, then `Grep` for exact name matches as structural follow-up.
 
 For each DL0-DL1 person, assess which support types they provide. Sources for inference:
 1. **Categorization tags** in the people file (#mentor: Informational + Appraisal, #partner: Emotional + Instrumental, #colleague: Informational, etc.)
@@ -181,7 +181,7 @@ Fix any issues they surface before writing the output file.
 ## Session Log
 
 After writing the PRM audit file, emit a session log:
-1. `Bash: uv run scripts/session_log.py --type prm --duration <minutes>`
+1. `Bash: uv run scripts/atelier/session_log.py --type prm --duration <minutes>`
 2. `Edit` the created file to populate sections from session data (agents dispatched, searches, questions, frameworks, anomalies). The canonical fill-in guide lives in `protocols/session-log.md` § "Section Guidance". Leave empty sections with headers only. If the write fails, warn and continue.
 
 ## Wrap Up

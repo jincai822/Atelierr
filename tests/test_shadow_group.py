@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
+sys.path.insert(0, str(REPO_ROOT / "scripts" / "atelier"))
 
 import shadow  # noqa: E402
 
@@ -29,13 +29,13 @@ class ExpectedForAgentTest(unittest.TestCase):
 
     def test_cli_requires_exactly_one_mode(self) -> None:
         both = subprocess.run(
-            [sys.executable, "scripts/shadow.py", "group-start",
+            [sys.executable, "scripts/atelier/shadow.py", "group-start",
              "--task", "t", "--agent", "thinker", "--expected", "[]"],
             cwd=REPO_ROOT, capture_output=True, text=True, timeout=60,
         )
         self.assertEqual(both.returncode, 2)
         neither = subprocess.run(
-            [sys.executable, "scripts/shadow.py", "group-start", "--task", "t"],
+            [sys.executable, "scripts/atelier/shadow.py", "group-start", "--task", "t"],
             cwd=REPO_ROOT, capture_output=True, text=True, timeout=60,
         )
         self.assertEqual(neither.returncode, 2)

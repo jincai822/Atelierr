@@ -208,7 +208,7 @@ Required fields:
 The envelope markers are exactly `---forgetter-result---` and
 `---end-result---`. No other opening marker is valid.
 
-**No-envelope case (out-of-band).** If Forgetter is interrupted by the runtime and never emits the closing `---end-result---` marker, no envelope reaches the orchestrator. The orchestrator detects this absence and routes the scope to audit § Errors as `forgetter_no_envelope` with `scope`, `tool_calls_observed`, `duration_s`. The next-/hi cue (`scripts/cues.py check_autoevo_ran`) surfaces this via the Errors-section read.
+**No-envelope case (out-of-band).** If Forgetter is interrupted by the runtime and never emits the closing `---end-result---` marker, no envelope reaches the orchestrator. The orchestrator detects this absence and routes the scope to audit § Errors as `forgetter_no_envelope` with `scope`, `tool_calls_observed`, `duration_s`. The next-/hi cue (`scripts/atelier/cues.py check_autoevo_ran`) surfaces this via the Errors-section read.
 
 **Per-finding `confidence` field.** Every row in `findings_inline` carries `confidence: high | medium | low` derived per category by the rules in `.claude/agents/forgetter.md` § Confidence Field. The orchestrator (specifically `/autoevo-nightly`) reads this field to decide whether a finding is auto-apply-eligible or routes to the pending queue. Findings without `confidence` (older Forgetter runs, partial reports) default to `medium` and never auto-apply.
 

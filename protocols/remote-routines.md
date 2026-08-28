@@ -9,7 +9,7 @@ Three layers, each owning a different concern.
 
 | Layer | What lives here | Provides | Boundary |
 |---|---|---|---|
-| **atelier** (public, portable git repo) | `scripts/cues.py`, `.claude/commands/`, `.claude/agents/`, `protocols/` | mechanism (generic, vault-agnostic) | knows the **shape** of routine outputs (config schema + ack schema), never the **content** |
+| **atelier** (public, portable git repo) | `scripts/atelier/cues.py`, `.claude/commands/`, `.claude/agents/`, `protocols/` | mechanism (generic, vault-agnostic) | knows the **shape** of routine outputs (config schema + ack schema), never the **content** |
 | **$OV/_meta/** (user-private vault metadata) | `routine_watch.toml`, `routine_acks.json` | policy + state (which routines, what paths, what's been read) | private; never committed to atelier |
 | **claude.ai cloud** (Anthropic-managed) | routine definitions (cron expression + prompt + MCP connections) | execution (the cron itself runs here, writes back to $OV via Drive MCP) | lifecycle managed via `/schedule` skill or routines UI |
 
@@ -33,7 +33,7 @@ drive_write_enforced = true          # see Policy below — set true when Drive 
 
 Exactly one of `drive_write_enforced` or `needs_drive_write_update` MUST be `true` for the policy cue to stay silent. The two flags are mutually exclusive in intent: the first declares compliance, the second declares migration debt being tracked.
 
-`scripts/cues.py check_routine_outputs` reads this generically. It does NOT know what any specific routine does; it only walks the declared `output_dir` looking for files matching `file_pattern` that are newer (by filename sort) than the corresponding ack in `routine_acks.json`.
+`scripts/atelier/cues.py check_routine_outputs` reads this generically. It does NOT know what any specific routine does; it only walks the declared `output_dir` looking for files matching `file_pattern` that are newer (by filename sort) than the corresponding ack in `routine_acks.json`.
 
 ## Contract: routine_acks.json
 
@@ -48,7 +48,7 @@ User-private state at `$OV/_meta/routine_acks.json`:
 
 After the user reads a routine output, they update the corresponding entry. The cue stops firing once `latest_acked_filename >= latest_file_in_dir.name`.
 
-**First run.** The file need not exist initially. `scripts/cues.py` defaults a missing `routine_acks.json` to `{}` and treats every routine as unacked (the cue will list every existing output until the user reads them). When the user acks their first routine, create `$OV/_meta/routine_acks.json` with `{"<output_dir>": "<filename>"}`. Subsequent acks add or update entries.
+**First run.** The file need not exist initially. `scripts/atelier/cues.py` defaults a missing `routine_acks.json` to `{}` and treats every routine as unacked (the cue will list every existing output until the user reads them). When the user acks their first routine, create `$OV/_meta/routine_acks.json` with `{"<output_dir>": "<filename>"}`. Subsequent acks add or update entries.
 
 ## Policy: all routines persist to $OV
 
@@ -63,7 +63,7 @@ Routine prompts implement this by calling Google Drive MCP `create_file` with a 
 
 **Conflict-resolution rule (multi-channel routines).** When a routine uses more than one output channel (any combination of Drive, email, Calendar, or future MCP backends), the Drive file is the canonical output. Every secondary channel MUST point at the Drive file (`see $OV/<path>/<file>.md`) and cap its own content at 5 lines of summary. The user reads one source of truth, not parallel summaries.
 
-**Enforcement.** Three cues in `scripts/cues.py`:
+**Enforcement.** Three cues in `scripts/atelier/cues.py`:
 
 1. `check_routine_policy`: fires a soft cue listing routines that declare neither `drive_write_enforced = true` nor `needs_drive_write_update = true`. Surfaces non-compliance at session start.
 2. `check_routine_staleness`: fires a hard cue when a routine's latest output file is older than its expected cadence + tolerance. For local routines it also catches a completed claim newer than the latest declared artifact. Newly transferred owners receive cadence-aware grace for routines that have not yet become due. Cadence is estimated from the `cron` field. Tolerance = `max(2, cadence_days)`.
@@ -111,8 +111,8 @@ enforceable.
 | Wrapper | `scripts/routine_runner.sh` handles model-driven routines; reviewed deterministic jobs use a purpose-specific wrapper such as `scripts/semantic_index_runner.sh` |
 | Runtime | Headless Codex for model-driven local routines; deterministic derived-cache jobs run directly; interactive selection remains in `harness/runtimes.toml` plus the gitignored local preference |
 | Capability profile | `harness/routine_profiles.toml` plus each private routine's `local_profile` / `cloud_profile` mapping |
-| Machine ownership | Gitignored per-machine identity plus shared `$OV/_meta/routine_owner.toml`; enforced by `scripts/routine_owner.py` |
-| Optional cross-machine lock | DynamoDB conditional put (`attribute_not_exists(pk)`) via `scripts/routine_lock.py` |
+| Machine ownership | Gitignored per-machine identity plus shared `$OV/_meta/routine_owner.toml`; enforced by `scripts/atelier/routine_owner.py` |
+| Optional cross-machine lock | DynamoDB conditional put (`attribute_not_exists(pk)`) via `scripts/atelier/routine_lock.py` |
 | Local audit trail | `$OV/_meta/routine_runs/<routine>/<cycle_id>.toml` claim files |
 | Missed-run detection | `check_local_routine_missed` computes the latest due cron occurrence after the current owner transfer |
 
@@ -170,7 +170,7 @@ honestly promise shell-network isolation.
 Audit the declarations and this machine's readiness before enabling jobs:
 
 ```bash
-python3 scripts/routine_audit.py audit --check-system --json
+python3 scripts/atelier/routine_audit.py audit --check-system --json
 ```
 
 For a background runtime check that must not execute the real routine, run
@@ -205,7 +205,7 @@ Prepare private prompts and a manifest for ChatGPT Scheduled without enabling
 a second scheduler:
 
 ```bash
-python3 scripts/routine_cloud_bundle.py \
+python3 scripts/atelier/routine_cloud_bundle.py \
   --output "$OV/cache/routine-cloud-bundles/<bundle-name>" --json
 ```
 
@@ -240,14 +240,14 @@ backend = "owner"    # "owner" (recommended) | "dynamodb" | "none"
 Claim the current machine:
 
 ```bash
-uv run scripts/routine_owner.py claim
-uv run scripts/routine_owner.py status
+uv run scripts/atelier/routine_owner.py claim
+uv run scripts/atelier/routine_owner.py status
 ```
 
 Transfer later from the destination machine:
 
 ```bash
-uv run scripts/routine_owner.py claim --force --source-stopped
+uv run scripts/atelier/routine_owner.py claim --force --source-stopped
 ```
 
 Before transferring, unload the old machine's routine plists and let any active
@@ -280,7 +280,7 @@ Table `atelier-routine-locks`, provisioned 1 WCU / 1 RCU (always-free tier):
 | `lease_expires_at` | Number | Diagnostic lease horizon; does not permit automatic takeover |
 | `ttl` | Number | Added only after completion; garbage-collects the completed marker after seven days |
 
-Setup: `AWS_PROFILE=atelier-lock uv run scripts/routine_lock.py setup-table`
+Setup: `AWS_PROFILE=atelier-lock uv run scripts/atelier/routine_lock.py setup-table`
 
 ### Claim files
 
@@ -308,7 +308,7 @@ These are gitignored; they sync across machines via Drive's filesystem sync. The
 `owner_generation` is an integer. `0` means owner fencing is not active for
 the selected coordination backend; a positive value is the synchronized owner
 generation checked before execution.
-`scripts/routine_claim.py` exposes `validate_claim()` as the shared field
+`scripts/atelier/routine_claim.py` exposes `validate_claim()` as the shared field
 validator for claim writers, schedulers, cycle selection, and system-audit
 evidence. Its `--validate-cycle` path is the calendar-date gate used before a
 selected scheduled cycle enters preflight or the model environment.
@@ -374,7 +374,7 @@ the routine's external effects. If those effects completed, preserve the cycle
 as completed:
 
 ```bash
-uv run scripts/routine_lock.py recover <routine> --cycle <id> \
+uv run scripts/atelier/routine_lock.py recover <routine> --cycle <id> \
   --outcome completed --confirm-effects-reviewed
 ```
 
@@ -382,7 +382,7 @@ Only when review confirms that repeating the routine is safe, approve one
 same-cycle retry:
 
 ```bash
-uv run scripts/routine_lock.py recover <routine> --cycle <id> \
+uv run scripts/atelier/routine_lock.py recover <routine> --cycle <id> \
   --outcome safe-to-retry --confirm-effects-reviewed
 ```
 
@@ -410,7 +410,7 @@ or connector reauthentication.
 ## How the cues fire
 
 ```
-SessionStart hook → uv run scripts/cues.py --hook
+SessionStart hook → uv run scripts/atelier/cues.py --hook
                        → check_routine_outputs:
                            reads $OV/_meta/routine_watch.toml
                            for each routine entry:
@@ -508,7 +508,7 @@ The output directory itself is left in place (rmdir manually if empty and unwant
 
 | Symptom | Likely cause |
 |---|---|
-| Cue never fires | `$OV/_meta/routine_watch.toml` missing or unparseable. Run `uv run scripts/cues.py --verbose` and look at the `routine_outputs` debug line. |
+| Cue never fires | `$OV/_meta/routine_watch.toml` missing or unparseable. Run `uv run scripts/atelier/cues.py --verbose` and look at the `routine_outputs` debug line. |
 | Cue fires for already-read files | `routine_acks.json` not updated. Update `{<output_dir>: <latest filename>}`. |
 | Cue fires for routine that doesn't exist anymore | Remove the `[[routine]]` block from `routine_watch.toml`. |
 | Routine fires but no file appears in $OV | Check `execution` and `scheduler` in the private watch row. For local runs, inspect the canonical claim plus machine-specific failure diagnostics and launchd logs. For cloud runs, inspect the hosting scheduler's session log and connector state. |

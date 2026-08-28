@@ -38,7 +38,7 @@ class DineRankTest(unittest.TestCase):
                 encoding="utf-8",
             )
             proc = subprocess.run(
-                [sys.executable, "scripts/dine_rank.py", "--tracker", str(tracker), "--today", "2099-06-01"],
+                [sys.executable, "scripts/atelier/dine_rank.py", "--tracker", str(tracker), "--today", "2099-06-01"],
                 cwd=REPO_ROOT, env={**os.environ, "OV": str(vault)},
                 capture_output=True, text=True, timeout=60,
             )

@@ -1,6 +1,6 @@
 # Wiki Schema
 
-The structural format for a note that lives under `<paths.wiki>/`. Location is the certification: a note is a wiki entry by virtue of being in `<paths.wiki>/`, not by carrying any tag. Wiki entries are parseable by `scripts/trust.py` and have claim-level granularity in the trust graph. Notes outside `<paths.wiki>/` are alloy by default (see `epistemic-hygiene.md`).
+The structural format for a note that lives under `<paths.wiki>/`. Location is the certification: a note is a wiki entry by virtue of being in `<paths.wiki>/`, not by carrying any tag. Wiki entries are parseable by `scripts/atelier/trust.py` and have claim-level granularity in the trust graph. Notes outside `<paths.wiki>/` are alloy by default (see `epistemic-hygiene.md`).
 
 Design rationale for location-based certification and claim-level trust lives in the architecture review ledger under `$OV/research/`, not here; this file carries only the operative schema. The `#solo-flight` tag lives orthogonally to the schema and marks unstructured pure-human capture, which is location-independent (see `epistemic-hygiene.md`).
 
@@ -14,7 +14,7 @@ Wiki entries are structured around claims, not paragraphs: each claim has its ow
 
 A wiki entry has three required sections and lives in `<paths.wiki>/`. The full layer model is documented in `protocols/local-first-architecture.md`.
 
-A wiki entry MUST begin with an `# <Title>` H1 line matching the filename. `scripts/trust.py` derives the note title from the first `# ` heading and reports `missing H1 title` (a structural-integrity failure that blocks the trust floor) when it is absent. This is the one documented exception to the global no-H1 writing rule in `CLAUDE.md`: that rule governs non-wiki markdown (daily notes, research, reflections), but wiki entries require the H1 so the trust engine can identify and cross-cite them. After the H1, the body may carry an optional one-line `>` blockquote primer, then opens with `## Summary`. (The skeleton example below elides the H1 line for brevity; in a real entry it is required and is line 1.)
+A wiki entry MUST begin with an `# <Title>` H1 line matching the filename. `scripts/atelier/trust.py` derives the note title from the first `# ` heading and reports `missing H1 title` (a structural-integrity failure that blocks the trust floor) when it is absent. This is the one documented exception to the global no-H1 writing rule in `CLAUDE.md`: that rule governs non-wiki markdown (daily notes, research, reflections), but wiki entries require the H1 so the trust engine can identify and cross-cite them. After the H1, the body may carry an optional one-line `>` blockquote primer, then opens with `## Summary`. (The skeleton example below elides the H1 line for brevity; in a real entry it is required and is line 1.)
 
 ```markdown
 ## Summary
@@ -49,7 +49,7 @@ Body. ^c2
 - 2026-04-06: Initial draft. Claims [C1], [C2] anchored from scout brief sources.
 ```
 
-**Revision log ordering: latest entry first.** New rows go at the top of the list, not the bottom. The most recent change is almost always the one the reader needs; paging to the bottom of a long log to find it wastes attention. This is a human convention, not a parser-enforced rule — `scripts/trust.py` ignores the Revision Log entirely.
+**Revision log ordering: latest entry first.** New rows go at the top of the list, not the bottom. The most recent change is almost always the one the reader needs; paging to the bottom of a long log to find it wastes attention. This is a human convention, not a parser-enforced rule — `scripts/atelier/trust.py` ignores the Revision Log entirely.
 
 The `## Summary`, `## Claims`, and `## Revision Log` headings are required, below the `# <Title>` H1 mandated above. Topic tags (regular Obsidian-style hashtags) are allowed but not required and play no role in the trust engine.
 
@@ -81,7 +81,7 @@ The `^c1` marker is a **sibling of the claim text**, not a sibling of the fenced
 
 **Citing a claim from another wiki entry's `@cite`.** Use the same `#^cn` block-ID form: `@cite: [[Note Title#^c1]] | valid_at: ...`. The trust parser extracts the note title and claim number from this syntax, and a wikilink-aware viewer renders it as a clickable link that navigates to the claim. This is the unified notation: one syntax works for both the trust graph and viewer navigation.
 
-**Parser impact: none.** `scripts/trust.py` walks claim headings structurally and ignores trailing `^cn` tokens in body text. The structural-integrity check treats a claim body containing `^c1` at the end exactly the same as one without. The schema contract is unchanged — adding `^cn` markers is purely additive for human navigation.
+**Parser impact: none.** `scripts/atelier/trust.py` walks claim headings structurally and ignores trailing `^cn` tokens in body text. The structural-integrity check treats a claim body containing `^c1` at the end exactly the same as one without. The schema contract is unchanged — adding `^cn` markers is purely additive for human navigation.
 
 **When `^cn` is recommended.** Any wiki entry that is (or is expected to be) cited at claim granularity from alloy notes should carry `^cn` markers on every claim. In practice: add them by default when authoring a new wiki entry. The cost is one line per claim; the benefit is that future backlinks work without retrofitting. **Absence is a `/lint` WARN, not an ERROR** — a wiki entry without `^cn` markers is still valid, still parses, still scores. The lint warning exists to nudge authors toward the convention so cross-note navigation keeps working, not to reject entries at ingestion time. Pre-existing entries without markers may be retrofitted opportunistically and are not schema violations.
 
@@ -96,7 +96,7 @@ A block ID outside the `^cn` family in a wiki entry is a schema violation that `
 
 ## The Marker Vocabulary
 
-`@anchor` and `@pass` markers live inside fenced code blocks with the language label `anchors`, one marker per line, pipe-separated key-value pairs. The fenced format for these two marker types is non-negotiable because they contain URLs and structured data where code formatting is appropriate, and `scripts/trust.py` parses them by fence label.
+`@anchor` and `@pass` markers live inside fenced code blocks with the language label `anchors`, one marker per line, pipe-separated key-value pairs. The fenced format for these two marker types is non-negotiable because they contain URLs and structured data where code formatting is appropriate, and `scripts/atelier/trust.py` parses them by fence label.
 
 `@cite` markers live **outside** the fenced block, as regular Markdown lines immediately after the closing ` ``` `. This lets wikilink-aware viewers render the `[[wikilink]]` targets as live backlinks in the graph view and backlinks panel. The parser accepts `@cite` lines both inside and outside fences for backward compatibility, but new entries must place `@cite` outside the fence.
 
@@ -159,7 +159,7 @@ An internal pointer to another wiki entry. This is an **edge** in the trust grap
 @cite: [[Note Title]] | valid_at: <YYYY-MM-DD>
 ```
 
-The `#^cn` suffix points at a specific claim via its block ID. A wikilink-aware viewer renders this as a single clickable link that navigates directly to the claim. `scripts/trust.py` parses the note title and claim number from the same syntax. Without the suffix, the citation points at the note as a whole and uses the note-level aggregate score as the upstream signal.
+The `#^cn` suffix points at a specific claim via its block ID. A wikilink-aware viewer renders this as a single clickable link that navigates directly to the claim. `scripts/atelier/trust.py` parses the note title and claim number from the same syntax. Without the suffix, the citation points at the note as a whole and uses the note-level aggregate score as the upstream signal.
 
 `@cite` markers must resolve. A `@cite` to a note that does not exist in `<paths.wiki>/`, or a `@cite` with a `#^cn` suffix to a non-existent claim, is a **dangling internal cite** — caught by structural-integrity check, fails the floor.
 
@@ -194,7 +194,7 @@ Later, after the paper is retracted:
 
 The `Revision Log` section at the bottom of the note records the change in human-readable form, with a `@cite` to the note that explains the invalidation if there is one.
 
-`scripts/trust.py` filters markers by `invalid_at` when computing current trust: a marker with `invalid_at <= today` is excluded from the graph. The original record is preserved on disk forever. This is the Graphiti-style append-only-but-mutable contract.
+`scripts/atelier/trust.py` filters markers by `invalid_at` when computing current trust: a marker with `invalid_at <= today` is excluded from the graph. The original record is preserved on disk forever. This is the Graphiti-style append-only-but-mutable contract.
 
 The trust engine treats all valid markers as equal weight regardless of age. Temporal decay (β = 0.9 per month from Temporal PageRank, Rozenshtein & Gionis 2016) is tracked under § Open v2 Items.
 
@@ -243,9 +243,9 @@ The note-level score is a derived view shown in the trust report and used for ra
 
 ## Structural Integrity Check
 
-A note **passes structural integrity** if all of the following hold. `scripts/trust.py` enforces a minimum subset of these; the full check is the responsibility of `/lint`.
+A note **passes structural integrity** if all of the following hold. `scripts/atelier/trust.py` enforces a minimum subset of these; the full check is the responsibility of `/lint`.
 
-**Required (enforced by `scripts/trust.py`):**
+**Required (enforced by `scripts/atelier/trust.py`):**
 
 1. The note's file path is under `<paths.wiki>/`.
 2. The note has a `## Claims` section.
@@ -291,9 +291,9 @@ Translation rules:
 - Shadow filename matches the English source filename exactly; the shadow keeps the English `# <Title>` H1 (see `/promote` Phase 4)
 - Prepend a localized backreference, e.g. for Chinese: `> 本文为 [[English Title]] 的中文版本。核心技术术语保留英文原文。`
 
-Localized shadows are not part of the trust graph: `scripts/trust.py` only scans `<paths.wiki>/`. The shadow copy is for reading convenience. It does not need its own anchors or reviewer passes.
+Localized shadows are not part of the trust graph: `scripts/atelier/trust.py` only scans `<paths.wiki>/`. The shadow copy is for reading convenience. It does not need its own anchors or reviewer passes.
 
-**Sync requirement:** When the English source is updated, the localized shadow must be regenerated. `scripts/lint.py` enforces this with two checks, run for every shadow directory in `[paths.wiki_localized]`:
+**Sync requirement:** When the English source is updated, the localized shadow must be regenerated. `scripts/atelier/lint.py` enforces this with two checks, run for every shadow directory in `[paths.wiki_localized]`:
 - `shadow-missing` (WARN): English entry exists but no localized shadow
 - `shadow-stale` (WARN): localized shadow is older than the English source
 
@@ -303,5 +303,5 @@ Edit the English source first, then regenerate the localized shadow in the same 
 
 - Tag taxonomy and the validation-depth principle: `epistemic-hygiene.md`
 - Where wiki entries live: `local-first-architecture.md`
-- Trust engine implementation: `scripts/trust.py`
+- Trust engine implementation: `scripts/atelier/trust.py`
 - Lint integration: `.claude/commands/lint.md`

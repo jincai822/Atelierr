@@ -119,7 +119,7 @@ Use `<paths.health>/README.md` and `<paths.housing>/README.md` as the templates.
 ## Privacy boundaries
 
 - `$OV/` is gitignored. Personal data (landlord names, MRNs, addresses, lease amounts, IDs) lives in `$OV` safely. The committed repo never sees it.
-- Protocols / committed files (this file included) describe the **structure** generically. No personal names, addresses, employer names, or preference policy. `scripts/privacy_check.py` checks discovered private titles, gitignored exact terms, and staged blobs during `/lint` and `/system-review`; semantic review remains responsible for contextual disclosure.
+- Protocols / committed files (this file included) describe the **structure** generically. No personal names, addresses, employer names, or preference policy. `scripts/atelier/privacy_check.py` checks discovered private titles, gitignored exact terms, and staged blobs during `/lint` and `/system-review`; semantic review remains responsible for contextual disclosure.
 - Encrypted vaults (1Password, etc.) are **out of scope**: never extract credentials from there into `$OV` plain text.
 - Non-self entities (companion's medical, foster pets, etc.) get their own subdirectory under the domain (e.g., `<paths.health>/pet/`). Same protocol applies internally; cross-links from main self-line note "see also" but don't merge data.
 
@@ -135,8 +135,8 @@ Use `<paths.health>/README.md` and `<paths.housing>/README.md` as the templates.
 After a Drive → `$OV` ingestion sweep (especially a multi-domain pass), run the audit to catch gaps the protocol describes but a human eye misses:
 
 ```
-uv run scripts/zk_audit.py            # human-readable report
-uv run scripts/zk_audit.py --json     # machine-readable; used by /lint Phase 0b
+uv run scripts/atelier/zk_audit.py            # human-readable report
+uv run scripts/atelier/zk_audit.py --json     # machine-readable; used by /lint Phase 0b
 ```
 
 The audit walks `$OV/` and surfaces six categories of finding (advisory only; never mutates):
@@ -165,4 +165,4 @@ Findings are *advisory*, not auto-fixable. The audit reports gaps; consolidation
 - [[raw-indexing.md]] — downstream pattern: cross-cutting clickable indexes over `$OV/<domain>/raw/`, the navigational layer for ingested archives.
 - [[epistemic-hygiene.md]] — validation-depth taxonomy applies after ingestion.
 - `<paths.housing>/README.md`, `<paths.health>/README.md` — current implementations of this protocol.
-- `scripts/zk_audit.py` — post-ingestion hygiene audit (see "Post-ingestion verification" above).
+- `scripts/atelier/zk_audit.py` — post-ingestion hygiene audit (see "Post-ingestion verification" above).

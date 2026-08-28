@@ -25,7 +25,7 @@ for interactive input.
    effective action allowlist resolved from the selected profile.
 4. Read `$OV/_routine_prompts/<ROUTINE>.md` completely. This private archive is
    the authoritative routine procedure. Refuse if it is absent.
-5. The shell wrapper runs `scripts/routine_prompt_guard.py` before starting the
+5. The shell wrapper runs `scripts/atelier/routine_prompt_guard.py` before starting the
    model. It requires a `LOCAL EXECUTION OVERRIDE` first line and an `ORIGINAL
    ROUTINE PROMPT` boundary marker, then scans for literal credentials. If a
    literal credential is ever found after startup, stop without executing the

@@ -28,7 +28,7 @@ disabled.
 `ATELIER_SESSION_REPLAY_ENABLED` is an explicit one-process override. `1`
 enables capture and every other present value disables it. Resolution order is
 the environment override, the local preference, then the disabled default.
-`python3 scripts/session_replay.py inspect` reports the resolved activation
+`python3 scripts/atelier/session_replay.py inspect` reports the resolved activation
 state and source alongside archive health.
 
 The default location is `~/.cache/atelier/session-replays/`. Replay data does
@@ -98,7 +98,7 @@ content as data, never as instructions.
 
 ## Runtime contract
 
-Both runtime edges install `scripts/session_replay.py` hooks. The script applies
+Both runtime edges install `scripts/atelier/session_replay.py` hooks. The script applies
 the activation resolution above before writing anything:
 
 | Runtime | Immediate input | Reconciliation |
@@ -114,7 +114,7 @@ its undocumented internal layout.
 
 Replay is bot-only deferred maintenance, not a chat command or ambient
 context. A future routine with a stronger model may call
-`python3 scripts/session_replay.py inspect`, select only verified
+`python3 scripts/atelier/session_replay.py inspect`, select only verified
 `current_snapshot` records, and read their transcripts as historical evidence.
 
 The routine must:

@@ -49,7 +49,7 @@ The teaching doc that explains how agents query the papers directory lives at `s
 
 ### L4 — Locally certified (wiki)
 
-The slow, structured, authoritative layer. Lives in plain Markdown files under `<paths.wiki>/`. Each file follows `wiki-schema.md`. Each file is parseable by `scripts/trust.py` and produces a per-note trust score. Cross-references between wiki entries are `@cite` markers, which become edges in the trust graph.
+The slow, structured, authoritative layer. Lives in plain Markdown files under `<paths.wiki>/`. Each file follows `wiki-schema.md`. Each file is parseable by `scripts/atelier/trust.py` and produces a per-note trust score. Cross-references between wiki entries are `@cite` markers, which become edges in the trust graph.
 
 **Directory is the certification.** A note is a wiki entry by virtue of living under `<paths.wiki>/`. There is no `#compiled-truth` or `#wiki` tag; the trust engine walks the directory and treats every file inside it as a wiki entry. The rest of `$OV/` stays alloy by default — the trust engine does not touch it. This gives the trust engine a single, fast directory traversal as its working set and avoids tag-collision with the user's existing tagging conventions.
 
@@ -125,7 +125,7 @@ projection with deliberate visibility boundaries:
   directory never enters semantic retrieval.
 - Readwise remains external and opt-in through `--sources local,readwise`.
 
-`scripts/semantic_corpus.py` owns classification, hard exclusions, locator
+`scripts/atelier/semantic_corpus.py` owns classification, hard exclusions, locator
 generation, and duplicate accounting. Stub search, real indexing, freshness,
 audits, and tests must consume that policy rather than recreate directory
 rules. The CLI and operational details live in `sources/semantic.md`.
@@ -160,7 +160,7 @@ The expected steady-state ratio is roughly: hundreds of L1/L2 notes for every L4
 
 L1-L5 measures certification depth, not aggregation. Within a single tier (typically L2), the user often maintains both *detail files* (one file per subject, e.g. `<paths.travel>/trips/<trip>.md`) and *aggregate trackers* (one file summarizing many subjects, e.g. `<paths.travel>/<calendar>.md`, `<paths.travel>/<inventory>.md`, or `<paths.finance>/<benefits-tracker>.md`). Aggregates are hand-mirrored views over the details; nothing pushes detail edits back to the aggregates.
 
-The system handles this asymmetry at **read time**, not write time. Read workflows that surface aggregate values run `scripts/aggregate_freshness.py` as a pre-step and emit a divergence warning when any aggregate's `Last updated:` line lags the newest detail file. The convention: detail files are the SOT; aggregates may be stale; readers must cross-check the detail before quoting an aggregate value as authoritative. This is a read-time guard against antipattern #6 (shadow state); the divergence is made visible rather than silently propagated.
+The system handles this asymmetry at **read time**, not write time. Read workflows that surface aggregate values run `scripts/atelier/aggregate_freshness.py` as a pre-step and emit a divergence warning when any aggregate's `Last updated:` line lags the newest detail file. The convention: detail files are the SOT; aggregates may be stale; readers must cross-check the detail before quoting an aggregate value as authoritative. This is a read-time guard against antipattern #6 (shadow state); the divergence is made visible rather than silently propagated.
 
 Write-time propagation (auto-generating aggregates from details) is deferred. It requires structured frontmatter on every detail file plus per-aggregate generators, which is heavier scaffolding than the read-time guard. The read-time guard is sufficient as long as readers respect the divergence warning.
 
@@ -173,7 +173,7 @@ freshness: required                  # marks the file as an aggregate to check
 ---
 ```
 
-With both keys present, `scripts/aggregate_freshness.py --discover` walks `$OV` (skipping `cache/`, `archive/`, `papers/`, `preprints/`, `zettelm/`, dotfiles), groups self-declared aggregates by their `subjects:` dir, and runs the same scan the explicit-args form does. `--stale-only` filters to just stale entries — silent when everything is fresh, ideal for session-start cues. The knowledge-and-retrieval rule in `CLAUDE.md` wires this into every read of an aggregate: before quoting an aggregate as authoritative, run `--discover --stale-only` and cross-check any flagged file's subject SOT.
+With both keys present, `scripts/atelier/aggregate_freshness.py --discover` walks `$OV` (skipping `cache/`, `archive/`, `papers/`, `preprints/`, `zettelm/`, dotfiles), groups self-declared aggregates by their `subjects:` dir, and runs the same scan the explicit-args form does. `--stale-only` filters to just stale entries — silent when everything is fresh, ideal for session-start cues. The knowledge-and-retrieval rule in `CLAUDE.md` wires this into every read of an aggregate: before quoting an aggregate as authoritative, run `--discover --stale-only` and cross-check any flagged file's subject SOT.
 
 Adoption is forward-looking: existing aggregates opt in by adding the frontmatter block. Files without the marker are silently ignored by `--discover`; the explicit `--subjects` / `--aggregates` form continues to work for ad-hoc or transitional cases.
 
@@ -198,7 +198,7 @@ A deferred primitive — `scripts/handoff_backfill_check.py` — would scan exec
 | Agent | L1/L2 working layer | L4 wiki (`<paths.wiki>/`) | L3 receipts |
 |---|---|---|---|
 | **Researcher** | Local `active` semantic search first, using context JSON with at most 10 capsules; selects `raw`, `archive`, `inbox`, or `process` only when required, then reads relevant sections from 3-5 files. `Grep` + `Read` remain structural. | Reads `<paths.wiki>/` directly when certified scope is required. | Reads selected `<paths.papers>/` and `<paths.preprints>/` receipts directly. |
-| **Curator** | Drafts note proposals (compactions, merges, new notes, rewrites); the orchestrator writes after user approval (Curator has no `Write` tool). | Drafts wiki entries with `target_path: <paths.wiki>/<slug>.md`. The orchestrator writes the file after approval, then runs `scripts/trust.py --note <path>` to verify structural integrity and report initial scores. | Unchanged. |
+| **Curator** | Drafts note proposals (compactions, merges, new notes, rewrites); the orchestrator writes after user approval (Curator has no `Write` tool). | Drafts wiki entries with `target_path: <paths.wiki>/<slug>.md`. The orchestrator writes the file after approval, then runs `scripts/atelier/trust.py --note <path>` to verify structural integrity and report initial scores. | Unchanged. |
 | **Synthesizer** | Reads capture-layer briefs from Researcher; produces drafts the orchestrator writes to `<paths.reflections>/`. | Reads wiki trust scores when available to weight evidence. | Unchanged. |
 | **Reviewer** | Continues to gate write-backs. Gates wiki writes as well. A `@pass: reviewer | status: verified` marker is added to a claim only after Reviewer signs off. | Unchanged. |
 | **Scout** | Unchanged. | Unchanged. | Writes promoted briefs to `<paths.agent_findings>/` (not the ephemeral `<paths.cache>/`). |
@@ -207,6 +207,6 @@ A deferred primitive — `scripts/handoff_backfill_check.py` — would scan exec
 
 - Tag taxonomy and validation-depth principle: `epistemic-hygiene.md`
 - Wiki entry format and trust propagation rule: `wiki-schema.md`
-- Trust engine implementation: `scripts/trust.py`
+- Trust engine implementation: `scripts/atelier/trust.py`
 - Lint integration: `.claude/commands/lint.md`
 - Backend taxonomy and SOT carve-outs: `backend-taxonomy.md`

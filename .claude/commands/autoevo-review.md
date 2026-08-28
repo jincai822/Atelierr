@@ -7,7 +7,7 @@ Morning companion to `/autoevo-nightly`. Walks `$OV/_meta/autoevo_pending.toml` 
 
 ## When to run
 
-The cue at `/hi` fires when `$OV/_meta/autoevo_pending.toml` has entries with `status = "pending"`. Run this command to triage them. Snoozable per the standard cue mechanism (`uv run scripts/cues.py snooze autoevo_pending --days N`).
+The cue at `/hi` fires when `$OV/_meta/autoevo_pending.toml` has entries with `status = "pending"`. Run this command to triage them. Snoozable per the standard cue mechanism (`uv run scripts/atelier/cues.py snooze autoevo_pending --days N`).
 
 ## Step 1: Load the queue
 
@@ -34,18 +34,18 @@ Before showing anything to the user, sweep for entries that triggered the auto-d
 - `surface_count >= 3` (the helper's built-in threshold), OR
 - `proposed_at` is older than the helper's `--max-age-days` (default 30).
 
-Run `uv run --quiet python3 scripts/autoevo_pending.py auto-dismiss --today <RUN_DATE>`; it sets `status = "auto-dismissed"` with a `dismiss_reason` and prints the affected ids. For each, append a one-line note to `<paths.agent_findings>/autoevo-applied-<RUN_DATE>.md` § "Auto-dismissed". Resolve the registry-backed path before committing so a future rename of the `agent_findings` segment in `harness/paths.toml` does not silently break the git add:
+Run `uv run --quiet python3 scripts/atelier/autoevo_pending.py auto-dismiss --today <RUN_DATE>`; it sets `status = "auto-dismissed"` with a `dismiss_reason` and prints the affected ids. For each, append a one-line note to `<paths.agent_findings>/autoevo-applied-<RUN_DATE>.md` § "Auto-dismissed". Resolve the registry-backed path before committing so a future rename of the `agent_findings` segment in `harness/paths.toml` does not silently break the git add:
 
 ```bash
 PATHS_FINDINGS=$(uv run --quiet python3 -c "from scripts._paths import tier; print(tier('agent_findings'))")
 FINDINGS_REL="${PATHS_FINDINGS#$OV/}"   # portable shell strip; macOS realpath has no --relative-to
-uv run --quiet python3 scripts/autoevo_commit.py queue \
+uv run --quiet python3 scripts/atelier/autoevo_commit.py queue \
   --summary "auto-dismiss <N> stale pending entries" \
   --detail "Categories: <breakdown>. Reason: surface_count >= 3 OR proposed_at older than --max-age-days" \
   --extra-path "${FINDINGS_REL}/autoevo-applied-${RUN_DATE}.md"
 ```
 
-`scripts/autoevo_commit.py` is the sole committer: it stages the queue file plus `--extra-path`, commits `--only` those paths, and applies the bot author/committer identity.
+`scripts/atelier/autoevo_commit.py` is the sole committer: it stages the queue file plus `--extra-path`, commits `--only` those paths, and applies the bot author/committer identity.
 
 If no auto-dismiss candidates, skip the commit and continue.
 
@@ -95,19 +95,19 @@ Action? [a]pply | [s]kip | [d]efer | [e]xplain | [q]uit
 
 Dispatch the relevant agent in normal (approval-mode) Curator or Challenger flow. The user reviews the agent's proposal as usual — `/autoevo-review` does NOT shortcut Curator's content-preservation gates. Then:
 
-- On user-confirmed write: `uv run --quiet python3 scripts/autoevo_pending.py resolve --id <id> --status applied --today <RUN_DATE>`, append to audit log § "Applied via /autoevo-review", commit.
-- On user-rejected proposal: `uv run --quiet python3 scripts/autoevo_pending.py resolve --id <id> --status dismissed --reason "user rejected Curator proposal" --today <RUN_DATE>`, commit.
+- On user-confirmed write: `uv run --quiet python3 scripts/atelier/autoevo_pending.py resolve --id <id> --status applied --today <RUN_DATE>`, append to audit log § "Applied via /autoevo-review", commit.
+- On user-rejected proposal: `uv run --quiet python3 scripts/atelier/autoevo_pending.py resolve --id <id> --status dismissed --reason "user rejected Curator proposal" --today <RUN_DATE>`, commit.
 
 ### Skip
 
-Run `uv run --quiet python3 scripts/autoevo_pending.py resolve --id <id> --status dismissed --reason "user skipped during /autoevo-review" --today <RUN_DATE>`, commit. Move to next item. (Never hand-edit the TOML: the helper sets `resolved_at`, which anchors the nightly dedupe window.)
+Run `uv run --quiet python3 scripts/atelier/autoevo_pending.py resolve --id <id> --status dismissed --reason "user skipped during /autoevo-review" --today <RUN_DATE>`, commit. Move to next item. (Never hand-edit the TOML: the helper sets `resolved_at`, which anchors the nightly dedupe window.)
 
 ### Defer
 
-Run `uv run --quiet python3 scripts/autoevo_pending.py defer --id <id> --today <RUN_DATE>` (increments `surface_count`, sets `last_surfaced`). Optional snooze: ask "snooze for how many days? (default 7)". On a snooze ≥ 1, also call:
+Run `uv run --quiet python3 scripts/atelier/autoevo_pending.py defer --id <id> --today <RUN_DATE>` (increments `surface_count`, sets `last_surfaced`). Optional snooze: ask "snooze for how many days? (default 7)". On a snooze ≥ 1, also call:
 
 ```bash
-uv run scripts/cues.py snooze autoevo_pending --days <N>
+uv run scripts/atelier/cues.py snooze autoevo_pending --days <N>
 ```
 
 This snoozes the entire autoevo_pending cue group; per-entry snoozing is not supported (keeps cue surface simple). Move to next item.
@@ -115,7 +115,7 @@ This snoozes the entire autoevo_pending cue group; per-entry snoozing is not sup
 Commit the queue update at the end of the session (one commit covers all defers), not per-item, to avoid commit-spam:
 
 ```bash
-uv run --quiet python3 scripts/autoevo_commit.py queue \
+uv run --quiet python3 scripts/atelier/autoevo_commit.py queue \
   --summary "defer <N> pending entries in <RUN_DATE> triage" \
   --detail "Categories: <breakdown>"
 ```
@@ -151,7 +151,7 @@ If anything was applied, append a "Session via /autoevo-review" subsection to th
 If steps 4-5 produced any queue mutations not already committed (the defer batch, status changes), commit now:
 
 ```bash
-uv run --quiet python3 scripts/autoevo_commit.py queue \
+uv run --quiet python3 scripts/atelier/autoevo_commit.py queue \
   --summary "triage session <RUN_DATE> resolved <N> entries" \
   --detail "Applied=<n>, Dismissed=<n>, Deferred=<n>"
 ```
@@ -163,7 +163,7 @@ uv run --quiet python3 scripts/autoevo_commit.py queue \
 - **Queue file is corrupted.** Refuse to operate. Surface to user: "queue parse failed: <error>. Repair `$OV/_meta/autoevo_pending.toml` manually then re-run." Do not auto-rewrite.
 - **An entry's peers no longer exist** (user already manually deleted them between the nightly run and triage). Skip the entry via `autoevo_pending.py resolve --id <id> --status dismissed --reason "peers no longer present"`. Log to audit.
 - **Wiki entry path requested for compaction** (a contradicted finding's `wiki_path`). Triage routes the Apply action to Curator's normal wiki-update flow (full approval gate, Revision Log append). `/autoevo-review` does NOT shortcut the wiki update path.
-- **Daily note appears anywhere in a pending entry.** Reject the entry on load — write to audit log § "Errors" with the entry id and run `uv run --quiet python3 scripts/autoevo_pending.py resolve --id <id> --status dismissed --reason "daily note in pending entry; nightly bug" --today <RUN_DATE>`. The nightly run should never have queued a daily-note finding; if it did, treat as a bug to fix in Forgetter.
+- **Daily note appears anywhere in a pending entry.** Reject the entry on load — write to audit log § "Errors" with the entry id and run `uv run --quiet python3 scripts/atelier/autoevo_pending.py resolve --id <id> --status dismissed --reason "daily note in pending entry; nightly bug" --today <RUN_DATE>`. The nightly run should never have queued a daily-note finding; if it did, treat as a bug to fix in Forgetter.
 
 ## What this command does NOT do
 
@@ -178,4 +178,4 @@ uv run --quiet python3 scripts/autoevo_commit.py queue \
 - `.claude/commands/autoevo-nightly.md` — producer of the queue.
 - `.claude/agents/curator.md` — op executor for Apply.
 - `.claude/agents/challenger.md` — for re-probing if user asks during Explain.
-- `scripts/cues.py` § `check_autoevo_pending` — the cue surface.
+- `scripts/atelier/cues.py` § `check_autoevo_pending` — the cue surface.

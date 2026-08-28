@@ -17,7 +17,7 @@ Reuse the current `curate` context projection from `$hi`; for direct
 invocation, run:
 
 ```bash
-uv run scripts/context_bundle.py --intent curate --format json
+uv run scripts/atelier/context_bundle.py --intent curate --format json
 ```
 
 Use only the projected profile excerpts as goal and identity context. Retrieve

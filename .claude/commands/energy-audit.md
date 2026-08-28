@@ -12,7 +12,7 @@ Deep assessment of where your energy goes — physical, mental, emotional, and s
 ## Prerequisites
 
 1. Reuse the current `energy-audit` context projection from `$hi`; for direct
-   invocation, run `uv run scripts/context_bundle.py --intent energy-audit
+   invocation, run `uv run scripts/atelier/context_bundle.py --intent energy-audit
    --format json`.
 2. Retrieve a specific profile section only if the bounded projection omits
    evidence needed for the audit.
@@ -20,14 +20,14 @@ Deep assessment of where your energy goes — physical, mental, emotional, and s
 ## Context Loading
 
 1. **Search the last 14 days of daily notes** with
-   `uv run scripts/semantic.py query "physical mental emotional social energy patterns" --path daily-notes --after YYYY-MM-DD --top 10 --context --format json`.
+   `uv run scripts/atelier/semantic.py query "physical mental emotional social energy patterns" --path daily-notes --after YYYY-MM-DD --top 10 --context --format json`.
    Triage the capsules, then read only the relevant sections from 3 to 5
    source notes. Report missing evidence rather than loading every daily note.
 2. **Search for energy-related notes:**
    - `Grep(pattern: "累|疲惫|精力", path: "$OV/")` — Chinese exhaustion markers (local, exact).
    - `Grep(pattern: "运动|健康|睡眠", path: "$OV/")` — Chinese health markers (local, exact).
    - `Grep(pattern: "exercise|health|sleep", path: "$OV/")` — English health markers (local, exact).
-   - `Bash: uv run scripts/semantic.py query "tired exhausted drained" --top 10 --context --format json` — **primary** for affective states that may not use literal "tired/exhausted" language. Reframe the concept and retry if results are thin.
+   - `Bash: uv run scripts/atelier/semantic.py query "tired exhausted drained" --top 10 --context --format json` — **primary** for affective states that may not use literal "tired/exhausted" language. Reframe the concept and retry if results are thin.
 
 ## The Four Energy Dimensions
 
@@ -111,7 +111,7 @@ Present findings as:
 ## Session Log
 
 After writing the energy audit file, emit a session log:
-1. `Bash: uv run scripts/session_log.py --type energy-audit --duration <minutes>`
+1. `Bash: uv run scripts/atelier/session_log.py --type energy-audit --duration <minutes>`
 2. `Edit` the created file to populate sections from session data (agents dispatched, searches, questions, frameworks, anomalies). The canonical fill-in guide lives in `protocols/session-log.md` § "Section Guidance". Leave empty sections with headers only. If the write fails, warn and continue.
 
 ## Wrap Up

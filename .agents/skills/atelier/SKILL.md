@@ -24,16 +24,16 @@ agents, or harness portability.
 6. Discover native roles under `.codex/agents/` and inspect them with `/agent`.
 7. Load only the selected `.claude/commands/<command>.md` spec and any directly
    referenced agent or protocol files.
-8. For external launches, `scripts/atelier_runtime.py` resolves the committed
+8. For external launches, `scripts/atelier/atelier_runtime.py` resolves the committed
    Codex default, the gitignored local preference, and one-process overrides.
    It sends the workflow name directly to the selected native CLI surface.
 9. For local scheduled routines, inspect ownership with
-   `uv run scripts/routine_owner.py status`; transfer all local routines to the
+   `uv run scripts/atelier/routine_owner.py status`; transfer all local routines to the
    current machine only after unloading the source scheduler, using
-   `uv run scripts/routine_owner.py claim --force --source-stopped`.
+   `uv run scripts/atelier/routine_owner.py claim --force --source-stopped`.
 10. Keep private routine support/profile mappings under `$OV`, keep generic
     profiles in `harness/routine_profiles.toml`, and run
-    `python3 scripts/routine_audit.py audit --check-system --json` before
+    `python3 scripts/atelier/routine_audit.py audit --check-system --json` before
     enabling or handing off launchd jobs.
 11. Keep private skill sources under `<paths.private_features>/`. Link the same
     source directory into Claude and Codex user skill discovery; do not copy
@@ -85,8 +85,8 @@ When editing the harness:
    registries and lifecycle contracts.
 9. Keep private feature names and behavior out of committed registries; the
    source-root contract is defined in `protocols/private-features.md`.
-10. Run `python3 scripts/harness_lint.py` before finishing.
-11. Run `.venv/bin/python scripts/harness_smoke.py` after helper or registry
+10. Run `python3 scripts/atelier/harness_lint.py` before finishing.
+11. Run `.venv/bin/python scripts/atelier/harness_smoke.py` after helper or registry
     edits when the project environment exists; otherwise use the configured
     dependency runner.
 

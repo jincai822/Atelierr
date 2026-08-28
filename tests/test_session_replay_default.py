@@ -27,7 +27,7 @@ class DefaultActivationTest(unittest.TestCase):
             env["HOME"] = str(Path(tmp) / "home")
             snippet = (
                 "import os, sys, json\n"
-                "sys.path.insert(0, 'scripts')\n"
+                "sys.path.insert(0, 'scripts/atelier')\n"
                 "import session_replay as sr\n"
                 "os.environ.pop(sr.ENABLED_ENV, None)\n"
                 "enabled, source = sr.replay_activation()\n"

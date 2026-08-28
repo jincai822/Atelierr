@@ -21,7 +21,7 @@ Before dispatching the reading agent, apply the auto-promotion check from `proto
 
 If the source is a paper or an external URL (arXiv, conference PDF, a paper named by title), check local material FIRST and only hit the web on a miss. The cached copy is often already on disk; a web round-trip before checking it is wasted latency.
 
-1. Surface prior local material. Run `uv run scripts/semantic.py query "<title
+1. Surface prior local material. Run `uv run scripts/atelier/semantic.py query "<title
    or distinctive keywords>" --top 5 --context --format json`. The central
    corpus policy returns current authored notes and may return compact
    locators for assets under a `raw/` cluster. It does not extract a binary PDF
@@ -32,7 +32,7 @@ If the source is a paper or an external URL (arXiv, conference PDF, a paper name
 
 3. Fetch from the web only if both the note query (step 1) and the PDF glob (step 2) miss. After a web fetch, cache the PDF into `<paths.papers>/` so the next read is a local hit (naming convention in `sources/local-papers.md`).
 
-4. If the resolved source is a local PDF, materialize or reuse the paper text cache before dispatch. Run `python3 scripts/paper_cache.py "<resolved-pdf-path>"`; it returns `<paths.cache>/<paper-slug>/`. Pass that directory as `cache_path` to every Reader or Scholar. For a normal URL or a non-PDF source, skip this cache step and use the source directly. Follow the shared scratch rule in `CLAUDE.md`; one-session page renders use `mktemp -d` and are removed when reading finishes.
+4. If the resolved source is a local PDF, materialize or reuse the paper text cache before dispatch. Run `python3 scripts/atelier/paper_cache.py "<resolved-pdf-path>"`; it returns `<paths.cache>/<paper-slug>/`. Pass that directory as `cache_path` to every Reader or Scholar. For a normal URL or a non-PDF source, skip this cache step and use the source directly. Follow the shared scratch rule in `CLAUDE.md`; one-session page renders use `mktemp -d` and are removed when reading finishes.
 
 ## Prefetch Step (Readwise podcasts, videos, articles; applies to all three Read modes)
 
@@ -75,7 +75,7 @@ checkpoint defined in protocols/session-log.md before presenting the analysis
 or entering discussion. Do not wait for a future write-back request. Resolve a
 collision-free reading session-log path, then create the complete log and its
 filled Reading Capsule in one Write/Edit operation. Do not use
-`scripts/session_log.py` for reading because skeleton-then-fill leaves an
+`scripts/atelier/session_log.py` for reading because skeleton-then-fill leaves an
 interruption window.
 
 ## Per-option flows

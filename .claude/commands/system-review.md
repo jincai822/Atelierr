@@ -26,7 +26,7 @@ If the working tree is clean, stop and tell the user there is nothing to review.
 ### 1b. Privacy gate (blocking)
 
 ```bash
-uv run scripts/privacy_check.py --json
+uv run scripts/atelier/privacy_check.py --json
 ```
 
 Parse stdout as JSON and route on its `action` field (`exit 1` is the normal "hits found" signal, not a script error):
@@ -47,7 +47,7 @@ The mechanical script in 1b matches discovered private titles and locally declar
 **Before dispatch — shadow group setup (best-effort):** Run a single Bash call to create the witness file. Parse the UUID from the output line `export ATELIER_SHADOW_GROUP="<uuid>"` and **remember it** for the direct-API leg and for cleanup after dispatch. Best-effort: if the call fails, proceed without correlation.
 
 ```bash
-python3 scripts/shadow.py group-start --task privacy-review --agent privacy-reviewer
+python3 scripts/atelier/shadow.py group-start --task privacy-review --agent privacy-reviewer
 ```
 
 `--agent` derives both expected legs from `harness/agents.toml` voices plus the runtime-aware native identity, and also prints `export ATELIER_DIRECT_MODEL="<direct identity>"` for the direct-leg dispatch.
@@ -82,7 +82,7 @@ DIRECT_MODEL=$(python3 -c "import tomllib; print(tomllib.loads(open('harness/age
     echo "=== $f ==="
     cat "./$f"
   done < <(git ls-files --others --exclude-standard -z)
-} | uv run scripts/chat_completion.py --model "$DIRECT_MODEL" --max-tokens 0 --shadow-group "<SHADOW_UUID>" --task-type privacy-review --prompt -
+} | uv run scripts/atelier/chat_completion.py --model "$DIRECT_MODEL" --max-tokens 0 --shadow-group "<SHADOW_UUID>" --task-type privacy-review --prompt -
 ```
 
 Replace `<SHADOW_UUID>` with the UUID captured from `group-start` output. If group-start failed or was skipped, omit `--shadow-group` and `--task-type`.
@@ -94,12 +94,12 @@ Both legs return verdicts (CLEAN / NEEDS_REVISION / BLOCKER). The direct-api leg
 Resolve the native model identity, then log the project agent's response inline and close the witness:
 
 ```bash
-NATIVE_MODEL=$(python3 scripts/shadow.py native-model --agent privacy-reviewer)
-python3 scripts/shadow.py log \
+NATIVE_MODEL=$(python3 scripts/atelier/shadow.py native-model --agent privacy-reviewer)
+python3 scripts/atelier/shadow.py log \
   --group "<SHADOW_UUID>" --task privacy-review --model "$NATIVE_MODEL" --leg native \
   --prompt-text "<agent prompt summary>" \
   --response-text "<full agent response text>"
-python3 scripts/shadow.py group-close --group "<SHADOW_UUID>" --mark-closed
+python3 scripts/atelier/shadow.py group-close --group "<SHADOW_UUID>" --mark-closed
 ```
 
 Replace `<agent prompt summary>` with a short summary of what was sent to the project agent, and `<full agent response text>` with its actual response (the verdict text). If group-start was skipped, skip this step too.
@@ -124,7 +124,7 @@ When the bundle touches `.claude/agents/`, `protocols/`, or
 so the synthesis can compare against the previous one:
 
 ```bash
-uv run scripts/eval_run.py --no-semantic
+uv run scripts/atelier/eval_run.py --no-semantic
 ```
 
 Carry the routing score (and any misses) into the synthesis. A drop is a

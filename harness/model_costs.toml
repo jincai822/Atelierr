@@ -11,7 +11,7 @@
 #   reasoning_per_1m_usd     (optional) separately-priced reasoning tokens
 #   last_verified            "YYYY-MM-DD" — when this row's prices were checked
 #                            against the provider's published rate card.
-#                            `scripts/shadow.py report` fails closed when any
+#                            `scripts/atelier/shadow.py report` fails closed when any
 #                            aggregated model is >90 days stale, unless
 #                            invoked with `--accept-stale-costs`.
 #

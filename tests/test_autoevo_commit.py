@@ -29,7 +29,7 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 def _run(vault: Path, *argv: str) -> dict:
     proc = subprocess.run(
-        [sys.executable, "scripts/autoevo_commit.py", *argv],
+        [sys.executable, "scripts/atelier/autoevo_commit.py", *argv],
         cwd=REPO_ROOT,
         env={
             **os.environ,
@@ -91,7 +91,7 @@ class AutoevoCommitTest(unittest.TestCase):
 
     def test_cluster_hash_is_order_insensitive(self) -> None:
         snippet = (
-            "import sys; sys.path.insert(0, 'scripts'); import autoevo_commit as a; "
+            "import sys; sys.path.insert(0, 'scripts/atelier'); import autoevo_commit as a; "
             "print(a.cluster_hash(['wip/b.md', 'wip/a.md']) == a.cluster_hash(['wip/a.md', 'wip/b.md']))"
         )
         proc = subprocess.run([sys.executable, "-c", snippet], cwd=REPO_ROOT,

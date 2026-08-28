@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 def _run(vault: Path) -> dict:
     proc = subprocess.run(
-        [sys.executable, "scripts/decay_scan.py"],
+        [sys.executable, "scripts/atelier/decay_scan.py"],
         cwd=REPO_ROOT, env={**os.environ, "OV": str(vault)},
         capture_output=True, text=True, timeout=120,
     )

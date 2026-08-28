@@ -29,7 +29,7 @@ class SessionStatsTest(unittest.TestCase):
                 (bucket / name).write_text(body, encoding="utf-8")
             (flat / "2099-01-08-decision.md").write_text(filled, encoding="utf-8")
             proc = subprocess.run(
-                [sys.executable, "scripts/session_stats.py", "--window-days", "0", "--json"],
+                [sys.executable, "scripts/atelier/session_stats.py", "--window-days", "0", "--json"],
                 cwd=REPO_ROOT,
                 env={**os.environ, "OV": str(vault)},
                 capture_output=True,

@@ -1,4 +1,4 @@
-# Local Semantic Search (`scripts/semantic.py`)
+# Local Semantic Search (`scripts/atelier/semantic.py`)
 
 Teaching doc for the `semantic.py` CLI. Agents and command files call this script to find notes by meaning rather than exact string match.
 
@@ -8,7 +8,7 @@ Teaching doc for the `semantic.py` CLI. Agents and command files call this scrip
 
 **Stub mode** (lexical fallback): active when `~/.cache/atelier/lance/` does not exist. Uses the same corpus policy and scopes as real mode, but ranks with lexical token matching. Prints a warning to stderr on every invocation so callers never mistake "empty result" for "no conceptual neighbor exists."
 
-**Real mode** (embedding-backed): active when `~/.cache/atelier/lance/` exists (sentinel). Current stack: dense embedder (BGE-M3 default, Qwen3-Embedding-0.6B / 4B / 8B opt-in via `SEMANTIC_EMBEDDER`) + LanceDB (embedded columnar store, cosine distance) + BM25 sparse retrieval fused via Reciprocal Rank Fusion + optional BGE-reranker-v2-m3 cross-encoder rerank. Documents are chunked at markdown heading boundaries (~2K chars per chunk). Index is machine-local per embedder (`~/.cache/atelier/lance/`, `~/.cache/atelier/lance-qwen3-0.6b/`, ...); rebuild with `uv run scripts/semantic.py index` (~10 min on MPS for 5K-file vault with BGE-M3 / Qwen3-0.6B, ~60 min for Qwen3-4B). No caller code changes across the swap.
+**Real mode** (embedding-backed): active when `~/.cache/atelier/lance/` exists (sentinel). Current stack: dense embedder (BGE-M3 default, Qwen3-Embedding-0.6B / 4B / 8B opt-in via `SEMANTIC_EMBEDDER`) + LanceDB (embedded columnar store, cosine distance) + BM25 sparse retrieval fused via Reciprocal Rank Fusion + optional BGE-reranker-v2-m3 cross-encoder rerank. Documents are chunked at markdown heading boundaries (~2K chars per chunk). Index is machine-local per embedder (`~/.cache/atelier/lance/`, `~/.cache/atelier/lance-qwen3-0.6b/`, ...); rebuild with `uv run scripts/atelier/semantic.py index` (~10 min on MPS for 5K-file vault with BGE-M3 / Qwen3-0.6B, ~60 min for Qwen3-4B). No caller code changes across the swap.
 
 Model loading is cache-first. When the Hugging Face cache contains a snapshot
 with both the model config and Sentence Transformers modules manifest, the
@@ -21,11 +21,11 @@ even when no complete snapshot can be resolved.
 ## CLI
 
 ```
-scripts/semantic.py query "<text>" [OPTIONS]
-scripts/semantic.py status [--format text|json]
-scripts/semantic.py corpus [--format text|json]
-scripts/semantic.py index [--rebuild | --if-stale]
-scripts/semantic.py --help
+scripts/atelier/semantic.py query "<text>" [OPTIONS]
+scripts/atelier/semantic.py status [--format text|json]
+scripts/atelier/semantic.py corpus [--format text|json]
+scripts/atelier/semantic.py index [--rebuild | --if-stale]
+scripts/atelier/semantic.py --help
 ```
 
 ### `query` options
@@ -57,7 +57,7 @@ lookup does not regress when full BM25 is selected.
 
 ### Corpus policy
 
-`scripts/semantic_corpus.py` is the single policy used by stub search, real
+`scripts/atelier/semantic_corpus.py` is the single policy used by stub search, real
 indexing, freshness checks, audits, and smoke tests.
 
 | Scope | Contents |
@@ -155,18 +155,18 @@ raw locator cards so provenance does not crowd out authored notes.
 - **CJK-tolerant.** Chinese characters are preserved through tokenization, so queries like `"目标 精力"` work for exact-phrase matches but not conceptual ones.
 - **No ranking beyond token frequency.** A daily note that mentions the query word five times in passing will outrank a wiki entry that discusses the concept in depth using different words. Real mode fixes this.
 
-To exit stub mode, run `uv run python scripts/semantic.py index` to build the lance index.
+To exit stub mode, run `uv run python scripts/atelier/semantic.py index` to build the lance index.
 
 ## Examples
 
 Basic query:
 ```
-scripts/semantic.py query "curiosity vectors"
+scripts/atelier/semantic.py query "curiosity vectors"
 ```
 
 Restricted to reflections in the last 30 days, JSON output:
 ```
-scripts/semantic.py query "energy drain" \
+scripts/atelier/semantic.py query "energy drain" \
     --path "$OV"/reflections \
     --after 2026-03-07 \
     --scope active \
@@ -176,7 +176,7 @@ scripts/semantic.py query "energy drain" \
 
 Multiple paths, top 20 hits:
 ```
-scripts/semantic.py query "研究 方向" \
+scripts/atelier/semantic.py query "研究 方向" \
     --path "$OV"/daily-notes \
     --path "$OV"/reflections \
     --top 20
@@ -184,7 +184,7 @@ scripts/semantic.py query "研究 方向" \
 
 Reading only authored files returned by a bounded agent query:
 ```
-scripts/semantic.py query "contradiction" --top 5 --context --format json | \
+scripts/atelier/semantic.py query "contradiction" --top 5 --context --format json | \
     jq -r '.[] | select(.source == "local" and .representation == "authored") | .path' | \
     while read path; do sed -n '1,220p' "$OV/$path"; done
 ```
@@ -206,8 +206,8 @@ filesystem paths. Use the locator's cluster terms to narrow an explicit
 
 ```bash
 uv sync                                    # install deps (venv at ~/.cache/atelier/.venv)
-uv run python scripts/semantic.py index    # build index (~5K files, ~10 min on MPS)
-uv run python scripts/semantic.py query "curiosity vectors"  # search
+uv run python scripts/atelier/semantic.py index    # build index (~5K files, ~10 min on MPS)
+uv run python scripts/atelier/semantic.py query "curiosity vectors"  # search
 ```
 
 On the active local-routine owner, `com.atelier.semantic-index` runs at 07:30
@@ -223,7 +223,7 @@ matching `.err` file.
 
 ## Quality stack
 
-`semantic.py` exposes three orthogonal quality knobs on top of the dense retrieval base. They can be combined; the eval harness (`scripts/semantic_eval.py`) measures Recall@5/10, MRR@10, nDCG@10 against a link-graph-derived gold set.
+`semantic.py` exposes three orthogonal quality knobs on top of the dense retrieval base. They can be combined; the eval harness (`scripts/atelier/semantic_eval.py`) measures Recall@5/10, MRR@10, nDCG@10 against a link-graph-derived gold set.
 
 | Layer | Flag / env | When it helps | Cost |
 |---|---|---|---|
@@ -232,16 +232,16 @@ matching `.err` file.
 | Cross-encoder rerank | `--rerank ce` or env `SEMANTIC_RERANK_CE=1` | Biggest single nDCG lift across stacks; biggest cost too | ~5-10s/query on MPS; first call downloads ~568M-param model |
 | Tier+recency rerank | on by default in `_build_retriever` | UX heuristic: prefers wiki and fresh notes. Hurts pure retrieval metrics by ~3-5pt nDCG when the gold set spans older L2/L3 content | Free |
 
-The eval harness lives at `scripts/semantic_eval.py`:
+The eval harness lives at `scripts/atelier/semantic_eval.py`:
 
 ```bash
-uv run scripts/semantic_eval.py build                  # rebuild gold set from vault wikilinks/md-links
-uv run scripts/semantic_eval.py run                    # current default active scope
-uv run scripts/semantic_eval.py run --scope all        # historical all-scope comparison
-uv run scripts/semantic_eval.py run --hybrid           # +BM25 RRF
-uv run scripts/semantic_eval.py run --cross-encoder    # +BGE-reranker-v2-m3
-uv run scripts/semantic_eval.py run --no-rerank        # disable TierRecency
-SEMANTIC_EMBEDDER=qwen3-0.6b uv run scripts/semantic_eval.py run --hybrid --cross-encoder
+uv run scripts/atelier/semantic_eval.py build                  # rebuild gold set from vault wikilinks/md-links
+uv run scripts/atelier/semantic_eval.py run                    # current default active scope
+uv run scripts/atelier/semantic_eval.py run --scope all        # historical all-scope comparison
+uv run scripts/atelier/semantic_eval.py run --hybrid           # +BM25 RRF
+uv run scripts/atelier/semantic_eval.py run --cross-encoder    # +BGE-reranker-v2-m3
+uv run scripts/atelier/semantic_eval.py run --no-rerank        # disable TierRecency
+SEMANTIC_EMBEDDER=qwen3-0.6b uv run scripts/atelier/semantic_eval.py run --hybrid --cross-encoder
 ```
 
 The gold set is built only from active authored notes. Evaluation therefore
@@ -250,6 +250,6 @@ contract before they can produce meaningful metrics.
 
 ## References
 
-- Backend implementations: `scripts/semantic_backends.py`
+- Backend implementations: `scripts/atelier/semantic_backends.py`
 - Local-first architecture: `protocols/local-first-architecture.md`
 - Sibling teaching docs: `sources/scholar.md`, `sources/local-papers.md`, `sources/readwise.md`

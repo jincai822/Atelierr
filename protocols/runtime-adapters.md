@@ -30,7 +30,7 @@ activation contract is in `protocols/private-features.md`.
 
 `.claude/skills/` is a Claude Code-only surface holding **entry hints**, not authoritative dispatch. Claude Code matches a skill's frontmatter description against user phrasing semantically: the LLM judges relevance, not substring. On a match the skill forwards into `/hi`; the canonical intent router in `harness/intents.toml` is still the single decision point for which agents run. Codex does not read `.claude/skills/`; repo-scoped skills under `.agents/skills/` provide its native entry surface. `$atelier` handles broad routing and harness work, while explicit command skills such as `$weekly` and `$review` read the matching `.claude/commands/*.md` specification directly. Skill exposure is additive at both runtime edges and produces zero workflow duplication.
 
-`scripts/harness_lint.py` enforces structural invariants only: skill name matches its directory, frontmatter has a non-empty description that mentions `/hi` (delegation), and the skill name corresponds to an existing `intents.<name>` row. Coherence between the skill's prose description and the intent it exposes is human-curated — substring-checking an LLM-judged trigger surface would be the wrong tool.
+`scripts/atelier/harness_lint.py` enforces structural invariants only: skill name matches its directory, frontmatter has a non-empty description that mentions `/hi` (delegation), and the skill name corresponds to an existing `intents.<name>` row. Coherence between the skill's prose description and the intent it exposes is human-curated — substring-checking an LLM-judged trigger surface would be the wrong tool.
 
 The command files remain Claude-shaped source specifications, but both runtimes
 have native execution edges. Claude Code consumes `AskUserQuestion` and
@@ -41,7 +41,7 @@ sequential role emulation only when the active surface lacks those features.
 `harness/commands.toml` and `harness/agents.toml` are the registries shared by
 both runtimes. They map portable names to the current Claude source files.
 Codex command skills and agent TOMLs point directly to those sources;
-`scripts/harness_lint.py` enforces the mapping.
+`scripts/atelier/harness_lint.py` enforces the mapping.
 
 Codex reserves slash-prefixed input for built-in TUI commands. Its native
 repo-shared counterpart is an explicit `$skill` mention: Claude `/weekly` maps
@@ -54,9 +54,9 @@ another registered project command, Codex renders the `$command` form. Native
 Codex built-ins such as `/hooks` keep their slash form.
 
 Codex lifecycle hooks live in `.codex/hooks.json`. `SessionStart` reuses
-`scripts/cues.py --hook --runtime codex`; `UserPromptSubmit` optionally records
+`scripts/atelier/cues.py --hook --runtime codex`; `UserPromptSubmit` optionally records
 the replay prompt, refreshes the session lock, and runs
-`scripts/intent_coverage.py intent-hook --runtime codex`; `Stop` optionally
+`scripts/atelier/intent_coverage.py intent-hook --runtime codex`; `Stop` optionally
 reconciles the replay snapshot and runs shared shadow-log cleanup. Claude Code
 keeps the corresponding behavior in `.claude/settings.json`, using both `Stop`
 and `SessionEnd` for optional replay reconciliation. Replay capture is disabled
@@ -67,7 +67,7 @@ activation contract is in `protocols/session-replay.md`.
 ## Runtime Selection
 
 `harness/runtimes.toml` declares both native CLI surfaces and ships with Codex
-as the default. `scripts/atelier_runtime.py` is an optional selector around
+as the default. `scripts/atelier/atelier_runtime.py` is an optional selector around
 those surfaces. It never expands a workflow into an adapter prompt: it sends
 the registered name directly as `$<command>` to Codex or `/<command>` to
 Claude Code.
@@ -77,7 +77,7 @@ Resolution order is:
 1. `--runtime codex|claude` for one selector invocation.
 2. `ATELIER_RUNTIME=codex|claude` for one interactive launcher process.
 3. Gitignored `harness/runtime.local.toml`, written by
-   `python3 scripts/atelier_runtime.py use <runtime>`.
+   `python3 scripts/atelier/atelier_runtime.py use <runtime>`.
 4. The committed Codex default in `harness/runtimes.toml`.
 
 Direct CLI invocation always remains valid. The selector exists for interactive
@@ -133,7 +133,7 @@ Sonnet execution and retrieval roles use `xdeep`; they never silently inherit
 a lower Codex effort.
 External provider bindings remain in gitignored `profile/models.toml`.
 Shadow telemetry resolves native identity through
-`scripts/shadow.py native-model`: Claude uses the role binding, while Codex
+`scripts/atelier/shadow.py native-model`: Claude uses the role binding, while Codex
 uses the dynamic `codex_native` slot so it never inherits an Anthropic cost
 row.
 
@@ -173,7 +173,7 @@ When a user asks Codex to run an Atelier command:
 5. Dispatch referenced roles through `.codex/agents/<role>.toml`; the adapter
    instructs the subagent to read the authoritative `.claude/agents/` brief.
    If subagents are unavailable, emulate the brief sequentially and disclose it.
-6. Prefer local `$OV/` files, `rg`, and `uv run scripts/semantic.py`.
+6. Prefer local `$OV/` files, `rg`, and `uv run scripts/atelier/semantic.py`.
 7. Ask before user-facing note writes under `$OV/`. Scribe capture operations
    (`daily_note`, `dining_row`, `gtd_entry`, `people_stub`, `generic`) write
    directly because the user already authored the raw content. Bounded private

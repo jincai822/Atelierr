@@ -22,7 +22,7 @@ Inspired by the general lesson: a behavioral workaround for an older model in a 
 
 ### Voice Assignments
 
-`harness/agents.toml` is the canonical source of truth for the per-agent `voices` keyed inline table (`{native = "X", direct = "Y"}` or single-leg variants). `harness/models.toml` declares model identities and runtime-neutral reasoning tiers. Provider/model **bindings** (model id, endpoint URL, env var, request extras) live in the gitignored `profile/models.toml`; loaders merge schema + bindings at runtime. For native shadow telemetry, `scripts/shadow.py native-model` resolves the selected runtime so Codex results use `codex_native` instead of a Claude identity. `harness_lint.py` validates voice references and runtime-aware call sites. The table below is the audit-trigger registry only: it does not restate the per-agent voices (read agents.toml for those), it lists what staleness signal would force a re-evaluation per role family.
+`harness/agents.toml` is the canonical source of truth for the per-agent `voices` keyed inline table (`{native = "X", direct = "Y"}` or single-leg variants). `harness/models.toml` declares model identities and runtime-neutral reasoning tiers. Provider/model **bindings** (model id, endpoint URL, env var, request extras) live in the gitignored `profile/models.toml`; loaders merge schema + bindings at runtime. For native shadow telemetry, `scripts/atelier/shadow.py native-model` resolves the selected runtime so Codex results use `codex_native` instead of a Claude identity. `harness_lint.py` validates voice references and runtime-aware call sites. The table below is the audit-trigger registry only: it does not restate the per-agent voices (read agents.toml for those), it lists what staleness signal would force a re-evaluation per role family.
 
 Voice band vocabulary used in this file:
 - **deep** — flagship pair (e.g., highest-cognition Anthropic + highest-cognition direct-api)
@@ -92,7 +92,7 @@ Voice band vocabulary used in this file:
 
 | Rule | Location | Current Value | Re-test When |
 |------|----------|--------------|-------------|
-| semantic.py is primary for content queries | CLAUDE.md | Real embedding mode | Index is machine-local at `~/.cache/atelier/lance/`; inspect with `uv run scripts/semantic.py status`; owner-gated launchd maintenance runs incremental `index --if-stale`; full rebuild stays manual |
+| semantic.py is primary for content queries | CLAUDE.md | Real embedding mode | Index is machine-local at `~/.cache/atelier/lance/`; inspect with `uv run scripts/atelier/semantic.py status`; owner-gated launchd maintenance runs incremental `index --if-stale`; full rebuild stays manual |
 | Grep for structural queries only | CLAUDE.md | Always | semantic.py covers structural queries too |
 | Retry with synonyms on empty results | error-handling.md | Manual retry | semantic.py handles synonyms natively |
 
@@ -103,7 +103,7 @@ These track behavioral assumptions about external services the atelier depends o
 | Assumption | Backend | Where it bites | Re-test When |
 |---|---|---|---|
 | Drive MCP `create_file` writes within minutes; absence after one cron cycle = silent failure | Google Drive MCP | `remote-routines.md` § Policy, Debugging row | Anthropic changes MCP latency SLA; user observes routine output gap |
-| Drive sync (local client) catches up within minutes of cloud write | Google Drive (substrate) | `scripts/cues.py check_routine_outputs` may report "no new files" while file exists in cloud | Drive desktop client changes sync cadence; user reports phantom missing files |
+| Drive sync (local client) catches up within minutes of cloud write | Google Drive (substrate) | `scripts/atelier/cues.py check_routine_outputs` may report "no new files" while file exists in cloud | Drive desktop client changes sync cadence; user reports phantom missing files |
 | Readwise CLI is callable and authenticated on every session | Readwise | `/curate` blocks if not; routes through standard Level-2 degradation | Readwise changes CLI auth; user rotates token |
 | claude.ai cron fires within tolerance of declared cron expression | claude.ai routines | Output staleness; cue never fires for routine that silently stopped running | Anthropic changes scheduling SLA; user observes missing cron fires |
 | Google Drive MCP API surface (`create_file`, `get_file_metadata`, etc.) stays stable | Google Drive MCP | All routine prompts that call these tools; ingestion flows | Anthropic deprecates or renames MCP tools |

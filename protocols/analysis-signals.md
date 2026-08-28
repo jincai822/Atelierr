@@ -25,7 +25,7 @@ Before web retrieval or agent dispatch, read
 projection:
 
 ```bash
-uv run scripts/signal_facts.py bundle \
+uv run scripts/atelier/signal_facts.py bundle \
   --profile finance \
   --format json
 ```
@@ -70,7 +70,7 @@ from the selected observations:
 5. After the applicable vault-write approval, run:
 
    ```bash
-   uv run scripts/signal_facts.py ingest --file <candidate.json>
+   uv run scripts/atelier/signal_facts.py ingest --file <candidate.json>
    ```
 
 6. Regenerate the bundle before drawing conclusions.

@@ -16,7 +16,7 @@ When the system needs a new behavior, choose the lightest primitive that covers 
 
 | Primitive | When | Trigger | Examples in this repo |
 |---|---|---|---|
-| **Hook** (`.claude/settings.json` or `.codex/hooks.json`) | Programmatic event handler. Safety gate, mechanical lint, session-start cue. Always-on, no model judgment. | Runtime lifecycle or tool event | SessionStart cues via `scripts/cues.py`; intent coverage via `scripts/intent_coverage.py`; shadow-log cleanup via `scripts/shadow.py` |
+| **Hook** (`.claude/settings.json` or `.codex/hooks.json`) | Programmatic event handler. Safety gate, mechanical lint, session-start cue. Always-on, no model judgment. | Runtime lifecycle or tool event | SessionStart cues via `scripts/atelier/cues.py`; intent coverage via `scripts/atelier/intent_coverage.py`; shadow-log cleanup via `scripts/atelier/shadow.py` |
 | **Skill** (`.claude/skills/<name>/SKILL.md`) | Thin entry hint that auto-triggers on semantic match against user phrasing. Lowers friction of typing `/hi` first. Skills here forward to `/hi`; the canonical intent router (`harness/intents.toml`) stays the decision point. | Model judges the description matches user input | `.claude/skills/capture/`, `.claude/skills/reading/` |
 | **Command** (`.claude/commands/<name>.md`) | Explicit `/slash` invocation. User names the operation. | User types `/<name>` | `/curate`, `/sync`, `/lint`, `/promote`, `/hi` |
 | **Agent** (`.claude/agents/<name>.md`) | Delegated subprocess with isolated context. Use when the task needs research or tool use that would bloat main context, or when role/voice separation matters (Reviewer's voice is not Challenger's voice). | Orchestrator dispatches via the `Agent` tool | The cercle (Researcher, Reviewer, Challenger, Curator, ...) |
@@ -47,7 +47,7 @@ No-branching contract: `pattern` is documentation. No code path in `scripts/`, n
 ## Session Startup Checks
 
 Route before loading personal context. After selecting the intent, run
-`scripts/context_bundle.py` with the intent key or injected route packet. Use
+`scripts/atelier/context_bundle.py` with the intent key or injected route packet. Use
 that projection as the shared startup context; do not separately reread the
 same profile, reflection, or session files.
 

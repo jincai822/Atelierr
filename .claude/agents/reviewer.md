@@ -93,7 +93,7 @@ The default mode. Scores session output on 5 dimensions.
 
 ### 1. Citation Accuracy (weight: 30%)
 
-**Process:** Spot-check 3-5 [[Note Title]] references by grepping the local vault: `Grep(pattern: "<title>", path: "$OV/")` then `Read` the match. For conceptual verification, use `Bash: uv run scripts/semantic.py query "<claim>"`.
+**Process:** Spot-check 3-5 [[Note Title]] references by grepping the local vault: `Grep(pattern: "<title>", path: "$OV/")` then `Read` the match. For conceptual verification, use `Bash: uv run scripts/atelier/semantic.py query "<claim>"`.
 
 | Score | Criteria |
 |-------|---------|

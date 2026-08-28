@@ -41,7 +41,7 @@ silently open a file, call an external service, write, or start a multi-agent
 chain on a low-confidence route.
 
 The hook logs deterministic fallback and ambiguity misses. For an
-LLM-identified low-confidence match, run `scripts/intent_coverage.py
+LLM-identified low-confidence match, run `scripts/atelier/intent_coverage.py
 intent-log` with the raw input, runtime, initial match fields, and final route.
 Logging is best-effort and must not block dispatch.
 
@@ -56,7 +56,7 @@ execute `intents.general`.
 When `profile_reads` is non-empty, run:
 
 ```bash
-uv run scripts/context_bundle.py \
+uv run scripts/atelier/context_bundle.py \
   --route-json '<ATELIER_INTENT_ROUTE packet>' \
   --format json
 ```

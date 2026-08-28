@@ -26,14 +26,14 @@ When to invoke:
 ## Context Loading
 
 1. Reuse the current `weekly` context projection from `$hi`; for direct
-   invocation, run `uv run scripts/context_bundle.py --intent weekly
+   invocation, run `uv run scripts/atelier/context_bundle.py --intent weekly
    --byte-budget 20480 --format json`.
 
 2. Use the projected reflection headings and closing sections as the first
    pass. Search the seven-day window semantically and read only the source
    sections needed to verify a weekly pattern:
 
-   `Bash: uv run scripts/semantic.py query "weekly themes moods accomplishments struggles" --after "<7 days ago, YYYY-MM-DD>" --top 10 --context --format json`
+   `Bash: uv run scripts/atelier/semantic.py query "weekly themes moods accomplishments struggles" --after "<7 days ago, YYYY-MM-DD>" --top 10 --context --format json`
 
 3. Inspect daily-note file presence for the past seven effective dates. Use the
    bounded capsules first, then read a matching daily-note section or complete
@@ -204,7 +204,7 @@ Based on the review:
 ## Session Log
 
 After writing the weekly review file, emit a session log:
-1. `Bash: uv run scripts/session_log.py --type weekly --duration <minutes>`
+1. `Bash: uv run scripts/atelier/session_log.py --type weekly --duration <minutes>`
 2. `Edit` the created file to populate sections from session data (agents dispatched, searches, questions, frameworks, anomalies). The canonical fill-in guide lives in `protocols/session-log.md` § "Section Guidance". Leave empty sections with headers only. If the write fails, warn and continue.
 
 ## Wrap Up

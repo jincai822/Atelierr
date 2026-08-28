@@ -38,7 +38,7 @@ Five role categories. Every external system the atelier touches belongs to exact
 The "`$OV/` is SOT" rule applies to **L2-L4** content that the system has durably written and confirmed present on disk. The carve-outs:
 
 - **Readwise inbox is split-SOT for unpromoted L1 captures.** Rationale: L1 is ephemeral by tier definition; loss of unpromoted highlights is equivalent to loss of browser history. Accepted trade-off. Revisit if Readwise deprecates or user moves >20 hrs/yr through it.
-- **In-flight routine outputs hold provisional SOT in the claude.ai session log** until `scripts/cues.py check_routine_outputs` confirms the file on disk. Confirmation latency window: next session start (when the cue runs). If the Drive MCP write fails silently, the session log is the only recovery surface; the routine prompt MUST print the full output as fallback per `remote-routines.md` § Policy.
+- **In-flight routine outputs hold provisional SOT in the claude.ai session log** until `scripts/atelier/cues.py check_routine_outputs` confirms the file on disk. Confirmation latency window: next session start (when the cue runs). If the Drive MCP write fails silently, the session log is the only recovery surface; the routine prompt MUST print the full output as fallback per `remote-routines.md` § Policy.
 - **Substrate-layer corruption** (Google Drive sync conflict, filesystem damage) breaks the SOT guarantee at a lower layer than the atelier addresses. Recovery is filesystem-level (Drive web UI version history, Time Machine, etc.).
 
 ## Per-Backend Contract Requirements

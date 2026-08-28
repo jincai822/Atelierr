@@ -15,22 +15,22 @@ The user's entire vault lives under `<paths.daily_notes>/` (`YYYY/MM/YYYY-MM-DD.
 
 | Intent | Command |
 |---|---|
-| Conceptual / semantic content query | `Bash: uv run scripts/semantic.py query "<concept>" --top 10 --context --format json` as the default bounded local-active scan |
+| Conceptual / semantic content query | `Bash: uv run scripts/atelier/semantic.py query "<concept>" --top 10 --context --format json` as the default bounded local-active scan |
 | Structural query: known tag, exact title, date range, file presence | `Grep` (with `glob` / `path` scoped to the relevant tier directory) |
 | Read a daily note | `Read <paths.daily_notes>/YYYY/MM/YYYY-MM-DD.md` |
 | Read a note by title | `Grep` for the title, then `Read` the match |
 | Discover tags in the corpus | `Bash: grep -rohE '#[A-Za-z][A-Za-z0-9_-]*' "$OV"/ \| sort -u \| head -50` |
 
-Semantic-primary rule. For anything phrased as a concept ("how does X relate to Y", "what did I think about Z", "find notes about...") the first move is `uv run scripts/semantic.py query "<concept>" --top 10 --context --format json`, not Grep. The default is local `active` scope. Select `raw`, `archive`, `inbox`, or `process` explicitly when the intent requires it, and opt into Readwise with `--sources local,readwise`. The semantic script is embedding-backed when `~/.cache/atelier/lance/` exists (rebuild with `uv run scripts/semantic.py index` on each machine). Grep is reserved for structural queries where you already know the exact string (a tag name, a known title, a date pattern, a file path). If semantic returns thin results, *then* fall through to grep with synonym variants.
+Semantic-primary rule. For anything phrased as a concept ("how does X relate to Y", "what did I think about Z", "find notes about...") the first move is `uv run scripts/atelier/semantic.py query "<concept>" --top 10 --context --format json`, not Grep. The default is local `active` scope. Select `raw`, `archive`, `inbox`, or `process` explicitly when the intent requires it, and opt into Readwise with `--sources local,readwise`. The semantic script is embedding-backed when `~/.cache/atelier/lance/` exists (rebuild with `uv run scripts/atelier/semantic.py index` on each machine). Grep is reserved for structural queries where you already know the exact string (a tag name, a known title, a date pattern, a file path). If semantic returns thin results, *then* fall through to grep with synonym variants.
 
-Fast-path for semantic / exploratory sessions. For `/explore`, forgotten-connection queries, and paradigm-shift prompts ("what am I missing?", "surprise me", "find a contradiction"), `uv run scripts/semantic.py query` is already your first move by default. Do not exhaust synonym grep first. Note `semantic-first` in the handoff so the choice is transparent.
+Fast-path for semantic / exploratory sessions. For `/explore`, forgotten-connection queries, and paradigm-shift prompts ("what am I missing?", "surprise me", "find a contradiction"), `uv run scripts/atelier/semantic.py query` is already your first move by default. Do not exhaust synonym grep first. Note `semantic-first` in the handoff so the choice is transparent.
 
 ## Search Strategy: Progressive Disclosure
 
 Don't search randomly. Follow this strategy:
 
 ### Phase 1: Broad Scan (cast the net)
-- **Conceptual queries start with semantic:** `Bash: uv run scripts/semantic.py query "<concept>" --top 10 --context --format json`. Run the Chinese framing and the English framing as separate calls when the topic straddles languages.
+- **Conceptual queries start with semantic:** `Bash: uv run scripts/atelier/semantic.py query "<concept>" --top 10 --context --format json`. Run the Chinese framing and the English framing as separate calls when the topic straddles languages.
 - **Structural queries start with Grep:** known tag (`#moment`), exact title, date pattern, file presence. Always run Chinese + English variants for topical terms: `Grep(pattern: "目标", path: "$OV/")` AND `Grep(pattern: "goal", path: "$OV/")`.
 - Narrow by subdirectory when the user's intent is tier-specific (`<paths.wiki>/` for certified, `<paths.daily_notes>/` for capture stream, `<paths.reflections>/` for prior sessions)
 - Use file mtime or filename date to weight recency but don't exclude old matches
@@ -47,11 +47,11 @@ Don't search randomly. Follow this strategy:
 ### Phase 3: Gap Filling (what's missing?)
 - Review what you found against the query — what angles are uncovered?
 - If your first pass was semantic, try grep with synonym variants: "career" → "job" → "work" → "职业" → "工作"
-- If your first pass was grep, reframe the gap as a concept and rerun `uv run scripts/semantic.py query`
+- If your first pass was grep, reframe the gap as a concept and rerun `uv run scripts/atelier/semantic.py query`
 - If a gap remains after 3 attempts, report it honestly. Do not fabricate coverage. If the gap is today's daily note specifically, flag it and let the orchestrator handle it.
 
 ### Phase 4: Contradiction Search (at least 1 per session)
-- Run at least one temporal contradiction search: pick a strong current belief from today's context and search for the same topic 3+ months back with `uv run scripts/semantic.py query "<topic>" --before "<3+ months ago>" --top 5`.
+- Run at least one temporal contradiction search: pick a strong current belief from today's context and search for the same topic 3+ months back with `uv run scripts/atelier/semantic.py query "<topic>" --before "<3+ months ago>" --top 5`.
 - If you find a position change, include it in the research brief under **Contradictions Found** so the Challenger and Synthesizer can use it.
 
 ## Query Patterns

@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "session_log.py"
+SCRIPT = ROOT / "scripts" / "atelier" / "session_log.py"
 
 
 class SessionLogTests(unittest.TestCase):

@@ -23,7 +23,7 @@ class RoutingEvalsetTest(unittest.TestCase):
         self.assertGreaterEqual(len(cases), 20)
         snippet = (
             "import sys, json\n"
-            "sys.path.insert(0, 'scripts')\n"
+            "sys.path.insert(0, 'scripts/atelier')\n"
             "import intent_coverage as ic\n"
             "intents = ic.load_intents()\n"
             "out = []\n"

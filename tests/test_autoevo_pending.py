@@ -1,4 +1,4 @@
-"""Tests for scripts/autoevo_pending.py (queue append dedupe + auto-dismiss).
+"""Tests for scripts/atelier/autoevo_pending.py (queue append dedupe + auto-dismiss).
 
 Glitch (2026-08-22): the nightly command hand-wrote TOML and re-proposed
 clusters the user had already dismissed; nothing deduped by peers. This
@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 def _run(vault: Path, queue: Path, *argv: str, stdin: str | None = None) -> dict:
     proc = subprocess.run(
-        [sys.executable, "scripts/autoevo_pending.py", "--queue", str(queue), *argv],
+        [sys.executable, "scripts/atelier/autoevo_pending.py", "--queue", str(queue), *argv],
         cwd=REPO_ROOT,
         env={**os.environ, "OV": str(vault)},
         input=stdin,
@@ -91,7 +91,7 @@ class PendingQueueTest(unittest.TestCase):
             vault = Path(tmp)
             queue = vault / "_meta" / "autoevo_pending.toml"
             proc = subprocess.run(
-                [sys.executable, "scripts/autoevo_pending.py", "--queue", str(queue), "append", "--entries", "-"],
+                [sys.executable, "scripts/atelier/autoevo_pending.py", "--queue", str(queue), "append", "--entries", "-"],
                 cwd=REPO_ROOT, env={**os.environ, "OV": str(vault)}, input="{not json",
                 capture_output=True, text=True, timeout=60,
             )
@@ -109,7 +109,7 @@ class PendingQueueTest(unittest.TestCase):
             queue.parent.mkdir(parents=True)
             queue.write_text("[[pending]\nbroken", encoding="utf-8")
             proc = subprocess.run(
-                [sys.executable, "scripts/autoevo_pending.py", "--queue", str(queue), "append", "--entries", "-"],
+                [sys.executable, "scripts/atelier/autoevo_pending.py", "--queue", str(queue), "append", "--entries", "-"],
                 cwd=REPO_ROOT, env={**os.environ, "OV": str(vault)},
                 input=json.dumps([_entry("a", ["wip/x.md"])]),
                 capture_output=True, text=True, timeout=60,
@@ -123,7 +123,7 @@ class PendingQueueTest(unittest.TestCase):
             self.assertIn('id = "a"', sidecar.read_text(encoding="utf-8"))
             # A retry against the still-corrupt queue must not clobber the first sidecar.
             proc2 = subprocess.run(
-                [sys.executable, "scripts/autoevo_pending.py", "--queue", str(queue), "append", "--entries", "-"],
+                [sys.executable, "scripts/atelier/autoevo_pending.py", "--queue", str(queue), "append", "--entries", "-"],
                 cwd=REPO_ROOT, env={**os.environ, "OV": str(vault)},
                 input=json.dumps([_entry("b", ["wip/y.md"])]),
                 capture_output=True, text=True, timeout=60,
@@ -141,7 +141,7 @@ class PendingQueueTest(unittest.TestCase):
             bad = _entry("bad", ["wip/x.md"])
             bad["category"] = "mystery"
             proc = subprocess.run(
-                [sys.executable, "scripts/autoevo_pending.py", "--queue", str(queue), "append", "--entries", "-"],
+                [sys.executable, "scripts/atelier/autoevo_pending.py", "--queue", str(queue), "append", "--entries", "-"],
                 cwd=REPO_ROOT, env={**os.environ, "OV": str(vault)}, input=json.dumps([bad]),
                 capture_output=True, text=True, timeout=60,
             )

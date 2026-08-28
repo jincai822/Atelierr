@@ -3,7 +3,7 @@
 # The shipped default is Codex. A user can persist a different default in the
 # gitignored `harness/runtime.local.toml`, or override one invocation with the
 # `ATELIER_RUNTIME` environment variable or `--runtime` on
-# `scripts/atelier_runtime.py`.
+# `scripts/atelier/atelier_runtime.py`.
 #
 # Argument vectors are executed directly, without a shell. `{root}` expands to
 # the Atelier repository root. The workflow prompt is appended as the final
@@ -19,7 +19,7 @@ label = "Codex"
 executable = "codex"
 command_prefix = "$"
 native_shadow_identity = "codex_native"
-# Surface declaration (consumed by scripts/render_runtime_edges.py and, later,
+# Surface declaration (consumed by scripts/atelier/render_runtime_edges.py and, later,
 # runtime-aware helpers). Paths are repo-relative.
 instruction_file = "AGENTS.md"
 agent_dir = ".codex/agents"
