@@ -1,8 +1,11 @@
 """日期解析工具：统一把各种输入规范为本地时区 aware datetime。"""
+
 from __future__ import annotations
 
 from datetime import date as _date
-from datetime import datetime, time as _time, tzinfo
+from datetime import datetime
+from datetime import time as _time
+from datetime import tzinfo
 from typing import Union
 
 
@@ -12,7 +15,10 @@ def local_timezone() -> tzinfo:
     Returns:
         tzinfo: 本地时区对象。
     """
-    return datetime.now().astimezone().tzinfo
+    tz = datetime.now().astimezone().tzinfo
+    if tz is None:  # pragma: no cover - astimezone 必然带时区，仅作类型兜底
+        raise RuntimeError("无法确定本地时区")
+    return tz
 
 
 def parse_date(value: Union[datetime, _date, str]) -> datetime:

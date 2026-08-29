@@ -113,6 +113,7 @@ def run_cli_section(phase: str) -> bool:
     print("🧪 CLI...")
     try:
         from click.testing import CliRunner
+
         from scripts.cli.memory_cli import MemoryCLI
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -120,7 +121,9 @@ def run_cli_section(phase: str) -> bool:
             cli = MemoryCLI(config_path=str(config)).cli
             runner = CliRunner()
 
-            result = runner.invoke(cli, ["create", "cli.md", "--content", "CLI 测试内容"])
+            result = runner.invoke(
+                cli, ["create", "cli.md", "--content", "CLI 测试内容"]
+            )
             assert result.exit_code == 0, result.output
 
             result = runner.invoke(cli, ["search", "CLI"])
@@ -145,15 +148,17 @@ def run_cli_section(phase: str) -> bool:
                 out_file = Path(tmp) / "cli-image.md"
                 result = CliRunner().invoke(
                     ProcessCLI().cli,
-                    ["image", str(fixtures / "test_image.jpg"),
-                     "--output", str(out_file)],
+                    [
+                        "image",
+                        str(fixtures / "test_image.jpg"),
+                        "--output",
+                        str(out_file),
+                    ],
                 )
-                assert result.exit_code == 0, (
-                    f"process_cli image 失败: {result.output}"
-                )
-                assert out_file.exists() and out_file.stat().st_size > 0, (
-                    "process_cli image 未写出输出文件"
-                )
+                assert result.exit_code == 0, f"process_cli image 失败: {result.output}"
+                assert (
+                    out_file.exists() and out_file.stat().st_size > 0
+                ), "process_cli image 未写出输出文件"
 
         print("  ✅ CLI 验收通过")
         return True

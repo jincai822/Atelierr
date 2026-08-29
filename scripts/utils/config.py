@@ -1,4 +1,5 @@
 """配置加载工具：YAML 配置文件读取与深层取值。"""
+
 from __future__ import annotations
 
 from pathlib import Path

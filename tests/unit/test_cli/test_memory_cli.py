@@ -1,4 +1,5 @@
 """memory_cli 单元测试：CliRunner 冒烟 create/search/stats + sync 对齐。"""
+
 from __future__ import annotations
 
 import frontmatter
@@ -12,9 +13,7 @@ def _make_cli(tmp_path):
     """在临时目录写配置并构造 CLI（笔记目录 + 显式 state_dir）。"""
     config = tmp_path / "memory.yaml"
     config.write_text(
-        f"memory:\n"
-        f"  root: {tmp_path}/memory\n"
-        f"  state_dir: {tmp_path}/state\n",
+        f"memory:\n" f"  root: {tmp_path}/memory\n" f"  state_dir: {tmp_path}/state\n",
         encoding="utf-8",
     )
     cli = MemoryCLI(config_path=str(config)).cli
@@ -70,7 +69,9 @@ def test_cli_create_search_stats_smoke(tmp_path):
     cli, config, _ = _make_cli(tmp_path)
     runner = CliRunner()
 
-    result = runner.invoke(cli, ["create", "smoke.md", "--content", "冒烟内容", "--tags", "测试"])
+    result = runner.invoke(
+        cli, ["create", "smoke.md", "--content", "冒烟内容", "--tags", "测试"]
+    )
     assert result.exit_code == 0, result.output
     assert "已创建" in result.output
 

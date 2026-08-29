@@ -4,6 +4,7 @@
 运行: python examples/basic_usage.py
 零外部服务依赖：全部在临时目录里完成，不触碰 ~/atelierr-data。
 """
+
 from __future__ import annotations
 
 import sys
@@ -22,7 +23,10 @@ def main() -> int:
         tree = MemoryTree(f"{tmp}/memory", state_dir=f"{tmp}/state")
 
         note_a = tree.create_note(
-            "meeting.md", "今天讨论了 Atelierr 的发布计划。", source="agent", tags=["工作"]
+            "meeting.md",
+            "今天讨论了 Atelierr 的发布计划。",
+            source="agent",
+            tags=["工作"],
         )
         note_b = tree.create_note(
             "idea.md", "想到一个记忆衰减的优化思路。", source="agent", tags=["灵感"]

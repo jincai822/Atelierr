@@ -588,6 +588,7 @@ Week 4 结束:
 - ~~Whisper 真实模型转写验证~~ ✅ 已完成（2026-08-29）：真实 tiny 模型
   转写 JFK 语音样本，audio/video 两条路径均正确识别（含 "ask not" 片段），
   audio 14.0s（含首次模型加载）/ video 0.6s（模型进程内缓存），confidence 0.717
-- **RapidOCR 5s 路径**: 图片 OCR 的 onnxruntime 备选引擎，与 PaddleOCR
-  互为备份（单张 <5s 是验收性能目标）
+- ~~RapidOCR 5s 路径~~ ✅ 已完成（2026-08-29）：`processors.image.engine: rapidocr`
+  已实现（onnxruntime），整页扫描 CPU 实测 ~0.8s/页（vs paddle 12-14s），
+  截图类 ~0.8s；PDF 经 `processors.pdf.ocr_engine` 透传
 - **完整版验收**: 覆盖率 ≥85%、mypy/pylint 门禁、负载测试（1000+ 笔记）

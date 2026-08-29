@@ -1,4 +1,5 @@
 """MemoryWatcher.process_pending 单元测试。"""
+
 from __future__ import annotations
 
 import frontmatter

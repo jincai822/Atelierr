@@ -1,4 +1,5 @@
 """搜索性能测试：1000 条笔记内搜索 < 100ms（验收 1.4 性能条）。"""
+
 from __future__ import annotations
 
 import time

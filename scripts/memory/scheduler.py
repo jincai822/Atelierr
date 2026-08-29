@@ -1,10 +1,14 @@
 """定时衰减调度器：按固定间隔执行 DecayManager.run()。"""
+
 from __future__ import annotations
 
 import threading
-from typing import Dict, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
 from scripts.memory.decay import DecayManager
+
+if TYPE_CHECKING:
+    from scripts.memory.core import MemoryTree
 
 
 class DecayScheduler:
@@ -16,7 +20,7 @@ class DecayScheduler:
         manager: 内部的 DecayManager。
     """
 
-    def __init__(self, memory_tree: "MemoryTree", interval_hours: int = 24) -> None:  # noqa: F821
+    def __init__(self, memory_tree: "MemoryTree", interval_hours: int = 24) -> None:
         """初始化。
 
         Args:

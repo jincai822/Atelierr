@@ -4,12 +4,13 @@
 解析/ Markdown 组装辅助函数，输出结构与视频处理器一致（标题 +
 按 segment 的时间戳小节）。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional, Union
 
-import whisper  # noqa: F401 - 模块级导入；单元测试 monkeypatch 此处的 load_model
+import whisper  # noqa: F401  # pylint: disable=unused-import
 
 from scripts.processors.base import BaseProcessor, ProcessResult
 from scripts.processors.video import (
@@ -18,6 +19,9 @@ from scripts.processors.video import (
     _load_model,
     _segment_confidence,
 )
+
+# 模块级导入：单元测试 monkeypatch 此模块命名空间里的 _load_model
+
 
 #: 支持的扩展名（大小写不敏感）
 SUPPORTED_EXTENSIONS: tuple = (".wav", ".mp3", ".flac", ".m4a", ".ogg", ".aac")

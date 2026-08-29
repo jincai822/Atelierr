@@ -3,6 +3,7 @@
 ffmpeg 抽音频走真实命令（对 test_video.mp4），Whisper 转写用
 monkeypatch 注入假模型（返回 dict 形态结果），不下载真实模型。
 """
+
 from __future__ import annotations
 
 import pytest

@@ -5,6 +5,7 @@
 用临时 .txt 文件演示 BaseProcessor 子类的 process() 返回 ProcessResult。
 零外部服务依赖，不触碰 ~/atelierr-data。
 """
+
 from __future__ import annotations
 
 import sys
@@ -33,19 +34,26 @@ class TxtWordCountProcessor(BaseProcessor):
         word_count = len(text.split())
         markdown = f"# {path.stem}\n\n{text}\n\n> 词数: {word_count}\n"
         return ProcessResult(
-            success=True, text=text, markdown=markdown, metadata={"word_count": word_count}
+            success=True,
+            text=text,
+            markdown=markdown,
+            metadata={"word_count": word_count},
         )
 
 
 def main() -> int:
-    with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as fh:
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".txt", encoding="utf-8", delete=False
+    ) as fh:
         fh.write("Atelierr custom processor 示例：统计这一行的单词数量。")
         tmp_path = Path(fh.name)
     try:
         processor = TxtWordCountProcessor()
         result = processor.process(tmp_path)
         assert result.success, result.error
-        print(f"处理器: {processor.name}（支持 {', '.join(processor.supported_extensions)}）")
+        print(
+            f"处理器: {processor.name}（支持 {', '.join(processor.supported_extensions)}）"
+        )
         print(f"词数: {result.metadata['word_count']}")
         print("markdown 输出:")
         print(result.markdown)

@@ -5,6 +5,7 @@
 不传目录时用临时目录自动生成 3 个示例笔记。
 零外部服务依赖，不触碰 ~/atelierr-data。
 """
+
 from __future__ import annotations
 
 import sys
@@ -33,11 +34,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         notes_dir.mkdir(parents=True)
         state_dir = base / "state"
         for i in range(1, 4):
-            (notes_dir / f"note-{i}.md").write_text(f"批量笔记 {i} 的正文内容。", encoding="utf-8")
+            (notes_dir / f"note-{i}.md").write_text(
+                f"批量笔记 {i} 的正文内容。", encoding="utf-8"
+            )
     try:
         tree = MemoryTree(str(notes_dir), state_dir=str(state_dir))
         result = MemoryWatcher(tree, source="web").process_pending()
-        print(f"归一化: {len(result['normalized'])} 条 -> {[p.name for p in result['normalized']]}")
+        print(
+            f"归一化: {len(result['normalized'])} 条 -> {[p.name for p in result['normalized']]}"
+        )
         print(f"新登记: {len(result['registered'])} 条")
         print(f"注销: {len(result['deregistered'])} 条")
         print(f"跳过: {len(result['skipped'])} 条")

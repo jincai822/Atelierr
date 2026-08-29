@@ -1,4 +1,5 @@
 """文本清洗小工具。"""
+
 from __future__ import annotations
 
 

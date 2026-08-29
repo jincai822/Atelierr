@@ -4,6 +4,7 @@
 动态状态（confidence/layer/last_accessed/references/pending_delete）只写
 sidecar；笔记文件创建后机器绝不改写。id 为 26 字符 ULID。
 """
+
 from __future__ import annotations
 
 import json
@@ -12,13 +13,16 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import frontmatter
 
 from scripts.memory.confidence import ConfidenceCalculator
 from scripts.utils.config import load_config
 from scripts.utils.date_utils import local_timezone
+
+if TYPE_CHECKING:
+    from scripts.memory.search import Memory, MemorySearcher
 
 #: 合法逻辑层级（存于 sidecar，不是物理目录）
 LAYERS: Tuple[str, str, str] = ("short-term", "mid-term", "long-term")
@@ -41,6 +45,13 @@ def generate_id() -> str:
 def _now_iso() -> str:
     """当前本地时间的 ISO 字符串（秒精度）。"""
     return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _str_list(value: object) -> List[str]:
+    """把 frontmatter 元数据值规范为字符串列表（非列表/元组返回空）。"""
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return []
 
 
 @dataclass
@@ -104,7 +115,7 @@ class MemoryTree:
         self.settings = MemorySettings()
         self.index_path = self.state_dir / "index.json"
         self._index: Optional[Dict[str, dict]] = None
-        self._searcher: Optional[object] = None
+        self._searcher: Optional["MemorySearcher"] = None
 
     # ------------------------------------------------------------------
     # sidecar 索引（原子写；损坏时备份并从空索引重建）
@@ -130,7 +141,10 @@ class MemoryTree:
     def _backup_corrupt_index(self) -> None:
         """把损坏的 index.json 改名为 index.json.bak。"""
         try:
-            os.replace(self.index_path, self.index_path.with_name(self.index_path.name + ".bak"))
+            os.replace(
+                self.index_path,
+                self.index_path.with_name(self.index_path.name + ".bak"),
+            )
         except OSError:
             pass
 
@@ -445,7 +459,9 @@ class MemoryTree:
         confidence = calculator.calculate(
             {
                 "accessed": entry.get("last_accessed"),
-                "modified": datetime.fromtimestamp(path.stat().st_mtime, tz=local_timezone()),
+                "modified": datetime.fromtimestamp(
+                    path.stat().st_mtime, tz=local_timezone()
+                ),
                 "references": entry.get("references", 0),
             }
         )
@@ -455,7 +471,7 @@ class MemoryTree:
             "title": post.metadata.get("title"),
             "created": post.metadata.get("created"),
             "source": post.metadata.get("source"),
-            "tags": list(post.metadata.get("tags") or []),
+            "tags": _str_list(post.metadata.get("tags")),
             "layer": entry["layer"],
             "confidence": confidence,
             "references": entry.get("references", 0),
@@ -471,7 +487,7 @@ class MemoryTree:
         date_to: Optional[str] = None,
         layer: Optional[str] = None,
         limit: int = 10,
-    ) -> List["Memory"]:  # noqa: F821 - 延迟导入避免循环依赖
+    ) -> List["Memory"]:
         """搜索记忆（委托 MemorySearcher，结果按 confidence 降序）。
 
         Args:
@@ -553,11 +569,17 @@ class MemoryTree:
         layers = memory.get("layers", {}) or {}
         decay = memory.get("decay", {}) or {}
         tree.settings = MemorySettings(
-            short_term_min=float(layers.get("short_term_min", tree.settings.short_term_min)),
+            short_term_min=float(
+                layers.get("short_term_min", tree.settings.short_term_min)
+            ),
             mid_term_min=float(layers.get("mid_term_min", tree.settings.mid_term_min)),
             decay_rate=float(decay.get("rate", tree.settings.decay_rate)),
-            ref_coefficient=float(decay.get("ref_coefficient", tree.settings.ref_coefficient)),
+            ref_coefficient=float(
+                decay.get("ref_coefficient", tree.settings.ref_coefficient)
+            ),
             ref_cap=int(decay.get("ref_cap", tree.settings.ref_cap)),
-            delete_threshold=float(decay.get("delete_threshold", tree.settings.delete_threshold)),
+            delete_threshold=float(
+                decay.get("delete_threshold", tree.settings.delete_threshold)
+            ),
         )
         return tree

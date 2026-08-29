@@ -8,6 +8,7 @@
   节），缺省按 config/processors.yaml > processors.yaml.example >
   内置默认值的顺序合并解析，不硬依赖配置文件存在。
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -178,9 +179,7 @@ class BaseProcessor(ABC):
         """
         return ProcessResult(success=False, error=error)
 
-    def _check_input(
-        self, input_path: Union[str, Path]
-    ) -> Optional[ProcessResult]:
+    def _check_input(self, input_path: Union[str, Path]) -> Optional[ProcessResult]:
         """校验输入文件存在性、类型与扩展名。
 
         Args:

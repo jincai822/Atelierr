@@ -15,6 +15,7 @@ memory.root / memory.state_dir，创建：
     python tools/init_memory.py
     python tools/init_memory.py --config /path/to/memory.yaml
 """
+
 from __future__ import annotations
 
 import argparse

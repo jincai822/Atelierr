@@ -228,7 +228,8 @@ tags: ["标签1", "标签2"]
 ### 输入处理与质量
 
 ```
-✅ 整页扫描图 OCR（CPU）12-14s（目标 ≤15s）
+✅ 整页扫描图 OCR（CPU）：PaddleOCR 12-14s（目标 ≤15s）；RapidOCR ~0.8s
+   （`processors.image.engine: rapidocr`，扫描件多时推荐）
 ✅ 121 项测试通过 / 覆盖率 83%
 ```
 

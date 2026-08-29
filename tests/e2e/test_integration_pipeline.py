@@ -7,6 +7,7 @@ Flatnotes 可见。只组合现有公共接口，不触碰任何生产代码。
 - test_flatnotes_sees_pipeline_note：live 验证 Flatnotes 可见性，
   docker/.env 缺失或容器未起时 pytest.skip 优雅跳过。
 """
+
 from __future__ import annotations
 
 import json
@@ -71,7 +72,9 @@ def test_process_to_memory_to_decay_pipeline(memory_config, tmp_path):
     image_out = tmp_path / "image.md"
     pdf_out = tmp_path / "pdf.md"
     result = _invoke(
-        process_cli, runner, ["image", str(FIXTURES_DIR / "test_image.jpg"), "--output", str(image_out)]
+        process_cli,
+        runner,
+        ["image", str(FIXTURES_DIR / "test_image.jpg"), "--output", str(image_out)],
     )
     assert "已写入" in result.output
     assert image_out.exists() and image_out.stat().st_size > 0
@@ -79,7 +82,9 @@ def test_process_to_memory_to_decay_pipeline(memory_config, tmp_path):
     assert OCR_TEXT in image_markdown
 
     result = _invoke(
-        process_cli, runner, ["pdf", str(FIXTURES_DIR / "test.pdf"), "--output", str(pdf_out)]
+        process_cli,
+        runner,
+        ["pdf", str(FIXTURES_DIR / "test.pdf"), "--output", str(pdf_out)],
     )
     assert "已写入" in result.output
     assert pdf_out.exists() and pdf_out.stat().st_size > 0
@@ -213,7 +218,9 @@ def test_flatnotes_sees_pipeline_note(tmp_path):
             token = json.loads(response.read().decode("utf-8"))["access_token"]
 
         # GET /api/notes/{title}：200 且内容包含 OCR 文本
-        status, body = _flatnotes_get_json(f"/api/notes/{urllib.parse.quote(unique)}", token)
+        status, body = _flatnotes_get_json(
+            f"/api/notes/{urllib.parse.quote(unique)}", token
+        )
         assert status == 200, f"Flatnotes 应能看到 {unique}，status={status}"
         assert OCR_TEXT in body.get("content", ""), "Flatnotes 内容应包含 OCR 文本"
 
@@ -223,7 +230,9 @@ def test_flatnotes_sees_pipeline_note(tmp_path):
             f"/api/notes/{urllib.parse.quote(unique)}", token
         )
         assert status_after == 200, "decay 后 Flatnotes 仍应可见"
-        assert body_after.get("content") == body.get("content"), "decay 不应改变笔记内容"
+        assert body_after.get("content") == body.get(
+            "content"
+        ), "decay 不应改变笔记内容"
     finally:
         # 只清理本测试自己的产物：删文件 + process_pending 注销 sidecar 条目
         if note_path.exists():

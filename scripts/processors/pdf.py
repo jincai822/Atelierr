@@ -5,6 +5,7 @@
 （复用 :class:`scripts.processors.image.ImageProcessor`，最多前 20 张，
 计入 metadata）。
 """
+
 from __future__ import annotations
 
 import os
@@ -40,12 +41,13 @@ class PDFProcessor(BaseProcessor):
         super().__init__(config)
         self.ocr_images = bool(self.config.get("ocr_images", True))
         self.generate_toc = bool(self.config.get("generate_toc", True))
+        self.ocr_engine = str(self.config.get("ocr_engine", "paddleocr"))
         self._image_processor: Optional[ImageProcessor] = None
 
     def _get_image_processor(self) -> ImageProcessor:
         """惰性创建图片处理器（首个内嵌图片出现时才触发模型加载）。"""
         if self._image_processor is None:
-            self._image_processor = ImageProcessor()
+            self._image_processor = ImageProcessor(config={"engine": self.ocr_engine})
         return self._image_processor
 
     def process(self, input_path: Union[str, Path]) -> ProcessResult:
@@ -75,9 +77,7 @@ class PDFProcessor(BaseProcessor):
         finally:
             document.close()
 
-    def _process_document(
-        self, document: Any, path: Path
-    ) -> ProcessResult:
+    def _process_document(self, document: Any, path: Path) -> ProcessResult:
         """逐页提取文字与内嵌图片（流式，不一次读入全文）。"""
         pages_text: List[str] = []
         images: List[ExtractedImage] = []
@@ -94,9 +94,7 @@ class PDFProcessor(BaseProcessor):
                 images_total += 1
                 if len(images) >= MAX_OCR_IMAGES:
                     continue
-                ocr_text, _conf = self._ocr_embedded_image(
-                    document, image_info
-                )
+                ocr_text, _conf = self._ocr_embedded_image(document, image_info)
                 images.append(
                     ExtractedImage(
                         page=page_no + 1, index=image_index, ocr_text=ocr_text
@@ -105,9 +103,7 @@ class PDFProcessor(BaseProcessor):
                 image_index += 1
 
         text = "\n".join(pages_text)
-        markdown = self._build_markdown(
-            path, pages_text, document, images
-        )
+        markdown = self._build_markdown(path, pages_text, document, images)
         images_processed = len(images)
         metadata: Dict[str, Any] = {
             "engine": "pymupdf",
@@ -169,7 +165,7 @@ class PDFProcessor(BaseProcessor):
         path: Path,
         pages_text: List[str],
         document: Any,
-        images: List[ExtractedImage],
+        images: List[ExtractedImage],  # pylint: disable=unused-argument
     ) -> str:
         """组装 Markdown：标题 + 目录 + 分页正文。"""
         lines: List[str] = [f"# {path.stem}", ""]

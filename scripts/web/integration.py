@@ -6,6 +6,7 @@ Flatnotes 与记忆模块共享同一平面目录（$OV/memory），因此**不�
 
 所有操作都是纯文件系统操作，Flatnotes 是否启动不影响归一化。
 """
+
 from __future__ import annotations
 
 from typing import Dict

@@ -3,6 +3,7 @@
 conf = decay_rate ** (idle_days / ref_factor)，
 幂等纯函数：任何时刻用同一元数据重算结果一致，不依赖历史值。
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -67,15 +68,34 @@ class ConfidenceCalculator:
             if value is None:
                 continue
             candidate = parse_date(value)
-            last_active = candidate if last_active is None else max(last_active, candidate)
+            last_active = (
+                candidate if last_active is None else max(last_active, candidate)
+            )
         if last_active is None:
             created = metadata.get("created")
             if created is not None:
                 last_active = parse_date(created)
         if last_active is None:
             last_active = now
-        idle_days = max((now - last_active).days, 0)
-        refs = metadata.get("references") or 0
-        ref_factor = 1 + self.ref_coefficient * min(max(refs, 0), self.ref_cap)
-        confidence = self.decay_rate ** (idle_days / ref_factor)
+        idle_days = (now - last_active).days
+        return self.from_idle_days(idle_days, metadata.get("references") or 0)
+
+    def from_idle_days(self, idle_days: int, references: int = 0) -> float:
+        """由已知闲置天数直接计算（与 calculate 同一公式，单次真源）。
+
+        供调用方在已持有 epoch 时间戳时避免 datetime 构造/减法开销
+        （如搜索热路径）；``idle_days`` 负值钳到 0，``references`` 负值
+        按 0、超 ref_cap 封顶。
+
+        Args:
+            idle_days: 闲置天数（整数，语义同 ``(now - last_active).days``）。
+            references: 引用次数。
+
+        Returns:
+            float: confidence，范围 [0.0, 1.0]。
+        """
+        idle = max(int(idle_days), 0)
+        refs = max(int(references), 0)
+        ref_factor = 1 + self.ref_coefficient * min(refs, self.ref_cap)
+        confidence = self.decay_rate ** (idle / ref_factor)
         return max(0.0, min(1.0, confidence))

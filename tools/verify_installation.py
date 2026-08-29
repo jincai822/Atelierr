@@ -5,8 +5,8 @@
 检查所有依赖和配置是否正确。
 """
 
-import sys
 import subprocess
+import sys
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -16,11 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 # ANSI 颜色
-GREEN = '\033[92m'
-YELLOW = '\033[93m'
-RED = '\033[91m'
-BLUE = '\033[94m'
-RESET = '\033[0m'
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+RED = "\033[91m"
+BLUE = "\033[94m"
+RESET = "\033[0m"
 
 
 def print_section(title: str):
@@ -33,21 +33,23 @@ def print_section(title: str):
 def check_python_version():
     """检查 Python 版本"""
     print("🔍 检查 Python 版本...")
-    
+
     version = sys.version_info
     if version >= (3, 8):
-        print(f"  {GREEN}✅{RESET} Python {version.major}.{version.minor}.{version.micro}")
+        print(
+            f"  {GREEN}✅{RESET} Python {version.major}.{version.minor}.{version.micro}"
+        )
         return True
     else:
         print(f"  {RED}❌{RESET} Python 版本过低: {version.major}.{version.minor}")
-        print(f"     需要 Python 3.8+")
+        print("     需要 Python 3.8+")
         return False
 
 
 def check_dependencies():
     """检查依赖包（必装 + 可选 MVP3 输入引擎）"""
     print("🔍 检查依赖包...")
-    
+
     required = {
         "yaml": "pyyaml",
         "watchdog": "watchdog",
@@ -56,7 +58,7 @@ def check_dependencies():
         "click": "click",
         "rich": "rich",
     }
-    
+
     all_ok = True
     for import_name, package_name in required.items():
         try:
@@ -66,7 +68,7 @@ def check_dependencies():
             print(f"  {RED}❌{RESET} {package_name} 未安装")
             print(f"     安装: pip install {package_name}")
             all_ok = False
-    
+
     # 可选依赖：MVP3 输入处理引擎，缺失只警告不算失败
     optional = {
         "paddle": "PaddlePaddle",
@@ -81,14 +83,14 @@ def check_dependencies():
             print(f"  {GREEN}✅{RESET} {package_name}")
         except ImportError:
             print(f"  {YELLOW}⚠️{RESET}  {package_name} 未安装（MVP3 输入处理需要）")
-    
+
     return all_ok
 
 
 def check_directories():
     """检查目录结构"""
     print("🔍 检查目录结构...")
-    
+
     required_dirs = [
         "scripts/memory",
         "scripts/web",
@@ -101,7 +103,7 @@ def check_directories():
         "examples",
         "tools",
     ]
-    
+
     all_ok = True
     for dir_path in required_dirs:
         path = Path(dir_path)
@@ -110,21 +112,21 @@ def check_directories():
         else:
             print(f"  {RED}❌{RESET} {dir_path} 不存在")
             all_ok = False
-    
+
     return all_ok
 
 
 def check_config_files():
     """检查配置文件"""
     print("🔍 检查配置文件...")
-    
+
     required_files = [
         "requirements.txt",
         ".gitignore",
         "pytest.ini",
         "docker/docker-compose.yml",
     ]
-    
+
     all_ok = True
     for file_path in required_files:
         path = Path(file_path)
@@ -133,20 +135,17 @@ def check_config_files():
         else:
             print(f"  {YELLOW}⚠️{RESET}  {file_path} 不存在")
             all_ok = False
-    
+
     return all_ok
 
 
 def check_docker():
     """检查 Docker"""
     print("🔍 检查 Docker...")
-    
+
     try:
         result = subprocess.run(
-            ["docker", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=5
+            ["docker", "--version"], capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0:
             version = result.stdout.strip()
@@ -166,7 +165,7 @@ def check_docker():
 def check_atelierr_modules():
     """检查 Atelierr 模块"""
     print("🔍 检查 Atelierr 模块...")
-    
+
     modules = [
         ("scripts.memory.core", "记忆模块核心"),
         ("scripts.memory.confidence", "Confidence 计算"),
@@ -179,7 +178,7 @@ def check_atelierr_modules():
         ("scripts.cli.memory_cli", "Memory CLI"),
         ("scripts.utils.config", "配置工具"),
     ]
-    
+
     all_ok = True
     for module_path, description in modules:
         try:
@@ -193,7 +192,7 @@ def check_atelierr_modules():
             print(f"  {YELLOW}⚠️{RESET}  {description} - 有语法错误")
             print(f"     {str(e)}")
             all_ok = False
-    
+
     return all_ok
 
 
@@ -209,11 +208,15 @@ def check_flatnotes():
         if status == 200:
             print(f"  {GREEN}✅{RESET} http://localhost:8080 可访问 (HTTP {status})")
             return True
-        print(f"  {YELLOW}⚠️{RESET}  http://localhost:8080 返回 HTTP {status}（非 200）")
+        print(
+            f"  {YELLOW}⚠️{RESET}  http://localhost:8080 返回 HTTP {status}（非 200）"
+        )
         return True
     except Exception as exc:
-        print(f"  {YELLOW}⚠️{RESET}  http://localhost:8080 不可达（可选，Web 界面未启动）")
-        print(f"     提示: cd docker && docker compose up -d")
+        print(
+            f"  {YELLOW}⚠️{RESET}  http://localhost:8080 不可达（可选，Web 界面未启动）"
+        )
+        print("     提示: cd docker && docker compose up -d")
         print(f"     原因: {exc}")
         return True
 
@@ -244,22 +247,22 @@ def check_memorytree():
 def generate_report(checks: dict):
     """生成检查报告"""
     print_section("检查报告")
-    
+
     total = len(checks)
     passed = sum(1 for v in checks.values() if v)
     failed = total - passed
-    
+
     print("检查结果:")
     for check_name, status in checks.items():
         if status:
             print(f"  {GREEN}✅{RESET} {check_name}")
         else:
             print(f"  {RED}❌{RESET} {check_name}")
-    
+
     print(f"\n总计: {total} 项检查")
     print(f"通过: {passed} 项")
     print(f"失败: {failed} 项")
-    
+
     if passed == total:
         print(f"\n{GREEN}✅ 安装验证完全通过！系统准备就绪。{RESET}")
         return True
@@ -275,7 +278,7 @@ def generate_report(checks: dict):
 def main():
     """运行所有检查"""
     print_section("Atelierr 安装验证")
-    
+
     # 运行所有检查
     checks = {
         "Python 版本": check_python_version(),
@@ -287,10 +290,10 @@ def main():
         "Atelierr 模块": check_atelierr_modules(),
         "MemoryTree": check_memorytree(),
     }
-    
+
     # 生成报告
     success = generate_report(checks)
-    
+
     # 返回状态码
     return 0 if success else 1
 

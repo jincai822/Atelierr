@@ -6,17 +6,37 @@
     python tools/init_project.py
 """
 
-import os
 from pathlib import Path
 
 # 项目目录结构
 STRUCTURE = {
     "scripts": {
-        "memory": ["__init__.py", "core.py", "confidence.py", "decay.py", "search.py", "watcher.py", "scheduler.py"],
+        "memory": [
+            "__init__.py",
+            "core.py",
+            "confidence.py",
+            "decay.py",
+            "search.py",
+            "watcher.py",
+            "scheduler.py",
+        ],
         "web": ["__init__.py", "integration.py"],
-        "processors": ["base.py", "image.py", "video.py", "pdf.py", "audio.py", "wechat.py"],
+        "processors": [
+            "base.py",
+            "image.py",
+            "video.py",
+            "pdf.py",
+            "audio.py",
+            "wechat.py",
+        ],
         "cli": ["__init__.py", "memory_cli.py", "process_cli.py", "batch_cli.py"],
-        "utils": ["__init__.py", "file_utils.py", "text_utils.py", "date_utils.py", "config.py"],
+        "utils": [
+            "__init__.py",
+            "file_utils.py",
+            "text_utils.py",
+            "date_utils.py",
+            "config.py",
+        ],
     },
     "config": [
         "memory.yaml.example",
@@ -30,8 +50,18 @@ STRUCTURE = {
     ],
     "tests": {
         "unit": {
-            "test_memory": ["__init__.py", "test_confidence.py", "test_decay.py", "test_search.py"],
-            "test_processors": ["__init__.py", "test_image.py", "test_video.py", "test_pdf.py"],
+            "test_memory": [
+                "__init__.py",
+                "test_confidence.py",
+                "test_decay.py",
+                "test_search.py",
+            ],
+            "test_processors": [
+                "__init__.py",
+                "test_image.py",
+                "test_video.py",
+                "test_pdf.py",
+            ],
             "test_utils": ["__init__.py", "test_config.py"],
         },
         "integration": ["__init__.py", "test_memory_web.py", "test_end_to_end.py"],
@@ -86,7 +116,7 @@ def process_structure(base_path: Path, structure, indent: int = 0):
 def create_root_files():
     """创建根目录必要文件"""
     print("\n📝 创建根目录文件...")
-    
+
     # requirements.txt
     requirements = """# Atelierr 依赖包
 # 核心依赖（必需）
@@ -120,7 +150,7 @@ flake8>=6.0.0
 mypy>=1.0.0
 """
     create_file(Path("requirements.txt"), requirements)
-    
+
     # .gitignore
     gitignore = """# Python
 __pycache__/
@@ -180,14 +210,14 @@ logs/
 Thumbs.db
 """
     create_file(Path(".gitignore"), gitignore)
-    
+
     # pytest.ini
     pytest_ini = """[pytest]
 testpaths = tests
 python_files = test_*.py
 python_classes = Test*
 python_functions = test_*
-addopts = 
+addopts =
     -v
     --strict-markers
     --cov=scripts
@@ -200,16 +230,16 @@ addopts =
 def main():
     """主函数"""
     print("🚀 开始初始化 Atelierr 项目结构...\n")
-    
+
     base_path = Path(".")
-    
+
     # 创建目录结构
     print("📁 创建目录结构...")
     process_structure(base_path, STRUCTURE)
-    
+
     # 创建根目录文件
     create_root_files()
-    
+
     # 总结
     print("\n" + "=" * 60)
     print("✅ 项目结构初始化完成！")

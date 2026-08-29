@@ -3,18 +3,22 @@
 归一化（一次性补写 frontmatter）后用 os.utime 还原 mtime，避免污染
 衰减的 modified 信号。机器绝不删除笔记文件。
 """
+
 from __future__ import annotations
 
 import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import frontmatter
 
 from scripts.memory.core import generate_id
 from scripts.utils.date_utils import local_timezone
+
+if TYPE_CHECKING:
+    from scripts.memory.core import MemoryTree
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +38,7 @@ class MemoryWatcher:
         source: 归一化时写入 frontmatter 的默认来源（默认 "web"）。
     """
 
-    def __init__(self, memory_tree: "MemoryTree", source: str = "web") -> None:  # noqa: F821
+    def __init__(self, memory_tree: "MemoryTree", source: str = "web") -> None:
         """初始化。
 
         Args:
@@ -43,7 +47,9 @@ class MemoryWatcher:
         """
         self.tree = memory_tree
         self.source = source
-        self._observer: Optional[object] = None
+        # watchdog 的 Observer 是平台相关别名（Linux 上 = InotifyObserver），
+        # mypy 将其视为变量而非类型，故注解用 Any
+        self._observer: Optional[Any] = None
 
     # ------------------------------------------------------------------
     # 对齐逻辑
@@ -84,7 +90,7 @@ class MemoryWatcher:
         self.tree._save_index()
         return result
 
-    def _process_new_file(self, path: Path, index: Dict, result: Dict) -> None:
+    def _process_new_file(self, path: Path, _index: Dict, result: Dict) -> None:
         """处理单个未登记文件：归一化或仅登记。"""
         try:
             mtime_ns = path.stat().st_mtime_ns

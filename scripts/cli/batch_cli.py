@@ -9,6 +9,7 @@ batch.workers=4），每个成功文件写出 ``{stem}.md`` 到输出目录；�
     python -m scripts.cli.batch_cli --input-dir ~/Downloads --output-dir ~/Notes
     python -m scripts.cli.batch_cli --input-dir in/ --output-dir out/ --workers 8
 """
+
 from __future__ import annotations
 
 import sys
@@ -88,13 +89,9 @@ class BatchCLI:
             default=None,
             help="并行数（缺省取配置 batch.workers，默认 4）",
         )
-        def cli(
-            input_dir: Path, output_dir: Path, workers: Optional[int]
-        ) -> None:
+        def cli(input_dir: Path, output_dir: Path, workers: Optional[int]) -> None:
             """批量处理输入目录中的受支持文件。"""
-            success, failed, errors = self.run_batch(
-                input_dir, output_dir, workers
-            )
+            success, failed, errors = self.run_batch(input_dir, output_dir, workers)
             if errors:
                 raise click.ClickException(
                     f"{failed} 个文件处理失败（成功 {success} / 共 "
@@ -136,9 +133,7 @@ class BatchCLI:
             click.echo("输入目录中没有受支持的文件")
             return 0, 0, []
 
-        worker_count = workers or int(
-            load_processor_config("batch").get("workers", 4)
-        )
+        worker_count = workers or int(load_processor_config("batch").get("workers", 4))
         worker_count = max(1, worker_count)
 
         # 每个线程持有自己的处理器实例（避免 PaddleOCR 跨线程共享）
@@ -168,9 +163,7 @@ class BatchCLI:
         errors: List[Tuple[str, str]] = []
         success = 0
         with ThreadPoolExecutor(max_workers=worker_count) as pool:
-            futures = {
-                pool.submit(_handle, path): path for path in tasks
-            }
+            futures = {pool.submit(_handle, path): path for path in tasks}
             for future in tqdm(
                 as_completed(futures),
                 total=len(tasks),
@@ -190,9 +183,7 @@ class BatchCLI:
                 click.echo(f"  ✗ {path}: {error}")
             if len(errors) > 20:
                 click.echo(f"  ... 其余 {len(errors) - 20} 个省略")
-        click.echo(
-            f"完成: 成功 {success} / 失败 {len(errors)} / 共 {len(tasks)}"
-        )
+        click.echo(f"完成: 成功 {success} / 失败 {len(errors)} / 共 {len(tasks)}")
         return success, len(errors), errors
 
     def main(self, args: Optional[List[str]] = None) -> int:

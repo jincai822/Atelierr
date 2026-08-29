@@ -3,6 +3,7 @@
 Whisper 转写用 monkeypatch 注入假模型（dict 形态结果），不下载真实
 模型；假模型与 test_video.py 同构，输出结构断言一致。
 """
+
 from __future__ import annotations
 
 import pytest

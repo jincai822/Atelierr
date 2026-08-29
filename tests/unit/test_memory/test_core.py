@@ -1,4 +1,5 @@
 """MemoryTree 单元测试（验收 1.1 全部 5 条 + 扩展）。"""
+
 from __future__ import annotations
 
 import os
@@ -55,7 +56,9 @@ def test_generate_id_shape():
 
 
 def test_create_note_with_tags_and_source(memory_tree):
-    note = memory_tree.create_note("tagged.md", "内容", source="obsidian", tags=["编程", "AI"])
+    note = memory_tree.create_note(
+        "tagged.md", "内容", source="obsidian", tags=["编程", "AI"]
+    )
     post = frontmatter.loads(note.read_text(encoding="utf-8"))
     assert post.metadata["source"] == "obsidian"
     assert post.metadata["tags"] == ["编程", "AI"]

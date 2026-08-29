@@ -1,4 +1,5 @@
 """DecayManager 单元测试（验收 1.3 全部 5 条 + 扩展）。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -56,9 +57,18 @@ def test_pending_delete_is_mark_only(memory_tree, make_note):
 
 def test_backlinks_boost_confidence(memory_tree, make_note):
     """反链：B 引用 [[A-stem]] → A 的 references>=1 且同龄时比无引用者 conf 高。"""
-    target = make_note(memory_tree, filename="asyncio.md", content="关于 asyncio 的笔记", idle_days=50)
-    other = make_note(memory_tree, filename="other.md", content="普通笔记", idle_days=50)
-    make_note(memory_tree, filename="reader.md", content="引用了 [[asyncio]] 的笔记", idle_days=0)
+    target = make_note(
+        memory_tree, filename="asyncio.md", content="关于 asyncio 的笔记", idle_days=50
+    )
+    other = make_note(
+        memory_tree, filename="other.md", content="普通笔记", idle_days=50
+    )
+    make_note(
+        memory_tree,
+        filename="reader.md",
+        content="引用了 [[asyncio]] 的笔记",
+        idle_days=0,
+    )
 
     DecayManager(memory_tree).run()
 
@@ -78,7 +88,9 @@ def test_backlink_alias_and_heading(memory_tree, make_note):
 
 def test_backlink_by_title(memory_tree, make_note):
     """按 frontmatter title 精确匹配。"""
-    target = make_note(memory_tree, filename="titled.md", content="---\ntitle: 中文标题\n---\n正文")
+    target = make_note(
+        memory_tree, filename="titled.md", content="---\ntitle: 中文标题\n---\n正文"
+    )
     make_note(memory_tree, filename="linker.md", content="引用 [[中文标题]]")
     DecayManager(memory_tree).run()
     assert memory_tree._entry(target)["references"] == 1

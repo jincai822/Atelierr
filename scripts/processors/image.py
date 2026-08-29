@@ -1,10 +1,14 @@
-"""图片 OCR 处理器（PaddleOCR）。
+"""图片 OCR 处理器（PaddleOCR / RapidOCR 双引擎）。
 
 支持 JPG/JPEG/PNG/WEBP；生成含原始图片链接与识别文字的 Markdown。
-PaddleOCR 实例在构造期懒加载（模型下载/初始化发生在构造时），
+引擎实例在构造期懒加载（模型下载/初始化发生在构造时），
 ``process()`` 的计时只含单张推理。配置中的 ``timeout_s`` 是文档化的
-验收性能目标（单张 < 5s，由性能测试验证），不强制中断推理。
+验收性能目标（截图类 < 5s，由性能测试验证），不强制中断推理。
+
+引擎通过 ``config["engine"]`` 选择：``paddleocr``（默认）或
+``rapidocr``（onnxruntime，体积小、整页扫描更快）。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,15 +21,16 @@ SUPPORTED_EXTENSIONS: Tuple[str, ...] = (".jpg", ".jpeg", ".png", ".webp")
 
 
 def parse_ocr_output(output: Any) -> Tuple[List[str], List[float]]:
-    """解析 PaddleOCR 结果，兼容 2.x 与 3.x 两种结构。
+    """解析 OCR 结果，兼容 PaddleOCR 2.x/3.x 与 RapidOCR 三种结构。
 
-    2.x: ``ocr.ocr(img, cls=True)`` 返回
+    paddleocr 2.x: ``ocr.ocr(img, cls=True)`` 返回
         ``[[box, (text, confidence)], ...]``（外层再包一层列表）；
-    3.x: ``predict(img)`` 返回含 ``rec_texts`` / ``rec_scores``
-        属性的结果对象列表（也可能直接是 dict）。
+    paddleocr 3.x: ``predict(img)`` 返回含 ``rec_texts`` / ``rec_scores``
+        属性的结果对象列表（也可能直接是 dict）；
+    rapidocr: ``engine(img)`` 返回 ``([[box, text, score], ...], elapse)``。
 
     Args:
-        output: PaddleOCR 原始输出（可能为 None）。
+        output: OCR 引擎原始输出（可能为 None）。
 
     Returns:
         Tuple[List[str], List[float]]: 识别文本列表与对应置信度列表。
@@ -34,31 +39,63 @@ def parse_ocr_output(output: Any) -> Tuple[List[str], List[float]]:
     scores: List[float] = []
     if output is None:
         return texts, scores
+    # rapidocr 形态：([lines], elapse) 二元组，取第一项
+    if (
+        isinstance(output, tuple)
+        and len(output) == 2
+        and isinstance(output[0], (list, type(None)))
+    ):
+        output = output[0]
+        if output is None:
+            return texts, scores
     items = output if isinstance(output, (list, tuple)) else [output]
     for item in items:
         if hasattr(item, "rec_texts"):
             texts.extend(str(t) for t in (item.rec_texts or []))
-            scores.extend(
-                float(s) for s in (getattr(item, "rec_scores", None) or [])
-            )
+            scores.extend(float(s) for s in (getattr(item, "rec_scores", None) or []))
         elif isinstance(item, dict):
             texts.extend(str(t) for t in item.get("rec_texts") or [])
-            scores.extend(
-                float(s) for s in item.get("rec_scores") or []
-            )
+            scores.extend(float(s) for s in item.get("rec_scores") or [])
         elif isinstance(item, (list, tuple)):
-            for line in item:
-                if not isinstance(line, (list, tuple)) or len(line) != 2:
+            # item 可能是单行，也可能是一页（行的列表）
+            lines = [item] if _is_ocr_line(item) else item
+            for line in lines:
+                if not isinstance(line, (list, tuple)):
                     continue
-                second = line[1]
-                if isinstance(second, (list, tuple)) and len(second) == 2:
-                    texts.append(str(second[0]))
-                    scores.append(float(second[1]))
+                # rapidocr 行：[box, text, score]
+                if len(line) == 3 and isinstance(line[1], str):
+                    texts.append(line[1])
+                    scores.append(float(line[2]))
+                # paddleocr 2.x 行：[box, (text, confidence)]
+                elif (
+                    len(line) == 2
+                    and isinstance(line[1], (list, tuple))
+                    and len(line[1]) == 2
+                    and isinstance(line[1][0], str)
+                ):
+                    texts.append(line[1][0])
+                    scores.append(float(line[1][1]))
     return texts, scores
 
 
+def _is_ocr_line(item: Any) -> bool:
+    """判断 item 是否是一行 OCR 结果（而非一页/多行列表）。"""
+    if not isinstance(item, (list, tuple)):
+        return False
+    # rapidocr 行：[box, text, score]
+    if len(item) == 3 and isinstance(item[1], str):
+        return True
+    # paddleocr 2.x 行：[box, (text, confidence)]
+    return (
+        len(item) == 2
+        and isinstance(item[1], (list, tuple))
+        and len(item[1]) == 2
+        and isinstance(item[1][0], str)
+    )
+
+
 class ImageProcessor(BaseProcessor):
-    """基于 PaddleOCR 的图片文字识别处理器。
+    """图片文字识别处理器（PaddleOCR / RapidOCR 双引擎）。
 
     Examples:
         >>> result = ImageProcessor().process("screenshot.jpg")
@@ -70,12 +107,19 @@ class ImageProcessor(BaseProcessor):
     supported_extensions = SUPPORTED_EXTENSIONS
 
     def __init__(self, config: Optional[dict] = None) -> None:
-        """初始化（构造期加载 PaddleOCR，模型下载发生在此处）。
+        """初始化（构造期加载引擎，模型下载发生在此处）。
 
         Args:
             config: processors.image 配置节；缺省按配置文件加载。
+                ``engine`` 支持 ``paddleocr``（默认）与 ``rapidocr``。
+
+        Raises:
+            ValueError: 未知的 engine 取值。
         """
         super().__init__(config)
+        self.engine = str(self.config.get("engine", "paddleocr")).lower()
+        if self.engine not in ("paddleocr", "rapidocr"):
+            raise ValueError(f"未知 OCR 引擎: {self.engine}")
         self.lang = str(self.config.get("lang", "ch"))
         self.use_gpu = bool(self.config.get("use_gpu", False))
         self.timeout_s = float(self.config.get("timeout_s", 5.0))
@@ -83,11 +127,18 @@ class ImageProcessor(BaseProcessor):
         self._load_engine()
 
     def _load_engine(self) -> None:
-        """构造期懒加载 PaddleOCR 实例（按安装版本适配参数）。
+        """构造期懒加载 OCR 引擎实例（按引擎/版本适配参数）。
 
+        rapidocr: onnxruntime 推理，无需 paddlepaddle；
         paddleocr 3.x：后端用 ``device`` 指定，无 ``use_gpu``/``show_log``；
         paddleocr 2.x：接受 ``use_gpu``/``show_log``。
         """
+        if self.engine == "rapidocr":
+            from rapidocr_onnxruntime import RapidOCR
+
+            self._ocr = RapidOCR()
+            return
+
         from paddleocr import PaddleOCR, __version__
 
         if __version__.split(".")[0] == "3":
@@ -95,13 +146,9 @@ class ImageProcessor(BaseProcessor):
             # paddlepaddle 3.x 的 MKLDNN 推理路径存在已知崩溃
             # （ConvertPirAttribute2RuntimeAttribute 未实现），关闭后走
             # 普通 CPU 推理（性能验收 < 5s 仍满足）
-            self._ocr = PaddleOCR(
-                lang=self.lang, device=device, enable_mkldnn=False
-            )
+            self._ocr = PaddleOCR(lang=self.lang, device=device, enable_mkldnn=False)
         else:
-            self._ocr = PaddleOCR(
-                lang=self.lang, use_gpu=self.use_gpu, show_log=False
-            )
+            self._ocr = PaddleOCR(lang=self.lang, use_gpu=self.use_gpu, show_log=False)
 
     def process(self, input_path: Union[str, Path]) -> ProcessResult:
         """对单张图片执行 OCR。
@@ -126,9 +173,7 @@ class ImageProcessor(BaseProcessor):
             return self._fail(f"OCR 失败: {exc}")
 
         text = "\n".join(texts)
-        confidence = (
-            sum(scores) / len(scores) if scores else 0.0
-        )
+        confidence = sum(scores) / len(scores) if scores else 0.0
         markdown = (
             f"# {path.stem}\n\n"
             f"![原始图片]({path})\n\n"
@@ -136,7 +181,7 @@ class ImageProcessor(BaseProcessor):
             f"{text}"
         )
         metadata = {
-            "engine": "paddleocr",
+            "engine": self.engine,
             "lang": self.lang,
             "lines": len(texts),
             "timeout_s": self.timeout_s,
@@ -150,7 +195,9 @@ class ImageProcessor(BaseProcessor):
         )
 
     def _run_ocr(self, image_path: str) -> Any:
-        """调用 PaddleOCR（按安装版本选择 predict 或 ocr 接口）。"""
+        """调用 OCR 引擎（rapidocr 直接可调用；paddleocr 按版本选择接口）。"""
+        if self.engine == "rapidocr":
+            return self._ocr(image_path)
         if hasattr(self._ocr, "predict"):
             return self._ocr.predict(image_path)
         return self._ocr.ocr(image_path, cls=True)

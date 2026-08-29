@@ -8,6 +8,7 @@
 
 无 --output 时 Markdown 打印到 stdout；处理失败 exit code 1 并打印错误。
 """
+
 from __future__ import annotations
 
 import sys
@@ -59,9 +60,9 @@ class ProcessCLI:
 
         for name, processor_cls in PROCESSORS.items():
 
-            @cli.command(name=name)
+            @cli.command(name=name)  # pylint: disable=cell-var-from-loop
             @click.argument(
-                "input",
+                "input_path",
                 type=click.Path(dir_okay=False, path_type=Path),
             )
             @click.option(
@@ -78,14 +79,14 @@ class ProcessCLI:
                 help="转写模型（仅 video/audio 生效，默认 base）",
             )
             def command(
-                input: Path,
+                input_path: Path,
                 output: Optional[Path],
                 model: Optional[str],
                 _name: str = name,
                 _processor_cls: Type[BaseProcessor] = processor_cls,
             ) -> None:
                 """处理单个输入文件。"""
-                self._run(_name, _processor_cls, input, output, model)
+                self._run(_name, _processor_cls, input_path, output, model)
 
         return cli
 
@@ -93,7 +94,7 @@ class ProcessCLI:
         self,
         name: str,
         processor_cls: Type[BaseProcessor],
-        input: Path,
+        input_path: Path,
         output: Optional[Path],
         model: Optional[str],
     ) -> None:
@@ -102,11 +103,9 @@ class ProcessCLI:
         if model and name in MODEL_AWARE:
             config = dict(config or {})
             config["model"] = model
-        result = processor_cls(config).process(input)
+        result = processor_cls(config).process(input_path)
         if not result.success:
-            raise click.ClickException(
-                result.error or f"{name} 处理失败: {input}"
-            )
+            raise click.ClickException(result.error or f"{name} 处理失败: {input_path}")
         if output is None:
             click.echo(result.markdown)
         else:

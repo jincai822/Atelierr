@@ -3,6 +3,7 @@
 图片 OCR → MemoryTree 入库 → 按 OCR 文本搜索命中 → 访问后重算
 confidence ≈ 1.0。验证"处理器输出直接进入记忆系统"的完整链路。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,6 +32,6 @@ def test_ocr_into_memory_and_search(memory_tree):
     # on_note_accessed 后重算 confidence ≈ 1.0
     memory_tree.on_note_accessed(note)
     info = memory_tree.note_info(note)
-    assert info["confidence"] >= 0.99, (
-        f"访问后 confidence 应为 ≈1.0，得到 {info['confidence']}"
-    )
+    assert (
+        info["confidence"] >= 0.99
+    ), f"访问后 confidence 应为 ≈1.0，得到 {info['confidence']}"

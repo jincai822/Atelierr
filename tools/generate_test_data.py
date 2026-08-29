@@ -6,6 +6,7 @@
 用法:
     python tools/generate_test_data.py [--fixtures-dir DIR]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -91,7 +92,8 @@ def _make_text_pdf(path: Path, pages: int = 10) -> None:
         page = document.new_page()
         y = 100
         page.insert_text(
-            (72, y), f"Atelierr PDF test document - page {page_no + 1}",
+            (72, y),
+            f"Atelierr PDF test document - page {page_no + 1}",
             fontsize=20,
         )
         y += 40
@@ -102,8 +104,9 @@ def _make_text_pdf(path: Path, pages: int = 10) -> None:
                 fontsize=12,
             )
             y += 24
-    document.set_toc([[1, f"Page {page_no + 1}", page_no + 1]
-                      for page_no in range(pages)])
+    document.set_toc(
+        [[1, f"Page {page_no + 1}", page_no + 1] for page_no in range(pages)]
+    )
     document.save(str(path))
     document.close()
 
@@ -131,8 +134,9 @@ def _make_scanned_pdf(path: Path, pages: int = 2) -> None:
 
 def _make_pdf_with_images(path: Path, pages: int = 3) -> None:
     """生成文字 + 每页一张内嵌图片的 PDF。"""
-    import fitz
     from io import BytesIO
+
+    import fitz
 
     document = fitz.open()
     for page_no in range(pages):
@@ -176,11 +180,23 @@ def _make_video_mp4(path: Path) -> None:
     """用 ffmpeg 生成 2 秒 testsrc 视频 + sine 音轨。"""
     ffmpeg = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
     command = [
-        ffmpeg, "-y",
-        "-f", "lavfi", "-i", "testsrc=duration=2:size=640x480:rate=25",
-        "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-shortest",
+        ffmpeg,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=duration=2:size=640x480:rate=25",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=440:duration=2",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-shortest",
         str(path),
     ]
     proc = subprocess.run(command, capture_output=True, text=True)
@@ -235,7 +251,11 @@ def main(argv=None) -> int:
     )
     args = parser.parse_args(argv)
 
-    existing = set(Path(args.fixtures_dir).glob("*")) if Path(args.fixtures_dir).is_dir() else set()
+    existing = (
+        set(Path(args.fixtures_dir).glob("*"))
+        if Path(args.fixtures_dir).is_dir()
+        else set()
+    )
     created = generate_all(args.fixtures_dir)
     for name, path in created.items():
         status = "已存在" if path in existing else "已生成"

@@ -1,4 +1,5 @@
 """Web 集成测试共享 fixture。"""
+
 from __future__ import annotations
 
 from pathlib import Path

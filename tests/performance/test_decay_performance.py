@@ -1,4 +1,5 @@
 """衰减性能测试：1000 条笔记全量衰减 < 5s（架构性能目标）。"""
+
 from __future__ import annotations
 
 import time

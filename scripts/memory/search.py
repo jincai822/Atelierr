@@ -1,22 +1,29 @@
 """记忆搜索：全文/标签/日期/层级过滤，按 confidence 降序。
 
-性能关键路径：query 过滤用原始文本大小写不敏感子串匹配（不解析
-frontmatter）；confidence 用 live 重算（stat mtime + sidecar）；
-只对前 limit 个结果物化 Memory 对象。增量索引按 (mtime_ns, size)
-缓存原始文本，物化结果按 (path, mtime_ns) 缓存。
+性能关键路径：os.scandir 枚举（DirEntry.stat 无 Path 构造开销）；
+query 过滤用缓存的小写副本做子串匹配（不解析 frontmatter）；
+confidence 用 live 重算（epoch 浮点快速路径）；只对前 limit 个
+结果物化 Memory 对象。增量索引按 (mtime_ns, size) 缓存原始文本，
+物化结果按 (文件名, mtime_ns, size) 缓存。
 """
+
 from __future__ import annotations
 
+import os
+import time
 from dataclasses import dataclass, field
 from datetime import date as _date
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import frontmatter
 
 from scripts.memory.confidence import ConfidenceCalculator
-from scripts.utils.date_utils import local_timezone, parse_date
+from scripts.utils.date_utils import parse_date
+
+if TYPE_CHECKING:
+    from scripts.memory.core import MemoryTree
 
 
 @dataclass
@@ -47,7 +54,7 @@ class Memory:
 class MemorySearcher:
     """搜索器：增量读缓存 + live confidence 重算 + 惰性物化。"""
 
-    def __init__(self, memory_tree: "MemoryTree") -> None:  # noqa: F821
+    def __init__(self, memory_tree: "MemoryTree") -> None:
         """初始化。
 
         Args:
@@ -60,43 +67,42 @@ class MemorySearcher:
             ref_coefficient=settings.ref_coefficient,
             ref_cap=settings.ref_cap,
         )
-        #: path -> (mtime_ns, size, raw_text)
-        self._raw_cache: Dict[Path, Tuple[int, int, str]] = {}
-        #: path -> (mtime_ns, size, 静态物化字段 dict)
-        self._object_cache: Dict[Path, Tuple[int, int, Dict[str, Any]]] = {}
-        #: 本地时区（避免热路径反复取当前时区）
-        self._tz = local_timezone()
+        #: 文件名 -> (mtime_ns, size, raw_text, raw_text_lower)
+        self._raw_cache: Dict[str, Tuple[int, int, str, str]] = {}
+        #: 文件名 -> (mtime_ns, size, 静态物化字段 dict)
+        self._object_cache: Dict[str, Tuple[int, int, Dict[str, Any]]] = {}
 
     # ------------------------------------------------------------------
     # 内部工具
     # ------------------------------------------------------------------
 
-    def _candidate_files(self) -> List[Path]:
-        """列出候选笔记文件，并清理已消失文件的缓存。
+    def _scan_candidates(self) -> Dict[str, Any]:
+        """os.scandir 枚举候选 .md 文件：返回 文件名 -> stat 结果。
 
-        缓存只按当前 glob 结果查询，已消失文件的条目不会被访问；
-        仅在文件数与缓存数不一致时才做一次清理，避免每次全量扫描。
+        DirEntry.stat() 比 pathlib 轻量（避免逐文件构造 Path 对象）。
+        已消失文件的缓存条目在此处清理（仅当数量不一致时扫描缓存）。
         """
-        files = [
-            path
-            for path in sorted(self.tree.notes_dir.glob("*.md"))
-            if not path.name.startswith(".")
-        ]
-        if len(files) != len(self._raw_cache):
-            current = set(files)
-            for path in list(self._raw_cache):
-                if path not in current:
-                    self._raw_cache.pop(path, None)
-                    self._object_cache.pop(path, None)
-        return files
-
-    @staticmethod
-    def _safe_stat(path: Path):
-        """stat；文件消失返回 None。"""
+        found: Dict[str, Any] = {}
         try:
-            return path.stat()
-        except OSError:
-            return None
+            with os.scandir(self.tree.notes_dir) as entries:
+                for dent in entries:
+                    name = dent.name
+                    if name.startswith(".") or not name.endswith(".md"):
+                        continue
+                    try:
+                        if not dent.is_file():
+                            continue
+                        found[name] = dent.stat()
+                    except OSError:  # 枚举期间文件被删
+                        continue
+        except OSError:  # 笔记目录不可读
+            return {}
+        if len(found) != len(self._raw_cache):
+            for name in list(self._raw_cache):
+                if name not in found:
+                    self._raw_cache.pop(name, None)
+                    self._object_cache.pop(name, None)
+        return found
 
     def _entry_map(self) -> Dict[str, dict]:
         """按文件名建立 sidecar 条目查询表（每次搜索构建一次，O(n)）。
@@ -104,23 +110,27 @@ class MemorySearcher:
         Returns:
             Dict[str, dict]: 文件名 → sidecar 条目。
         """
-        return {
-            entry.get("path"): entry
-            for entry in self.tree._load_index().values()
-            if entry.get("path")
-        }
+        result: Dict[str, dict] = {}
+        for entry in self.tree._load_index().values():
+            name = entry.get("path")
+            if name:
+                result[str(name)] = entry
+        return result
 
-    def _raw_text(self, path: Path, stat) -> Optional[str]:
-        """按 (mtime_ns, size) 增量读取原始文本；mtime 未变不重读。"""
+    def _raw_text(self, name: str, stat) -> Optional[str]:
+        """按 (mtime_ns, size) 增量读取原始文本；mtime 未变不重读。
+
+        缓存同时存原文与小写副本，热路径子串匹配不再重复 lower()。
+        """
         key = (stat.st_mtime_ns, stat.st_size)
-        cached = self._raw_cache.get(path)
+        cached = self._raw_cache.get(name)
         if cached is not None and cached[0] == key[0] and cached[1] == key[1]:
             return cached[2]
         try:
-            text = path.read_text(encoding="utf-8")
+            text = (self.tree.notes_dir / name).read_text(encoding="utf-8")
         except OSError:
             return None
-        self._raw_cache[path] = (key[0], key[1], text)
+        self._raw_cache[name] = (key[0], key[1], text, text.lower())
         return text
 
     def _parse_post(self, text: str) -> Optional[Any]:
@@ -161,42 +171,46 @@ class MemorySearcher:
 
     def _live_confidence(
         self,
-        path: Path,
         entry: Optional[dict],
         references: int,
         stat,
     ) -> float:
-        """live 重算 confidence（复用候选的 stat，纯浮点运算）。"""
-        modified = datetime.fromtimestamp(stat.st_mtime, tz=self._tz)
-        accessed = None
+        """live 重算 confidence（epoch 浮点快速路径，纯浮点运算）。
+
+        idle_days 语义与 ConfidenceCalculator.calculate 完全一致：
+        ``floor((now - max(mtime, accessed)) / 86400)``，负值经
+        from_idle_days 钳 0；只是不逐文件构造 datetime（热路径优化）。
+        """
+        accessed_ts = 0.0
         if entry is not None and entry.get("last_accessed"):
             try:
-                accessed = parse_date(entry["last_accessed"])
+                accessed_ts = parse_date(entry["last_accessed"]).timestamp()
             except ValueError:
-                accessed = None
-        return self.calculator.calculate(
-            {"accessed": accessed, "modified": modified, "references": references}
-        )
+                accessed_ts = 0.0
+        last_active = max(stat.st_mtime, accessed_ts)
+        idle_days = int((time.time() - last_active) // 86400)
+        return self.calculator.from_idle_days(idle_days, references)
 
     def _materialize(
         self,
-        path: Path,
+        name: str,
         confidence: float,
         layer: str,
         text: str,
+        stat,
     ) -> Optional[Memory]:
-        """物化 Memory 对象；静态字段按 (path, mtime_ns, size) 缓存。
+        """物化 Memory 对象；静态字段按 (文件名, mtime_ns, size) 缓存。
 
         size 作为次级信号：粗粒度 mtime 的文件系统上，同一秒内的改写
         不会改变 mtime_ns，但仍会改变文件大小，据此让缓存失效。
         """
-        try:
-            stat = path.stat()
-        except OSError:
-            return None
         cache_key = (stat.st_mtime_ns, stat.st_size)
-        cached = self._object_cache.get(path)
-        if cached is not None and cached[0] == cache_key[0] and cached[1] == cache_key[1]:
+        cached = self._object_cache.get(name)
+        if (
+            cached is not None
+            and cached[0] == cache_key[0]
+            and cached[1] == cache_key[1]
+        ):
             static = cached[2]
         else:
             post = self._parse_post(text)
@@ -204,13 +218,18 @@ class MemorySearcher:
                 return None
             created = post.metadata.get("created")
             static = {
-                "title": str(post.metadata.get("title") or path.stem),
+                "title": str(post.metadata.get("title") or Path(name).stem),
                 "content": post.content.strip(),
                 "tags": [str(tag) for tag in (post.metadata.get("tags") or [])],
                 "created": parse_date(created) if created is not None else None,
-                "id": str(post.metadata["id"]) if post.metadata.get("id") is not None else None,
+                "id": (
+                    str(post.metadata["id"])
+                    if post.metadata.get("id") is not None
+                    else None
+                ),
             }
-            self._object_cache[path] = (cache_key[0], cache_key[1], static)
+            self._object_cache[name] = (cache_key[0], cache_key[1], static)
+        path = self.tree.notes_dir / name
         return Memory(path=path, confidence=confidence, layer=layer, **static)
 
     # ------------------------------------------------------------------
@@ -246,25 +265,17 @@ class MemorySearcher:
             return []
         query_lower = query.lower().strip() if query else ""
         entry_map = self._entry_map()
+        scanned = self._scan_candidates()
+        need_frontmatter = bool(tags) or bool(date_from) or bool(date_to)
 
-        texts: Dict[Path, str] = {}
-        stats: Dict[Path, Any] = {}
-        for path in self._candidate_files():
-            stat = self._safe_stat(path)
-            if stat is None:
-                continue
-            text = self._raw_text(path, stat)
+        scored: List[Tuple[float, str, str, str]] = []
+        for name, stat in scanned.items():
+            text = self._raw_text(name, stat)
             if text is None:
                 continue
-            if query_lower and query_lower not in text.lower():
+            if query_lower and query_lower not in self._raw_cache[name][3]:
                 continue
-            texts[path] = text
-            stats[path] = stat
-
-        need_frontmatter = bool(tags) or bool(date_from) or bool(date_to)
-        scored: List[Tuple[float, Path, str, str]] = []
-        for path, text in texts.items():
-            entry = entry_map.get(path.name)
+            entry = entry_map.get(name)
             note_layer = entry["layer"] if entry is not None else "short-term"
             if layer and note_layer != layer:
                 continue
@@ -279,13 +290,16 @@ class MemorySearcher:
                 ):
                     continue
             references = entry.get("references", 0) if entry is not None else 0
-            confidence = self._live_confidence(path, entry, references, stats[path])
-            scored.append((confidence, path, text, note_layer))
+            confidence = self._live_confidence(entry, references, stat)
+            scored.append((confidence, name, text, note_layer))
 
-        scored.sort(key=lambda item: (-item[0], str(item[1])))
+        # 平面目录下文件名排序等价于完整路径排序（同一前缀）
+        scored.sort(key=lambda item: (-item[0], item[1]))
         results: List[Memory] = []
-        for confidence, path, text, note_layer in scored[:limit]:
-            memory = self._materialize(path, confidence, note_layer, text)
+        for confidence, name, text, note_layer in scored[:limit]:
+            memory = self._materialize(
+                name, confidence, note_layer, text, scanned[name]
+            )
             if memory is not None:
                 results.append(memory)
         return results

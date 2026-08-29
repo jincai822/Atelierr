@@ -1,0 +1,37 @@
+[MASTER]
+; Atelierr 应用代码的 pylint 配置（验收：pylint --rcfile=.pylintrc 无错误无警告）
+; 检查范围仅限 Atelierr 应用包（scripts/memory|web|processors|cli|utils 等）；
+; scripts/atelier 框架存量代码由 harness 的 ruff strict-core 门禁管辖
+py-version = 3.10
+
+[BASIC]
+good-names = i,x,e,f,d,_,id,tz
+
+[FORMAT]
+max-line-length = 120
+
+[DESIGN]
+; 项目惯例阈值（click 命令包装 / CLI 参数较多属正常形态）
+max-args = 8
+max-positional-arguments = 8
+max-locals = 25
+max-statements = 70
+max-attributes = 10
+min-public-methods = 1
+
+[MESSAGES CONTROL]
+; 有意的工程决策，逐项注明理由：
+;   import-outside-toplevel: 重依赖（paddleocr/fitz/whisper/rich/watchdog）
+;     刻意惰性导入，让轻量路径不加载重库
+;   broad-exception-caught: 处理器契约——process() 对预期错误不抛异常，
+;     返回 ProcessResult(success=False)；衰减/搜索对损坏文件容错跳过
+;   protected-access: memory 包内部协作（decay/watcher/search/cli 是
+;     MemoryTree 的自有子组件，架构文档的公共 API 面不变）
+;   fixme: scripts/processors/wechat.py 是契约冻结的 backlog 占位标记
+;   duplicate-code: 测试与 CLI 模板代码的相似性可接受
+disable =
+    duplicate-code,
+    import-outside-toplevel,
+    broad-exception-caught,
+    protected-access,
+    fixme

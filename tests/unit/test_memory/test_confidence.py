@@ -1,4 +1,5 @@
 """ConfidenceCalculator 单元测试（验收 1.2 全部 5 条 + 扩展）。"""
+
 from __future__ import annotations
 
 import random

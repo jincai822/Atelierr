@@ -1,4 +1,5 @@
 """性能测试共享 fixture。"""
+
 from __future__ import annotations
 
 import os

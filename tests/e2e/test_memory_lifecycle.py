@@ -1,5 +1,6 @@
 """记忆模块端到端生命周期测试（CLI 全流程：create → show → search →
 stats → decay → review → purge）。"""
+
 from __future__ import annotations
 
 import time
@@ -23,7 +24,11 @@ def test_memory_lifecycle(memory_config, tmp_path):
     state_dir = tmp_path / "state"
 
     # create
-    _invoke(cli, runner, ["create", "hello.md", "--content", "你好世界", "--tags", "测试,笔记"])
+    _invoke(
+        cli,
+        runner,
+        ["create", "hello.md", "--content", "你好世界", "--tags", "测试,笔记"],
+    )
     assert (notes_dir / "hello.md").exists()
 
     # show（含 live confidence / layer / tags）

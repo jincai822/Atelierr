@@ -5,6 +5,7 @@ mtime 保持、创建笔记对 Flatnotes 可见；扩展覆盖外部删除注销
 损坏 frontmatter 跳过、自带 frontmatter 只登记。全部走
 FlatnotesIntegration 门面，不绕过。
 """
+
 from __future__ import annotations
 
 import pytest
@@ -101,9 +102,7 @@ def test_from_config(tmp_path):
     """从 YAML 配置构造门面：tree 指向配置的目录，watcher source=web。"""
     config = tmp_path / "memory.yaml"
     config.write_text(
-        f"memory:\n"
-        f"  root: {tmp_path}/memory\n"
-        f"  state_dir: {tmp_path}/state\n",
+        f"memory:\n" f"  root: {tmp_path}/memory\n" f"  state_dir: {tmp_path}/state\n",
         encoding="utf-8",
     )
 

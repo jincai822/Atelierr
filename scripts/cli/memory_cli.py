@@ -9,6 +9,7 @@
     python -m scripts.cli.memory_cli decay --dry-run
     python -m scripts.cli.memory_cli sync
 """
+
 from __future__ import annotations
 
 import os
@@ -97,10 +98,18 @@ class MemoryCLI:
         )
         @click.option("--tags", default=None, help="逗号分隔的标签列表")
         @click.pass_context
-        def create(ctx: click.Context, filename: str, content: str, source: str, tags: Optional[str]) -> None:
+        def create(
+            ctx: click.Context,
+            filename: str,
+            content: str,
+            source: str,
+            tags: Optional[str],
+        ) -> None:
             """创建新笔记（平面根层 + 一次性 frontmatter + sidecar 登记）。"""
             tree: MemoryTree = ctx.obj
-            path = tree.create_note(filename, content, source=source, tags=_parse_tags(tags))
+            path = tree.create_note(
+                filename, content, source=source, tags=_parse_tags(tags)
+            )
             click.echo(f"已创建: {path}")
 
         @cli.command()
@@ -131,7 +140,9 @@ class MemoryCLI:
             default=None,
             help="逻辑层级过滤",
         )
-        @click.option("--limit", default=10, show_default=True, type=int, help="返回条数上限")
+        @click.option(
+            "--limit", default=10, show_default=True, type=int, help="返回条数上限"
+        )
         @click.pass_context
         def search(
             ctx: click.Context,

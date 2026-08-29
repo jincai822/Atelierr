@@ -2,17 +2,21 @@
 
 只写 sidecar 与报告文件，绝不改动笔记文件（内容与 mtime 均不变）。
 """
+
 from __future__ import annotations
 
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 import frontmatter
 
 from scripts.memory.confidence import ConfidenceCalculator
 from scripts.utils.date_utils import local_timezone, parse_date
+
+if TYPE_CHECKING:
+    from scripts.memory.core import MemoryTree
 
 _WIKILINK_RE = re.compile(r"\[\[([^\[\]]+)\]\]")
 
@@ -31,7 +35,7 @@ class DecayManager:
     分层/待删标记（只写 sidecar）→ 生成报告。支持 dry-run。
     """
 
-    def __init__(self, memory_tree: "MemoryTree") -> None:  # noqa: F821
+    def __init__(self, memory_tree: "MemoryTree") -> None:
         """初始化。
 
         Args:

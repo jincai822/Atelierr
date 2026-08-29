@@ -9,6 +9,7 @@ Whisper 共享辅助函数（``_load_model`` / ``_extract_transcript`` /
 ``_build_transcript_markdown`` 等）集中在本模块，供 audio.py 复用，
 避免为两个处理器新增内部模块。
 """
+
 from __future__ import annotations
 
 import os
@@ -26,8 +27,16 @@ FFMPEG_PATH = "/usr/bin/ffmpeg"
 
 #: 支持的扩展名（大小写不敏感）
 SUPPORTED_EXTENSIONS: Tuple[str, ...] = (
-    ".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".flv",
-    ".wmv", ".mpg", ".mpeg",
+    ".mp4",
+    ".mkv",
+    ".avi",
+    ".mov",
+    ".webm",
+    ".m4v",
+    ".flv",
+    ".wmv",
+    ".mpg",
+    ".mpeg",
 )
 
 #: 模型名 → 实例 的模块级缓存（真实模型只加载一次）
@@ -71,7 +80,7 @@ def _extract_transcript(
     else:
         text = str(getattr(result, "text", "") or "")
         raw_segments = getattr(result, "segments", None) or []
-    segments: List[Dict[str, float]] = []
+    segments: List[Dict[str, Any]] = []
     for segment in raw_segments:
         if isinstance(segment, dict):
             normalized = {
@@ -105,11 +114,7 @@ def _segment_confidence(segments: List[Dict[str, float]]) -> float:
     """
     import math
 
-    logprobs = [
-        float(s["avg_logprob"])
-        for s in segments
-        if "avg_logprob" in s
-    ]
+    logprobs = [float(s["avg_logprob"]) for s in segments if "avg_logprob" in s]
     if not logprobs:
         return 0.0
     return min(max(math.exp(sum(logprobs) / len(logprobs)), 0.0), 1.0)
@@ -128,9 +133,7 @@ def _format_timestamp(seconds: float) -> str:
     return f"{total // 60:02d}:{total % 60:02d}"
 
 
-def _build_transcript_markdown(
-    stem: str, segments: List[Dict[str, float]]
-) -> str:
+def _build_transcript_markdown(stem: str, segments: List[Dict[str, Any]]) -> str:
     """组装转写 Markdown：标题 + 按 segment 的时间戳小节。
 
     Args:
@@ -198,10 +201,11 @@ class VideoProcessor(BaseProcessor):
         except Exception as exc:  # noqa: BLE001 - 转写失败转为失败结果
             return self._fail(f"视频转写失败: {exc}")
         finally:
-            try:
-                os.unlink(wav_path)
-            except OSError:
-                pass
+            if wav_path is not None:
+                try:
+                    os.unlink(wav_path)
+                except OSError:
+                    pass
         markdown = _build_transcript_markdown(path.stem, segments)
         metadata = {
             "engine": "whisper",
@@ -232,14 +236,22 @@ class VideoProcessor(BaseProcessor):
         fd, wav_path = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
         command = [
-            self.ffmpeg, "-y",
-            "-i", video_path,
-            "-vn", "-ac", "1", "-ar", "16000",
-            "-f", "wav", wav_path,
+            self.ffmpeg,
+            "-y",
+            "-i",
+            video_path,
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-f",
+            "wav",
+            wav_path,
         ]
         try:
             proc = subprocess.run(
-                command, capture_output=True, text=True, timeout=300
+                command, capture_output=True, text=True, timeout=300, check=False
             )
         except Exception as exc:  # noqa: BLE001 - 调用异常
             self._unlink(wav_path)

@@ -1,4 +1,5 @@
 """PDF 处理性能测试（验收标准：10 页 < 30s，真实 PyMuPDF）。"""
+
 from __future__ import annotations
 
 import time

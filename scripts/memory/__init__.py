@@ -12,6 +12,7 @@
 - MemoryWatcher（watcher）
 - DecayScheduler（scheduler）
 """
+
 from __future__ import annotations
 
 from scripts.memory.confidence import ConfidenceCalculator

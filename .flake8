@@ -1,0 +1,17 @@
+[flake8]
+# Atelierr 应用代码（架构 v1.2）的 flake8 配置
+# 与 Black 兼容：E203/W503 为 Black 风格冲突项，按惯例忽略
+# line-length 120 与 harness ruff 门禁（F,E4,E7,E9）对齐
+max-line-length = 120
+extend-ignore = E203,W503
+exclude =
+    .venv,
+    .venv-atelierr,
+    .git,
+    __pycache__,
+    scripts/atelier,
+    build,
+    dist
+# scripts/atelier 是 Atelier 框架存量代码，由 harness 的
+# ruff strict-core 门禁管辖（见 scripts/atelier/harness_smoke.py），
+# 不属于 Atelierr 应用代码质量门禁范围

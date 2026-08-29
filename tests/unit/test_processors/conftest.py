@@ -1,4 +1,5 @@
 """输入处理器单元测试共享 fixture。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,9 +9,7 @@ import pytest
 from tools.generate_test_data import generate_all
 
 #: 测试夹具目录（tests/fixtures）
-FIXTURES_DIR = (
-    Path(__file__).resolve().parents[3] / "tests" / "fixtures"
-)
+FIXTURES_DIR = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 
 
 @pytest.fixture(scope="session", autouse=True)
