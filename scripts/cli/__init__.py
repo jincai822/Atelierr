@@ -1,1 +1,1 @@
-"""TODO: Add module docstring"""
+"""Atelierr 命令行工具包。"""
