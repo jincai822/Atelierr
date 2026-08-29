@@ -4,6 +4,12 @@
 **状态**: 🔒 已锁定  
 **日期**: 2026-08-27
 
+> **当前生效契约**：架构 `ARCHITECTURE-LOCKED-V1.md`（**v1.2**：平面存储 +
+> sidecar 索引 + 无状态 confidence）、验收 `../ACCEPTANCE-CRITERIA.md`、
+> 实施 `IMPLEMENTATION-PLAN-PARALLEL.md`。
+> 设计过程的历史文档已移入 `archive/`（见 `archive/README.md` 的过时项清单），
+> 本索引其余内容如与上述契约冲突，以契约为准。
+
 ---
 
 ## 📚 文档导航
@@ -93,7 +99,7 @@
 详细的 8-10 周实施路线图。
 
 ```
-📄 IMPLEMENTATION-PLAN.md (32KB)
+📄 IMPLEMENTATION-PLAN-PARALLEL.md (32KB)
    - 6个阶段，每周任务清单
    - 详细的验收标准
    - 风险识别和应对
@@ -130,7 +136,7 @@
 ### 3. 开始实施
 
 ```
-follow IMPLEMENTATION-PLAN.md:
+follow IMPLEMENTATION-PLAN-PARALLEL.md:
   - Week 1: 记忆模块核心
   - Week 2: 衰减和搜索
   - Week 3: Web 界面
@@ -165,7 +171,7 @@ docs/prd/
 │   └── large-file-examples.md             (20KB, 案例)
 │
 ├── 🚀 实施计划
-│   ├── IMPLEMENTATION-PLAN.md             (32KB, 已锁定)
+│   ├── IMPLEMENTATION-PLAN-PARALLEL.md             (32KB, 已锁定)
 │   └── implementation-timeline.png        (时间线图)
 │
 └── 📖 其他文档
@@ -356,7 +362,7 @@ confidence = f(
 cat docs/prd/ARCHITECTURE-LOCKED-V1.md
 
 # 2. 阅读实施计划
-cat docs/prd/IMPLEMENTATION-PLAN.md
+cat docs/prd/IMPLEMENTATION-PLAN-PARALLEL.md
 
 # 3. 创建项目结构
 mkdir -p Atelierr/scripts/processors
@@ -399,7 +405,7 @@ Day 5-7: 衰减机制实现 + 测试
 
 实施过程中遇到技术问题：
 
-1. 查看 IMPLEMENTATION-PLAN.md 的"风险和应对"章节
+1. 查看 IMPLEMENTATION-PLAN-PARALLEL.md 的"风险和应对"章节
 2. 参考各个 examples.md 中的实际代码示例
 3. 查看架构文档的 API 规范
 

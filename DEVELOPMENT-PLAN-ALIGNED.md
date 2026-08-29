@@ -411,7 +411,7 @@ Day 11-12: 批量处理器
     $ python -m scripts.cli.batch_cli \
         --input-dir ~/Downloads/ \
         --workers 4 \
-        --output-dir $OV/memory/short-term/
+        --output-dir $OV/memory/
 
   交付:
     - scripts/cli/batch_cli.py

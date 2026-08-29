@@ -22,8 +22,8 @@ python3 tools/verify_installation.py
   ⚠️  模块导入: 待开发
 
 # 2. 安装依赖
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv-atelierr  # 独立环境，勿用 .venv（Atelier 框架专用）
+source .venv-atelierr/bin/activate
 pip install -r requirements.txt
 
 # 3. 再次验证

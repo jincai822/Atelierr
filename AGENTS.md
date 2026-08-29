@@ -1,5 +1,11 @@
 # AGENTS.md: Atelier Codex adapter
 
+> **Atelierr application work** (the note-memory system in
+> `scripts/{memory,web,processors,cli,utils}/`): read
+> `docs/AGENT-ONBOARDING.md` first and follow it exclusively. Do not touch
+> harness surfaces (`scripts/atelier/`, `.claude/`, `.codex/`, `harness/`,
+> `protocols/`). The rest of this file applies to harness work only.
+
 Codex reads this file; Claude Code reads `CLAUDE.md`. Read `CLAUDE.md` once at
 session start for the shared safety, knowledge, and writing contract. Load
 `protocols/runtime-adapters.md` only when changing or debugging portability.

@@ -48,7 +48,9 @@
 
 ```
 ✅ 功能完整性
-  - 所有输入格式支持（图片/视频/音频/PDF/微信）
+  - 输入格式支持：图片/视频/音频/PDF
+    （微信处理器移入 backlog：导出格式不稳定且无官方规范，
+     不作为任何版本的验收条件）
   - CLI 工具完整
   - 批量处理可用
   
@@ -58,15 +60,23 @@
   - 端到端测试覆盖主要场景
   
 ✅ 性能达标
-  - 满足性能指标
+  - 满足全部性能指标
   - 通过负载测试
   - 资源使用合理
+  
+✅ 代码质量（完整版才作为硬门槛）
+  - mypy / pylint / flake8 无错误
+  - Black + isort 格式一致
   
 ✅ 生产就绪
   - 日志完善
   - 错误处理健全
   - 配置灵活
 ```
+
+> **验收分级说明**：MVP 门槛 = 功能完整 + 核心测试 + 性能冒烟
+> （创建/搜索/衰减三项即可）+ 可部署。本文档"代码质量标准"一节的
+> mypy/pylint 全绿与完整性能矩阵属于**完整版**门槛，MVP 阶段仅作参考。
 
 ---
 
@@ -79,12 +89,12 @@
 **功能要求**:
 
 ```python
-✅ 必须实现:
-  - 初始化三层目录结构
-  - 创建新笔记到 short-term/
+✅ 必须实现（架构 v1.2：平面存储 + sidecar 索引）:
+  - 初始化平面笔记目录与 sidecar 状态目录
+  - 创建新笔记（平面根层，写一次性 frontmatter，登记 sidecar）
   - 读取笔记内容
-  - 移动笔记到不同层级
-  - 列出指定层级的所有笔记
+  - 覆写笔记的逻辑层级（只写 sidecar，不移动文件）
+  - 按逻辑层级列出笔记
   
 ✅ 错误处理:
   - 目录不存在时自动创建
@@ -98,28 +108,29 @@
 # tests/unit/test_memory/test_core.py
 
 def test_memory_tree_init():
-    """测试初始化"""
+    """测试初始化：平面笔记目录 + sidecar 状态目录"""
     tree = MemoryTree("/tmp/test")
-    assert tree.short_term.exists()
-    assert tree.mid_term.exists()
-    assert tree.long_term.exists()
+    assert tree.notes_dir.exists()
+    assert tree.state_dir.exists()
 
 def test_create_note():
-    """测试创建笔记"""
+    """测试创建笔记：文件在平面根层，sidecar 登记为 short-term"""
     tree = MemoryTree("/tmp/test")
     note_path = tree.create_note("测试笔记.md", "这是内容")
     assert note_path.exists()
-    assert note_path.parent == tree.short_term
+    assert note_path.parent == tree.notes_dir
+    assert tree.layer_of(note_path) == "short-term"
 
 def test_move_note():
-    """测试移动笔记"""
+    """测试层级覆写：sidecar 变化，文件不动"""
     tree = MemoryTree("/tmp/test")
     note = tree.create_note("test.md", "content")
-    new_path = tree.move_note(note, "mid-term")
-    assert new_path.parent == tree.mid_term
+    tree.move_note(note, "mid-term")
+    assert tree.layer_of(note) == "mid-term"
+    assert note.exists()  # 文件位置不变
 
 def test_list_notes():
-    """测试列出笔记"""
+    """测试按层级列出笔记"""
     tree = MemoryTree("/tmp/test")
     tree.create_note("note1.md", "content1")
     tree.create_note("note2.md", "content2")
@@ -154,16 +165,16 @@ test_invalid_path PASSED
 **功能要求**:
 
 ```python
-✅ 必须实现:
-  - 计算笔记的 confidence 值（0.0-1.0）
-  - 考虑时间因素（新笔记 confidence 高）
-  - 考虑引用因素（被引用多 confidence 高）
-  - 考虑修改因素（常修改 confidence 高）
-  - 可配置权重
+✅ 必须实现（架构 v1.2：无状态纯函数）:
+  - conf = decay_rate ** (idle_days / ref_factor)，范围 [0.0, 1.0]
+  - idle_days 取最后访问与最后修改的较新者
+  - 引用因素为乘性：ref_factor = 1 + 0.2 * min(references, 10)
+  - 幂等：同一元数据任何时刻重算结果一致
+  - 衰减率与引用系数可配置（config/memory.yaml）
   
 ✅ 边界条件:
   - 新创建的笔记: confidence = 1.0
-  - 从未访问的笔记: confidence 逐渐下降
+  - 从未访问/修改的笔记: confidence 单调下降
   - 返回值必须在 [0.0, 1.0] 范围内
 ```
 
@@ -175,7 +186,7 @@ test_invalid_path PASSED
 def test_new_note_confidence():
     """新笔记 confidence = 1.0"""
     calc = ConfidenceCalculator()
-    conf = calc.calculate(note_path, metadata={
+    conf = calc.calculate(metadata={
         "created": datetime.now(),
         "accessed": datetime.now(),
         "modified": datetime.now(),
@@ -186,28 +197,38 @@ def test_old_note_confidence():
     """旧笔记 confidence 下降"""
     calc = ConfidenceCalculator()
     old_date = datetime.now() - timedelta(days=100)
-    conf = calc.calculate(note_path, metadata={
+    conf = calc.calculate(metadata={
         "created": old_date,
         "accessed": old_date,
         "modified": old_date,
     })
-    assert 0.0 < conf < 0.5
+    assert 0.0 <= conf < 0.5
 
-def test_referenced_note_confidence():
-    """被引用的笔记 confidence 高"""
+def test_referenced_note_decays_slower():
+    """被引用的笔记比同龄未引用笔记衰减慢（相对断言）"""
     calc = ConfidenceCalculator()
-    conf = calc.calculate(note_path, metadata={
-        "created": datetime.now() - timedelta(days=50),
-        "references": 10,  # 被引用10次
-    })
-    assert conf > 0.5
+    old_date = datetime.now() - timedelta(days=50)
+    base = {"created": old_date, "accessed": old_date, "modified": old_date}
+    conf_plain = calc.calculate(metadata=base)
+    conf_referenced = calc.calculate(metadata={**base, "references": 10})
+    assert conf_referenced > conf_plain
+    # ref_factor=3 ⇒ 等效闲置 50/3 天，应仍在 mid-term 以上
+    assert conf_referenced > 0.4
+
+def test_idempotent():
+    """纯函数：重复计算结果一致"""
+    calc = ConfidenceCalculator()
+    meta = {"created": datetime.now() - timedelta(days=10),
+            "accessed": datetime.now() - timedelta(days=10),
+            "modified": datetime.now() - timedelta(days=10)}
+    assert calc.calculate(metadata=meta) == calc.calculate(metadata=meta)
 
 def test_confidence_range():
     """Confidence 必须在 [0, 1] 范围"""
     calc = ConfidenceCalculator()
     for _ in range(100):
         random_metadata = generate_random_metadata()
-        conf = calc.calculate(note_path, random_metadata)
+        conf = calc.calculate(metadata=random_metadata)
         assert 0.0 <= conf <= 1.0
 ```
 
@@ -223,17 +244,19 @@ pytest tests/unit/test_memory/test_confidence.py -v
 **功能要求**:
 
 ```python
-✅ 必须实现:
-  - 扫描所有笔记并计算 confidence
-  - 根据 confidence 移动笔记层级
-  - 生成衰减报告
-  - 支持 dry-run 模式（不实际移动）
+✅ 必须实现（架构 v1.2：只写 sidecar，绝不改动笔记文件）:
+  - 全量扫描 [[wikilink]] 反链，更新 references
+  - 无状态重算所有笔记的 confidence
+  - 根据 confidence 更新 sidecar 中的逻辑层级
+  - 生成衰减报告（层级迁移 + 待删除清单，写入 <state_dir>/reports/）
+  - 支持 dry-run 模式（只报告，不写 sidecar）
   
-✅ 衰减规则:
-  - confidence ≥ 0.7: 保持 short-term
-  - 0.4 ≤ confidence < 0.7: 移至 mid-term
-  - confidence < 0.4: 移至 long-term
-  - confidence < 0.1: 标记为待删除（不自动删除）
+✅ 分层/标记规则:
+  - confidence ≥ 0.7: short-term
+  - 0.4 ≤ confidence < 0.7: mid-term
+  - confidence < 0.4: long-term
+  - confidence < 0.1: 置 pending_delete（不自动删除；
+    由 memory_cli review → purge 移入 <state_dir>/trash/）
 ```
 
 **测试要求**:
@@ -251,28 +274,45 @@ def test_decay_scan():
     assert "mid_term" in report
     assert "long_term" in report
 
-def test_decay_move():
-    """测试衰减移动"""
-    # 创建测试笔记
-    note = create_test_note(confidence=0.5)
+def test_decay_relayer():
+    """测试衰减重分层：sidecar 层级变化，文件不动"""
+    note = create_test_note(idle_days=10)  # 重算后 conf ≈ 0.6
     
     decay = DecayManager(memory_tree)
     decay.run()
     
-    # 验证笔记移到了 mid-term
     assert note in memory_tree.list_notes("mid-term")
+    assert note.exists()  # 文件仍在平面根层
+
+def test_decay_never_touches_files():
+    """衰减前后笔记内容与 mtime 完全不变"""
+    note = create_test_note(idle_days=30)
+    before = (note.read_bytes(), note.stat().st_mtime_ns)
+    
+    DecayManager(memory_tree).run()
+    
+    assert (note.read_bytes(), note.stat().st_mtime_ns) == before
 
 def test_decay_dry_run():
     """测试 dry-run 模式"""
-    note = create_test_note(confidence=0.5)
+    note = create_test_note(idle_days=10)
     
     decay = DecayManager(memory_tree)
     report = decay.run(dry_run=True)
     
-    # 笔记应该还在原位置
+    # sidecar 未变化
     assert note in memory_tree.list_notes("short-term")
-    # 但报告显示会移动
-    assert report["would_move"] > 0
+    # 但报告显示将会重分层
+    assert report["would_relayer"] > 0
+
+def test_pending_delete_is_mark_only():
+    """conf < 0.1 只打标记，文件仍存在"""
+    note = create_test_note(idle_days=60)
+    
+    DecayManager(memory_tree).run()
+    
+    assert note.exists()
+    assert memory_tree.is_pending_delete(note)
 ```
 
 **验收检查**:
@@ -358,15 +398,18 @@ pytest tests/performance/test_search_performance.py -v
 **功能要求**:
 
 ```python
-✅ 必须实现:
-  - 监控 Flatnotes 笔记目录
-  - 自动同步新笔记到记忆模块
-  - 自动更新 metadata
-  - 双向同步（记忆模块 → Flatnotes）
+✅ 必须实现（架构 v1.2：Flatnotes 与记忆模块共享同一平面目录，
+   不存在"同步"，集成的职责是"归一化"）:
+  - watcher 监控笔记目录的新文件 / 删除事件
+  - 新文件归一化：补写一次性 frontmatter（id/title/created/source）
+    并登记 sidecar（confidence = 1.0, layer = short-term）
+  - 文件被外部删除时清理对应 sidecar 条目
+  - 归一化必须保持文件 mtime 不变（os.utime 还原），
+    避免污染衰减的 modified 信号
   
 ✅ 错误处理:
-  - Flatnotes 未启动时给出提示
-  - 文件冲突时的策略（最新优先）
+  - Flatnotes 未启动不影响归一化（纯文件系统操作）
+  - frontmatter 损坏的文件跳过并记录日志，不中断 watcher
 ```
 
 **测试要求**:
@@ -374,27 +417,29 @@ pytest tests/performance/test_search_performance.py -v
 ```python
 # tests/integration/test_web_integration.py
 
-def test_flatnotes_sync():
-    """测试 Flatnotes 同步"""
-    # 在 Flatnotes 目录创建笔记
-    create_flatnotes_note("test.md", "content")
+def test_new_file_normalized():
+    """外部（Flatnotes/Obsidian）新建的笔记被登记"""
+    # 模拟 Flatnotes：直接往共享目录写裸 markdown
+    (memory_tree.notes_dir / "test.md").write_text("content")
     
-    # 等待同步
-    time.sleep(1)
+    watcher.process_pending()  # 或等待 watcher 周期
     
-    # 验证笔记出现在记忆模块
-    assert memory_tree.note_exists("test.md")
+    assert memory_tree.layer_of(memory_tree.notes_dir / "test.md") == "short-term"
 
-def test_bidirectional_sync():
-    """测试双向同步"""
-    # 在记忆模块创建笔记
-    memory_tree.create_note("from_memory.md", "content")
+def test_normalize_preserves_mtime():
+    """归一化补写 frontmatter 后 mtime 不变"""
+    note = memory_tree.notes_dir / "raw.md"
+    note.write_text("content")
+    before = note.stat().st_mtime_ns
     
-    # 等待同步
-    time.sleep(1)
+    watcher.process_pending()
     
-    # 验证笔记出现在 Flatnotes
-    assert flatnotes_note_exists("from_memory.md")
+    assert note.stat().st_mtime_ns == before
+
+def test_created_note_visible_to_flatnotes():
+    """记忆模块创建的笔记就在共享目录根层（Flatnotes 可直接见）"""
+    path = memory_tree.create_note("from_memory.md", "content")
+    assert path.parent == memory_tree.notes_dir
 ```
 
 **验收检查**:

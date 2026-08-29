@@ -2,7 +2,8 @@
 
 processors:
   image:
-    engine: paddleocr
+    engine: paddleocr     # 备选: rapidocr（onnxruntime，安装体积小一个数量级，
+                          # 无需 paddlepaddle）
     lang: ch              # ch / en
     use_gpu: false
     timeout_s: 5          # 单张图片处理超时（验收标准 < 5s）
@@ -21,7 +22,7 @@ processors:
     engine: whisper
     model: base
 
-  wechat:
+  wechat:                 # backlog：导出格式不稳定，不在 MVP/完整版验收范围
     input_format: txt     # 微信导出格式
 
   batch:

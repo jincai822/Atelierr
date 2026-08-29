@@ -29,12 +29,12 @@ cd Atelierr
 
 ```bash
 # 创建虚拟环境
-python3 -m venv .venv
+python3 -m venv .venv-atelierr  # 独立环境，勿用 .venv（Atelier 框架专用）
 
 # 激活虚拟环境
-source .venv/bin/activate  # Linux/macOS
+source .venv-atelierr/bin/activate  # Linux/macOS
 # 或
-.venv\Scripts\activate     # Windows
+.venv-atelierr\Scripts\activate     # Windows
 
 # 安装依赖
 pip install -r requirements.txt
@@ -60,9 +60,8 @@ python scripts/init_memory.py
 
 输出：
 ```
-✅ 创建目录: $OV/memory/short-term/
-✅ 创建目录: $OV/memory/mid-term/
-✅ 创建目录: $OV/memory/long-term/
+✅ 创建目录: $OV/memory/            (平面笔记目录)
+✅ 创建目录: ~/atelierr-data/state/ (sidecar 索引 / 报告 / trash)
 ✅ 创建目录: $OV/inbox/
 ✅ 初始化完成！
 ```
@@ -95,11 +94,10 @@ docker-compose ps
 #### 方法 2: 直接创建文件
 
 ```bash
-cat > $OV/memory/short-term/first-note.md << 'MARKDOWN'
+cat > $OV/memory/first-note.md << 'MARKDOWN'
 ---
 title: 我的第一个笔记
 created: 2026-08-27T18:00:00+08:00
-confidence: 0.8
 source: manual
 tags: ["测试"]
 ---
@@ -169,7 +167,7 @@ python scripts/input_processor.py \
 # 🔍 检测到图片...
 # 📝 正在进行 OCR 识别...
 # ✅ 识别完成！提取了 120 个字符
-# 💾 已保存到: $OV/memory/short-term/2026-08-27-screenshot.md
+# 💾 已保存到: $OV/memory/2026-08-27-screenshot.md
 ```
 
 生成的笔记：

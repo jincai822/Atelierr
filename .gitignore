@@ -55,6 +55,7 @@ handoffs
 # Python virtual environment (typically a symlink to ~/.cache/atelier/.venv
 # on the contributor's machine; never committed)
 .venv
+.venv-atelierr
 __pycache__/
 *.pyc
 

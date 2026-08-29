@@ -44,8 +44,8 @@ git clone https://github.com/your-username/Atelierr.git
 cd Atelierr
 
 # 安装依赖
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv-atelierr  # 独立环境，勿用 .venv（Atelier 框架专用）
+source .venv-atelierr/bin/activate
 pip install -r requirements.txt
 
 # 启动 Web 界面
@@ -62,7 +62,7 @@ python scripts/memory_scheduler.py --daemon
 打开 http://localhost:8080
 
 # 或直接创建 Markdown
-echo "# 我的第一个笔记" > $OV/memory/short-term/test.md
+echo "# 我的第一个笔记" > $OV/memory/test.md
 ```
 
 ### 处理多模态输入
@@ -152,54 +152,53 @@ python scripts/input_processor.py --type pdf --input paper.pdf
 
 ## 💡 核心概念
 
-### Confidence（置信度）
+### Confidence（新鲜度）
 
-每个笔记都有一个 0.0-1.0 的 confidence 值，表示其可信度和重要性：
+每个笔记都有一个 0.0-1.0 的 confidence 值，表示其新鲜度/活跃度
+（新笔记 = 1.0，随闲置时间衰减）。confidence、层级等动态状态存于
+sidecar 索引，**不写在笔记文件里**；frontmatter 创建时写一次即静态不变：
 
 ```yaml
 ---
+id: 01J6ABCDEF             # 稳定 ID
 title: 笔记标题
 created: 2026-08-27
-confidence: 0.8          # 初始 confidence
-last_accessed: 2026-08-27
-access_count: 1
-source: manual           # 来源类型
+source: manual             # 来源类型
 tags: ["标签1", "标签2"]
 ---
 
 笔记内容...
 ```
 
-### 三层记忆
+### 三层记忆（逻辑分层）
+
+所有笔记存放在同一平面目录 `$OV/memory/`，层级是 sidecar 索引中的
+逻辑属性（文件不会被移动）。Confidence 表示新鲜度，新笔记 = 1.0，
+按 `0.95^(闲置天数/引用因子)` 单一曲线衰减：
 
 ```
 短期记忆 (Short-term):
-  - Confidence: 0.0-0.4
-  - 位置: $OV/memory/short-term/
-  - 衰减: 快速（每天 -5%）
-  - 用途: 临时想法、待整理
+  - Confidence ≥ 0.7（新鲜、活跃）
+  - 约 7 天不活跃后降级
+  - 用途: 新想法、进行中的内容
 
 中期记忆 (Mid-term):
-  - Confidence: 0.4-0.7
-  - 位置: $OV/memory/mid-term/
-  - 衰减: 中等（每天 -2%）
+  - 0.4 ≤ Confidence < 0.7
   - 用途: 项目知识、学习笔记
 
 长期记忆 (Long-term):
-  - Confidence: 0.7-1.0
-  - 位置: $OV/memory/long-term/
-  - 衰减: 缓慢（每天 -0.5%）
-  - 用途: 核心知识、重要参考
+  - Confidence < 0.4（低频归档）
+  - < 0.1 时仅标记待删除，经 review→purge 才移入回收站
 ```
 
 ### 自动衰减
 
 ```
-每天自动执行:
-  1. 所有笔记 confidence 下降
-  2. 访问过的笔记 confidence 提升
-  3. 低于阈值的笔记移到下层
-  4. 极低 confidence 的笔记归档
+每天自动执行（只写 sidecar 索引，不改动笔记文件）:
+  1. 扫描 [[wikilink]] 反链，更新引用计数
+  2. 无状态重算所有笔记的 confidence
+  3. 按阈值更新逻辑层级
+  4. confidence < 0.1 的笔记标记待删除（review→purge 才移入回收站）
 ```
 
 ---

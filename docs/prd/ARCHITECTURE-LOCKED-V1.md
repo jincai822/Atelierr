@@ -1,17 +1,18 @@
-# Atelierr 架构规范 v1.1 (LOCKED)
+# Atelierr 架构规范 v1.2 (LOCKED)
 
-**版本**: v1.1  
+**版本**: v1.2  
 **状态**: 🔒 已锁定  
 **日期**: 2026-08-28  
 **下次修订**: 需明确的问题或需求变更时
 
-> v1.1 修订：Confidence 语义统一为"新鲜度"模型，与 `docs/ACCEPTANCE-CRITERIA.md` 对齐。
+> v1.1 修订：Confidence 语义统一为"新鲜度"模型，与 `docs/ACCEPTANCE-CRITERIA.md` 对齐。  
+> v1.2 修订：平面存储（Flatnotes 兼容）+ sidecar 状态索引 + 无状态 confidence 重算 + 访问信号契约 + trash/purge 流程。
 
 ---
 
 ## 文档说明
 
-本文档是 Atelierr 系统的**官方架构规范**，当前锁定版本为 v1.1。
+本文档是 Atelierr 系统的**官方架构规范**，当前锁定版本为 v1.2。
 
 **修订原则**:
 - ✅ 实现过程中发现的技术细节可补充
@@ -167,19 +168,19 @@ class MemoryTree:
     """记忆模块核心类"""
     
     def __init__(self, ov_path: str):
-        """初始化三层目录结构（不存在则创建）"""
+        """初始化平面笔记目录与 sidecar 状态目录（不存在则创建）"""
         
     def create_note(self, filename: str, content: str) -> Path:
-        """创建新笔记到 short-term/，初始 confidence = 1.0"""
+        """创建新笔记（平面目录根层），登记 sidecar，初始 confidence = 1.0"""
         
     def read_note(self, note_path: Path) -> str:
         """读取笔记内容，文件不存在抛 FileNotFoundError"""
         
     def move_note(self, note_path: Path, layer: str) -> Path:
-        """移动笔记到指定层级"""
+        """手动覆写笔记层级（写 sidecar，不移动文件）"""
         
     def list_notes(self, layer: str) -> List[Path]:
-        """列出指定层级的所有笔记"""
+        """按 sidecar 中的 layer 列出笔记"""
         
     def search(self, query: str) -> List[Memory]:
         """搜索记忆（委托 MemorySearcher）"""
@@ -188,100 +189,113 @@ class MemoryTree:
         """获取记忆统计信息"""
 
 # 配套组件
-#   ConfidenceCalculator  - confidence 计算（confidence.py）
-#   DecayManager          - 衰减扫描/移动/报告，支持 dry-run（decay.py）
+#   ConfidenceCalculator  - 无状态 confidence 重算（confidence.py）
+#   DecayManager          - 每日重算/分层/待删标记/报告，支持 dry-run（decay.py）
 #   MemorySearcher        - 全文/标签/日期搜索（search.py）
+#   memory_cli review/purge - 待删除笔记的人工确认与移入 trash（cli/）
 ```
 
 ### 存储结构
 
 ```
-$OV/memory/
-├── short-term/         # confidence ≥ 0.7（新鲜、活跃）
-│   ├── observations/   # 临时观察
-│   ├── ideas/          # 快速想法
-│   └── drafts/         # 草稿
-│
-├── mid-term/           # 0.4 ≤ confidence < 0.7
-│   ├── learnings/      # 学习内容
-│   ├── insights/       # 洞察
-│   └── observations/   # 观察
-│
-└── long-term/          # confidence < 0.4（低频归档）
-    ├── beliefs/        # 核心信念
-    ├── patterns/       # 识别的模式
-    └── lessons/        # 重要教训
+$OV/memory/                     # 平面目录（Flatnotes 直接挂载；不使用子目录）
+├── asyncio-not-for-cpu.md
+├── 2026-08-28-quick-idea.md
+└── ...                         # 所有笔记都在根层，文件永不被机器移动
+
+<state_dir>/                    # 机器状态目录（config/memory.yaml: state_dir）
+├── index.json                  # sidecar 索引：id / layer / confidence /
+│                               #   last_accessed / references / pending_delete
+├── reports/                    # 衰减报告 decay-YYYY-MM-DD.md
+└── trash/                      # purge 后的笔记归宿（永不静默删除）
 ```
+
+**逻辑分层**（layer 是 sidecar 索引中的派生属性，不是物理目录）：
+
+```
+short-term   confidence ≥ 0.7        新鲜、活跃
+mid-term     0.4 ≤ confidence < 0.7
+long-term    confidence < 0.4        低频归档
+```
+
+原三层子目录方案已废弃：Flatnotes 是刻意的平面设计（不支持子目录），
+且物理移动文件会破坏笔记身份、wiki 链接和并发写入。原分类目录
+（observations/ideas/beliefs/...）改用 frontmatter tags 表达。
 
 ### Confidence 机制
 
 ```python
 # Confidence 表示"新鲜度/活跃度"，范围 [0.0, 1.0]
-# 新创建的笔记 confidence = 1.0
+# 无状态纯函数：任何时刻都能从元数据重算，不依赖上一次的值
 
 class ConfidenceCalculator:
-    def calculate(self, note_path: Path, metadata: Dict) -> float:
-        score = 1.0
+    def calculate(self, metadata: Dict) -> float:
+        # 活跃时点 = 最后访问与最后修改的较新者
+        last_active = max(metadata["accessed"], metadata["modified"])
+        idle_days = (now - last_active).days
 
-        # 时间因素：距最后访问越久，分数越低
-        days_idle = (now - metadata["accessed"]).days
-        score *= 0.95 ** days_idle
+        # 引用减缓时间流逝（被引用越多，衰减越慢）
+        ref_factor = 1 + 0.2 * min(metadata.get("references", 0), 10)
 
-        # 引用因素：被引用越多，衰减越慢
-        score += min(metadata.get("references", 0) * 0.05, 0.3)
-
-        # 修改因素：近期修改视为活跃
-        if (now - metadata["modified"]).days < 7:
-            score += 0.1
-
-        return max(0.0, min(score, 1.0))
+        return 0.95 ** (idle_days / ref_factor)
 ```
 
-权重与衰减率通过 `config/memory.yaml` 配置。`source`（web/obsidian/lark/agent/reflection）仅作为元数据记录，不参与初始 confidence 计算。
+**设计要点**：
+- 新笔记 idle_days = 0 → confidence = 1.0
+- 无引用笔记：约 7 天降到 0.7（出 short-term），约 19 天降到 0.4，
+  约 45 天降到 0.1（进入待删除标记区）
+- 10 次引用（ref_factor = 3）：时间轴放慢 3 倍，约 135 天才触及 0.1
+- 纯函数 ⇒ 幂等：定时任务漏跑、重跑结果都一致；不存在增量复利误差
+- 衰减率与引用系数通过 `config/memory.yaml` 配置
+
+**访问信号契约**（衰减的输入从哪来）：
+- `modified`：文件 mtime（用户在 Flatnotes/Obsidian 编辑即刷新）— 主信号
+- `accessed`：CLI / Agent 调用 `on_note_accessed()` 时写入 sidecar — 辅信号
+- 明确接受的降级：**Web 端纯阅读不计入访问**（Flatnotes 无回调机制，
+  文件系统 atime 不可靠）。阅读多、编辑少的重要笔记靠引用因子保护
+- `references`：每日任务全量扫描 `[[wikilink]]` 反链得出，写入 sidecar
+
+`source`（web/obsidian/lark/agent/reflection）仅作为元数据记录，不参与计算。
 
 ### 衰减机制
 
 ```python
-# 每日衰减任务
-def daily_decay():
-    for memory in all_memories():
-        # 计算天数
-        days_since_accessed = (now - memory.last_accessed).days
-        
-        # 衰减公式
-        decay = 0.95 ** days_since_accessed
-        boost = 1.0 if days_since_accessed < 7 else 0.0
-        
-        new_confidence = memory.confidence * decay + boost * 0.05
-        update_confidence(memory, new_confidence)
-        
-        # 分层规则
-        #   confidence ≥ 0.7        → short-term
-        #   0.4 ≤ confidence < 0.7  → mid-term
-        #   confidence < 0.4        → long-term
-        reassign_layer_if_needed(memory)
-        
-        # 删除策略：只标记待删除，绝不自动删除文件
-        if new_confidence < 0.1:
-            mark_for_deletion(memory)
+# 每日任务（幂等；只写 sidecar 索引，绝不改动笔记文件）
+def daily_decay(dry_run: bool = False):
+    references = scan_backlinks(memory_root)      # 全量 [[wikilink]] 反链统计
+
+    for note in all_notes(memory_root):
+        meta = index.metadata(note, references)   # accessed/modified/references
+        conf = calculator.calculate(meta)         # 无状态重算
+
+        new_layer = assign_layer(conf)            # ≥0.7 short / ≥0.4 mid / else long
+        pending = conf < 0.1                      # 只标记，绝不自动删除
+
+        if not dry_run:
+            index.update(note, confidence=conf,
+                         layer=new_layer, pending_delete=pending)
+
+    report = build_report(index)                  # 层级迁移 + 待删除清单
+    write(state_dir / "reports" / f"decay-{today}.md", report)
 ```
+
+**待删除流程**：`pending_delete` 笔记只出现在报告和 `memory_cli review` 里，
+由用户确认后执行 `memory_cli purge`，笔记移入 `<state_dir>/trash/`。
+trash 内容不参与索引和搜索，用户可随时手工找回。系统在任何路径下都
+不会静默删除笔记文件。
 
 ### 访问增强
 
 ```python
-# 记忆被访问时增强
+# 记忆被访问时（CLI / Agent 显式上报）
 def on_note_accessed(note_path: Path):
-    memory = get_memory(note_path)
-    
-    # 增强 Confidence
-    memory.confidence = min(memory.confidence + 0.05, 1.0)
-    
-    # 更新访问时间
-    memory.last_accessed = datetime.now()
-    
-    # 重新评估层级
-    reassign_layer_if_needed(memory)
+    # 只更新 sidecar 的活跃时点；confidence 由纯函数在下次计算时得出
+    # （idle 归零 ⇒ confidence 回到 ~1.0，层级随之回升）
+    index.update(note_path, last_accessed=datetime.now())
 ```
+
+不再使用 "+0.05" 式加分：在无状态模型下，访问的语义就是"重置闲置时钟"，
+与遗忘曲线的复习模型一致，也避免了与每日任务的重复计分。
 
 ### 职责边界
 
@@ -418,22 +432,20 @@ def agent_workflow():
 
 ### 记忆文件格式
 
+frontmatter 在创建时写入一次，此后**机器不再改写笔记文件**
+（confidence / layer / last_accessed 等动态状态存于 sidecar 索引，
+避免 mtime 污染、Git 噪音和与 Web 编辑器的写冲突）：
+
 ```markdown
 ---
-# 必需字段
+# 创建时写入，静态不变
+id: "01J6ABCDEF"               # 稳定 ID（层级与链接不随文件名变化失效）
 title: "asyncio 不适合 CPU 密集型任务"
 created: "2026-08-27T16:00:00+08:00"
-confidence: 0.85
-
-# 可选字段
 source: "reflection"           # web, obsidian, lark, agent, reflection
-tags: ["python", "asyncio", "performance"]
-last_accessed: "2026-08-27T18:00:00+08:00"
-access_count: 5
-layer: "short-term"           # long-term, mid-term, short-term（confidence ≥ 0.7 → short-term）
-category: "beliefs"           # beliefs, patterns, lessons, learnings, etc.
+tags: ["python", "asyncio", "beliefs"]   # 原 category 用 tag 表达
 
-# 关联
+# 关联（用户/Agent 维护）
 related: ["[[Python GIL]]", "[[Threading vs Asyncio]]"]
 references: ["https://example.com/article"]
 ---
@@ -458,6 +470,21 @@ asyncio 是为 I/O 密集型任务设计的...
 
 - CPU 密集型任务使用 multiprocessing
 - I/O 密集型任务使用 asyncio
+```
+
+**sidecar 索引条目**（`<state_dir>/index.json`，以 id 为键）：
+
+```json
+{
+  "01J6ABCDEF": {
+    "path": "asyncio-not-for-cpu.md",
+    "confidence": 0.85,
+    "layer": "short-term",
+    "last_accessed": "2026-08-27T18:00:00+08:00",
+    "references": 3,
+    "pending_delete": false
+  }
+}
 ```
 
 ### 认知文件格式
@@ -557,7 +584,7 @@ class MemoryTree:
     
     # 初始化
     def __init__(self, ov_path: str) -> None:
-        """初始化记忆树，自动创建三层目录"""
+        """初始化平面笔记目录与 sidecar 状态目录"""
     
     # 增
     def create_note(
@@ -567,14 +594,15 @@ class MemoryTree:
         source: str = "unknown",
         tags: Optional[List[str]] = None
     ) -> Path:
-        """创建新笔记到 short-term/，初始 confidence = 1.0，返回路径"""
+        """创建新笔记（平面目录根层），写一次性 frontmatter，
+        登记 sidecar（confidence = 1.0, layer = short-term），返回路径"""
     
     # 查
     def read_note(self, note_path: Path) -> str:
         """读取笔记内容"""
     
     def list_notes(self, layer: str) -> List[Path]:
-        """列出指定层级的所有笔记"""
+        """按 sidecar 中的 layer 过滤列出笔记"""
     
     def search(
         self,
@@ -589,10 +617,10 @@ class MemoryTree:
     
     # 改
     def move_note(self, note_path: Path, layer: str) -> Path:
-        """移动笔记到指定层级"""
+        """手动覆写层级（只写 sidecar，不移动文件）"""
     
     def on_note_accessed(self, note_path: Path) -> None:
-        """记录访问（confidence +0.05，更新 last_accessed）"""
+        """记录访问：更新 sidecar 的 last_accessed（闲置时钟归零）"""
     
     # 统计
     def get_stats(self) -> Dict:
@@ -600,21 +628,23 @@ class MemoryTree:
 
 
 class ConfidenceCalculator:
-    """confidence 计算 (confidence.py)"""
+    """无状态 confidence 重算 (confidence.py)"""
     
-    def calculate(self, note_path: Path, metadata: Dict) -> float:
-        """返回 [0.0, 1.0]，新笔记 = 1.0"""
+    def calculate(self, metadata: Dict) -> float:
+        """纯函数：0.95 ** (idle_days / ref_factor)，返回 [0.0, 1.0]，
+        新笔记 = 1.0；幂等，可随时全量重算"""
 
 
 class DecayManager:
     """衰减管理 (decay.py)"""
     
     def scan(self) -> Dict:
-        """扫描全部笔记，返回分层统计报告"""
+        """扫描全部笔记，返回分层统计报告（不写任何状态）"""
     
     def run(self, dry_run: bool = False) -> Dict:
-        """执行衰减：更新 confidence、移动层级、标记待删除（<0.1），
-        dry_run=True 时只报告不移动"""
+        """每日任务：反链统计 → 全量重算 confidence → 更新 sidecar
+        （layer、pending_delete<0.1）→ 生成报告。只写 sidecar，
+        绝不改动笔记文件；dry_run=True 时只报告不写入"""
 ```
 
 ---
@@ -664,13 +694,11 @@ class DecayManager:
 ```
 1. 用户打开 Flatnotes (https://memory.example.com)
 2. 创建新笔记 "asyncio 测试失败"
-3. Flatnotes 保存到 $OV/memory/short-term/observations/asyncio-test-fail.md
-4. 文件包含基本 frontmatter (title, created, source: web)
-5. 定时任务触发 memory.py
-6. memory.py 读取新文件
-7. 新笔记初始 confidence = 1.0
-8. 文件保持在 short-term/ (confidence ≥ 0.7)
-9. 更新 frontmatter (添加 confidence, layer 字段)
+3. Flatnotes 保存到 $OV/memory/asyncio-test-fail.md（平面目录根层）
+4. watcher（或每日任务）发现未登记的新文件
+5. 归一化：补写一次性 frontmatter（id, title, created, source: web）
+6. 登记 sidecar：confidence = 1.0, layer = short-term
+7. 此后机器不再改写该文件；层级/confidence 变化只发生在 sidecar
 ```
 
 ### Agent 使用记忆
@@ -681,10 +709,10 @@ class DecayManager:
 3. memory 模块返回相关记忆列表
 4. Agent 读取记忆内容
 5. 调用 memory.on_note_accessed(note_path)
-6. memory 模块增强该记忆的 confidence (+0.05)
+6. sidecar 中该笔记 last_accessed 归零（下次重算 confidence ≈ 1.0）
 7. Agent 生成新洞察
 8. 调用 memory.create_note(filename, content)
-9. 新笔记进入 short-term/（confidence = 1.0），后续随访问情况自然分层
+9. 新笔记登记为 short-term（confidence = 1.0），随访问情况自然分层
 ```
 
 ### 记忆衰减
@@ -692,14 +720,14 @@ class DecayManager:
 ```
 1. Cron 每日 03:00 触发
 2. 执行 python -m scripts.cli.memory_cli decay
-3. DecayManager 扫描所有记忆
-4. 对每个记忆：
-   - 计算未访问天数
-   - 应用衰减公式: new_conf = old_conf * 0.95^days
-   - 按阈值移动层级: ≥0.7 short / 0.4~0.7 mid / <0.4 long
-   - 如果 new_conf < 0.1: 标记为待删除（不自动删除）
-5. 生成衰减报告
-6. 保存到 $OV/memory/reports/decay-YYYY-MM-DD.md
+3. DecayManager 全量扫描 [[wikilink]] 反链，更新 references
+4. 对每个笔记（只写 sidecar，不碰文件）：
+   - 无状态重算: conf = 0.95^(idle_days / ref_factor)
+   - 按阈值更新逻辑层级: ≥0.7 short / 0.4~0.7 mid / <0.4 long
+   - conf < 0.1: 置 pending_delete 标记（不自动删除）
+5. 生成衰减报告（层级迁移 + 待删除清单）
+6. 保存到 <state_dir>/reports/decay-YYYY-MM-DD.md
+7. 用户择期 memory_cli review → 确认后 purge 移入 <state_dir>/trash/
 ```
 
 ---
@@ -903,6 +931,25 @@ logs/memory.log
 
 ## 版本历史
 
+### v1.2 (2026-08-28) - 平面存储与无状态衰减
+
+```
+✅ 平面存储：Flatnotes 刻意不支持子目录，三层物理目录方案废弃；
+   layer 改为 sidecar 索引中的逻辑属性，文件永不被机器移动
+✅ sidecar 状态索引 (<state_dir>/index.json)：confidence/layer/
+   last_accessed/references/pending_delete 移出 frontmatter，
+   frontmatter 创建时写一次后机器不再改写（消除 mtime 污染、
+   Git 噪音、与 Web 编辑器的写冲突）
+✅ 无状态 confidence：conf = 0.95^(idle_days / ref_factor)，
+   纯函数幂等，修复增量式 0.95^days 每日复利错误与重复加分
+✅ 访问信号契约：mtime（编辑）为主信号 + CLI/Agent 显式上报；
+   明确接受 Web 纯阅读不计数的降级；references 由每日反链扫描产生
+✅ 引用因子改为减缓时间流逝（乘性）而非加分（加性），
+   使"读多改少"的重要笔记免于 45 天必然触底
+✅ 待删除流程：pending_delete 标记 → review → purge → trash/，
+   永不静默删除
+```
+
 ### v1.1 (2026-08-28) - Confidence 语义对齐
 
 ```
@@ -988,4 +1035,4 @@ logs/memory.log
 
 ---
 
-**🔒 本文档已锁定为 v1.1 - 开始实现！**
+**🔒 本文档已锁定为 v1.2 - 开始实现！**

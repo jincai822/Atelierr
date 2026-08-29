@@ -159,7 +159,7 @@ python -m scripts.cli.batch_cli --input-dir ~/Downloads/ --output-dir ~/Notes/
 ✅ PDF 处理器（PyMuPDF）
 ✅ 视频处理器（Whisper）
 ✅ 音频处理器（Whisper）
-✅ 微信处理器（解析导出）
+⏳ 微信处理器（→ backlog：导出格式不稳定，不进 MVP）
 ✅ 批量处理工具
 
 交付标准:
