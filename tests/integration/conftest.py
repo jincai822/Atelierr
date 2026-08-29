@@ -1,10 +1,20 @@
 """Web 集成测试共享 fixture。"""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from scripts.memory.core import MemoryTree
 from scripts.web.integration import FlatnotesIntegration
+from tools.generate_test_data import generate_all
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_fixtures() -> None:
+    """session 级：保证端到端测试夹具存在（幂等生成）。"""
+    fixtures_dir = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
+    generate_all(fixtures_dir)
 
 
 @pytest.fixture

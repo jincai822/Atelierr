@@ -101,8 +101,12 @@ def run_memory_section() -> bool:
         return False
 
 
-def run_cli_section() -> bool:
-    """CLI 验收：MemoryCLI 导入 + CliRunner 跑 create/search/stats。"""
+def run_cli_section(phase: str) -> bool:
+    """CLI 验收：MemoryCLI 导入 + CliRunner 跑 create/search/stats。
+
+    phase >= 3 时追加 ProcessCLI/BatchCLI 导入冒烟，并用 CliRunner
+    对 test_image.jpg 跑一次 image 子命令（--output 到临时文件）。
+    """
     print("🧪 CLI...")
     try:
         from click.testing import CliRunner
@@ -124,8 +128,32 @@ def run_cli_section() -> bool:
             assert result.exit_code == 0, result.output
             assert "总数: 1" in result.output, "CLI stats 异常"
 
-            print("  ✅ CLI 验收通过")
-            return True
+        if phase in ("3", "all"):
+            from scripts.cli.batch_cli import BatchCLI
+            from scripts.cli.process_cli import ProcessCLI
+            from tools.generate_test_data import generate_all
+
+            assert callable(ProcessCLI), "ProcessCLI 不可用"
+            assert callable(BatchCLI), "BatchCLI 不可用"
+
+            fixtures = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
+            generate_all(fixtures)
+            with tempfile.TemporaryDirectory() as tmp:
+                out_file = Path(tmp) / "cli-image.md"
+                result = CliRunner().invoke(
+                    ProcessCLI().cli,
+                    ["image", str(fixtures / "test_image.jpg"),
+                     "--output", str(out_file)],
+                )
+                assert result.exit_code == 0, (
+                    f"process_cli image 失败: {result.output}"
+                )
+                assert out_file.exists() and out_file.stat().st_size > 0, (
+                    "process_cli image 未写出输出文件"
+                )
+
+        print("  ✅ CLI 验收通过")
+        return True
     except Exception as exc:  # noqa: BLE001
         print(f"  ❌ 失败: {exc}")
         return False
@@ -183,21 +211,28 @@ def run_web_section() -> bool:
 
 
 def run_processors_section() -> bool:
-    """输入处理器验收（phase >= 3）：导入 + 用 tests/fixtures 冒烟。"""
+    """输入处理器验收（phase >= 3）：夹具生成 + 图片 OCR / PDF 处理断言。"""
     print("🧪 输入处理器...")
     try:
         from scripts.processors.base import BaseProcessor
         from scripts.processors.image import ImageProcessor
         from scripts.processors.pdf import PDFProcessor
+        from tools.generate_test_data import generate_all
 
         assert callable(BaseProcessor), "BaseProcessor 不可用"
         assert callable(ImageProcessor), "ImageProcessor 不可用"
         assert callable(PDFProcessor), "PDFProcessor 不可用"
 
         fixtures = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
-        if (fixtures / "sample.md").exists():
-            text = (fixtures / "sample.md").read_text(encoding="utf-8")
-            assert text.strip(), "fixtures/sample.md 为空"
+        generate_all(fixtures)
+
+        image_result = ImageProcessor().process(str(fixtures / "test_image.jpg"))
+        assert image_result.success, f"图片 OCR 失败: {image_result.error}"
+        assert image_result.text.strip(), "图片 OCR 未提取到文字"
+
+        pdf_result = PDFProcessor().process(str(fixtures / "test.pdf"))
+        assert pdf_result.success, f"PDF 处理失败: {pdf_result.error}"
+        assert pdf_result.page_count > 0, "PDF 未检测到页面"
 
         print("  ✅ 输入处理器验收通过")
         return True
@@ -223,7 +258,7 @@ def main() -> int:
 
     results = {
         "记忆模块": run_memory_section(),
-        "CLI": run_cli_section(),
+        "CLI": run_cli_section(args.phase),
         "工具函数": run_utils_section(),
     }
 

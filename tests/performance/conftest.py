@@ -3,11 +3,20 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 from typing import List, Optional
 
 import pytest
 
 from scripts.memory.core import MemoryTree
+from tools.generate_test_data import generate_all
+
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_processor_fixtures() -> None:
+    """session 级：保证输入处理器性能测试夹具存在（幂等生成）。"""
+    fixtures_dir = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
+    generate_all(fixtures_dir)
 
 
 @pytest.fixture

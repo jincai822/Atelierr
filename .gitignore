@@ -109,3 +109,16 @@ zk
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Atelierr MVP3 输入处理测试夹具（tools/generate_test_data.py 生成，不入库）
+tests/fixtures/test_image.jpg
+tests/fixtures/test_image.png
+tests/fixtures/test_image.webp
+tests/fixtures/test_image2.jpg
+tests/fixtures/test_image2.png
+tests/fixtures/test_image2.webp
+tests/fixtures/test.pdf
+tests/fixtures/test_scanned.pdf
+tests/fixtures/test_with_images.pdf
+tests/fixtures/test_audio.wav
+tests/fixtures/test_video.mp4
