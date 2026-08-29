@@ -275,6 +275,143 @@ def run_examples_section() -> bool:
     return ok
 
 
+def run_cognition_section() -> bool:
+    """认知模块验收（Phase 5）：COGNITION-SPEC v1.0 全流程断言。
+
+    覆盖：create / question certainty 拒绝 / 提名-批准升级 / 来源 memory
+    不变红线 / 挑战-接受 / 继任 / 归档 / validate / reindex / CLI 冒烟。
+    """
+    print("🧪 认知模块...")
+    try:
+        import frontmatter
+        from click.testing import CliRunner
+
+        from scripts.cli.cognition_cli import CognitionCLI
+        from scripts.memory.cognition import (
+            ApprovalRecord,
+            CognitionError,
+            CognitionManager,
+        )
+        from scripts.memory.core import MemoryTree
+
+        approval = ApprovalRecord(action="acceptance", reason="验收批准")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tree = MemoryTree(str(root / "memory"), state_dir=str(root / "state"))
+            manager = CognitionManager(root, state_dir=root / "state")
+
+            # 手工创建 belief；question 拒绝 certainty
+            belief = manager.create_entry(
+                entry_type="belief",
+                title="验收信念",
+                statement="认知模块验收陈述。",
+                status="active",
+                certainty=0.8,
+                approval=approval,
+            )
+            assert belief.path.parent == manager.cognition_dir, "非平面根层"
+            try:
+                manager.create_entry(
+                    entry_type="question",
+                    title="q",
+                    statement="问题？",
+                    status="open",
+                    certainty=0.5,
+                    approval=approval,
+                )
+                raise AssertionError("question 接受 certainty 了")
+            except CognitionError:
+                pass
+
+            # 提名 → 批准：来源 memory 红线（bytes/mtime 不变）
+            note = tree.create_note("origin.md", "升级来源内容")
+            memory_id = frontmatter.loads(note.read_text(encoding="utf-8")).metadata[
+                "id"
+            ]
+            before = (note.read_bytes(), note.stat().st_mtime_ns)
+            proposal = manager.nominate_memory(
+                memory_id,
+                entry_type="hypothesis",
+                title="验收假设",
+                statement="假设陈述。",
+                rationale="含证伪条件：跑验收",
+                proposed_status="testing",
+                proposed_certainty=0.5,
+            )
+            promoted = manager.approve_promotion(
+                proposal.id,
+                status="testing",
+                certainty=0.55,
+                approval=approval,
+            )
+            assert (
+                note.read_bytes(),
+                note.stat().st_mtime_ns,
+            ) == before, "来源 memory 被改动"
+            assert promoted.origin["memory_id"] == memory_id, "origin 未记录来源"
+
+            # 挑战 → accept：revision/证据/确信度
+            from scripts.memory.cognition import EvidenceRef
+
+            challenge = manager.propose_challenge(
+                belief.id,
+                evidence=[
+                    EvidenceRef(kind="manual", relation="challenges", note="验收反例")
+                ],
+                rationale="验收挑战",
+                proposed_certainty=0.6,
+            )
+            updated = manager.resolve_challenge(
+                challenge.id,
+                resolution="accept",
+                certainty=0.6,
+                status=None,
+                rationale="接受验收反例",
+                approval=approval,
+            )
+            assert updated.revision == 2 and updated.certainty == 0.6
+
+            # 继任 + 归档
+            successor = manager.supersede_entry(
+                promoted.id,
+                replacement_statement="收窄后的假设陈述。",
+                replacement_certainty=0.5,
+                rationale="适用范围收窄",
+                approval=approval,
+            )
+            assert successor.supersedes == promoted.id
+            assert manager.get_entry(promoted.id).status == "superseded"
+            archived = manager.archive_entry(
+                successor.id,
+                reason="验收归档",
+                approval=approval,
+            )
+            assert archived.status == "archived" and archived.path.exists()
+
+            # validate / reindex
+            report = manager.validate()
+            assert report.ok, report.errors
+            rebuilt = manager.rebuild_index()
+            assert rebuilt.rebuilt == 3 and not rebuilt.errors
+
+            # CLI 冒烟：list / show --json / proposals list
+            config = _write_memory_config(root)
+            cli = CognitionCLI(config_path=str(config)).cli
+            runner = CliRunner()
+            result = runner.invoke(cli, ["list", "--all"])
+            assert result.exit_code == 0 and "确信度" in result.output
+            result = runner.invoke(cli, ["show", belief.id, "--json"])
+            assert result.exit_code == 0 and '"certainty": 0.6' in result.output
+            result = runner.invoke(cli, ["proposals", "list", "--status", "all"])
+            assert result.exit_code == 0 and proposal.id in result.output
+
+            print("  ✅ 认知模块验收通过")
+            return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ❌ 失败: {exc}")
+        return False
+
+
 def main() -> int:
     """解析 --phase 并运行对应验收节。"""
     parser = argparse.ArgumentParser(description="Atelierr MVP 分阶段验收测试")
@@ -305,6 +442,11 @@ def main() -> int:
         results["输入处理器"] = run_processors_section()
     else:
         print("⏳ 跳过输入处理器（后续阶段）")
+
+    if args.phase == "all":
+        results["认知模块"] = run_cognition_section()
+    else:
+        print("⏳ 跳过认知模块（Phase 5，--phase all 时验收）")
 
     results["示例"] = run_examples_section()
 

@@ -39,6 +39,24 @@ def _resolve_config_path(config_path: Optional[str]) -> Optional[str]:
     return None
 
 
+def _cognition_dependencies(tree: MemoryTree, note_id: str) -> List:
+    """查询引用该 memory 的在研 cognition（active/testing/questioned）。
+
+    COG-PROMOTION-05：仅显示依赖警告，不阻止 purge、不恢复 memory、
+    不改变 confidence。memory-only 部署（cognition 目录不存在）直接跳过，
+    绝不因查询而创建 cognition 目录。
+    """
+    if not note_id:
+        return []
+    ov_path = tree.notes_dir.parent
+    if not (ov_path / "cognition").is_dir():
+        return []
+    from scripts.memory.cognition import CognitionManager
+
+    manager = CognitionManager(ov_path, state_dir=tree.state_dir)
+    return manager.memory_dependencies(note_id)
+
+
 class MemoryCLI:
     """记忆模块 CLI（点击组）。"""
 
@@ -210,7 +228,7 @@ class MemoryCLI:
         @cli.command()
         @click.pass_context
         def review(ctx: click.Context) -> None:
-            """列出 pending_delete 笔记供人工确认。"""
+            """列出 pending_delete 笔记供人工确认（含 cognition 依赖警告）。"""
             tree: MemoryTree = ctx.obj
             pending = tree.list_pending_delete()
             if not pending:
@@ -219,6 +237,12 @@ class MemoryCLI:
             click.echo(f"{len(pending)} 条待删除笔记（确认后 purge 移入回收站）:")
             for path in pending:
                 click.echo(f"  - {path}")
+                note_id = tree._find_entry_id(path) or ""
+                for dep in _cognition_dependencies(tree, note_id):
+                    click.echo(
+                        f"    ⚠ 被在研 cognition 引用: {dep.id}"
+                        f"（{dep.entry_type}/{dep.status}）；purge 后其证据将悬空"
+                    )
 
         @cli.command()
         @click.option("--yes", "assume_yes", is_flag=True, help="跳过确认直接执行")
@@ -230,6 +254,13 @@ class MemoryCLI:
             if not pending:
                 click.echo("没有待删除的笔记")
                 return
+            for path in pending:
+                note_id = tree._find_entry_id(path) or ""
+                for dep in _cognition_dependencies(tree, note_id):
+                    click.echo(
+                        f"⚠ {path.name} 被在研 cognition 引用: {dep.id}"
+                        f"（{dep.entry_type}/{dep.status}）"
+                    )
             if not assume_yes:
                 click.confirm(f"确认把 {len(pending)} 条笔记移入回收站?", abort=True)
             trash_dir = tree.state_dir / "trash"
