@@ -37,11 +37,11 @@
 
 | 图解 | 说明 | 文件 |
 |------|------|------|
-| **三模块架构** | 系统整体架构，三个模块的位置和关系 | [architecture-diagram.png](./architecture-diagram.png) |
-| **数据流程** | 用户创建笔记的完整数据流 | [dataflow-diagram.png](./dataflow-diagram.png) |
-| **文件结构** | $OV/ 和 Atelierr/ 的目录组织 | [file-structure-diagram.png](./file-structure-diagram.png) |
+| **三模块架构** | 系统整体架构，三个模块的位置和关系 | [architecture-diagram.png](./archive/architecture-diagram.png) |
+| **数据流程** | 用户创建笔记的完整数据流 | [dataflow-diagram.png](./archive/dataflow-diagram.png) |
+| **文件结构** | $OV/ 和 Atelierr/ 的目录组织 | [file-structure-diagram.png](./archive/file-structure-diagram.png) |
 
-**快速参考**: [README-visual.md](./README-visual.md)
+**快速参考**: [README-visual.md](./archive/README-visual.md)
 
 ---
 
@@ -276,7 +276,7 @@ Week 9-10: ✅ 优化和测试
            🎉 v1.0 发布
 ```
 
-详见: [implementation-timeline.png](./implementation-timeline.png)
+详见: [implementation-timeline.png](./archive/implementation-timeline.png)
 
 ---
 
