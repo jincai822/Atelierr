@@ -1,18 +1,19 @@
-# Atelierr 架构规范 v1.2 (LOCKED)
+# Atelierr 架构规范 v1.3 (LOCKED)
 
-**版本**: v1.2  
+**版本**: v1.3
 **状态**: 🔒 已锁定  
-**日期**: 2026-08-28  
+**日期**: 2026-08-29
 **下次修订**: 需明确的问题或需求变更时
 
 > v1.1 修订：Confidence 语义统一为"新鲜度"模型，与 `docs/ACCEPTANCE-CRITERIA.md` 对齐。  
 > v1.2 修订：平面存储（Flatnotes 兼容）+ sidecar 状态索引 + 无状态 confidence 重算 + 访问信号契约 + trash/purge 流程。
+> v1.3 修订：锁定 Phase 5 认知模块；认知确信度使用 `certainty`，与 memory `confidence` 从字段名上隔离；正式 schema 与状态流转见 `docs/prd/COGNITION-SPEC.md` v1.0。
 
 ---
 
 ## 文档说明
 
-本文档是 Atelierr 系统的**官方架构规范**，当前锁定版本为 v1.2。
+本文档是 Atelierr 系统的**官方架构规范**，当前锁定版本为 v1.3。
 
 **修订原则**:
 - ✅ 实现过程中发现的技术细节可补充
@@ -489,13 +490,39 @@ asyncio 是为 I/O 密集型任务设计的...
 
 ### 认知文件格式
 
+认知条目存于 `$OV/cognition/*.md` 平面目录。认知的 `certainty` 表示确信度，
+不随时间衰减；它与 memory sidecar 中表示新鲜度的 `confidence` 无换算、同步或
+比较关系。完整 schema、证据枚举、状态机、API 与 CLI 以
+`docs/prd/COGNITION-SPEC.md` v1.0 为准。
+
 ```markdown
 ---
+schema_version: 1
+id: "cog_01K3Y8M6Q4J7V2T9N5P0A1B3C4"
 title: "线程安全的最佳实践"
 type: "belief"                # belief, question, hypothesis
-confidence: 0.92
-created: "2026-08-27T16:00:00+08:00"
-upgraded_from: "memory/mid-term/learnings/thread-safety.md"
+statement: "共享可变状态必须由明确的同步边界保护。"
+status: "active"
+certainty: 0.92
+certainty_updated_at: "2026-08-29T16:00:00+08:00"
+certainty_source: "human_assessment"
+created: "2026-08-29T16:00:00+08:00"
+updated: "2026-08-29T16:00:00+08:00"
+revision: 1
+tags: [concurrency, thread-safety]
+origin:
+  kind: "memory"
+  memory_id: "01J6ABCDEF"
+  memory_path: "thread-safety.md"
+  promoted_at: "2026-08-29T16:00:00+08:00"
+evidence:
+  - kind: "memory"
+    id: "01J6ABCDEF"
+    path: "thread-safety.md"
+    relation: "supports"
+    added_at: "2026-08-29T16:00:00+08:00"
+related: []
+supersedes: null
 ---
 
 # 线程安全的最佳实践
@@ -779,10 +806,11 @@ class DecayManager:
 ### Phase 5: 认知模块 (Week 4+)
 
 ```
-✅ 实现 cognition.py
-✅ 实现升级机制
-✅ 测试认知流程
-✅ 集成到现有流程
+✅ 按 docs/prd/COGNITION-SPEC.md v1.0 实现 scripts/memory/cognition.py
+✅ 实现 belief/question/hypothesis 公共 schema 与 certainty 语义
+✅ 实现 Agent 提名 + 人工批准的升级机制
+✅ 实现挑战、证伪、继任、派生索引与独立 CLI
+✅ 按 docs/ACCEPTANCE-CRITERIA.md v1.1 测试并集成认知流程
 ```
 
 ---
@@ -932,6 +960,18 @@ logs/memory.log
 
 ## 版本历史
 
+### v1.3 (2026-08-29) - 认知模块锁定
+
+```
+✅ 新增正式契约 docs/prd/COGNITION-SPEC.md v1.0
+✅ 认知条目固定为 belief/question/hypothesis，存于 $OV/cognition/ 平面目录
+✅ 认知确信度字段锁定为 certainty，与 memory confidence 从结构上隔离
+✅ memory → cognition 采用 Agent 提名 + 人工批准，来源 memory 原地不变
+✅ 挑战、证伪和实质修订保留状态历史与 successor 关系，不物理降级或删除
+✅ cognition Markdown 保存语义源真相，独立 sidecar 只做派生索引与 proposal 队列
+✅ Phase 5 不接入 Flatnotes，不修改 harness/Agent/命令注册表
+```
+
 ### v1.2 (2026-08-28) - 平面存储与无状态衰减
 
 ```
@@ -1036,4 +1076,4 @@ logs/memory.log
 
 ---
 
-**🔒 本文档已锁定为 v1.2 - 开始实现！**
+**🔒 本文档已锁定为 v1.3 - 开始实现！**

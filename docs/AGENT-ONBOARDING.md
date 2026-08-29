@@ -15,9 +15,10 @@
 
 ## 契约（唯一事实源，冲突时以此为准）
 
-1. **架构**：`docs/prd/ARCHITECTURE-LOCKED-V1.md`（**v1.2**）
-2. **验收**：`docs/ACCEPTANCE-CRITERIA.md`（测试规格逐条对应实现）
-3. **计划**：`DEVELOPMENT-PLAN-3MVP.md`、`docs/prd/IMPLEMENTATION-PLAN-PARALLEL.md`
+1. **架构**：`docs/prd/ARCHITECTURE-LOCKED-V1.md`（**v1.3**）
+2. **认知模块**：`docs/prd/COGNITION-SPEC.md`（**v1.0**）
+3. **验收**：`docs/ACCEPTANCE-CRITERIA.md`（**v1.1**，测试规格逐条对应实现）
+4. **计划**：`DEVELOPMENT-PLAN-3MVP.md`、`docs/prd/IMPLEMENTATION-PLAN-PARALLEL.md`
 
 `docs/prd/archive/` 是历史存档，**不要引用**（旧模型清单见其 README）。
 

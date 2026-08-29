@@ -1,8 +1,11 @@
 # Atelierr 验收标准与测试规范
 
-**版本**: v1.0  
+**版本**: v1.1
 **状态**: 🔒 已锁定  
-**日期**: 2026-08-28
+**日期**: 2026-08-29
+
+> v1.1 修订：新增 Phase 5 cognition 验收标准与逐条测试映射；cognition 使用
+> `certainty`，与 memory `confidence` 分离。
 
 ---
 
@@ -572,6 +575,303 @@ pytest tests/unit/test_processors/test_pdf.py -v
 
 ---
 
+### 模块 4: 认知模块 (scripts/memory/cognition.py)
+
+正式数据模型、状态流转、API 与 CLI 以
+`docs/prd/COGNITION-SPEC.md` v1.0 为准。本节为 Phase 5 的可执行验收契约。
+
+#### 4.1 文件与 Schema（COG-SCHEMA）
+
+**功能要求**:
+
+```python
+✅ COG-SCHEMA-01 平面存储:
+  - 已批准 cognition 只创建在 $OV/cognition/ 根层
+  - 文件名为 <slug>--<short-id>.md，创建后机器不自动重命名
+  - frontmatter id 是稳定身份；标题、类型、状态变化不改变 id
+
+✅ COG-SCHEMA-02 公共字段:
+  - schema_version / id / title / type / statement / status
+  - created / updated / revision / tags / origin / evidence / related / supersedes
+  - created/updated 及所有事件时间为带时区 ISO 8601
+
+✅ COG-SCHEMA-03 类型与 certainty:
+  - type 只允许 belief / question / hypothesis
+  - belief/hypothesis 必须有 [0.0, 1.0] certainty
+  - question 必须省略 certainty/certainty_updated_at/certainty_source
+  - certainty_source 只允许 human_assessment / human_approved_agent_assessment
+
+✅ COG-SCHEMA-04 状态机:
+  - belief: draft/active/questioned/refuted/superseded/archived
+  - hypothesis: draft/testing/supported/refuted/superseded/archived
+  - question: open/answered/superseded/archived
+  - 未知或跨类型 status 必须拒绝写入
+
+✅ COG-SCHEMA-05 Evidence kind:
+  - kind 只允许 memory / url / manual
+  - 所有 kind 必须有 relation 和 added_at
+  - memory 必须有 id/path；禁止 url/accessed_at
+  - url 必须有绝对 http/https url 和 accessed_at；禁止 id/path
+  - manual 必须有非空 note；禁止 id/path/url/accessed_at
+
+✅ COG-SCHEMA-06 Schema 错误:
+  - 未知 type/status/schema_version、重复 id、非法关系或 supersedes 环必须拒绝
+  - 损坏文件报告明确错误，不得自动覆盖或猜测性修复
+```
+
+**测试要求**:
+
+```python
+# tests/unit/test_memory/test_cognition.py
+
+def test_create_belief_in_flat_cognition_root(): ...       # COG-SCHEMA-01
+def test_id_stable_when_title_type_or_status_changes(): ... # COG-SCHEMA-01
+def test_required_common_frontmatter_fields(): ...          # COG-SCHEMA-02
+def test_question_rejects_certainty_fields(): ...            # COG-SCHEMA-03
+def test_certainty_source_enum(): ...                        # COG-SCHEMA-03
+def test_type_specific_status_validation(): ...              # COG-SCHEMA-04
+def test_memory_evidence_field_rules(): ...                  # COG-SCHEMA-05
+def test_url_evidence_field_rules(): ...                     # COG-SCHEMA-05
+def test_manual_evidence_field_rules(): ...                  # COG-SCHEMA-05
+def test_unknown_schema_version_is_rejected(): ...           # COG-SCHEMA-06
+def test_duplicate_id_is_rejected(): ...                     # COG-SCHEMA-06
+def test_supersedes_cycle_is_rejected(): ...                 # COG-SCHEMA-06
+```
+
+#### 4.2 Memory confidence 与 Cognition certainty 隔离（COG-CERTAINTY）
+
+**功能要求**:
+
+```python
+✅ COG-CERTAINTY-01 字段隔离:
+  - memory 继续使用 confidence，语义为新鲜度/活跃度
+  - cognition 只使用 certainty，语义为确信度
+  - cognition 文件出现 confidence 字段必须拒绝
+
+✅ COG-CERTAINTY-02 时间不变:
+  - certainty 不读取文件年龄、mtime、last_accessed 或 idle_days
+  - 同一证据集未获新人工评估时，时间经过不得改变 certainty
+
+✅ COG-CERTAINTY-03 更新权限:
+  - Agent 只能提议 certainty、理由和证据
+  - 获批更新必须携带 ApprovalRecord 并追加审计历史
+  - certainty 不得自动触发类型/状态转换、归档或删除
+
+✅ COG-CERTAINTY-04 精度:
+  - 写入值在 [0.0, 1.0] 内，最多保存四位小数
+  - CLI 默认显示两位；--json 输出存储值
+
+✅ COG-CERTAINTY-05 Memory 回归:
+  - ConfidenceCalculator 与 v1.3 行为完全不变
+  - 两种数值不得同步、取平均、互相覆盖或跨域排序
+```
+
+**测试要求**:
+
+```python
+# tests/unit/test_memory/test_cognition.py
+
+def test_cognition_rejects_confidence_field(): ...           # COG-CERTAINTY-01
+def test_cognition_certainty_does_not_decay_with_time(): ... # COG-CERTAINTY-02
+def test_update_requires_approval_record(): ...              # COG-CERTAINTY-03
+def test_certainty_rounding_and_range(): ...                 # COG-CERTAINTY-04
+def test_memory_decay_does_not_change_certainty(): ...       # COG-CERTAINTY-05
+```
+
+#### 4.3 Memory → Cognition 升级（COG-PROMOTION）
+
+**功能要求**:
+
+```python
+✅ COG-PROMOTION-01 提名无语义副作用:
+  - nominate 只创建 proposal，不创建 cognition，不修改 memory
+  - references/memory confidence/layer 只能影响排序，不能自动批准
+
+✅ COG-PROMOTION-02 人工批准:
+  - approve 前必须展示来源、statement、type、证据、重复项和建议 certainty
+  - 一次 approve 只创建一个 cognition，并记录 ApprovalRecord
+  - reject 记录理由，不修改 memory 或 cognition
+
+✅ COG-PROMOTION-03 来源不变:
+  - approve 前后来源 memory 的 bytes/mtime/path 完全不变
+  - 既有 memory sidecar 动态字段不得因升级改变
+  - cognition 必须保存 origin.memory_id 与 memory_path 快照
+
+✅ COG-PROMOTION-04 边界状态:
+  - pending_delete 来源必须显示 purge 风险警告
+  - trash 中来源必须先恢复，不能直接升级
+  - 相同 statement 给出重复警告，但不自动合并
+
+✅ COG-PROMOTION-05 Purge 集成:
+  - 被 active/testing/questioned cognition 引用的 memory 在 review/purge 时显示依赖
+  - 警告不自动阻止 purge、恢复 memory 或提高 memory confidence
+```
+
+**测试要求**:
+
+```python
+# tests/integration/test_cognition_memory.py
+
+def test_nomination_has_no_cognition_side_effect(): ...      # COG-PROMOTION-01
+def test_reference_threshold_never_auto_promotes(): ...      # COG-PROMOTION-01
+def test_approval_creates_exactly_one_entry(): ...           # COG-PROMOTION-02
+def test_rejection_records_reason_without_mutation(): ...    # COG-PROMOTION-02
+def test_promotion_never_touches_source_memory(): ...        # COG-PROMOTION-03
+def test_pending_delete_source_requires_warning(): ...       # COG-PROMOTION-04
+def test_trash_source_must_be_restored(): ...                # COG-PROMOTION-04
+def test_purge_review_reports_cognition_dependency(): ...    # COG-PROMOTION-05
+```
+
+#### 4.4 挑战、证伪与继任（COG-CHALLENGE）
+
+**功能要求**:
+
+```python
+✅ COG-CHALLENGE-01 挑战提案:
+  - propose_challenge 只写 proposal，批准前不改变 cognition
+  - review 并列显示 statement、支持/挑战证据、当前与建议 certainty
+
+✅ COG-CHALLENGE-02 处理结果:
+  - reject/defer/accept 都记录理由
+  - accept 附加挑战证据，由用户指定 certainty/status
+  - 获批变化递增 revision、刷新 updated、追加修订历史
+
+✅ COG-CHALLENGE-03 保留历史:
+  - refuted/archived/superseded 条目不删除、不移动
+  - 非活动条目默认列表可隐藏，但必须可显式查询
+
+✅ COG-CHALLENGE-04 实质修订:
+  - 措辞澄清可以在原文件获批更新
+  - 适用范围、因果方向或核心含义变化必须创建 successor
+  - 新条目 supersedes 旧 id；旧条目标记 superseded
+
+✅ COG-CHALLENGE-05 Question 回答:
+  - answered 必须记录答案摘要或相关 cognition id
+  - 不得因存在相关 belief 自动关闭 question
+```
+
+**测试要求**:
+
+```python
+# tests/e2e/test_cognition_lifecycle.py
+
+def test_challenge_proposal_does_not_mutate_entry(): ...      # COG-CHALLENGE-01
+def test_all_challenge_resolutions_record_reason(): ...       # COG-CHALLENGE-02
+def test_accepted_challenge_updates_revision_history(): ...   # COG-CHALLENGE-02
+def test_refutation_never_deletes_or_moves_entry(): ...       # COG-CHALLENGE-03
+def test_material_revision_creates_successor(): ...           # COG-CHALLENGE-04
+def test_question_answer_requires_summary_or_relation(): ...  # COG-CHALLENGE-05
+```
+
+#### 4.5 索引与故障恢复（COG-INDEX）
+
+**功能要求**:
+
+```python
+✅ COG-INDEX-01 源真相:
+  - cognition Markdown 保存 certainty/status/evidence 等批准后语义状态
+  - index 只镜像可重建字段，不得反向覆盖 Markdown
+
+✅ COG-INDEX-02 重建:
+  - 删除 <state_dir>/cognition/index.json 后可从 Markdown 完整重建
+  - index 与 Markdown 冲突时 Markdown 胜出并触发 reindex
+
+✅ COG-INDEX-03 Proposal 状态:
+  - proposals.json 只保存未批准 promotion/challenge
+  - proposal 丢失或损坏不得影响任何已批准 cognition
+
+✅ COG-INDEX-04 写入安全:
+  - 已批准更新使用原子替换与 revision 并发冲突检查
+  - 损坏文件隔离报告，不得覆盖或猜测性修复
+```
+
+**测试要求**:
+
+```python
+# tests/unit/test_memory/test_cognition.py
+
+def test_index_can_be_rebuilt_from_markdown(): ...            # COG-INDEX-01/02
+def test_markdown_wins_over_stale_index(): ...                # COG-INDEX-02
+def test_broken_proposals_do_not_affect_approved_entries(): ... # COG-INDEX-03
+def test_corrupt_entry_is_reported_without_rewrite(): ...     # COG-INDEX-04
+def test_revision_conflict_prevents_lost_update(): ...        # COG-INDEX-04
+```
+
+#### 4.6 红线回归（COG-REDLINE）
+
+**验收检查**:
+
+```bash
+.venv-atelierr/bin/pytest
+python tools/acceptance_test.py
+.venv/bin/python scripts/atelier/harness_smoke.py  # 必须 exit 0
+
+✅ COG-REDLINE-01 Atelierr 测试全绿且覆盖率 ≥ 80%
+✅ COG-REDLINE-02 harness_smoke exit 0
+✅ COG-REDLINE-03 cognition 不改变来源 memory 的内容、mtime 或路径
+✅ COG-REDLINE-04 不存在 cognition 自动删除路径
+✅ COG-REDLINE-05 实现 diff 不修改 scripts/atelier/、.claude/、.codex/、
+   harness/、protocols/ 或锁定文档
+```
+
+#### 4.7 目标规模（COG-SCALE）
+
+**功能要求**:
+
+```python
+✅ COG-SCALE-01:
+  - 使用 10,000 条 cognition 验证 list/reindex/validate 结果完整且无数据丢失
+  - 验收报告记录测试硬件、数据规模和三项耗时
+  - v1.1 暂不设置硬性能时限；后续依据实测单独锁定回归阈值
+```
+
+**测试要求**:
+
+```python
+# tests/performance/test_cognition_capacity.py
+
+def test_cognition_capacity_correctness_at_10000_entries(): ... # COG-SCALE-01
+```
+
+#### 4.8 API / CLI 与逐条测试映射
+
+**API / CLI 要求**:
+
+```python
+✅ COG-API-01 公共 API 与 docs/prd/COGNITION-SPEC.md §6.2 签名一致
+✅ COG-API-02 读取方法不改变文件、mtime 或 proposal 状态
+✅ COG-API-03 不提供 delete_entry 或跨两种数值的通用更新 API
+✅ COG-CLI-01 独立入口为 python -m scripts.cli.cognition_cli
+✅ COG-CLI-02 所有语义变更默认显示 diff 并要求用户确认
+✅ COG-CLI-03 --dry-run 不写 cognition/index/proposal 终态
+✅ COG-CLI-04 cognition 显示 certainty；memory 提名信号显示 confidence（新鲜度）
+```
+
+| 规格要求 | 主测试文件 | 对应测试 |
+|---|---|---|
+| COG-SCHEMA-01..06 | `tests/unit/test_memory/test_cognition.py` | `test_create_belief_in_flat_cognition_root` 至 `test_supersedes_cycle_is_rejected` |
+| COG-CERTAINTY-01..05 | `tests/unit/test_memory/test_cognition.py` | `test_cognition_rejects_confidence_field` 至 `test_memory_decay_does_not_change_certainty` |
+| COG-PROMOTION-01..05 | `tests/integration/test_cognition_memory.py` | `test_nomination_has_no_cognition_side_effect` 至 `test_purge_review_reports_cognition_dependency` |
+| COG-CHALLENGE-01..05 | `tests/e2e/test_cognition_lifecycle.py` | `test_challenge_proposal_does_not_mutate_entry` 至 `test_question_answer_requires_summary_or_relation` |
+| COG-INDEX-01..04 | `tests/unit/test_memory/test_cognition.py` | `test_index_can_be_rebuilt_from_markdown` 至 `test_revision_conflict_prevents_lost_update` |
+| COG-REDLINE-01..05 | 完整测试套件 + `harness_smoke.py` | 本节三条命令与人工 diff 检查 |
+| COG-SCALE-01 | `tests/performance/test_cognition_capacity.py` | `test_cognition_capacity_correctness_at_10000_entries` |
+| COG-API-01..03 | `tests/unit/test_memory/test_cognition.py` | `test_public_api_contract`、`test_reads_are_side_effect_free`、`test_no_delete_api` |
+| COG-CLI-01..04 | `tests/unit/test_cli/test_cognition_cli.py` | `test_cli_entrypoint`、`test_mutations_require_confirmation`、`test_dry_run_is_side_effect_free`、`test_cli_terminology` |
+
+**验收检查**:
+
+```bash
+.venv-atelierr/bin/pytest tests/unit/test_memory/test_cognition.py -v
+.venv-atelierr/bin/pytest tests/unit/test_cli/test_cognition_cli.py -v
+.venv-atelierr/bin/pytest tests/integration/test_cognition_memory.py -v
+.venv-atelierr/bin/pytest tests/e2e/test_cognition_lifecycle.py -v
+.venv-atelierr/bin/pytest tests/performance/test_cognition_capacity.py -v
+✅ COG-* 映射中的测试全部通过
+```
+
+---
+
 ## 🧪 测试要求
 
 ### 测试层次
@@ -610,11 +910,13 @@ pytest --cov=scripts --cov-report=html --cov-report=term
   - scripts/memory/core.py
   - scripts/memory/confidence.py
   - scripts/memory/decay.py
+  - scripts/memory/cognition.py
   
 ✅ 关键函数覆盖率 = 100%:
   - 数据写入函数
   - 文件移动函数
   - Confidence 计算函数
+  - Cognition 审批写入与 revision 冲突检查函数
 ```
 
 ### 测试数据
@@ -627,6 +929,8 @@ pytest --cov=scripts --cov-report=html --cov-report=term
   ✅ 示例图片（JPG/PNG/WEBP各2张）
   ✅ 示例 PDF（文字版 + 扫描版各1个）
   ✅ 示例音频（短音频 < 1分钟）
+  ✅ 示例 cognition（3 种 type、3 种 evidence kind、全部状态）
+  ✅ 损坏/冲突 cognition 与 proposal fixtures
   ✅ Mock 数据生成器
 ```
 
@@ -647,6 +951,7 @@ pytest --cov=scripts --cov-report=html --cov-report=term
 图片 OCR                 | 截图类 < 5s；整页扫描 ≤ 15s（CPU 实测 12-14s） | test_image_ocr_performance
 PDF 处理（10页）          | < 30s      | test_pdf_processing_performance
 视频转文字（1分钟）       | < 60s      | test_video_transcribe_performance
+Cognition（10000条）      | 记录 list/reindex/validate 耗时；v1.1 不设硬阈值 | test_cognition_capacity_correctness_at_10000_entries
 ```
 
 ### 吞吐量要求
@@ -1153,6 +1458,11 @@ MVP (Week 1):
   ✅ 测试: 覆盖率 ≥ 85%
   ✅ 性能: 所有指标达标
   ✅ 生产: 生产就绪
+
+Phase 5 Cognition:
+  ✅ 功能: COG-SCHEMA/CERTAINTY/PROMOTION/CHALLENGE/INDEX 全部通过
+  ✅ 回归: COG-REDLINE 全部通过，harness_smoke exit 0
+  ✅ 容量: 10000 条正确性通过并记录 list/reindex/validate 耗时
 ```
 
 ### 关键验收点
@@ -1164,6 +1474,25 @@ MVP (Week 1):
 4. 代码质量达标 ✅
 5. 部署成功 ✅
 6. 功能演示成功 ✅
+```
+
+---
+
+## 版本历史
+
+### v1.1 (2026-08-29) - Phase 5 Cognition
+
+```text
+✅ 新增 COG-SCHEMA/CERTAINTY/PROMOTION/CHALLENGE/INDEX 验收组
+✅ 新增 API/CLI、红线回归与 10000 条容量正确性验收
+✅ 建立每个 COG-* 要求到测试文件和测试函数的追踪映射
+✅ 红线回归增加 harness_smoke exit 0
+```
+
+### v1.0 (2026-08-28) - 初始锁定
+
+```text
+✅ 锁定 Memory、Web、输入处理、测试、性能、质量和部署验收标准
 ```
 
 ---

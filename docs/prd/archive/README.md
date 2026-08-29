@@ -5,8 +5,9 @@
 
 当前生效的契约：
 
-- 架构：`../ARCHITECTURE-LOCKED-V1.md`（v1.2：平面存储 + sidecar 索引 + 无状态 confidence）
-- 验收：`../../ACCEPTANCE-CRITERIA.md`
+- 架构：`../ARCHITECTURE-LOCKED-V1.md`（v1.3）
+- 认知模块：`../COGNITION-SPEC.md`（v1.0）
+- 验收：`../../ACCEPTANCE-CRITERIA.md`（v1.1）
 - 实施：`../IMPLEMENTATION-PLAN-PARALLEL.md`
 
 存档文档中的以下描述均已过时，请勿引用：

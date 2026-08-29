@@ -1,11 +1,11 @@
 # Atelierr 记忆管理系统 - PRD 文档索引
 
-**版本**: v1.0  
+**版本**: v1.1
 **状态**: 🔒 已锁定  
-**日期**: 2026-08-27
+**日期**: 2026-08-29
 
-> **当前生效契约**：架构 `ARCHITECTURE-LOCKED-V1.md`（**v1.2**：平面存储 +
-> sidecar 索引 + 无状态 confidence）、验收 `../ACCEPTANCE-CRITERIA.md`、
+> **当前生效契约**：架构 `ARCHITECTURE-LOCKED-V1.md`（**v1.3**）、认知模块
+> `COGNITION-SPEC.md`（**v1.0**）、验收 `../ACCEPTANCE-CRITERIA.md`（**v1.1**）、
 > 实施 `IMPLEMENTATION-PLAN-PARALLEL.md`。
 > 设计过程的历史文档已移入 `archive/`（见 `archive/README.md` 的过时项清单），
 > 本索引其余内容如与上述契约冲突，以契约为准。
@@ -25,9 +25,15 @@
    - 数据结构设计
    - API 接口规范
    - 🔒 已锁定，开始实施
+
+📄 COGNITION-SPEC.md
+   - Phase 5 belief/question/hypothesis schema
+   - certainty、升级、证伪、索引与 API/CLI 契约
+   - 🔒 v1.0 已锁定，等待独立实现批次
 ```
 
-**快速链接**: [ARCHITECTURE-LOCKED-V1.md](./ARCHITECTURE-LOCKED-V1.md)
+**快速链接**: [ARCHITECTURE-LOCKED-V1.md](./ARCHITECTURE-LOCKED-V1.md) ·
+[COGNITION-SPEC.md](./COGNITION-SPEC.md)
 
 ---
 
