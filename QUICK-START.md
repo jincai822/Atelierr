@@ -154,19 +154,20 @@ MARKDOWN
 ```
 
 手工/外部工具创建的文件需要归一化登记后，`show`/`decay` 才能处理
-（`search` 可直接搜到）。运行一次集成归一化即可（与 Web 集成 watcher
+（`search` 可直接搜到）。运行一次 sync 即可（与 Web 集成 watcher
 的自动登记等价）：
 
 ```bash
-python -c "from scripts.memory.core import MemoryTree; from scripts.web.integration import FlatnotesIntegration; FlatnotesIntegration(MemoryTree.from_config('config/memory.yaml')).process_pending()"
+python -m scripts.cli.memory_cli sync
 ```
 
-输出：
+真实输出：
 
 ```
-normalized: ['first-note.md']
-registered: []
-skipped: []
+归一化: 1
+新登记: 0
+注销: 0
+跳过: 0
 ```
 
 > 💡 用命令行创建可以一步到位（自动补 frontmatter 并登记）：
@@ -268,6 +269,15 @@ python tools/verify_installation.py
   ✅ pyyaml
   ✅ watchdog
   ✅ pytest
+  ✅ frontmatter
+  ✅ click
+  ✅ rich
+
+  （可选，MVP3 输入处理引擎）:
+  ✅ PaddlePaddle
+  ✅ PaddleOCR
+  ✅ OpenAI Whisper
+  ✅ PyMuPDF
 🔍 检查目录结构...
   ✅ scripts/memory
   ✅ scripts/web

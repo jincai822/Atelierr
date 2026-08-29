@@ -16,3 +16,6 @@
 - 来源权重/内容权重的重要度模型、`>0.8 进 long-term`、`<0.3 自动删除`
 - `add_memory / search_memory / decay_memories` API 命名
 - Flatnotes 5000 端口（现为 8080）
+- `DOCUMENTATION-STRUCTURE.md`：早期"文档结构愿景"（docs/dev、docs/user、
+  docs/design 分层规划），该结构从未按计划落地，已被 `docs/README.md`
+  的实际文档索引取代，故随本批次归档于此

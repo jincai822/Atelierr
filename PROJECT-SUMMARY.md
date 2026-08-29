@@ -15,7 +15,7 @@
 ✅ 多模态输入方案（multimodal-*.md）
 ✅ 大文件处理方案（large-file-*.md）
 ✅ 8 张架构图解
-✅ 文档结构规范（DOCUMENTATION-STRUCTURE.md）
+✅ 文档结构规范（docs/prd/archive/DOCUMENTATION-STRUCTURE.md，已归档）
 ✅ 项目结构规范（PROJECT-STRUCTURE.md）
 ```
 
@@ -370,7 +370,7 @@ Week 2: 完善功能（可选）
   → docs/PROJECT-STRUCTURE.md
 
 文档规范:
-  → docs/DOCUMENTATION-STRUCTURE.md
+  → docs/prd/archive/DOCUMENTATION-STRUCTURE.md
 
 快速开始:
   → QUICK-START.md

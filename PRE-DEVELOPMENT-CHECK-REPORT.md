@@ -34,7 +34,7 @@
   ✅ docs/prd/large-file-handling.md
   ✅ docs/prd/README.md
   ✅ docs/README.md
-  ✅ docs/DOCUMENTATION-STRUCTURE.md
+  ✅ docs/prd/archive/DOCUMENTATION-STRUCTURE.md
 
 用户文档:
   ✅ README.md

@@ -34,7 +34,7 @@ PRD 文档:
 
 开发指南:
   ✅ PROJECT-STRUCTURE.md（项目结构）
-  ✅ DOCUMENTATION-STRUCTURE.md（文档规范）
+  ✅ docs/prd/archive/DOCUMENTATION-STRUCTURE.md（文档规范，已归档）
   ✅ PROJECT-SUMMARY.md（项目总结）
 
 用户文档:

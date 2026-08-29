@@ -77,7 +77,7 @@ def check_prd_documents():
         "docs/prd/large-file-handling.md",
         "docs/prd/README.md",
         "docs/README.md",
-        "docs/DOCUMENTATION-STRUCTURE.md",
+        "docs/prd/archive/DOCUMENTATION-STRUCTURE.md",
     ]
     
     print("\n支持文档:")

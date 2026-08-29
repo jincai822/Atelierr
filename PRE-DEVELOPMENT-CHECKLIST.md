@@ -32,7 +32,7 @@
 - [ ] `docs/prd/large-file-handling.md` - 大文件处理
 - [ ] `docs/prd/README.md` - PRD 索引
 - [ ] `docs/README.md` - 文档导航
-- [ ] `docs/DOCUMENTATION-STRUCTURE.md` - 文档规范
+- [ ] `docs/prd/archive/DOCUMENTATION-STRUCTURE.md` - 文档规范（已归档）
 
 #### ✅ 用户文档
 
