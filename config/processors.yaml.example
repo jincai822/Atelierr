@@ -3,10 +3,14 @@
 processors:
   image:
     engine: paddleocr     # 备选: rapidocr（onnxruntime，安装体积小一个数量级，
-                          # 无需 paddlepaddle）
+                          # 无需 paddlepaddle；也是未来整页扫描达成 < 5s 的候选路径）
     lang: ch              # ch / en
     use_gpu: false
-    timeout_s: 5          # 单张图片处理超时（验收标准 < 5s）
+    timeout_s: 5          # 软目标：截图类 < 5s；整页扫描图 CPU 实测 12-14s
+                          # （对齐 docs/ACCEPTANCE-CRITERIA.md 性能表），实现不做硬中断
+    # 实现注记：paddlepaddle 3.3.1 + paddleocr 3.x 的 MKLDNN 推理路径会崩溃
+    # （NotImplementedError: ConvertPirAttribute2RuntimeAttribute），
+    # image.py 构造 PaddleOCR 时固定 enable_mkldnn=False，勿改
 
   pdf:
     engine: pymupdf

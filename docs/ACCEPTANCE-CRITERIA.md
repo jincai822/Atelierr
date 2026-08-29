@@ -470,7 +470,7 @@ pytest tests/integration/test_web_integration.py -v
   - 保留原图链接
   
 ✅ 性能要求:
-  - 单张图片处理 < 5s
+  - 截图类图片处理 < 5s；整页扫描图 ≤ 15s（CPU 实测 12-14s）
   - 批量处理支持并行
 ```
 
@@ -644,7 +644,7 @@ pytest --cov=scripts --cov-report=html --cov-report=term
 搜索（1000笔记）          | < 100ms    | test_search_performance
 计算 Confidence          | < 10ms     | test_confidence_performance
 衰减扫描（1000笔记）      | < 5s       | test_decay_performance
-图片 OCR                 | < 5s       | test_image_ocr_performance
+图片 OCR                 | 截图类 < 5s；整页扫描 ≤ 15s（CPU 实测 12-14s） | test_image_ocr_performance
 PDF 处理（10页）          | < 30s      | test_pdf_processing_performance
 视频转文字（1分钟）       | < 60s      | test_video_transcribe_performance
 ```

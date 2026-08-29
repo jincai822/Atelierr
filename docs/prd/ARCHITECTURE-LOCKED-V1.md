@@ -96,7 +96,7 @@ Atelierr 是一个**基于 LLM 的个人反思系统**，通过三个独立模�
 ### 核心功能
 
 ```
-✅ Web UI (Vue.js 前端 + Flask 后端)
+✅ Web UI (Vue.js 前端 + FastAPI 后端)
 ✅ 移动端响应式设计
 ✅ Markdown 编辑器
 ✅ 全文搜索
@@ -516,7 +516,8 @@ upgraded_from: "memory/mid-term/learnings/thread-safety.md"
   - Markdown-it (渲染)
 
 后端:
-  - Flask (Python)
+  - FastAPI (Python)    # 实测 API：POST /api/token 登录（Bearer JWT），
+                        # PATCH /api/notes/{title} 更新（非旧版 Flask 的 login/PUT）
   - Whoosh (全文搜索)
 
 部署:
