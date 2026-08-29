@@ -158,21 +158,22 @@ def run_utils_section() -> bool:
 
 
 def run_web_section() -> bool:
-    """Web 集成验收（phase >= 2）：导入 + 基本归一化冒烟。"""
+    """Web 集成验收（phase >= 2）：导入 + 归一化冒烟（走 FlatnotesIntegration 门面）。"""
     print("🧪 Web 集成...")
     try:
         from scripts.memory.core import MemoryTree
-        from scripts.memory.watcher import MemoryWatcher
         from scripts.web.integration import FlatnotesIntegration
 
         with tempfile.TemporaryDirectory() as tmp:
             tree = MemoryTree(f"{tmp}/memory", state_dir=f"{tmp}/state")
-            watcher = MemoryWatcher(tree, source="web")
+            integration = FlatnotesIntegration(tree)
             note = tree.notes_dir / "raw.md"
             note.write_text("裸内容", encoding="utf-8")
-            result = watcher.process_pending()
+            result = integration.process_pending()
             assert result["normalized"], "归一化失败"
             assert tree.layer_of(note) == "short-term", "登记失败"
+            assert integration.tree is tree, "门面未装配 tree"
+            assert integration.watcher.source == "web", "门面未装配 source=web"
 
         print("  ✅ Web 集成验收通过")
         return True
