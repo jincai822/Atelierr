@@ -25,6 +25,16 @@ Semantic-primary rule. For anything phrased as a concept ("how does X relate to 
 
 Fast-path for semantic / exploratory sessions. For `/explore`, forgotten-connection queries, and paradigm-shift prompts ("what am I missing?", "surprise me", "find a contradiction"), `uv run scripts/atelier/semantic.py query` is already your first move by default. Do not exhaust synonym grep first. Note `semantic-first` in the handoff so the choice is transparent.
 
+## Atelierr Memory Usage
+
+The memory module is a separate flat store. Resolve `memory.root` and `memory.state_dir` from `config/memory.yaml`; from the repository root use `.venv-atelierr/bin/python` (the memory dependencies are installed there), not the Atelier harness environment.
+
+Search memory before forming a new brief:
+`.venv-atelierr/bin/python -m scripts.cli.memory_cli --config config/memory.yaml search "asyncio" --limit 10`
+(replace `asyncio` with the actual topic). For the API flow, run `from scripts.memory.core import MemoryTree`, then `memory = MemoryTree.from_config("config/memory.yaml")`; call `memory.search(...)`, and call `memory.on_note_accessed(hit.path)` only for hits you actually read and use. Never mark every search result as accessed.
+
+When the work produces a genuinely new insight, propose or execute the approved API call `memory.create_note(filename="<slug>.md", content="<insight>", source="agent", tags=["phase4"])`. Replace every angle-bracket placeholder with concrete values before calling; never pass placeholders literally. Return the exact payload to the orchestrator when approval is pending; do not overwrite an existing filename. Empty memory results remain empty and must not be invented.
+
 ## Search Strategy: Progressive Disclosure
 
 Don't search randomly. Follow this strategy:
