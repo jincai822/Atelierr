@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -18,7 +18,7 @@ import frontmatter
 
 from scripts.memory.confidence import ConfidenceCalculator
 from scripts.utils.config import load_config
-from scripts.utils.date_utils import local_timezone, parse_date
+from scripts.utils.date_utils import local_timezone
 
 #: 合法逻辑层级（存于 sidecar，不是物理目录）
 LAYERS: Tuple[str, str, str] = ("short-term", "mid-term", "long-term")
