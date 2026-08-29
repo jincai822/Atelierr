@@ -1,0 +1,19 @@
+# Atelierr 每日衰减定时器（与 atelierr-decay.service 配套）
+#
+# 用户级安装:
+#   systemctl --user enable --now atelierr-decay.timer
+# 查看下次触发时间:
+#   systemctl --user list-timers atelierr-decay.timer
+#
+# OnCalendar=*-*-* 03:00:00: 每天 03:00
+# Persistent=true: 错过的触发（关机/睡眠）在下次启动后立即补跑
+
+[Unit]
+Description=Atelierr memory decay daily timer (03:00)
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

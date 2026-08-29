@@ -1,0 +1,27 @@
+# Atelierr 每日衰减服务（oneshot）
+#
+# 用户级 systemd unit（安装说明见 docs/DECAY-SCHEDULING.md）:
+#   mkdir -p ~/.config/systemd/user
+#   cp docker/systemd/atelierr-decay.service docker/systemd/atelierr-decay.timer \
+#     ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now atelierr-decay.timer
+#
+# 日志: ~/atelierr-data/state/logs/decay.log（stdout/stderr 追加，
+#       ExecStartPre 保证 logs 目录存在）
+# 报告: <state_dir>/reports/decay-YYYY-MM-DD.md（由 decay 自身写入）
+# 前置: config/memory.yaml 必须存在（gitignored，先 cp config/memory.yaml.example
+#       config/memory.yaml 并确认 memory.root / memory.state_dir）
+
+[Unit]
+Description=Atelierr memory decay (daily 03:00)
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/workspaces/Atelierr
+Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.memory_cli decay
+StandardOutput=append:%h/atelierr-data/state/logs/decay.log
+StandardError=append:%h/atelierr-data/state/logs/decay.log
