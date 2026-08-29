@@ -7,7 +7,12 @@
 
 import sys
 import subprocess
+import tempfile
+import urllib.request
 from pathlib import Path
+
+# 直接运行（python tools/verify_installation.py）时保证 scripts 包可导入
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 # ANSI 颜色
@@ -174,6 +179,50 @@ def check_atelierr_modules():
     return all_ok
 
 
+def check_flatnotes():
+    """检查 Flatnotes Web 界面可达性（http://localhost:8080）。
+
+    不可达只给 ⚠️ 警告不算失败（Web 界面是可选组件）。
+    """
+    print("🔍 检查 Flatnotes...")
+    try:
+        with urllib.request.urlopen("http://localhost:8080", timeout=3) as resp:
+            status = resp.status
+        if status == 200:
+            print(f"  {GREEN}✅{RESET} http://localhost:8080 可访问 (HTTP {status})")
+            return True
+        print(f"  {YELLOW}⚠️{RESET}  http://localhost:8080 返回 HTTP {status}（非 200）")
+        return True
+    except Exception as exc:
+        print(f"  {YELLOW}⚠️{RESET}  http://localhost:8080 不可达（可选，Web 界面未启动）")
+        print(f"     提示: cd docker && docker compose up -d")
+        print(f"     原因: {exc}")
+        return True
+
+
+def check_memorytree():
+    """MemoryTree 功能冒烟：临时目录 create_note → search → note_info。
+
+    只用内存模块自身依赖（frontmatter/rich），不触发 OCR/Whisper 等重引擎。
+    """
+    print("🔍 测试 MemoryTree...")
+    try:
+        from scripts.memory.core import MemoryTree
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = MemoryTree(f"{tmp}/memory", state_dir=f"{tmp}/state")
+            note = tree.create_note("smoke.md", "冒烟测试内容", tags=["验证"])
+            results = tree.search("冒烟")
+            info = tree.note_info(note)
+        assert results and results[0].path == note, "搜索未命中"
+        assert info["layer"] == "short-term", "层级异常"
+        print(f"  {GREEN}✅{RESET} create_note / search / note_info 正常")
+        return True
+    except Exception as exc:  # noqa: BLE001 - 冒烟失败按检查失败处理
+        print(f"  {RED}❌{RESET} MemoryTree 冒烟失败: {exc}")
+        return False
+
+
 def generate_report(checks: dict):
     """生成检查报告"""
     print_section("检查报告")
@@ -216,7 +265,9 @@ def main():
         "目录结构": check_directories(),
         "配置文件": check_config_files(),
         "Docker": check_docker(),
+        "Flatnotes": check_flatnotes(),
         "Atelierr 模块": check_atelierr_modules(),
+        "MemoryTree": check_memorytree(),
     }
     
     # 生成报告

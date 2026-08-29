@@ -50,12 +50,10 @@ Atelierr/
 │   │
 │   ├── web/                        ← 模块 2: Web 界面（独立开发）
 │   │   ├── __init__.py
-│   │   ├── flatnotes_config.py     ← Flatnotes 配置生成
 │   │   ├── integration.py          ← 与记忆模块集成
 │   │   └── custom_styles.py        ← 自定义样式（可选）
 │   │
 │   ├── processors/                 ← 模块 3: 输入处理（独立开发）
-│   │   ├── __init__.py
 │   │   ├── base.py                 ← 基类（先写这个）
 │   │   ├── image.py                ← 图片处理（调用 PaddleOCR）
 │   │   ├── video.py                ← 视频处理（调用 Whisper）
@@ -148,7 +146,6 @@ Day 1: Flatnotes 部署
   
 Day 2-3: 集成
   scripts/web/integration.py      # 与 memory 集成
-  scripts/web/flatnotes_config.py # 配置生成
 
 Day 4: 测试
   测试 Web 界面

@@ -108,8 +108,8 @@ def check_directory_structure():
     # Atelierr 核心目录
     atelierr_dirs = {
         "scripts/memory": ["__init__.py", "core.py", "confidence.py", "decay.py", "search.py", "watcher.py", "scheduler.py"],
-        "scripts/web": ["__init__.py", "flatnotes_config.py", "integration.py"],
-        "scripts/processors": ["__init__.py", "base.py", "image.py", "video.py", "pdf.py", "audio.py", "wechat.py"],
+        "scripts/web": ["__init__.py", "integration.py"],
+        "scripts/processors": ["base.py", "image.py", "video.py", "pdf.py", "audio.py", "wechat.py"],
         "scripts/cli": ["__init__.py", "memory_cli.py", "process_cli.py", "batch_cli.py"],
         "scripts/utils": ["__init__.py", "config.py", "file_utils.py", "text_utils.py", "date_utils.py"],
     }

@@ -18,7 +18,7 @@
 - **视频**: 智能提取转录和关键帧（99% 压缩）
 - **PDF**: 文本提取和图表保留
 - **音频**: 语音转文字
-- **微信记录**: 聊天记录结构化保存
+- **微信记录**: 聊天记录结构化保存（backlog 规划中，未实现）
 
 ### 💾 智能大文件处理
 
@@ -48,11 +48,10 @@ python3 -m venv .venv-atelierr  # 独立环境，勿用 .venv（Atelier 框架�
 source .venv-atelierr/bin/activate
 pip install -r requirements.txt
 
-# 启动 Web 界面
-docker-compose up -d
+# 启动 Web 界面（compose 文件在 docker/ 下）
+cd docker && docker compose up -d
 
-# 启动记忆管理守护进程
-python scripts/memory_scheduler.py --daemon
+# 每天 03:00 自动衰减（生产部署）见文末"定时衰减（生产部署）"小节
 ```
 
 ### 创建第一个笔记
@@ -62,20 +61,35 @@ python scripts/memory_scheduler.py --daemon
 打开 http://localhost:8080
 
 # 或直接创建 Markdown
-echo "# 我的第一个笔记" > $OV/memory/test.md
+echo "# 我的第一个笔记" > ~/atelierr-data/memory/test.md
 ```
 
 ### 处理多模态输入
 
 ```bash
-# 处理图片
-python scripts/input_processor.py --type image --input screenshot.jpg
+# 处理图片（OCR）
+python -m scripts.cli.process_cli image screenshot.jpg --output screenshot.md
 
-# 处理视频
-python scripts/input_processor.py --type video --input lecture.mp4
+# 处理视频（Whisper 转写）
+python -m scripts.cli.process_cli video lecture.mp4 --output lecture.md
 
 # 处理 PDF
-python scripts/input_processor.py --type pdf --input paper.pdf
+python -m scripts.cli.process_cli pdf paper.pdf --output paper.md
+
+# 批量处理
+python -m scripts.cli.batch_cli --input-dir ~/Downloads/ --output-dir ~/Notes/
+```
+
+### 定时衰减（生产部署）
+
+每天 03:00 自动执行记忆衰减（只写 sidecar 索引与报告，不改笔记文件）。
+生产环境推荐用 systemd timer（备选 crontab），安装与运维见
+[定时衰减（生产部署）](./docs/DECAY-SCHEDULING.md)。
+
+手动触发一次：
+
+```bash
+python -m scripts.cli.memory_cli decay
 ```
 
 ---
@@ -85,15 +99,15 @@ python scripts/input_processor.py --type pdf --input paper.pdf
 ### 快速链接
 
 - [快速开始指南](./QUICK-START.md) - 10分钟上手
-- [完整文档](./docs/README.md) - 所有文档导航
-- [用户手册](./docs/user/user-guide.md) - 详细使用说明
-- [API 参考](./docs/dev/api-reference.md) - 开发者文档
+- [文档导航](./docs/README.md) - 所有文档索引
+- [验收标准](./docs/ACCEPTANCE-CRITERIA.md) - 功能验收与配置语义
+- [测试指南](./docs/TESTING-GUIDE.md) - 测试运行方法
 
 ### 架构文档
 
 - [核心架构](./docs/prd/ARCHITECTURE-LOCKED-V1.md) - 系统设计
 - [实施计划](./docs/prd/IMPLEMENTATION-PLAN-PARALLEL.md) - 开发路线图
-- [架构图解](./docs/prd/) - 可视化架构
+- [PRD 总索引](./docs/prd/README.md) - 设计文档导航
 
 ---
 
@@ -118,7 +132,7 @@ python scripts/input_processor.py --type pdf --input paper.pdf
 └─────────────────────────────────┘
 ```
 
-更多细节: [架构图解](./docs/prd/README-visual.md)
+更多细节: [PRD 文档](./docs/prd/README.md)
 
 ---
 
@@ -172,7 +186,8 @@ tags: ["标签1", "标签2"]
 
 ### 三层记忆（逻辑分层）
 
-所有笔记存放在同一平面目录 `$OV/memory/`，层级是 sidecar 索引中的
+所有笔记存放在同一平面目录（默认 `~/atelierr-data/memory/`，即
+`memory.root`），层级是 sidecar 索引中的
 逻辑属性（文件不会被移动）。Confidence 表示新鲜度，新笔记 = 1.0，
 按 `0.95^(闲置天数/引用因子)` 单一曲线衰减：
 
@@ -233,24 +248,24 @@ tags: ["标签1", "标签2"]
 - [x] 自动衰减机制
 - [x] 基础搜索功能
 
-### ⏳ Phase 2: Web 界面集成（Week 3）
+### ✅ Phase 2: Web 界面集成（Week 3）
 
-- [ ] Flatnotes 部署
-- [ ] 文件监控集成
-- [ ] 自动化工作流
+- [x] Flatnotes 部署
+- [x] 文件监控集成
+- [x] 自动化工作流
 
-### ⏳ Phase 3: 输入处理（Week 4）
+### ✅ Phase 3: 输入处理（Week 4）
 
-- [ ] 图片 OCR
-- [ ] 视频处理
-- [ ] PDF 处理
+- [x] 图片 OCR
+- [x] 视频处理
+- [x] PDF 处理
 
 ### ⏳ Phase 4: 大文件和多模态（Week 5-8）
 
 - [ ] 大文件智能提取
-- [ ] 微信记录处理
-- [ ] 音频转文字
-- [ ] 批量处理工具
+- [ ] 微信记录处理（→ backlog 规划中）
+- [x] 音频转文字
+- [x] 批量处理工具
 
 ### ⏳ Phase 5: 优化和发布（Week 9-10）
 
@@ -282,8 +297,6 @@ git push origin feature/amazing-feature
 
 # 5. 提交 Pull Request
 ```
-
-详见: [贡献指南](./docs/dev/contributing.md)
 
 ---
 

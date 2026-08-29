@@ -13,8 +13,8 @@ from pathlib import Path
 STRUCTURE = {
     "scripts": {
         "memory": ["__init__.py", "core.py", "confidence.py", "decay.py", "search.py", "watcher.py", "scheduler.py"],
-        "web": ["__init__.py", "flatnotes_config.py", "integration.py"],
-        "processors": ["__init__.py", "base.py", "image.py", "video.py", "pdf.py", "audio.py", "wechat.py"],
+        "web": ["__init__.py", "integration.py"],
+        "processors": ["base.py", "image.py", "video.py", "pdf.py", "audio.py", "wechat.py"],
         "cli": ["__init__.py", "memory_cli.py", "process_cli.py", "batch_cli.py"],
         "utils": ["__init__.py", "file_utils.py", "text_utils.py", "date_utils.py", "config.py"],
     },
