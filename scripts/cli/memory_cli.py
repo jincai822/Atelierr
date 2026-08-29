@@ -1,12 +1,13 @@
 """Atelierr 记忆模块 CLI。
 
-子命令：create / show / search / stats / decay / review / purge。
+子命令：create / show / search / stats / decay / review / purge / sync。
 配置解析顺序：--config 显式参数 > 环境变量 ATELIERR_CONFIG >
 ./config/memory.yaml（若存在）> 内置默认 ~/atelierr-data/{memory,state}。
 
 用法:
     python -m scripts.cli.memory_cli create note.md --content "正文"
     python -m scripts.cli.memory_cli decay --dry-run
+    python -m scripts.cli.memory_cli sync
 """
 from __future__ import annotations
 
@@ -70,7 +71,7 @@ class MemoryCLI:
         )
         @click.pass_context
         def cli(ctx: click.Context, config_path: Optional[str]) -> None:
-            """Atelierr 记忆模块（create/show/search/stats/decay/review/purge）。"""
+            """Atelierr 记忆模块（create/show/search/stats/decay/review/purge/sync）。"""
             # --config 选项 > 构造参数 self.config_path > 默认解析链
             resolved = _resolve_config_path(config_path or self.config_path)
             ctx.obj = (
@@ -230,6 +231,25 @@ class MemoryCLI:
                 shutil.move(str(path), str(dest))
                 tree._remove_entry(path)
                 click.echo(f"已移入回收站: {path.name} -> {dest.name}")
+
+        @cli.command()
+        @click.option(
+            "--source",
+            default="web",
+            show_default=True,
+            help="新文件归一化时写入 frontmatter 的默认来源",
+        )
+        @click.pass_context
+        def sync(ctx: click.Context, source: str) -> None:
+            """对齐笔记目录与索引：新文件归一化登记、外部删除注销。"""
+            from scripts.memory.watcher import MemoryWatcher
+
+            tree: MemoryTree = ctx.obj
+            result = MemoryWatcher(tree, source=source).process_pending()
+            click.echo(f"归一化: {len(result['normalized'])}")
+            click.echo(f"新登记: {len(result['registered'])}")
+            click.echo(f"注销: {len(result['deregistered'])}")
+            click.echo(f"跳过: {len(result['skipped'])}")
 
         return cli
 

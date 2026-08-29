@@ -10,6 +10,8 @@ Atelierr MVP 分阶段验收测试（架构 v1.2：平面存储 + sidecar 索引
 - phase 2: 追加 Web 集成（scripts/web.integration.FlatnotesIntegration）
 - phase 3: 追加输入处理器（scripts/processors 导入 + fixtures 冒烟）
 - all:    全部（默认）
+- 示例:   子进程逐个运行 examples/*.py 断言 exit 0（所有 phase 都运行，
+          示例只依赖 MVP1，零外部服务）
 
 未选中的节打印 "⏳ 跳过（后续阶段）" 不算失败。
 退出码：选中节全部通过 → 0，否则 1。
@@ -18,6 +20,7 @@ Atelierr MVP 分阶段验收测试（架构 v1.2：平面存储 + sidecar 索引
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 import tempfile
 from datetime import datetime
@@ -241,6 +244,32 @@ def run_processors_section() -> bool:
         return False
 
 
+def run_examples_section() -> bool:
+    """示例验收（所有 phase 运行）：子进程逐个运行 examples/*.py。
+
+    示例只依赖 MVP1 模块，零外部服务；逐个 subprocess 运行并断言 exit 0。
+    """
+    print("🧪 示例...")
+    examples_dir = Path(__file__).resolve().parent.parent / "examples"
+    scripts = ["basic_usage.py", "batch_processing.py", "custom_processor.py"]
+    ok = True
+    for name in scripts:
+        result = subprocess.run(
+            [sys.executable, str(examples_dir / name)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode == 0:
+            print(f"  ✅ {name} 运行成功")
+        else:
+            print(f"  ❌ {name} 运行失败（exit {result.returncode}）")
+            print(f"     stdout: {result.stdout[-500:]}")
+            print(f"     stderr: {result.stderr[-500:]}")
+            ok = False
+    return ok
+
+
 def main() -> int:
     """解析 --phase 并运行对应验收节。"""
     parser = argparse.ArgumentParser(description="Atelierr MVP 分阶段验收测试")
@@ -271,6 +300,8 @@ def main() -> int:
         results["输入处理器"] = run_processors_section()
     else:
         print("⏳ 跳过输入处理器（后续阶段）")
+
+    results["示例"] = run_examples_section()
 
     print_section("验收报告")
     failed = []

@@ -45,13 +45,16 @@ def check_python_version():
 
 
 def check_dependencies():
-    """检查依赖包"""
+    """检查依赖包（必装 + 可选 MVP3 输入引擎）"""
     print("🔍 检查依赖包...")
     
     required = {
         "yaml": "pyyaml",
         "watchdog": "watchdog",
         "pytest": "pytest",
+        "frontmatter": "frontmatter",
+        "click": "click",
+        "rich": "rich",
     }
     
     all_ok = True
@@ -63,6 +66,21 @@ def check_dependencies():
             print(f"  {RED}❌{RESET} {package_name} 未安装")
             print(f"     安装: pip install {package_name}")
             all_ok = False
+    
+    # 可选依赖：MVP3 输入处理引擎，缺失只警告不算失败
+    optional = {
+        "paddle": "PaddlePaddle",
+        "paddleocr": "PaddleOCR",
+        "whisper": "OpenAI Whisper",
+        "fitz": "PyMuPDF",
+    }
+    print("\n  （可选，MVP3 输入处理引擎）:")
+    for import_name, package_name in optional.items():
+        try:
+            __import__(import_name)
+            print(f"  {GREEN}✅{RESET} {package_name}")
+        except ImportError:
+            print(f"  {YELLOW}⚠️{RESET}  {package_name} 未安装（MVP3 输入处理需要）")
     
     return all_ok
 
