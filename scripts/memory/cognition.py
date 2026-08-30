@@ -1,7 +1,7 @@
 """认知模块：CognitionManager 与认知条目数据模型（COGNITION-SPEC v1.0）。
 
 认知条目（belief/question/hypothesis）以平面 Markdown 存于
-ov_path/cognition/（$OV 根下的 cognition 平面目录），是批准后语义状态的
+$OV/cognition/（平面目录，无子层级），是批准后语义状态的
 唯一源真相；<state_dir>/cognition/ 下只有派生索引（index.json，可完整
 重建）与未批准的 proposal 队列（proposals.json）。
 
@@ -10,8 +10,8 @@ memory 用 confidence（新鲜度，无状态纯函数）；两者不同步、�
 cognition 语义变更必须携带显式 ApprovalRecord（人工批准）；本模块不提供
 delete_entry，也没有任何自动删除路径。
 
-布局假定（架构 v1.3 §5.1）：ov_path 为 $OV 根，memory 在 ov_path/memory，
-cognition 在 ov_path/cognition，状态在 state_dir（默认 ov_path/state）。
+布局假定（架构 v1.3 §5.1）：ov_path 为 $OV 根，memory 在 $OV/memory，
+cognition 在 $OV/cognition，状态在 state_dir（默认 ov_path/state）。
 """
 
 from __future__ import annotations
