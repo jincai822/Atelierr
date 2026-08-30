@@ -1,5 +1,8 @@
 # Atelierr 每日衰减服务（oneshot）
 #
+# 每日流程：先 sync（登记手机/网页新来的裸笔记）再 decay（衰减分层）。
+# sync 行首的 "-" 表示失败不阻塞后续 decay。
+#
 # 用户级 systemd unit（安装说明见 docs/DECAY-SCHEDULING.md）:
 #   mkdir -p ~/.config/systemd/user
 #   cp docker/systemd/atelierr-decay.service docker/systemd/atelierr-decay.timer \
@@ -22,6 +25,7 @@ Type=oneshot
 WorkingDirectory=/srv/workspaces/Atelierr
 Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
 ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
+ExecStart=-/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.memory_cli sync
 ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.memory_cli decay
 StandardOutput=append:%h/atelierr-data/state/logs/decay.log
 StandardError=append:%h/atelierr-data/state/logs/decay.log
