@@ -26,6 +26,7 @@ config/*.yaml
 !config/*.yaml.example
 docker/.env
 docker/data/
+docker/syncthing-config/
 logs/
 
 # Personal data (PRIVATE — never commit)

@@ -22,3 +22,17 @@ services:
       # 挂载记忆模块数据目录（$OV/memory）；默认使用本地 ./data 便于独立试用
       - "${MEMORY_DATA_DIR:-./data}:/data"
     restart: unless-stopped
+
+  # 手机端同步（OBSIDIAN-SYNC-PLAN-DRAFT.md）：与手机 Syncthing-Fork 双向同步
+  # 同一个 $OV/memory 目录；host 网络用于局域网发现与 WireGuard 直连
+  syncthing:
+    image: syncthing/syncthing:latest
+    container_name: atelierr-syncthing
+    network_mode: host
+    environment:
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+    volumes:
+      - "./syncthing-config:/var/syncthing/config"
+      - "${MEMORY_DATA_DIR:-./data}:/data/memory"
+    restart: unless-stopped
