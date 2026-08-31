@@ -580,6 +580,40 @@ Week 4 结束:
 
 ---
 
+## 📱 移动端捕获（MVP 后增量，2026-08-31 完成）
+
+**定位**: 系统的移动端输入通道，挂靠 MVP 1（记忆模块）。手机端的看和写由
+Obsidian 承担，Flatnotes 保留为电脑浏览器入口。不改变架构 v1.2：速记产物是
+平面笔记目录里的普通 markdown，走 watcher 归一化既有链路。
+
+**组件**:
+
+```
+Obsidian (手机 App)   —— 查看/编辑笔记
+  └─ QuickAdd 插件    —— 一键速记：追加 "- HH:mm 内容" 到当天日记 YYYY-MM-DD.md
+Syncthing-Fork (手机) —— 与电脑双向同步
+Syncthing (docker)    —— 电脑侧守护，host 网络，端口 22000
+```
+
+**数据链路**:
+
+```
+手机 Obsidian 速记
+  → Documents/atelierr-memory (手机)
+  → Syncthing 双向同步 → /home/cj1024/atelierr-data/memory (电脑, = $OV/memory)
+  → watcher 归一化 frontmatter + sidecar 登记（mtime 保持不变）
+  → 每日 03:00 定时器：sync → decay
+```
+
+**远程连通**: WireGuard 专线（设备地址 `tcp://10.66.0.2`，电脑侧反向配
+`tcp://10.66.0.3`）+ global discovery 公网兜底，手机换网络环境也能同步。
+华为手机需在"应用启动管理"中放行 Syncthing 后台，防止被杀导致断线。
+
+**验收**: 端到端实测通过——手机速记三条内容经同步落入电脑侧当天日记，
+frontmatter 与正文追加互不干扰。
+
+---
+
 ## 📦 Backlog
 
 三个 MVP 已完成并集成后的待办池（不进 MVP 范围，按需排期）：
