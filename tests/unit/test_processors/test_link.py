@@ -137,15 +137,27 @@ def test_process_success(fake_pipeline):
 
 
 def test_transcript_to_paragraphs():
-    """时间戳剥离 + 繁转简 + 按句读分段。"""
-    raw = "# t\n\n## 转写文字\n\n- [00:00] 著名的哲學家舒本花寫過兩本書。\n- [00:04] 其中之一是作為意志和表現的世界。\n"
+    """时间戳剥离 + 繁转简 + 按字数分段；标题/小节头不得混入正文。"""
+    raw = "# 视频标题\n\n## 转写文字\n\n- [00:00] 著名的哲學家舒本花寫過兩本書。\n- [00:04] 其中之一是作為意志和表現的世界。\n"
 
     body = link_module._transcript_to_paragraphs(raw, width=10)
 
     assert "[00:" not in body
+    assert "视频标题" not in body
+    assert "转写文字" not in body
     assert "著名的哲学家舒本花写过两本书。" in body
     assert "其中之一是作为意志和表现的世界。" in body
     assert "\n\n" in body
+
+
+def test_transcript_no_punctuation_still_paragraphs():
+    """无标点转写（Whisper 常见）也按字数强制分段。"""
+    raw = "- [00:00] " + "啊" * 100 + "\n- [00:05] " + "嗯" * 100
+
+    body = link_module._transcript_to_paragraphs(raw, width=80)
+
+    assert "\n\n" in body
+    assert "。" not in body
 
 
 def test_title_fallback_to_share_text(fake_pipeline, monkeypatch):

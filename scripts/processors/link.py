@@ -67,23 +67,26 @@ _T2S = opencc.OpenCC("t2s")
 def _transcript_to_paragraphs(transcript_markdown: str, width: int = 160) -> str:
     """把视频处理器的逐句时间戳转写合并为自然段（简体）。
 
-    剥掉 ``- [mm:ss]`` 前缀 → 拼成整段文本 → 在句号/问号/感叹号等
-    句读处、累积超过 width 字处分段；无标点时整段返回。
+    只取 ``- [mm:ss] 文本`` 行（丢弃标题/小节头等其余内容），剥掉
+    时间戳后按累积字数分段：凑满 width 字即另起一段。Whisper 中文
+    转写常无标点，不依赖句读切分。
 
     Args:
         transcript_markdown: 视频处理器的 markdown（含时间戳行）。
-        width: 分段的目标字数下限（到句读才切）。
+        width: 每段的目标字数。
 
     Returns:
-        str: 简体、无时间戳、空行分段的转写全文。
+        str: 简体、无时间戳、空行分段的转写全文；无有效行时为空串。
     """
-    joined = _SEGMENT_LINE_RE.sub("", transcript_markdown)
-    text = _T2S.convert("".join(joined.split()))
+    lines = [
+        line for line in transcript_markdown.splitlines() if _SEGMENT_LINE_RE.match(line)
+    ]
+    texts = [_T2S.convert(_SEGMENT_LINE_RE.sub("", line).strip()) for line in lines]
     paragraphs: List[str] = []
     buf = ""
-    for ch in text:
-        buf += ch
-        if len(buf) >= width and ch in "。！？；…":
+    for text in texts:
+        buf += text
+        if len(buf) >= width:
             paragraphs.append(buf)
             buf = ""
     if buf:
