@@ -16,6 +16,7 @@ ffmpeg-python>=0.2.0
 # 链接抓取（抖音等，yt-dlp 借浏览器 cookie 过反爬）
 yt-dlp>=2024.8.6
 secretstorage>=3.3.0; sys_platform == 'linux'
+opencc-python-reimplemented>=0.1.7
 
 # PDF 处理
 PyMuPDF>=1.21.0

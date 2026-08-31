@@ -121,18 +121,31 @@ def test_process_unsupported_platform_fails():
 
 
 def test_process_success(fake_pipeline):
-    """成功路径：markdown 含标题/来源/转写，元数据齐全，临时目录已清理。"""
+    """成功路径：markdown 含标题/来源/分段简体转写，元数据齐全，临时目录已清理。"""
     result = LinkProcessor().process(SHARE_TEXT)
 
     assert result.success, result.error
     assert result.markdown.startswith("# 信息标题\n")
     assert "> 来源：抖音 @信息作者 https://v.douyin.com/eQOGBXJdlwQ/" in result.markdown
-    assert "## 转写文字" in result.markdown
-    assert "- [00:00] 你好" in result.markdown
+    assert "## 转写全文" in result.markdown
+    assert "你好" in result.markdown
+    assert "[00:00]" not in result.markdown
     assert result.metadata["platform"] == "douyin"
     assert result.metadata["model"] == "medium"
     assert result.confidence == 0.9
     assert fake_pipeline and not fake_pipeline[0].exists()
+
+
+def test_transcript_to_paragraphs():
+    """时间戳剥离 + 繁转简 + 按句读分段。"""
+    raw = "# t\n\n## 转写文字\n\n- [00:00] 著名的哲學家舒本花寫過兩本書。\n- [00:04] 其中之一是作為意志和表現的世界。\n"
+
+    body = link_module._transcript_to_paragraphs(raw, width=10)
+
+    assert "[00:" not in body
+    assert "著名的哲学家舒本花写过两本书。" in body
+    assert "其中之一是作为意志和表现的世界。" in body
+    assert "\n\n" in body
 
 
 def test_title_fallback_to_share_text(fake_pipeline, monkeypatch):

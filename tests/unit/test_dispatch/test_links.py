@@ -34,7 +34,7 @@ class _FakeLinkProcessor:
         return ProcessResult(
             success=True,
             text="转写全文",
-            markdown="# 视频标题\n\n## 转写文字\n\n- [00:00] 你好",
+            markdown="# 视频标题\n\n## 转写全文\n\n你好",
             confidence=0.9,
             metadata={"video_id": "vid123", "segments": 1},
         )
@@ -63,9 +63,9 @@ def test_processes_douyin_link(memory_tree):
     created = memory_tree.notes_dir / "douyin-vid123.md"
     assert created.exists()
     post = frontmatter.loads(created.read_text(encoding="utf-8"))
-    assert post["tags"] == ["待确认"]
+    assert post["tags"] == ["待确认", "抖音"]
     assert post["source"] == "link"
-    assert "## 转写文字" in post.content
+    assert "## 转写全文" in post.content
     # 源笔记不被改写
     assert memory_tree.read_note(memory_tree.notes_dir / "daily.md").startswith("今天看到")
     state = json.loads((memory_tree.state_dir / "processed_links.json").read_text())

@@ -124,7 +124,7 @@ class LinkDispatcher:
                     filename,
                     result.markdown,
                     source="link",
-                    tags=[REVIEW_TAG],
+                    tags=[REVIEW_TAG, "抖音"],
                 )
             except (ValueError, FileExistsError):
                 # 同名笔记已存在（状态丢失后的重跑）：视为已处理

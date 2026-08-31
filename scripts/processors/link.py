@@ -5,14 +5,18 @@
 yt-dlp 下载视频到临时目录 → 复用 :class:`VideoProcessor` 转写 →
 组装带来源行的 Markdown → 清理临时文件。
 
+输出格式（v2）：标题 + 来源行 + ``## 转写全文``——转写去除逐句
+时间戳、按标点合并为自然段、繁体转简体（OpenCC）。"观点总结 /
+分观点论述"两节依赖 LLM，待 API key 配置后补入（暂不留占位）。
+
 反爬约束（2026-08-31 真实样本实测）：抖音详情 API 对匿名请求 403，
 但 yt-dlp 借浏览器 cookie（``cookiesfrombrowser``）可拿到视频流地址
 完成下载；标题/作者优先取 yt-dlp 元数据，缺失时回退解析分享文本
 （``【作者的作品】标题 https://...`` 结构）。cookie 过期时在对应
 浏览器打开一次 douyin.com 即可刷新。
 
-触发方式：人工执行 CLI（见 scripts/cli/process_cli.py 的 link 子命令），
-机器完成抓取与转写；不做自动分发（分发器在 backlog）。
+触发方式：dispatch 定时器自动分发（scripts/dispatch/links.py）或
+人工执行 CLI（process_cli link 子命令）。
 
 单元测试 monkeypatch ``yt_dlp.YoutubeDL`` 与 ``VideoProcessor``，
 无真实网络与模型下载。
@@ -23,8 +27,9 @@ from __future__ import annotations
 import re
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+import opencc
 import yt_dlp
 
 from scripts.processors.base import BaseProcessor, ProcessResult
@@ -48,6 +53,39 @@ _URL_TRAILING = "。，、！？；：）》\"'…"
 
 #: 视频下载后按扩展名在临时目录里定位产物
 _VIDEO_EXTS: Tuple[str, ...] = (".mp4", ".mkv", ".webm", ".mov", ".flv")
+
+#: 视频处理器输出里的逐句时间戳行（"- [00:00] 文本"）
+_SEGMENT_LINE_RE = re.compile(r"^- \[\d{2}:\d{2}\]\s*", re.M)
+
+#: 繁体 → 简体转换器（模块级单例）
+_T2S = opencc.OpenCC("t2s")
+
+
+def _transcript_to_paragraphs(transcript_markdown: str, width: int = 160) -> str:
+    """把视频处理器的逐句时间戳转写合并为自然段（简体）。
+
+    剥掉 ``- [mm:ss]`` 前缀 → 拼成整段文本 → 在句号/问号/感叹号等
+    句读处、累积超过 width 字处分段；无标点时整段返回。
+
+    Args:
+        transcript_markdown: 视频处理器的 markdown（含时间戳行）。
+        width: 分段的目标字数下限（到句读才切）。
+
+    Returns:
+        str: 简体、无时间戳、空行分段的转写全文。
+    """
+    joined = _SEGMENT_LINE_RE.sub("", transcript_markdown)
+    text = _T2S.convert("".join(joined.split()))
+    paragraphs: List[str] = []
+    buf = ""
+    for ch in text:
+        buf += ch
+        if len(buf) >= width and ch in "。！？；…":
+            paragraphs.append(buf)
+            buf = ""
+    if buf:
+        paragraphs.append(buf)
+    return "\n\n".join(paragraphs)
 
 
 def _extract_url(text: str) -> Optional[str]:
@@ -234,21 +272,21 @@ class LinkProcessor(BaseProcessor):
     def _build_markdown(
         title: str, author: str, url: str, transcript_markdown: str
     ) -> str:
-        """组装最终 Markdown：标题 + 来源行 + 转写正文（复用视频处理器格式）。
+        """组装最终 Markdown：标题 + 来源行 + 转写全文（分段简体，无时间戳）。
 
         Args:
             title: 笔记标题。
             author: 作者（可为空串）。
             url: 来源链接。
-            transcript_markdown: 视频处理器的输出（首行为原临时标题，
-            丢弃并替换）。
+            transcript_markdown: 视频处理器的输出（逐句时间戳格式，
+            在此转换，原标题行丢弃）。
 
         Returns:
             str: 完整 Markdown。
         """
         source = f"> 来源：抖音 @{author} {url}" if author else f"> 来源：抖音 {url}"
-        body = transcript_markdown.split("\n", 1)[1] if "\n" in transcript_markdown else ""
-        return f"# {title}\n\n{source}\n{body}".rstrip() + "\n"
+        body = _transcript_to_paragraphs(transcript_markdown)
+        return f"# {_T2S.convert(title)}\n\n{source}\n\n## 转写全文\n\n{body}\n"
 
     @staticmethod
     def _cleanup(download_dir: str) -> None:
