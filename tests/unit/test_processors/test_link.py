@@ -167,6 +167,7 @@ def test_title_fallback_to_share_text(fake_pipeline, monkeypatch):
 
 def test_download_failure(monkeypatch):
     """下载抛 DownloadError → success=False，cookie 类错误带提示。"""
+    monkeypatch.setattr(LinkProcessor, "_refresh_cookies", lambda self, url: False)
 
     class _FailYT:
         def __init__(self, opts):
@@ -214,11 +215,80 @@ def test_link_model_forwarded_to_video(fake_pipeline):
 
 
 def test_config_defaults():
-    """内置默认配置：model=large-v3、cookies_browser=chrome。"""
+    """内置默认配置：model=large-v3、cookies_browser=chrome、profile/二进制默认。"""
     processor = LinkProcessor()
 
     assert processor.model == "large-v3"
     assert processor.cookies_browser == "chrome"
+    assert "douyin-chrome-profile" in processor.chrome_profile_dir
+    assert processor.chrome_binary == ""
+
+
+def test_cookie_refresh_retry_success(fake_pipeline, monkeypatch):
+    """cookie 失效 → 自动无头刷新 → 携专用 profile 重试成功。"""
+    calls = []
+
+    class _CookieAwareYT:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download=True):
+            cookies = self.opts.get("cookiesfrombrowser")
+            calls.append(cookies)
+            if cookies and len(cookies) == 1:
+                raise yt_dlp.utils.DownloadError("Fresh cookies are needed")
+            out = Path(
+                self.opts["outtmpl"].replace("%(id)s", "vid123").replace(
+                    "%(ext)s", "mp4"
+                )
+            )
+            out.write_bytes(b"fake video bytes")
+            return {"id": "vid123", "title": "自愈标题", "uploader": "作者"}
+
+    monkeypatch.setattr(link_module.yt_dlp, "YoutubeDL", _CookieAwareYT)
+    refresh_calls = []
+    monkeypatch.setattr(
+        LinkProcessor, "_refresh_cookies", lambda self, url: refresh_calls.append(url) or True
+    )
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert result.markdown.startswith("# 自愈标题\n")
+    assert len(refresh_calls) == 1
+    assert len(calls) == 2
+    assert calls[1][1].endswith("Default")
+
+
+def test_cookie_refresh_failure_keeps_error(fake_pipeline, monkeypatch):
+    """无头刷新失败 → 返回带提示的 cookie 错误（不静默重试）。"""
+    monkeypatch.setattr(LinkProcessor, "_refresh_cookies", lambda self, url: False)
+
+    class _AlwaysCookieFailYT:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download=True):
+            raise yt_dlp.utils.DownloadError("Fresh cookies are needed")
+
+    monkeypatch.setattr(link_module.yt_dlp, "YoutubeDL", _AlwaysCookieFailYT)
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert not result.success
+    assert "douyin.com" in (result.error or "")
 
 
 def test_cli_link_command(fake_pipeline):

@@ -9,11 +9,12 @@ yt-dlp 下载视频到临时目录 → 复用 :class:`VideoProcessor` 转写 →
 时间戳、按标点合并为自然段、繁体转简体（OpenCC）。"观点总结 /
 分观点论述"两节依赖 LLM，待 API key 配置后补入（暂不留占位）。
 
-反爬约束（2026-08-31 真实样本实测）：抖音详情 API 对匿名请求 403，
-但 yt-dlp 借浏览器 cookie（``cookiesfrombrowser``）可拿到视频流地址
-完成下载；标题/作者优先取 yt-dlp 元数据，缺失时回退解析分享文本
-（``【作者的作品】标题 https://...`` 结构）。cookie 过期时在对应
-浏览器打开一次 douyin.com 即可刷新。
+反爬约束（2026-08-31/09-01 真实样本实测）：抖音详情 API 对匿名请求
+403，yt-dlp 借浏览器 cookie（``cookiesfrombrowser``）可拿到视频流
+地址完成下载；cookie 失效时用无头 Chrome 访问视频页自动刷新
+（专用 profile，见配置 chrome_profile_dir），再携新 cookie 重试一次，
+无需人工打开浏览器。标题/作者优先取 yt-dlp 元数据，缺失时回退解析
+分享文本（``【作者的作品】标题 https://...`` 结构）。
 
 触发方式：dispatch 定时器自动分发（scripts/dispatch/links.py）或
 人工执行 CLI（process_cli link 子命令）。
@@ -25,6 +26,8 @@ yt-dlp 下载视频到临时目录 → 复用 :class:`VideoProcessor` 转写 →
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -163,12 +166,18 @@ class LinkProcessor(BaseProcessor):
         """初始化。
 
         Args:
-            config: processors.link 配置节（model / cookies_browser）；
-            缺省按配置文件加载。
+            config: processors.link 配置节（model / cookies_browser /
+            chrome_profile_dir / chrome_binary）；缺省按配置文件加载。
         """
         super().__init__(config)
-        self.model = str(self.config.get("model", "medium"))
+        self.model = str(self.config.get("model", "large-v3"))
         self.cookies_browser = str(self.config.get("cookies_browser", "chrome"))
+        self.chrome_profile_dir = str(
+            self.config.get(
+                "chrome_profile_dir", "~/.cache/atelierr/douyin-chrome-profile"
+            )
+        )
+        self.chrome_binary = str(self.config.get("chrome_binary", ""))
 
     def process(self, input_path: Union[str, Path]) -> ProcessResult:
         """抓取链接指向的视频并转写。
@@ -226,7 +235,11 @@ class LinkProcessor(BaseProcessor):
     def _download(
         self, url: str, download_dir: str
     ) -> Tuple[Optional[Path], Dict[str, Any], Optional[str]]:
-        """用 yt-dlp 下载视频到临时目录。
+        """用 yt-dlp 下载视频到临时目录，cookie 失效时自动刷新重试一次。
+
+        两段式：先用日常浏览器默认 profile 的 cookie；若报 cookie 类错误，
+        用无头 Chrome 访问目标页刷新专用 profile 的反爬 cookie
+        （``__ac_signature`` 等 JS 挑战产物），再携该 profile 重试。
 
         Args:
             url: 视频 URL。
@@ -236,14 +249,45 @@ class LinkProcessor(BaseProcessor):
             Tuple[Optional[Path], Dict[str, Any], Optional[str]]:
             (视频路径, yt-dlp info 字典, 错误信息)；成功时 error 为 None。
         """
+        cookies: Optional[Tuple[str, ...]] = (
+            (self.cookies_browser,) if self.cookies_browser else None
+        )
+        video_path, info, error = self._download_attempt(url, download_dir, cookies)
+        if error and "cookie" in error.lower() and self._refresh_cookies(url):
+            profile = str(self._profile_dir() / "Default")
+            cookies = (self.cookies_browser or "chrome", profile)
+            video_path, info, error = self._download_attempt(
+                url, download_dir, cookies
+            )
+        if error:
+            return None, {}, error
+        return video_path, info, None
+
+    def _download_attempt(
+        self,
+        url: str,
+        download_dir: str,
+        cookies: Optional[Tuple[str, ...]],
+    ) -> Tuple[Optional[Path], Dict[str, Any], Optional[str]]:
+        """单次下载尝试。
+
+        Args:
+            url: 视频 URL。
+            download_dir: 临时目录路径。
+            cookies: yt-dlp cookiesfrombrowser 元组（None 表示不带）。
+
+        Returns:
+            Tuple[Optional[Path], Dict[str, Any], Optional[str]]:
+            (视频路径, info 字典, 错误信息)；成功时 error 为 None。
+        """
         options: Dict[str, Any] = {
             "outtmpl": str(Path(download_dir) / "%(id)s.%(ext)s"),
             "quiet": True,
             "no_warnings": True,
             "socket_timeout": 30,
         }
-        if self.cookies_browser:
-            options["cookiesfrombrowser"] = (self.cookies_browser,)
+        if cookies:
+            options["cookiesfrombrowser"] = cookies
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -251,7 +295,7 @@ class LinkProcessor(BaseProcessor):
             detail = str(exc).splitlines()[0][:200] if str(exc) else "未知错误"
             hint = ""
             if "cookie" in str(exc).lower():
-                hint = f"（cookie 失效？在 {self.cookies_browser} 打开一次 douyin.com 后重试）"
+                hint = f"（cookie 失效且自动刷新未成功？在 {self.cookies_browser} 打开一次 douyin.com 后重试）"
             return None, {}, f"视频下载失败: {detail}{hint}"
         except Exception as exc:  # noqa: BLE001 - 下载异常转为失败结果
             return None, {}, f"视频下载失败: {exc}"
@@ -267,6 +311,49 @@ class LinkProcessor(BaseProcessor):
             if path.suffix.lower() in _VIDEO_EXTS and path.is_file():
                 return path
         return None
+
+    def _profile_dir(self) -> Path:
+        """专用 Chrome profile 目录（展开 ~）。"""
+        return Path(self.chrome_profile_dir).expanduser()
+
+    def _refresh_cookies(self, url: str) -> bool:
+        """无头 Chrome 访问目标页，把反爬 cookie 刷进专用 profile。
+
+        真实浏览器内核可执行抖音的 JS 挑战（__ac_signature 等），
+        curl 等纯 HTTP 客户端拿不到合格 cookie（2026-09-01 实测）。
+
+        Args:
+            url: 要访问的目标页（视频页）。
+
+        Returns:
+            bool: 刷新成功（浏览器正常退出）返回 True。
+        """
+        binary = (
+            self.chrome_binary
+            or shutil.which("google-chrome")
+            or shutil.which("chromium")
+        )
+        if not binary:
+            return False
+        profile = self._profile_dir()
+        profile.mkdir(parents=True, exist_ok=True)
+        command = [
+            binary,
+            "--headless=new",
+            f"--user-data-dir={profile}",
+            "--disable-gpu",
+            "--no-first-run",
+            "--virtual-time-budget=30000",
+            "--dump-dom",
+            url,
+        ]
+        try:
+            proc = subprocess.run(
+                command, capture_output=True, timeout=180, check=False
+            )
+        except Exception:  # noqa: BLE001 - 刷新失败按未刷新处理
+            return False
+        return proc.returncode == 0
 
     @staticmethod
     def _build_markdown(

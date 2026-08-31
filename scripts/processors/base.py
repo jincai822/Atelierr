@@ -49,6 +49,8 @@ DEFAULT_CONFIGS: Dict[str, Dict[str, Any]] = {
     "link": {
         "model": "large-v3",
         "cookies_browser": "chrome",
+        "chrome_profile_dir": "~/.cache/atelierr/douyin-chrome-profile",
+        "chrome_binary": "",
     },
     "wechat": {
         "input_format": "txt",

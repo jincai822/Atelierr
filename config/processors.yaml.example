@@ -30,8 +30,13 @@ processors:
   link:                 # 链接抓取（抖音已验证 2026-08-31；小红书待真实样本）
     model: large-v3     # 链接视频转写 whisper 模型：人工确认场景求准不求快；
                         # large-v3 实测直接输出简体且专有名词明显更准（对比 medium）
-    cookies_browser: chrome  # yt-dlp 借该浏览器 cookie 过抖音反爬；
-                             # cookie 过期时在该浏览器打开一次 douyin.com 刷新
+    cookies_browser: chrome  # yt-dlp 借该浏览器 cookie 过抖音反爬
+    chrome_profile_dir: ~/.cache/atelierr/douyin-chrome-profile
+                        # cookie 自愈（2026-09-01 实测）：cookie 失效时用无头
+                        # Chrome 访问视频页（真浏览器内核可过 JS 挑战），
+                        # 把新 cookie 刷进此专用 profile 后自动重试，
+                        # 不需要人工打开浏览器；无头刷新也失败才报错
+    chrome_binary: ""   # 空=自动探测 google-chrome/chromium
 
   wechat:                 # backlog：导出格式不稳定，不在 MVP/完整版验收范围
     input_format: txt     # 微信导出格式
