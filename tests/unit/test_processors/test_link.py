@@ -131,7 +131,7 @@ def test_process_success(fake_pipeline):
     assert "你好" in result.markdown
     assert "[00:00]" not in result.markdown
     assert result.metadata["platform"] == "douyin"
-    assert result.metadata["model"] == "medium"
+    assert result.metadata["model"] == "large-v3"
     assert result.confidence == 0.9
     assert fake_pipeline and not fake_pipeline[0].exists()
 
@@ -206,18 +206,18 @@ def test_transcribe_failure(fake_pipeline, monkeypatch):
 
 
 def test_link_model_forwarded_to_video(fake_pipeline):
-    """processors.link.model 透传给 VideoProcessor（默认 medium）。"""
+    """processors.link.model 透传给 VideoProcessor（默认 large-v3）。"""
     result = LinkProcessor().process(SHARE_TEXT)
 
     assert result.success, result.error
-    assert _FakeVideoProcessor.last_config == {"model": "medium"}
+    assert _FakeVideoProcessor.last_config == {"model": "large-v3"}
 
 
 def test_config_defaults():
-    """内置默认配置：model=medium、cookies_browser=chrome。"""
+    """内置默认配置：model=large-v3、cookies_browser=chrome。"""
     processor = LinkProcessor()
 
-    assert processor.model == "medium"
+    assert processor.model == "large-v3"
     assert processor.cookies_browser == "chrome"
 
 

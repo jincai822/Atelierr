@@ -47,7 +47,7 @@ DEFAULT_CONFIGS: Dict[str, Dict[str, Any]] = {
         "model": "base",
     },
     "link": {
-        "model": "medium",
+        "model": "large-v3",
         "cookies_browser": "chrome",
     },
     "wechat": {

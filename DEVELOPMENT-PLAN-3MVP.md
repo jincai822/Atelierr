@@ -632,7 +632,7 @@ frontmatter 与正文追加互不干扰。
 - **链接抓取处理器**: 通用网页抓取；小红书（图文提取 + OCR）有反爬与登录墙，
   待真实样本验证（同微信的冻结纪律）。抖音路径 ✅ 已验证并实现（2026-08-31）：
   `processors/link.py`，人工触发 `process_cli link "<分享文本>"` → yt-dlp 借
-  Chrome cookie 下载视频（详情 API 403 但视频流可取）→ Whisper（medium）
+  Chrome cookie 下载视频（详情 API 403 但视频流可取）→ Whisper（large-v3）
   转写 → 带来源行的 Markdown；标题/作者优先取 yt-dlp 元数据，回退解析分享文本
 
 信息源覆盖现状（2026-08-31）：

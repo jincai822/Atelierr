@@ -28,7 +28,8 @@ processors:
     model: base
 
   link:                 # 链接抓取（抖音已验证 2026-08-31；小红书待真实样本）
-    model: medium       # 链接视频转写 whisper 模型：人工触发场景求准不求快
+    model: large-v3     # 链接视频转写 whisper 模型：人工确认场景求准不求快；
+                        # large-v3 实测直接输出简体且专有名词明显更准（对比 medium）
     cookies_browser: chrome  # yt-dlp 借该浏览器 cookie 过抖音反爬；
                              # cookie 过期时在该浏览器打开一次 douyin.com 刷新
 
