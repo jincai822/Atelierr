@@ -27,6 +27,11 @@ processors:
     engine: whisper
     model: base
 
+  link:                 # 链接抓取（抖音已验证 2026-08-31；小红书待真实样本）
+    model: medium       # 链接视频转写 whisper 模型：人工触发场景求准不求快
+    cookies_browser: chrome  # yt-dlp 借该浏览器 cookie 过抖音反爬；
+                             # cookie 过期时在该浏览器打开一次 douyin.com 刷新
+
   wechat:                 # backlog：导出格式不稳定，不在 MVP/完整版验收范围
     input_format: txt     # 微信导出格式
 

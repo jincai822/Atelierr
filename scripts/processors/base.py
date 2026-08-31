@@ -46,6 +46,10 @@ DEFAULT_CONFIGS: Dict[str, Dict[str, Any]] = {
         "engine": "whisper",
         "model": "base",
     },
+    "link": {
+        "model": "medium",
+        "cookies_browser": "chrome",
+    },
     "wechat": {
         "input_format": "txt",
     },

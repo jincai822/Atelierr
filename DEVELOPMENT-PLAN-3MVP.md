@@ -625,8 +625,11 @@ frontmatter 与正文追加互不干扰。
   等），按类型路由到对应处理器，输出经 create_note 入库。只新增笔记，不改写、
   不移动既有笔记；实现为独立顶层模块（dispatch），memory 与 processors 互相
   不引入依赖
-- **链接抓取处理器**: 通用网页抓取；小红书（图文提取 + OCR）、抖音（视频下载 +
-  Whisper 转写）有反爬与登录墙，需真实样本验证后再定规格（同微信的冻结纪律）
+- **链接抓取处理器**: 通用网页抓取；小红书（图文提取 + OCR）有反爬与登录墙，
+  待真实样本验证（同微信的冻结纪律）。抖音路径 ✅ 已验证并实现（2026-08-31）：
+  `processors/link.py`，人工触发 `process_cli link "<分享文本>"` → yt-dlp 借
+  Chrome cookie 下载视频（详情 API 403 但视频流可取）→ Whisper（medium）
+  转写 → 带来源行的 Markdown；标题/作者优先取 yt-dlp 元数据，回退解析分享文本
 
 信息源覆盖现状（2026-08-31）：
 
@@ -634,8 +637,8 @@ frontmatter 与正文追加互不干扰。
 文字速记   ✅ 已通（Obsidian 速记 → watcher 入库）
 截图       处理器就绪（OCR），待分发器自动路由；现可 process_cli 手动处理
 录音       处理器就绪（Whisper），同上
-小红书     待链接抓取处理器
-抖音       待链接抓取 + 视频下载 + Whisper 转写
+小红书     待链接抓取处理器（待真实样本）
+抖音       ✅ 已通（process_cli link 人工触发，链接抓取 + 视频下载 + Whisper 转写）
 ```
 - ~~Whisper 真实模型转写验证~~ ✅ 已完成（2026-08-29）：真实 tiny 模型
   转写 JFK 语音样本，audio/video 两条路径均正确识别（含 "ask not" 片段），

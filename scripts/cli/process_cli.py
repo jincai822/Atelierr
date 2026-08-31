@@ -1,12 +1,14 @@
-"""Atelierr 输入处理 CLI（image/pdf/video/audio 单文件处理）。
+"""Atelierr 输入处理 CLI（image/pdf/video/audio 单文件处理 + link 抓取）。
 
 用法:
     python -m scripts.cli.process_cli image screenshot.jpg --output out.md
     python -m scripts.cli.process_cli pdf document.pdf --output out.md
     python -m scripts.cli.process_cli video lecture.mp4 --output out.md
     python -m scripts.cli.process_cli audio note.wav --model base
+    python -m scripts.cli.process_cli link "看看【张三的作品】… https://v.douyin.com/xx/"
 
 无 --output 时 Markdown 打印到 stdout；处理失败 exit code 1 并打印错误。
+link 子命令的 argument 是分享文本或 URL（不是文件路径）。
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import click
 from scripts.processors.audio import AudioProcessor
 from scripts.processors.base import BaseProcessor
 from scripts.processors.image import ImageProcessor
+from scripts.processors.link import LinkProcessor
 from scripts.processors.pdf import PDFProcessor
 from scripts.processors.video import VideoProcessor
 
@@ -32,7 +35,7 @@ PROCESSORS: Dict[str, Type[BaseProcessor]] = {
 }
 
 #: --model 选项实际生效的处理器
-MODEL_AWARE: tuple = ("video", "audio")
+MODEL_AWARE: tuple = ("video", "audio", "link")
 
 
 class ProcessCLI:
@@ -56,7 +59,7 @@ class ProcessCLI:
 
         @click.group()
         def cli() -> None:
-            """Atelierr 输入处理（image/pdf/video/audio）。"""
+            """Atelierr 输入处理（image/pdf/video/audio/link）。"""
 
         for name, processor_cls in PROCESSORS.items():
 
@@ -88,17 +91,43 @@ class ProcessCLI:
                 """处理单个输入文件。"""
                 self._run(_name, _processor_cls, input_path, output, model)
 
+        @cli.command(name="link")
+        @click.argument("link_text")
+        @click.option(
+            "--output",
+            "output",
+            type=click.Path(dir_okay=False, path_type=Path),
+            default=None,
+            help="输出 Markdown 文件路径（缺省打印到 stdout）",
+        )
+        @click.option(
+            "--model",
+            "model",
+            default=None,
+            help="转写模型（默认 medium，见 processors.link 配置）",
+        )
+        def link_command(
+            link_text: str,
+            output: Optional[Path],
+            model: Optional[str],
+        ) -> None:
+            """抓取链接内容并转写（当前支持抖音分享文本/链接）。"""
+            self._run("link", LinkProcessor, link_text, output, model)
+
         return cli
 
     def _run(
         self,
         name: str,
         processor_cls: Type[BaseProcessor],
-        input_path: Path,
+        input_path: "Path | str",
         output: Optional[Path],
         model: Optional[str],
     ) -> None:
-        """执行一次处理并写输出/打印。失败时抛 ClickException（exit 1）。"""
+        """执行一次处理并写输出/打印。失败时抛 ClickException（exit 1）。
+
+        input_path 对文件类处理器是路径，对 link 是分享文本/URL。
+        """
         config = dict(self.config) if self.config else None
         if model and name in MODEL_AWARE:
             config = dict(config or {})

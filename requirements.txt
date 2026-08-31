@@ -13,6 +13,10 @@ pillow>=9.0.0
 openai-whisper>=20230314
 ffmpeg-python>=0.2.0
 
+# 链接抓取（抖音等，yt-dlp 借浏览器 cookie 过反爬）
+yt-dlp>=2024.8.6
+secretstorage>=3.3.0; sys_platform == 'linux'
+
 # PDF 处理
 PyMuPDF>=1.21.0
 
