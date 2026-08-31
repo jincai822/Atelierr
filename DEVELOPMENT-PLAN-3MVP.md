@@ -604,6 +604,8 @@ Syncthing (docker)    —— 电脑侧守护，host 网络，端口 22000
   → Syncthing 双向同步 → /home/cj1024/atelierr-data/memory (电脑, = $OV/memory)
   → watcher 归一化 frontmatter + sidecar 登记（mtime 保持不变）
   → 每日 03:00 定时器：sync → decay
+  → 每 15 分钟定时器：dispatch links（笔记里的抖音链接自动抓取转写，
+    建带"待确认"标签的新笔记，人在 Obsidian 确认内容后移除标签）
 ```
 
 **远程连通**: WireGuard 专线（设备地址 `tcp://10.66.0.2`，电脑侧反向配
@@ -624,7 +626,9 @@ frontmatter 与正文追加互不干扰。
 - **通道→处理器自动分发器**: 扫描/监听通道产物（attachments/ 图片、录音文件
   等），按类型路由到对应处理器，输出经 create_note 入库。只新增笔记，不改写、
   不移动既有笔记；实现为独立顶层模块（dispatch），memory 与 processors 互相
-  不引入依赖
+  不引入依赖。链接路由 ✅ 已实现（2026-08-31）：`dispatch/links.py` + 15 分钟
+  定时器（`docker/systemd/atelierr-links.*`），产出笔记带"待确认"标签由人确认；
+  图片/录音路由仍在 backlog
 - **链接抓取处理器**: 通用网页抓取；小红书（图文提取 + OCR）有反爬与登录墙，
   待真实样本验证（同微信的冻结纪律）。抖音路径 ✅ 已验证并实现（2026-08-31）：
   `processors/link.py`，人工触发 `process_cli link "<分享文本>"` → yt-dlp 借
@@ -638,7 +642,8 @@ frontmatter 与正文追加互不干扰。
 截图       处理器就绪（OCR），待分发器自动路由；现可 process_cli 手动处理
 录音       处理器就绪（Whisper），同上
 小红书     待链接抓取处理器（待真实样本）
-抖音       ✅ 已通（process_cli link 人工触发，链接抓取 + 视频下载 + Whisper 转写）
+抖音       ✅ 自动处理（dispatch links 每 15 分钟扫描，产出"待确认"笔记；
+           也可 process_cli link 手动单条处理）
 ```
 - ~~Whisper 真实模型转写验证~~ ✅ 已完成（2026-08-29）：真实 tiny 模型
   转写 JFK 语音样本，audio/video 两条路径均正确识别（含 "ask not" 片段），

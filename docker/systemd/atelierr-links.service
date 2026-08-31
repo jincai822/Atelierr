@@ -1,0 +1,33 @@
+# Atelierr 链接自动分发服务（oneshot）
+#
+# 每 15 分钟扫描全部笔记中的抖音链接，自动抓取视频、Whisper 转写并
+# 创建带"待确认"标签的新笔记（人工确认在产出端，见
+# scripts/dispatch/links.py 模块 docstring）。幂等：同一链接只处理一次，
+# 失败 3 次熔断。
+#
+# 用户级 systemd unit:
+#   mkdir -p ~/.config/systemd/user
+#   cp docker/systemd/atelierr-links.service docker/systemd/atelierr-links.timer \
+#     ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now atelierr-links.timer
+#
+# 日志: ~/atelierr-data/state/logs/links.log（stdout/stderr 追加）
+# 状态: ~/atelierr-data/state/processed_links.json
+# 前置: config/memory.yaml 必须存在（同 atelierr-decay.service）；
+#       需要 Chrome 的 douyin.com cookie 有效（过期时在 Chrome 打开一次
+#       douyin.com 刷新；见 config/processors.yaml.example 的 link 节）
+
+[Unit]
+Description=Atelierr link dispatch (every 15 min)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/workspaces/Atelierr
+Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli links
+StandardOutput=append:%h/atelierr-data/state/logs/links.log
+StandardError=append:%h/atelierr-data/state/logs/links.log

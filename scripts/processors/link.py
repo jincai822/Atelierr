@@ -172,6 +172,7 @@ class LinkProcessor(BaseProcessor):
                 "platform": platform,
                 "model": self.model,
                 "url": url,
+                "video_id": str(info.get("id") or ""),
                 "segments": video_result.metadata.get("segments", 0),
             }
             return ProcessResult(
