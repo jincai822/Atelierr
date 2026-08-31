@@ -203,6 +203,9 @@ $OV/memory/                     # 平面目录（Flatnotes 直接挂载；不使
 ├── asyncio-not-for-cpu.md
 ├── 2026-08-28-quick-idea.md
 └── ...                         # 所有笔记都在根层，文件永不被机器移动
+                                # 勘误(2026-08-31)："不使用子目录"指笔记不分目录分层；
+                                #   Obsidian 产生的 .obsidian/（配置）与 attachments/
+                                #   （附件）属应用侧文件，非笔记组织，记忆系统忽略
 
 <state_dir>/                    # 机器状态目录（config/memory.yaml: state_dir）
 ├── index.json                  # sidecar 索引：id / layer / confidence /
