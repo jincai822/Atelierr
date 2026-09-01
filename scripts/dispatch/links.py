@@ -28,7 +28,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from scripts.memory.core import LAYERS, MemoryTree
 from scripts.memory.watcher import MemoryWatcher
-from scripts.processors.link import LinkProcessor, _URL_RE, _detect_platform
+from scripts.processors.link import LinkProcessor, URL_RE, detect_platform
 
 #: 单个 URL 的最大处理尝试次数（超限标记 failed）
 MAX_ATTEMPTS = 3
@@ -102,9 +102,9 @@ class LinkDispatcher:
                     continue
                 report["scanned"] += 1
                 body = self.tree.read_note(note_path)
-                for match in _URL_RE.finditer(body):
+                for match in URL_RE.finditer(body):
                     url = match.group(0)
-                    if _detect_platform(url) == "douyin" and url not in seen:
+                    if detect_platform(url) == "douyin" and url not in seen:
                         seen.add(url)
                         urls.append(url)
         return urls

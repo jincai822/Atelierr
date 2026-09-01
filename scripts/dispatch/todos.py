@@ -44,7 +44,7 @@ import yaml
 from scripts.memory.core import LAYERS, MemoryTree
 from scripts.memory.watcher import MemoryWatcher
 from scripts.processors.base import CONFIG_FILES
-from scripts.processors.link import _URL_RE, _URL_TRAILING, _detect_platform
+from scripts.processors.link import URL_RE, URL_TRAILING, detect_platform
 
 #: 单条笔记的最大处理尝试次数（超限标记 failed）
 MAX_ATTEMPTS = 3
@@ -343,9 +343,9 @@ class TodoDispatcher:
         except (OSError, json.JSONDecodeError):
             return ""
         parts: List[str] = []
-        for match in _URL_RE.finditer(body):
-            url = match.group(0).strip(_URL_TRAILING)
-            if _detect_platform(url) != "douyin":
+        for match in URL_RE.finditer(body):
+            url = match.group(0).strip(URL_TRAILING)
+            if detect_platform(url) != "douyin":
                 continue
             link_entry = links_state.get(url)
             if not link_entry or link_entry.get("status") != "done":

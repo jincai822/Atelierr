@@ -55,10 +55,10 @@ _DOUYIN_HOSTS: Tuple[str, ...] = (
 _AUTHOR_RE = re.compile(r"【(?P<author>.+?)的作品】")
 
 #: URL 提取（到第一个空白字符为止）
-_URL_RE = re.compile(r"https?://[^\s]+")
+URL_RE = re.compile(r"https?://[^\s]+")
 
 #: URL 首尾可能粘附的中文标点
-_URL_TRAILING = "。，、！？；：）》\"'…"
+URL_TRAILING = "。，、！？；：）》\"'…"
 
 #: 视频下载后按扩展名在临时目录里定位产物
 _VIDEO_EXTS: Tuple[str, ...] = (".mp4", ".mkv", ".webm", ".mov", ".flv")
@@ -140,13 +140,13 @@ def _extract_url(text: str) -> Optional[str]:
     Returns:
         Optional[str]: 清理过首尾标点的 URL；找不到返回 None。
     """
-    match = _URL_RE.search(text)
+    match = URL_RE.search(text)
     if not match:
         return None
-    return match.group(0).strip(_URL_TRAILING)
+    return match.group(0).strip(URL_TRAILING)
 
 
-def _detect_platform(url: str) -> Optional[str]:
+def detect_platform(url: str) -> Optional[str]:
     """按域名识别平台。
 
     Args:
@@ -182,7 +182,7 @@ def _parse_share_text(text: str) -> Tuple[str, str]:
         rest = text[author_match.end():]
     else:
         rest = text
-    url_match = _URL_RE.search(rest)
+    url_match = URL_RE.search(rest)
     if url_match:
         title = rest[: url_match.start()]
     title = title.strip().rstrip(".… ").strip()
@@ -240,7 +240,7 @@ class LinkProcessor(BaseProcessor):
         url = _extract_url(text)
         if url is None:
             return self._fail("未找到链接：请粘贴分享文本或 URL")
-        platform = _detect_platform(url)
+        platform = detect_platform(url)
         if platform != "douyin":
             return self._fail(f"暂不支持的平台（已支持: 抖音）: {url}")
 

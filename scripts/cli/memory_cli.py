@@ -27,7 +27,7 @@ DEFAULT_ROOT = "~/atelierr-data/memory"
 DEFAULT_STATE_DIR = "~/atelierr-data/state"
 
 
-def _resolve_config_path(config_path: Optional[str]) -> Optional[str]:
+def resolve_config_path(config_path: Optional[str]) -> Optional[str]:
     """解析配置文件路径：显式 > 环境变量 > ./config/memory.yaml > None。"""
     if config_path:
         return config_path
@@ -72,7 +72,7 @@ class MemoryCLI:
 
     def _build_tree(self, config_path: Optional[str]) -> MemoryTree:
         """按配置构造 MemoryTree；无配置时用内置默认路径。"""
-        resolved = _resolve_config_path(config_path)
+        resolved = resolve_config_path(config_path)
         if resolved is not None:
             return MemoryTree.from_config(resolved)
         return MemoryTree(DEFAULT_ROOT, state_dir=DEFAULT_STATE_DIR)
@@ -92,7 +92,7 @@ class MemoryCLI:
         def cli(ctx: click.Context, config_path: Optional[str]) -> None:
             """Atelierr 记忆模块（create/show/search/stats/decay/review/purge/sync）。"""
             # --config 选项 > 构造参数 self.config_path > 默认解析链
-            resolved = _resolve_config_path(config_path or self.config_path)
+            resolved = resolve_config_path(config_path or self.config_path)
             ctx.obj = (
                 MemoryTree.from_config(resolved)
                 if resolved is not None

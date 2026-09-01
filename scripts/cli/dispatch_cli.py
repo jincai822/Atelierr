@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 import click
 
-from scripts.cli.memory_cli import _resolve_config_path
+from scripts.cli.memory_cli import resolve_config_path
 from scripts.dispatch.digest import DigestDispatcher
 from scripts.dispatch.links import LinkDispatcher
 from scripts.dispatch.media import MediaDispatcher
@@ -189,7 +189,7 @@ class DispatchCLI:
 
     def _build_tree(self) -> MemoryTree:
         """按解析顺序构造 MemoryTree；配置损坏时抛 ClickException。"""
-        resolved = _resolve_config_path(self.config_path)
+        resolved = resolve_config_path(self.config_path)
         if resolved:
             try:
                 return MemoryTree.from_config(resolved)
