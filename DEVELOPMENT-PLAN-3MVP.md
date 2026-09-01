@@ -664,8 +664,10 @@ frontmatter 与正文追加互不干扰。
   转写超 6000 字自动降级为无摘要笔记，不阻塞管线。DeepSeek 后台建议专开
   独立 key 并设额度上限
 - **控制中台（Web 控制台）**: 系统状态看板 + 安全操作扳机（触发 sync/decay/
-  digest；purge 不进控制台，保持命令行人工确认）。2026-09-01 方案已探明：
-  推荐 Streamlit（纯 Python、单人看板性价比最高），refine 属多用户产品级
-  重方案不采用；数据层设计（console_data 只读采集器）已成形，随"暂用老
-  方案"裁决搁置删除，重启时按此重建。用户裁决：Web 端继续 Flatnotes +
-  Obsidian（2026-09-01）
+  digest；purge 不进控制台，保持命令行人工确认）。2026-09-01 方案探明：
+  refine 属多用户产品级重方案不采用，Streamlit 数据层已成形。
+  **2026-09-02 方案改判**：改用 **Obsidian + 第三方插件（Dataview 等）**
+  实现控制台——Dashboard 即一条带 Dataview 查询块的笔记，零新服务、
+  手机端随 Syncthing 免费同步。约束：Dataview 只读 frontmatter，
+  sidecar 指标（confidence/响应率）须经"每日新建状态笔记"搭桥。
+  Streamlit/refine 路线废弃。
