@@ -305,3 +305,50 @@ def test_cli_todos_command(memory_tree, tmp_path):
 
     assert code == 0
     assert list(memory_tree.notes_dir.glob("todo-*.md"))
+
+
+def test_douyin_link_summary_fed_as_context(memory_tree, monkeypatch):
+    """正文含已处理抖音链接：链接笔记的摘要两节作为上下文进 prompt。"""
+    calls = []
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+
+    def _post(url, **kwargs):
+        calls.append(kwargs["json"]["messages"][0]["content"])
+        return _FakeLLMResponse(_todos_payload([]))
+
+    monkeypatch.setattr(todos_module.httpx, "post", _post)
+    url = "https://v.douyin.com/eQOGBXJdlwQ/"
+    memory_tree.create_note(
+        "douyin-vid123.md",
+        "# 标题\n\n## 观点总结\n\n叔本华唯意志论，两本书。\n\n## 转写全文\n\n原文\n",
+        source="link",
+        tags=["待确认", "抖音"],
+    )
+    memory_tree.create_note("daily.md", f"看看 {url} 我想看里面的书！", source="test")
+    (memory_tree.state_dir / "processed_links.json").write_text(
+        json.dumps({url: {"status": "done", "note": "douyin-vid123.md"}},
+                   ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    TodoDispatcher(memory_tree).run()
+
+    prompt = next(c for c in calls if "我想看里面的书" in c)
+    assert "链接内容摘要" in prompt
+    assert "叔本华唯意志论，两本书。" in prompt
+
+
+def test_fenced_json_tolerated(memory_tree, monkeypatch):
+    """LLM 返回带 ```json 围栏的内容也能解析（真实遇到过）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    fenced = {"choices": [{"message": {"content": '```json\n{"todos": []}\n```'}}]}
+    monkeypatch.setattr(
+        todos_module.httpx, "post", lambda *a, **k: _FakeLLMResponse(fenced)
+    )
+    memory_tree.create_note("plain.md", "没有行动的内容", source="test")
+
+    report = TodoDispatcher(memory_tree).run()
+
+    assert report["created"] == []
+    assert report["failed"] == []
+    assert _state(memory_tree)["plain.md"]["status"] == "no-todo"

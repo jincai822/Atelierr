@@ -44,6 +44,7 @@ import yaml
 from scripts.memory.core import LAYERS, MemoryTree
 from scripts.memory.watcher import MemoryWatcher
 from scripts.processors.base import CONFIG_FILES
+from scripts.processors.link import _URL_RE, _URL_TRAILING, _detect_platform
 
 #: 单条笔记的最大处理尝试次数（超限标记 failed）
 MAX_ATTEMPTS = 3
@@ -106,6 +107,20 @@ def _extract_explicit(body: str) -> List[Dict[str, Any]]:
     return items
 
 
+def _summary_sections(body: str) -> str:
+    """取"观点总结 + 分观点论述"两节（无则空串）。
+
+    Args:
+        body: 笔记正文。
+
+    Returns:
+        str: 两节拼接文本。
+    """
+    sections = re.split(r"^## ", body, flags=re.M)
+    picked = [s for s in sections if s.startswith(("观点总结", "分观点论述"))]
+    return "\n\n".join(picked)
+
+
 def _llm_input(body: str, source: str) -> str:
     """构造喂给分类器的文本：链接产出笔记只取摘要两节，其余取全文。
 
@@ -117,12 +132,9 @@ def _llm_input(body: str, source: str) -> str:
         str: 截断到 _LLM_MAX_BODY_CHARS 的输入文本。
     """
     if source == "link":
-        sections = re.split(r"^## ", body, flags=re.M)
-        picked = [
-            s for s in sections if s.startswith(("观点总结", "分观点论述"))
-        ]
+        picked = _summary_sections(body)
         if picked:
-            return "\n\n".join(picked)[:_LLM_MAX_BODY_CHARS]
+            return picked[:_LLM_MAX_BODY_CHARS]
     return body[:_LLM_MAX_BODY_CHARS]
 
 
@@ -238,9 +250,13 @@ class TodoDispatcher:
             work["attempts"] = int(work.get("attempts", 0)) + 1
             work["last_attempt"] = datetime.now(timezone.utc).isoformat()
             try:
-                llm_items = self._chat_todos(
-                    _llm_input(body, str(post.get("source") or "")), api_key
-                )
+                llm_text = _llm_input(body, str(post.get("source") or ""))
+                extra = self._linked_summaries(body)
+                if extra:
+                    llm_text = (
+                        llm_text + "\n\n链接内容摘要：\n" + extra
+                    )[: _LLM_MAX_BODY_CHARS * 2]
+                llm_items = self._chat_todos(llm_text, api_key)
             except Exception as exc:  # noqa: BLE001 - 单篇失败不阻塞整轮
                 work["last_error"] = type(exc).__name__[:100]
                 if work["attempts"] >= MAX_ATTEMPTS:
@@ -300,6 +316,43 @@ class TodoDispatcher:
             return None
         return filename
 
+    def _linked_summaries(self, body: str) -> str:
+        """正文中已处理抖音链接的产出笔记摘要（给分类器补全指代上下文）。
+
+        分享文本在日记里常被截断（"其中之一是《作为意…"），对象全名
+        只存在于链接产出笔记的摘要里（2026-09-01 真实样本教训）。
+
+        Args:
+            body: 笔记正文。
+
+        Returns:
+            str: 各链接产出笔记的摘要两节拼接；无链接/未处理为空串。
+        """
+        links_state_path = self.state_path.parent / "processed_links.json"
+        try:
+            links_state = json.loads(links_state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return ""
+        parts: List[str] = []
+        for match in _URL_RE.finditer(body):
+            url = match.group(0).strip(_URL_TRAILING)
+            if _detect_platform(url) != "douyin":
+                continue
+            link_entry = links_state.get(url)
+            if not link_entry or link_entry.get("status") != "done":
+                continue
+            note = Path(self.tree.notes_dir) / str(link_entry.get("note") or "")
+            if not note.is_file():
+                continue
+            try:
+                post = frontmatter.loads(note.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            summary = _summary_sections(post.content)
+            if summary:
+                parts.append(summary)
+        return "\n\n".join(parts)
+
     def _chat_todos(self, text: str, api_key: str) -> List[Dict[str, Any]]:
         """LLM 判定并抽取行动项；失败抛异常（由调用方降级计数）。
 
@@ -320,8 +373,11 @@ class TodoDispatcher:
             "没有行动项输出空表；最多 5 条；text 不超过 40 字。"
             "text 必须脱离原文也能看懂：把'里面的书/那个/这篇'等指代替换为"
             "笔记中提到的具体对象（如《作为意志和表象的世界》），"
-            "去掉'我想/我要'等主语前缀，直接写动作（如：读《作为意志和"
-            "表象的世界》）。不要输出 JSON 以外的任何内容。\n\n笔记内容：\n"
+            "说清对象的主体归属（谁的什么作品），并列对象要列全"
+            "（提到两本就写两本）；若正文附有'链接内容摘要'，用它补全"
+            "被截断的分享文本。去掉'我想/我要'等主语前缀，直接写动作"
+            "（如：读叔本华《作为意志和表象的世界》）。"
+            "不要输出 JSON 以外的任何内容。\n\n笔记内容：\n"
             + text
         )
         response = httpx.post(
@@ -338,6 +394,8 @@ class TodoDispatcher:
         )
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
+        # 容错：模型偶发用 ```json 围栏包裹（2026-09-01 实测遇到）
+        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
         data = json.loads(content)
         todos = data.get("todos") or []
         items: List[Dict[str, Any]] = []
