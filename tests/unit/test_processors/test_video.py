@@ -25,6 +25,17 @@ class _FakeWhisperModel:
         }
 
 
+class _RecordingWhisperModel(_FakeWhisperModel):
+    """记录 transcribe 收到的 kwargs 的假模型。"""
+
+    def __init__(self):
+        self.kwargs = None
+
+    def transcribe(self, audio_path, **kwargs):
+        self.kwargs = kwargs
+        return super().transcribe(audio_path, **kwargs)
+
+
 @pytest.fixture
 def fake_whisper(monkeypatch):
     """替换 whisper.load_model 为假模型并清空模型缓存。"""
@@ -72,3 +83,29 @@ def test_video_ffmpeg_failure(fake_whisper, tmp_path):
 
     assert not result.success
     assert "ffmpeg" in (result.error or "")
+
+
+def test_initial_prompt_passed_by_default(monkeypatch, video_mp4):
+    """默认把内置标点提示语作为 initial_prompt 传给 Whisper。"""
+    model = _RecordingWhisperModel()
+    video_module._model_cache.clear()
+    monkeypatch.setattr(video_module.whisper, "load_model", lambda name: model)
+
+    result = VideoProcessor().process(str(video_mp4))
+
+    assert result.success, result.error
+    assert model.kwargs["initial_prompt"] == video_module.DEFAULT_INITIAL_PROMPT
+    assert "书名号" in model.kwargs["initial_prompt"]
+
+
+def test_initial_prompt_configurable_and_disableable(monkeypatch, video_mp4):
+    """配置可覆盖提示语；置空串则不传 initial_prompt。"""
+    model = _RecordingWhisperModel()
+    video_module._model_cache.clear()
+    monkeypatch.setattr(video_module.whisper, "load_model", lambda name: model)
+
+    VideoProcessor({"initial_prompt": "custom prompt"}).process(str(video_mp4))
+    assert model.kwargs["initial_prompt"] == "custom prompt"
+
+    VideoProcessor({"initial_prompt": ""}).process(str(video_mp4))
+    assert "initial_prompt" not in model.kwargs

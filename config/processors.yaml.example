@@ -22,10 +22,15 @@ processors:
     engine: whisper
     model: base           # tiny / base / small / medium / large
     extract_keyframes: true
+    # initial_prompt: 引导 Whisper 输出标点的提示语（中文转写不带提示常整段
+    # 无标点，2026-09-01 实测）；默认内置带书名号《》的规范中文样例，
+    # 英文材料多时可改为英文样例，置空串则不传提示
+    # initial_prompt: "以下是普通话转写，使用规范书面标点。"
 
   audio:
     engine: whisper
     model: base
+    # initial_prompt: 同 video 节说明
 
   link:                 # 链接抓取（抖音已验证 2026-08-31；小红书待真实样本）
     model: large-v3     # 链接视频转写 whisper 模型：人工确认场景求准不求快；

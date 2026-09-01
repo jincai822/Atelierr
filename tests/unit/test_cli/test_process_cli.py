@@ -44,7 +44,7 @@ def test_process_audio_with_model_option(tmp_path, monkeypatch, fixtures_dir):
     calls = {}
 
     class _FakeModel:
-        def transcribe(self, path):
+        def transcribe(self, path, **kwargs):
             return {
                 "text": "测试转写",
                 "segments": [{"start": 0.0, "end": 1.0, "text": "测试转写"}],

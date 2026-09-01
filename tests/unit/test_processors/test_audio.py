@@ -61,3 +61,23 @@ def test_audio_missing_file(fake_whisper, tmp_path):
 
     assert not result.success
     assert result.error
+
+
+def test_audio_initial_prompt_passed(monkeypatch, audio_wav):
+    """audio 同样默认把标点提示语传给 Whisper。"""
+    captured = {}
+
+    class _RecordingModel(_FakeWhisperModel):
+        def transcribe(self, audio_path, **kwargs):
+            captured.update(kwargs)
+            return super().transcribe(audio_path, **kwargs)
+
+    video_module._model_cache.clear()
+    monkeypatch.setattr(
+        audio_module.whisper, "load_model", lambda name: _RecordingModel()
+    )
+
+    result = AudioProcessor().process(str(audio_wav))
+
+    assert result.success, result.error
+    assert captured["initial_prompt"] == video_module.DEFAULT_INITIAL_PROMPT

@@ -151,13 +151,26 @@ def test_transcript_to_paragraphs():
 
 
 def test_transcript_no_punctuation_still_paragraphs():
-    """无标点转写（Whisper 常见）也按字数强制分段。"""
+    """无标点转写（未带标点提示的旧产物）兜底按字数硬切段。"""
     raw = "- [00:00] " + "啊" * 100 + "\n- [00:05] " + "嗯" * 100
 
     body = link_module._transcript_to_paragraphs(raw, width=80)
 
     assert "\n\n" in body
     assert "。" not in body
+
+
+def test_transcript_paragraphs_break_on_sentence_end():
+    """有标点时按句界分段：除末段外每段以句末标点收尾。"""
+    raw = "- [00:00] " + "短句。" * 10 + "\n- [00:05] " + "短句。" * 10
+
+    body = link_module._transcript_to_paragraphs(raw, width=30)
+
+    paragraphs = body.split("\n\n")
+    assert len(paragraphs) >= 2
+    for paragraph in paragraphs[:-1]:
+        assert paragraph.endswith("。")
+    assert all(len(p) <= 30 for p in paragraphs)
 
 
 def test_title_fallback_to_share_text(fake_pipeline, monkeypatch):

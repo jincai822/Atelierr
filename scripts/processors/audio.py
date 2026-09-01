@@ -14,6 +14,7 @@ import whisper  # noqa: F401  # pylint: disable=unused-import
 
 from scripts.processors.base import BaseProcessor, ProcessResult
 from scripts.processors.video import (
+    DEFAULT_INITIAL_PROMPT,
     _build_transcript_markdown,
     _extract_transcript,
     _load_model,
@@ -47,6 +48,9 @@ class AudioProcessor(BaseProcessor):
         """
         super().__init__(config)
         self.model_name = str(self.config.get("model", "base"))
+        self.initial_prompt = str(
+            self.config.get("initial_prompt", DEFAULT_INITIAL_PROMPT)
+        )
 
     def process(self, input_path: Union[str, Path]) -> ProcessResult:
         """直接转写音频文件（Whisper 自带音频解码）。
@@ -64,7 +68,10 @@ class AudioProcessor(BaseProcessor):
             return invalid
         try:
             model = _load_model(self.model_name)
-            raw = model.transcribe(str(path))
+            kwargs = {}
+            if self.initial_prompt:
+                kwargs["initial_prompt"] = self.initial_prompt
+            raw = model.transcribe(str(path), **kwargs)
             text, segments = _extract_transcript(raw)
         except Exception as exc:  # noqa: BLE001 - 转写失败转为失败结果
             return self._fail(f"音频转写失败: {exc}")

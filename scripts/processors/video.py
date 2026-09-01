@@ -42,6 +42,10 @@ SUPPORTED_EXTENSIONS: Tuple[str, ...] = (
 #: 模型名 → 实例 的模块级缓存（真实模型只加载一次）
 _model_cache: Dict[str, Any] = {}
 
+#: 默认 initial_prompt：规范带标点的中文样例，引导 Whisper 输出
+#: 标点（中文转写不带提示时常常整段无标点，2026-09-01 实测）
+DEFAULT_INITIAL_PROMPT = "以下是普通话转写，使用规范书面标点，如逗号、句号、问号、感叹号、冒号、引号与书名号《》。"
+
 
 def _load_model(model_name: str) -> Any:
     """按名称加载 Whisper 模型（懒加载并缓存实例）。
@@ -176,6 +180,9 @@ class VideoProcessor(BaseProcessor):
         super().__init__(config)
         self.model_name = str(self.config.get("model", "base"))
         self.ffmpeg = str(self.config.get("ffmpeg_path", FFMPEG_PATH))
+        self.initial_prompt = str(
+            self.config.get("initial_prompt", DEFAULT_INITIAL_PROMPT)
+        )
 
     def process(self, input_path: Union[str, Path]) -> ProcessResult:
         """转写视频：抽音频 → Whisper → 带时间戳 Markdown。
@@ -196,7 +203,10 @@ class VideoProcessor(BaseProcessor):
             return self._fail(extract_error)
         try:
             model = _load_model(self.model_name)
-            raw = model.transcribe(wav_path)
+            kwargs: Dict[str, Any] = {}
+            if self.initial_prompt:
+                kwargs["initial_prompt"] = self.initial_prompt
+            raw = model.transcribe(wav_path, **kwargs)
             text, segments = _extract_transcript(raw)
         except Exception as exc:  # noqa: BLE001 - 转写失败转为失败结果
             return self._fail(f"视频转写失败: {exc}")

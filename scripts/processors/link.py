@@ -60,20 +60,37 @@ _VIDEO_EXTS: Tuple[str, ...] = (".mp4", ".mkv", ".webm", ".mov", ".flv")
 #: 视频处理器输出里的逐句时间戳行（"- [00:00] 文本"）
 _SEGMENT_LINE_RE = re.compile(r"^- \[\d{2}:\d{2}\]\s*", re.M)
 
+#: 句末标点（分段优先落在句界上）
+_SENTENCE_END_RE = re.compile(r"(?<=[。！？!?…])")
+
 #: 繁体 → 简体转换器（模块级单例）
 _T2S = opencc.OpenCC("t2s")
+
+
+def _hard_wrap(text: str, width: int) -> List[str]:
+    """无标点长文本按字数硬切段的兜底。
+
+    Args:
+        text: 待切文本。
+        width: 每段字数。
+
+    Returns:
+        List[str]: 分段列表。
+    """
+    return [text[i : i + width] for i in range(0, len(text), width)] or [""]
 
 
 def _transcript_to_paragraphs(transcript_markdown: str, width: int = 160) -> str:
     """把视频处理器的逐句时间戳转写合并为自然段（简体）。
 
     只取 ``- [mm:ss] 文本`` 行（丢弃标题/小节头等其余内容），剥掉
-    时间戳后按累积字数分段：凑满 width 字即另起一段。Whisper 中文
-    转写常无标点，不依赖句读切分。
+    时间戳后按句界分段：累积到 width 字且当前句以句末标点收尾即
+    另起一段；整段无标点（Whisper 不带标点提示时的旧产物）兜底
+    按字数硬切。Whisper 标点由 video 处理器的 initial_prompt 引导。
 
     Args:
         transcript_markdown: 视频处理器的 markdown（含时间戳行）。
-        width: 每段的目标字数。
+        width: 每段的目标字数（句界分段时允许略超）。
 
     Returns:
         str: 简体、无时间戳、空行分段的转写全文；无有效行时为空串。
@@ -82,16 +99,26 @@ def _transcript_to_paragraphs(transcript_markdown: str, width: int = 160) -> str
         line for line in transcript_markdown.splitlines() if _SEGMENT_LINE_RE.match(line)
     ]
     texts = [_T2S.convert(_SEGMENT_LINE_RE.sub("", line).strip()) for line in lines]
+    full = "".join(texts)
+    if not full:
+        return ""
+    sentences = [s for s in _SENTENCE_END_RE.split(full) if s]
     paragraphs: List[str] = []
     buf = ""
-    for text in texts:
-        buf += text
-        if len(buf) >= width:
+    for sentence in sentences:
+        buf += sentence
+        if len(buf) >= width and sentence[-1] in "。！？!?…":
             paragraphs.append(buf)
             buf = ""
     if buf:
         paragraphs.append(buf)
-    return "\n\n".join(paragraphs)
+    wrapped: List[str] = []
+    for paragraph in paragraphs:
+        if len(paragraph) > width * 2:
+            wrapped.extend(_hard_wrap(paragraph, width))
+        else:
+            wrapped.append(paragraph)
+    return "\n\n".join(wrapped)
 
 
 def _extract_url(text: str) -> Optional[str]:
