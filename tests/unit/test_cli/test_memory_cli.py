@@ -111,3 +111,34 @@ def test_cli_resurface_lists_old_note(tmp_path):
     assert result.exit_code == 0, result.output
     assert "old.md" in result.output
     assert "闲置20天" in result.output
+
+
+def test_cli_resurface_stats_empty(tmp_path):
+    """resurface --stats：无结案观测 → 明确提示。"""
+    cli, _, _ = _make_cli(tmp_path)
+
+    result = CliRunner().invoke(cli, ["resurface", "--stats"])
+
+    assert result.exit_code == 0, result.output
+    assert "暂无响应率数据" in result.output
+
+
+def test_cli_resurface_stats_with_data(tmp_path):
+    """resurface --stats：有结案观测 → 显示响应率。"""
+    cli, config, _ = _make_cli(tmp_path)
+    from scripts.dispatch.response_probe import ResponseProbe
+
+    tree = MemoryTree.from_config(str(config))
+    path = tree.create_note("old.md", "旧内容")
+    old_ns = int((time.time() - 20 * 86400) * 1e9)
+    os.utime(path, ns=(old_ns, old_ns))
+    probe = ResponseProbe(tree)
+    probe.register([{"id": tree._find_entry_id(path), "filename": "old.md"}])
+    new_ns = int(time.time() * 1e9)
+    os.utime(path, ns=(new_ns, new_ns))  # 模拟推送后被编辑
+    probe.check_pending()
+
+    result = CliRunner().invoke(cli, ["resurface", "--stats"])
+
+    assert result.exit_code == 0, result.output
+    assert "响应率 100%" in result.output

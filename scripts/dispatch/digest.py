@@ -13,7 +13,9 @@
   待办文本再喂给 LLM 空转）；
 - 只读全部笔记的 frontmatter/正文，绝不改写；
 - 复习推送冷却时钟只写 ``<state_dir>/resurface.json``，且仅在摘要
-  笔记真正创建成功后记录（dry-run/跳过不烧冷却）。
+  笔记真正创建成功后记录（dry-run/跳过不烧冷却）；
+- 推送响应观测（实验 0）只写 ``<state_dir>/response_probe.json``，
+  同样仅在真实运行时执行。
 
 触发：systemd 每日定时器（docker/systemd/atelierr-digest.*）或
 人工 ``dispatch_cli digest``。
@@ -27,6 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import frontmatter
 
+from scripts.dispatch.response_probe import ResponseProbe
 from scripts.memory.core import LAYERS, MemoryTree
 from scripts.memory.resurface import ResurfaceManager
 from scripts.memory.watcher import MemoryWatcher
@@ -38,6 +41,7 @@ class DigestDispatcher:
     Attributes:
         tree: MemoryTree 实例。
         resurface: 复习队列管理器（默认按内置窗口构造）。
+        probe: 推送响应观测器（实验 0，随摘要每日执行一次）。
     """
 
     def __init__(
@@ -51,6 +55,7 @@ class DigestDispatcher:
         """
         self.tree = tree
         self.resurface = resurface or ResurfaceManager(tree)
+        self.probe = ResponseProbe(tree)
 
     def run(
         self, dry_run: bool = False, today: Optional[str] = None
@@ -78,6 +83,8 @@ class DigestDispatcher:
         if not dry_run:
             self.tree.create_note(filename, markdown, source="digest", tags=["摘要"])
             self.resurface.mark_pushed([item["id"] for item in review])
+            self.probe.register(review)
+            self.probe.check_pending()
             created = filename
         return {
             "created": created,

@@ -301,12 +301,43 @@ class MemoryCLI:
             type=int,
             help="最多列出几条（默认按配置 memory.resurface.daily_count）",
         )
+        @click.option(
+            "--stats",
+            "show_stats",
+            is_flag=True,
+            help="显示复习推送的响应率统计（实验 0 观测）",
+        )
         @click.pass_context
-        def resurface(ctx: click.Context, limit: Optional[int]) -> None:
+        def resurface(
+            ctx: click.Context, limit: Optional[int], show_stats: bool
+        ) -> None:
             """列出今日复习队列（遗忘临界区内的笔记；只读，绝不改笔记）。"""
+            tree: MemoryTree = ctx.obj
+            if show_stats:
+                from scripts.dispatch.response_probe import ResponseProbe
+
+                data = ResponseProbe(tree).summary()
+                if data["total"] == 0:
+                    click.echo(
+                        "暂无响应率数据"
+                        "（尚无结案观测：推送后需满 48h 观察窗）"
+                    )
+                    return
+                click.echo(
+                    f"累计推送 {data['total']} 条，"
+                    f"响应 {data['responded']} 条，"
+                    f"响应率 {data['rate']:.0%}"
+                )
+                if data["last7_total"]:
+                    click.echo(
+                        f"近 7 天: {data['last7_responded']}"
+                        f"/{data['last7_total']}，"
+                        f"响应率 {data['last7_rate']:.0%}"
+                    )
+                click.echo(f"观察中: {data['pending']} 条（未满 48h 窗）")
+                return
             from scripts.memory.resurface import ResurfaceManager
 
-            tree: MemoryTree = ctx.obj
             resolved = resolve_config_path(self.config_path)
             manager = (
                 ResurfaceManager.from_config(resolved, tree=tree)

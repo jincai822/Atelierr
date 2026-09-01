@@ -134,6 +134,16 @@ def run_resurface_section() -> bool:
             assert (tree.state_dir / "resurface.json").exists(), "状态未落 state_dir"
             assert not manager.candidates(), "冷却未生效"
 
+            # 实验 0：推送响应率观测（推送后被编辑 → 响应）
+            from scripts.dispatch.response_probe import ResponseProbe
+
+            probe = ResponseProbe(tree)
+            probe.register([{"id": picked[0]["id"], "filename": "old.md"}])
+            new_ns = int(time.time() * 1e9)
+            os.utime(old, ns=(new_ns, new_ns))
+            assert probe.check_pending()["responded"] == 1, "响应观测失败"
+            assert probe.summary()["rate"] == 1.0, "响应率统计失败"
+
             report = DigestDispatcher(tree).run(today="2026-09-01")
             assert "今日复习" in report["markdown"], "摘要缺复习节"
 

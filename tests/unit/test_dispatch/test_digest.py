@@ -6,7 +6,9 @@ frontmatter 解析与分节为真实代码路径；无网络（摘要不联网�
 from __future__ import annotations
 
 import json
+import os
 import re
+import time
 
 import frontmatter
 
@@ -105,13 +107,40 @@ def test_digest_includes_resurface_section(memory_tree, make_note):
 
 
 def test_digest_dry_run_does_not_burn_cooldown(memory_tree, make_note):
-    """dry-run：复习节照常渲染，但不写冷却状态。"""
+    """dry-run：复习节照常渲染，但不写冷却状态、不建响应观测。"""
     make_note(memory_tree, "old.md", "旧笔记", idle_days=20)
 
     report = DigestDispatcher(memory_tree).run(dry_run=True, today="2026-09-01")
 
     assert "今日复习（1）" in report["markdown"]
     assert not (memory_tree.state_dir / "resurface.json").exists()
+    assert not (memory_tree.state_dir / "response_probe.json").exists()
+
+
+def test_digest_registers_and_resolves_probe(memory_tree, make_note):
+    """推送复习笔记后建立响应观测；用户编辑后次日结案为响应。"""
+    path = make_note(memory_tree, "old.md", "旧笔记", idle_days=20)
+
+    DigestDispatcher(memory_tree).run(today="2026-09-01")
+    state = json.loads(
+        (memory_tree.state_dir / "response_probe.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert len(state["pending"]) == 1
+
+    ns = int(time.time() * 1e9)
+    os.utime(path, ns=(ns, ns))  # 模拟用户当天加工了这条笔记
+    DigestDispatcher(memory_tree).run(today="2026-09-02")
+
+    state = json.loads(
+        (memory_tree.state_dir / "response_probe.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert state["pending"] == {}
+    assert state["resolved"][0]["responded"] is True
+    assert state["resolved"][0]["reason"] == "edited"
 
 
 def test_digest_note_skipped_by_todos_dispatch(memory_tree):

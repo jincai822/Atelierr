@@ -148,3 +148,16 @@ decay 的反面：confidence 跌入遗忘临界区（默认 [0.15, 0.5)，无引
 cd /srv/workspaces/Atelierr
 python -m scripts.cli.memory_cli resurface
 ```
+
+### 响应率观测（实验 0，只读测量）
+
+系统每天随晨报记录复习推送的**响应率**：推送后 48 小时内笔记 mtime
+变化（任何端的编辑都会经 Syncthing 同步回服务器）或被 purge，记为
+响应；纯浏览（尤其手机端阅读）不可观测，所以该值是真实互动的下限，
+只看趋势、不看绝对值。
+
+- 观测状态：`<state_dir>/response_probe.json`（原子写，绝不触碰笔记）；
+- 查看统计：`python -m scripts.cli.memory_cli resurface --stats`；
+- 两周判据（事先约定）：响应率 <20% → 问题在推送本身（时机/数量/
+  渠道），先修推送；≥40% → 回路有效，再考虑加注意力精排
+  （回路二「蒸馏」的候选信号）。
