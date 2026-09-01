@@ -5,14 +5,16 @@
     python -m scripts.cli.dispatch_cli links --dry-run  # 只报告不处理
     python -m scripts.cli.dispatch_cli todos            # 扫描并抽取待办事项
     python -m scripts.cli.dispatch_cli todos --dry-run  # 只报告不建笔记
+    python -m scripts.cli.dispatch_cli media            # 扫描 attachments/ 截图录音并 OCR/转写
+    python -m scripts.cli.dispatch_cli media --dry-run  # 只报告不处理
     python -m scripts.cli.dispatch_cli digest           # 创建今日摘要笔记
 
 配置解析顺序与 memory_cli 一致：--config > 环境变量 ATELIERR_CONFIG >
 ./config/memory.yaml > 内置默认 ~/atelierr-data/{memory,state}。
 
 定时部署见 docker/systemd/atelierr-links.service / .timer。
-单条链接/单篇笔记的失败不影响退出码（记入状态文件，下次自动重试，
-3 次熔断）；仅当整体无法运行（如配置缺失）时 exit 1。
+单条链接/单篇笔记/单个附件的失败不影响退出码（记入状态文件，下次自动
+重试，3 次熔断）；仅当整体无法运行（如配置缺失）时 exit 1。
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ import click
 from scripts.cli.memory_cli import _resolve_config_path
 from scripts.dispatch.digest import DigestDispatcher
 from scripts.dispatch.links import LinkDispatcher
+from scripts.dispatch.media import MediaDispatcher
 from scripts.dispatch.notify import send_ntfy
 from scripts.dispatch.todos import TodoDispatcher
 from scripts.memory.core import MemoryTree
@@ -43,6 +46,15 @@ def _notify_failures(failures: List[Dict[str, Any]]) -> None:
         send_ntfy(
             "Atelierr 抓取失败",
             f"{len(failures)} 条链接抓取失败，请检查后重新粘贴",
+        )
+
+
+def _notify_media_failures(failures: List[Dict[str, Any]]) -> None:
+    """附件处理失败时推送（同上：成功不推，失败必推）。"""
+    if failures:
+        send_ntfy(
+            "Atelierr 处理失败",
+            f"{len(failures)} 个附件处理失败，请检查文件后重新放入",
         )
 
 
@@ -119,6 +131,31 @@ class DispatchCLI:
                 click.echo(f"  已创建待办: {filename}")
             for failure in report["failed"]:
                 click.echo(f"  失败: {failure['note']} — {failure['error']}")
+            if dry_run:
+                click.echo("（dry-run：未做处理）")
+
+        @cli.command(name="media")
+        @click.option(
+            "--dry-run",
+            "dry_run",
+            is_flag=True,
+            help="只扫描报告，不建笔记、不写状态、不加载引擎",
+        )
+        def media_command(dry_run: bool) -> None:
+            """扫描 attachments/ 里的截图/录音并自动 OCR/转写入库。"""
+            tree = self._build_tree()
+            report = MediaDispatcher(tree).run(dry_run=dry_run)
+            click.echo(
+                f"扫描 {report['scanned']} 个附件，"
+                f"新发现 {report['found']} 个，"
+                f"跳过已处理 {report['skipped']} 个"
+            )
+            for filename in report["created"]:
+                click.echo(f"  已创建: {filename}（待确认）")
+            for failure in report["failed"]:
+                click.echo(f"  失败: {failure['file']} — {failure['error']}")
+            if not dry_run:
+                _notify_media_failures(report["failed"])
             if dry_run:
                 click.echo("（dry-run：未做处理）")
 

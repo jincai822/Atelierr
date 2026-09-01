@@ -6,13 +6,17 @@
 
 from __future__ import annotations
 
+import os
 import re
+import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
 import scripts.cli.dispatch_cli as cli_module
 import scripts.dispatch.links as links_module
+import scripts.dispatch.media as media_module
 from scripts.cli.dispatch_cli import DispatchCLI
 from scripts.processors.base import ProcessResult
 
@@ -139,4 +143,52 @@ def test_digest_dry_run_no_push(cli, memory_tree, pushes):
     memory_tree.create_note("a.md", "待确认笔记", source="link", tags=["待确认"])
 
     assert cli.main(["digest", "--dry-run"]) == 0
+    assert pushes == []
+
+
+class _FakeMediaProcessor:
+    """假附件处理器：fail_with 置位时返回失败。"""
+
+    fail_with = None
+
+    def process(self, path):
+        if type(self).fail_with:
+            return ProcessResult(success=False, error=type(self).fail_with)
+        return ProcessResult(
+            success=True, text="识别文本", markdown="", confidence=0.9,
+        )
+
+
+def _add_attachment(tree, name="IMG_001.png"):
+    """在 attachments/ 落一个假附件并回拨 mtime（避开 30s 守卫）。"""
+    attach = Path(tree.notes_dir) / "attachments"
+    attach.mkdir(parents=True, exist_ok=True)
+    path = attach / name
+    path.write_bytes(b"\x89PNG fake-bytes")
+    old = time.time() - 60
+    os.utime(path, (old, old))
+    return path
+
+
+def test_media_failure_pushes(cli, memory_tree, pushes, monkeypatch):
+    """附件处理失败 → 推"Atelierr 处理失败"。"""
+    monkeypatch.setattr(media_module, "ImageProcessor", _FakeMediaProcessor)
+    _FakeMediaProcessor.fail_with = "OCR 失败: 引擎崩溃"
+    _add_attachment(memory_tree)
+
+    assert cli.main(["media"]) == 0
+    assert len(pushes) == 1
+    title, message = pushes[0]
+    assert title == "Atelierr 处理失败"
+    assert "1 个附件处理失败" in message
+
+
+def test_media_success_no_push(cli, memory_tree, pushes, monkeypatch):
+    """附件处理成功 → 不推。"""
+    monkeypatch.setattr(media_module, "ImageProcessor", _FakeMediaProcessor)
+    _FakeMediaProcessor.fail_with = None
+    _add_attachment(memory_tree)
+
+    assert cli.main(["media"]) == 0
+    assert list(memory_tree.notes_dir.glob("media-*.md"))
     assert pushes == []

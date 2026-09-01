@@ -1,9 +1,13 @@
-# Atelierr 链接自动分发服务（oneshot）
+# Atelierr 通道自动分发服务（oneshot）
 #
-# 每 15 分钟扫描全部笔记中的抖音链接，自动抓取视频、Whisper 转写并
-# 创建带"待确认"标签的新笔记（人工确认在产出端，见
-# scripts/dispatch/links.py 模块 docstring）。幂等：同一链接只处理一次，
-# 失败 3 次熔断。
+# 每 15 分钟跑三条分发（顺序有意安排）：
+#   1. links — 扫描笔记中的抖音链接，抓取视频、Whisper 转写建"待确认"
+#      笔记（见 scripts/dispatch/links.py）；
+#   2. media — 扫描 attachments/ 的截图/录音，OCR/Whisper 转写建"待确认"
+#      笔记（见 scripts/dispatch/media.py）；
+#   3. todos — 扫描笔记行动意图建待办（见 scripts/dispatch/todos.py），
+#      排在最后：links/media 当轮产出的正文同轮即可被待办分发捡到。
+# 幂等：同一链接/附件只处理一次，失败 3 次熔断。
 #
 # 用户级 systemd unit:
 #   mkdir -p ~/.config/systemd/user
@@ -13,7 +17,7 @@
 #   systemctl --user enable --now atelierr-links.timer
 #
 # 日志: ~/atelierr-data/state/logs/links.log（stdout/stderr 追加）
-# 状态: ~/atelierr-data/state/processed_links.json
+# 状态: ~/atelierr-data/state/processed_{links,todos,media}.json
 # 前置: config/memory.yaml 必须存在（同 atelierr-decay.service）；
 #       需要 Chrome 的 douyin.com cookie 有效（过期时在 Chrome 打开一次
 #       douyin.com 刷新；见 config/processors.yaml.example 的 link 节）
@@ -32,7 +36,9 @@ Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
 EnvironmentFile=-%h/.config/atelierr/env
 ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
 ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli links
-# 同轮顺带做待办分发（显式标记直转 + LLM 判定，见 scripts/dispatch/todos.py）
+# 同轮顺带做附件分发（attachments/ 截图/录音 OCR/转写，见 scripts/dispatch/media.py）
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli media
+# 待办分发排在最后：links/media 当轮产出的正文同轮即可被捡到（见 scripts/dispatch/todos.py）
 ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli todos
 StandardOutput=append:%h/atelierr-data/state/logs/links.log
 StandardError=append:%h/atelierr-data/state/logs/links.log
