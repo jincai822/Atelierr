@@ -52,7 +52,7 @@ def _cognition_dependencies(tree: MemoryTree, note_id: str) -> List:
     ov_path = tree.notes_dir.parent
     if not (ov_path / "cognition").is_dir():
         return []
-    from scripts.memory.cognition import CognitionManager
+    from scripts.cognition import CognitionManager
 
     manager = CognitionManager(ov_path, state_dir=tree.state_dir)
     return manager.memory_dependencies(note_id)

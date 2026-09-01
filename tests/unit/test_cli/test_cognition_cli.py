@@ -14,7 +14,7 @@ import frontmatter
 from click.testing import CliRunner
 
 from scripts.cli.cognition_cli import CognitionCLI
-from scripts.memory.cognition import ApprovalRecord, CognitionManager
+from scripts.cognition import ApprovalRecord, CognitionManager
 from scripts.memory.core import MemoryTree
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

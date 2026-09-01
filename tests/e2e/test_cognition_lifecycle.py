@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.memory.cognition import (
+from scripts.cognition import (
     ApprovalRecord,
     CognitionError,
     CognitionManager,

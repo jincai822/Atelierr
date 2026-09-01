@@ -6,7 +6,7 @@
 
 **日期**: 2026-08-29
 
-**目标实现**: Phase 5，`scripts/memory/cognition.py`
+**目标实现**: Phase 5，`scripts/cognition/manager.py`
 
 ---
 
@@ -389,7 +389,7 @@ Flatnotes 继续只访问 `$OV/memory/`；cognition 通过 CLI、Obsidian 或文
 
 ### 6.1 模块与 CLI 边界
 
-实现模块位于 `scripts/memory/cognition.py`，命令入口位于独立的
+实现模块位于 `scripts/cognition/manager.py`，命令入口位于独立的
 `scripts/cli/cognition_cli.py`。cognition 不作为 memory layer，也不挂入
 `memory_cli cognition ...`。
 

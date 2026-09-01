@@ -17,7 +17,7 @@ from pathlib import Path
 import frontmatter
 import pytest
 
-from scripts.memory.cognition import (
+from scripts.cognition import (
     ApprovalRecord,
     CognitionEntry,
     CognitionError,

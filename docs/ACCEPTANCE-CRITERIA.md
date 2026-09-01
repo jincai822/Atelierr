@@ -575,7 +575,7 @@ pytest tests/unit/test_processors/test_pdf.py -v
 
 ---
 
-### 模块 4: 认知模块 (scripts/memory/cognition.py)
+### 模块 4: 认知模块 (scripts/cognition/manager.py)
 
 正式数据模型、状态流转、API 与 CLI 以
 `docs/prd/COGNITION-SPEC.md` v1.0 为准。本节为 Phase 5 的可执行验收契约。
@@ -910,7 +910,7 @@ pytest --cov=scripts --cov-report=html --cov-report=term
   - scripts/memory/core.py
   - scripts/memory/confidence.py
   - scripts/memory/decay.py
-  - scripts/memory/cognition.py
+  - scripts/cognition/manager.py
   
 ✅ 关键函数覆盖率 = 100%:
   - 数据写入函数

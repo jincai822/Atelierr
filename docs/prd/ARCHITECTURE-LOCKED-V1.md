@@ -809,7 +809,7 @@ class DecayManager:
 ### Phase 5: 认知模块 (Week 4+)
 
 ```
-✅ 按 docs/prd/COGNITION-SPEC.md v1.0 实现 scripts/memory/cognition.py
+✅ 按 docs/prd/COGNITION-SPEC.md v1.0 实现 scripts/cognition/manager.py
 ✅ 实现 belief/question/hypothesis 公共 schema 与 certainty 语义
 ✅ 实现 Agent 提名 + 人工批准的升级机制
 ✅ 实现挑战、证伪、继任、派生索引与独立 CLI

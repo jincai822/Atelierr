@@ -32,7 +32,7 @@ from typing import List, Optional, cast
 
 import click
 
-from scripts.memory.cognition import (
+from scripts.cognition import (
     COGNITION_TYPES,
     DEFAULT_STATUS,
     ApprovalRecord,

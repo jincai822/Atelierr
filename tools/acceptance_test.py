@@ -337,7 +337,7 @@ def run_cognition_section() -> bool:
         from click.testing import CliRunner
 
         from scripts.cli.cognition_cli import CognitionCLI
-        from scripts.memory.cognition import (
+        from scripts.cognition import (
             ApprovalRecord,
             CognitionError,
             CognitionManager,
@@ -401,7 +401,7 @@ def run_cognition_section() -> bool:
             assert promoted.origin["memory_id"] == memory_id, "origin 未记录来源"
 
             # 挑战 → accept：revision/证据/确信度
-            from scripts.memory.cognition import EvidenceRef
+            from scripts.cognition import EvidenceRef
 
             challenge = manager.propose_challenge(
                 belief.id,

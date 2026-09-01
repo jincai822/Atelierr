@@ -14,7 +14,7 @@ import time
 import frontmatter
 import pytest
 
-from scripts.memory.cognition import CognitionManager
+from scripts.cognition import CognitionManager
 
 COUNT = 10_000
 

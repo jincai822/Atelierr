@@ -16,7 +16,7 @@ import pytest
 from click.testing import CliRunner
 
 from scripts.cli.memory_cli import MemoryCLI
-from scripts.memory.cognition import (
+from scripts.cognition import (
     ApprovalRecord,
     CognitionError,
     CognitionManager,
