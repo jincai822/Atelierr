@@ -109,9 +109,9 @@ class ResurfaceManager:
     ) -> List[Dict[str, Any]]:
         """返回今日复习队列（按 confidence 升序，最该复习的在前）。
 
-        只纳入：已登记且文件存在、非 pending_delete、非机器摘要
-        （source=digest）、live confidence 落在 [window_low, window_high)、
-        且距上次推送已满 cooldown_days 的笔记。
+        只纳入：已登记且文件存在、非 pending_delete、非机器摘要/基础设施
+        （source=digest/system）、live confidence 落在 [window_low,
+        window_high)、且距上次推送已满 cooldown_days 的笔记。
 
         Args:
             limit: 条数上限；None 时用 daily_count；<= 0 返回空。
@@ -134,8 +134,8 @@ class ResurfaceManager:
                     continue
                 if info["pending_delete"]:
                     continue
-                if info.get("source") == "digest":
-                    continue  # 机器生成的历史摘要不需复习
+                if info.get("source") in ("digest", "system"):
+                    continue  # 机器摘要/基础设施笔记（控制台等）不需复习
                 confidence = info["confidence"]
                 if not (self.window_low <= confidence < self.window_high):
                     continue

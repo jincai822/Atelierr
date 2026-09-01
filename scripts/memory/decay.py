@@ -61,6 +61,16 @@ class DecayManager:
             if not path.name.startswith(".")
         ]
 
+    @staticmethod
+    def _note_source(path: Path) -> Optional[str]:
+        """读取 frontmatter 的 source；损坏返回 None。"""
+        try:
+            post = frontmatter.loads(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - 损坏 frontmatter 视为无 source
+            return None
+        source = post.metadata.get("source")
+        return str(source) if source is not None else None
+
     def _recompute(
         self,
         path: Path,
@@ -149,6 +159,8 @@ class DecayManager:
             path = self.tree.notes_dir / entry["path"]
             if not path.exists():
                 continue
+            if self._note_source(path) == "system":
+                continue  # 与 run() 一致：基础设施笔记不计入衰减统计
             _, layer, pending = self._recompute(
                 path, entry, references=entry.get("references", 0)
             )
@@ -180,6 +192,7 @@ class DecayManager:
         transitions: List[Dict] = []
         pending_paths: List[Path] = []
         skipped: List[Path] = []
+        system_notes: List[Path] = []
         counts = {"short_term": 0, "mid_term": 0, "long_term": 0}
         total = 0
 
@@ -187,6 +200,10 @@ class DecayManager:
             note_id = self.tree._read_note_id(path)
             if note_id is None:
                 skipped.append(path)
+                continue
+            if self._note_source(path) == "system":
+                # 基础设施笔记（控制台等）：不衰减、不计数、不置待删
+                system_notes.append(path)
                 continue
             entry = self.tree._entry(path)
             refs = references.get(path, 0)
@@ -233,6 +250,7 @@ class DecayManager:
             "would_relayer": len(transitions) if dry_run else 0,
             "pending": [str(path) for path in pending_paths],
             "skipped": [str(path) for path in skipped],
+            "system": [str(path) for path in system_notes],
             "dry_run": dry_run,
         }
         if report_path is not None:

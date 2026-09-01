@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 
 import frontmatter
@@ -135,3 +137,23 @@ def test_decay_registers_frontmatter_only_note(memory_tree, make_note):
     # 文件内容未被改写
     post_after = frontmatter.loads(orphan.read_text(encoding="utf-8"))
     assert post_after.metadata["id"] == "01J6" + "0" * 22
+
+
+def test_decay_skips_system_notes(memory_tree, make_note):
+    """source=system 的基础设施笔记（控制台等）：不衰减、不计数、不置待删。"""
+    panel = memory_tree.create_note(
+        "控制台.md", "面板", source="system", tags=["系统"]
+    )
+    old_ns = int((time.time() - 60 * 86400) * 1e9)
+    os.utime(panel, ns=(old_ns, old_ns))
+    make_note(memory_tree, "content.md", "内容", idle_days=60)
+
+    report = DecayManager(memory_tree).run()
+
+    assert report["total_notes"] == 1
+    assert report["system"] == [str(panel)]
+    entry = memory_tree._entry(panel)
+    assert entry["pending_delete"] is False
+    assert entry["confidence"] == 1.0
+    scan = DecayManager(memory_tree).scan()
+    assert scan["total_notes"] == 1

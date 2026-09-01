@@ -75,6 +75,14 @@ def test_digest_source_excluded(memory_tree):
     assert ResurfaceManager(memory_tree).candidates() == []
 
 
+def test_system_source_excluded(memory_tree):
+    """基础设施笔记（source=system，控制台等）不进复习队列。"""
+    path = memory_tree.create_note("控制台.md", "面板", source="system")
+    _age(path, 20)
+
+    assert ResurfaceManager(memory_tree).candidates() == []
+
+
 def test_cooldown_blocks_repush(memory_tree, make_note):
     """推送后 cooldown_days 内不再入队；满期后重新入队。"""
     make_note(memory_tree, "due.md", "该复习", idle_days=20)
