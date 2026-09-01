@@ -55,7 +55,11 @@ REVIEW_TAG = "待确认"
 
 #: 显式通道：未勾选任务行 / 行内标记
 _TASK_LINE_RE = re.compile(r"^\s*- \[ \] (?P<text>.+?)\s*$", re.M)
-_INLINE_TAG_RE = re.compile(r"#(?:todo|待办)(?=\s|$)")
+#: 行内标记（前面不能是 "tag:"——那是 Obsidian 查询语法，2026-09-01 实测
+#: 主页笔记的 ```query tag:#待办``` 被误抽成待办 "tag:"）
+_INLINE_TAG_RE = re.compile(r"(?<!tag:)#(?:todo|待办)(?=\s|$)")
+#: 围栏代码块（query 等）内容不算显式标记
+_FENCED_BLOCK_RE = re.compile(r"^```.*?^```\s*", re.M | re.S)
 
 #: LLM 默认接入点（OpenAI 兼容）与限额
 _LLM_DEFAULT_BASE_URL = "https://api.deepseek.com"
@@ -86,12 +90,15 @@ def _load_todos_config() -> Dict[str, Any]:
 def _extract_explicit(body: str) -> List[Dict[str, Any]]:
     """显式通道抽取：``- [ ]`` 任务行优先，其次行内 #todo/#待办 标记。
 
+    先剥掉围栏代码块（Obsidian ```query 等），块内内容不算标记。
+
     Args:
         body: 笔记正文（不含 frontmatter）。
 
     Returns:
         List[Dict[str, Any]]: [{"text", "due": None}]；无显式标记为空表。
     """
+    body = _FENCED_BLOCK_RE.sub("", body)
     items = [
         {"text": match.group("text").strip(), "due": None}
         for match in _TASK_LINE_RE.finditer(body)
@@ -179,6 +186,7 @@ class TodoDispatcher:
             "scanned": 0,
             "candidates": 0,
             "created": [],
+            "created_review": [],
             "skipped": 0,
             "failed": [],
         }
@@ -207,7 +215,8 @@ class TodoDispatcher:
             report["skipped"] += 1
             return
         tags = post.get("tags") or []
-        if TODO_TAG in tags or "todo" in tags:  # 防自循环（含本模块产出）
+        # 防自循环（含本模块产出）；摘要笔记不再喂 LLM（内容全是既有待办）
+        if TODO_TAG in tags or "todo" in tags or post.get("source") == "digest":
             report["skipped"] += 1
             return
         body = post.content
@@ -233,7 +242,6 @@ class TodoDispatcher:
                 )
                 if filename:
                     created.append(filename)
-
         # LLM 通道：有 key 且未熔断才判定
         llm_done = False
         llm_items: List[Dict[str, Any]] = []
@@ -270,6 +278,7 @@ class TodoDispatcher:
                     )
                     if filename:
                         created.append(filename)
+                        report["created_review"].append(filename)
         if dry_run:
             return
         if key in state or explicit_items or llm_done:

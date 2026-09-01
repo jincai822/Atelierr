@@ -62,6 +62,10 @@ processors:
 #       api_key_env: DEEPSEEK_API_KEY
 #       max_tokens: 800
 #       timeout: 60
+#   notify:             # ntfy 推送：新增待确认内容时通知（只报数量）
+#     ntfy_url: https://ntfy.sh   # 或自托管实例
+#     topic: ""           # 主题名即口令：用随机长串，写在 config/processors.yaml
+#                         # （已 gitignore），不要写进此 example
 
   wechat:                 # backlog：导出格式不稳定，不在 MVP/完整版验收范围
     input_format: txt     # 微信导出格式

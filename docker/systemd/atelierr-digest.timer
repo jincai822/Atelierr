@@ -1,0 +1,14 @@
+# Atelierr 晨间摘要定时器（与 atelierr-digest.service 配套）
+#
+# OnCalendar=*-*-* 07:53: 每天 07:53 触发（避开整点）
+# Persistent=true: 错过的触发（关机/睡眠）在开机后立即补跑
+
+[Unit]
+Description=Atelierr morning digest timer (daily)
+
+[Timer]
+OnCalendar=*-*-* 07:53
+Persistent=true
+
+[Install]
+WantedBy=timers.target

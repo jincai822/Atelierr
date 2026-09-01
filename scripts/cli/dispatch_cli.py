@@ -5,6 +5,7 @@
     python -m scripts.cli.dispatch_cli links --dry-run  # 只报告不处理
     python -m scripts.cli.dispatch_cli todos            # 扫描并抽取待办事项
     python -m scripts.cli.dispatch_cli todos --dry-run  # 只报告不建笔记
+    python -m scripts.cli.dispatch_cli digest           # 创建今日摘要笔记
 
 配置解析顺序与 memory_cli 一致：--config > 环境变量 ATELIERR_CONFIG >
 ./config/memory.yaml > 内置默认 ~/atelierr-data/{memory,state}。
@@ -22,12 +23,20 @@ from typing import List, Optional
 import click
 
 from scripts.cli.memory_cli import _resolve_config_path
+from scripts.dispatch.digest import DigestDispatcher
 from scripts.dispatch.links import LinkDispatcher
+from scripts.dispatch.notify import send_ntfy
 from scripts.dispatch.todos import TodoDispatcher
 from scripts.memory.core import MemoryTree
 
 DEFAULT_ROOT = "~/atelierr-data/memory"
 DEFAULT_STATE_DIR = "~/atelierr-data/state"
+
+
+def _notify_pending(count: int) -> None:
+    """有新待确认内容时发 ntfy 推送（未配置/失败静默，不影响主流程）。"""
+    if count > 0:
+        send_ntfy("Atelierr 待确认", f"{count} 条新内容待确认")
 
 
 class DispatchCLI:
@@ -47,7 +56,7 @@ class DispatchCLI:
 
         @click.group()
         def cli() -> None:
-            """Atelierr 通道产物自动分发（links / todos）。"""
+            """Atelierr 通道产物自动分发（links / todos / digest）。"""
 
         @cli.command(name="links")
         @click.option(
@@ -69,6 +78,8 @@ class DispatchCLI:
                 click.echo(f"  已创建: {filename}（待确认）")
             for failure in report["failed"]:
                 click.echo(f"  失败: {failure['url']} — {failure['error']}")
+            if not dry_run:
+                _notify_pending(len(report["created"]))
             if dry_run:
                 click.echo("（dry-run：未做处理）")
 
@@ -92,8 +103,35 @@ class DispatchCLI:
                 click.echo(f"  已创建待办: {filename}")
             for failure in report["failed"]:
                 click.echo(f"  失败: {failure['note']} — {failure['error']}")
+            if not dry_run:
+                _notify_pending(len(report["created_review"]))
             if dry_run:
                 click.echo("（dry-run：未做处理）")
+
+        @cli.command(name="digest")
+        @click.option(
+            "--dry-run",
+            "dry_run",
+            is_flag=True,
+            help="只打印摘要内容，不建笔记",
+        )
+        def digest_command(dry_run: bool) -> None:
+            """创建今日摘要笔记（当天已存在则跳过）。"""
+            tree = self._build_tree()
+            report = DigestDispatcher(tree).run(dry_run=dry_run)
+            if report["skipped"]:
+                click.echo("今日摘要已存在，跳过")
+                return
+            counts = report["counts"]
+            click.echo(
+                f"待确认 {counts['pending']}，待办 {counts['todos']}，"
+                f"昨日新入库 {counts['yesterday_new']}"
+            )
+            if dry_run:
+                click.echo(report["markdown"])
+                click.echo("（dry-run：未建笔记）")
+            else:
+                click.echo(f"  已创建: {report['created']}")
 
         return cli
 

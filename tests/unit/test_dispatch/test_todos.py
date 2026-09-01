@@ -352,3 +352,25 @@ def test_fenced_json_tolerated(memory_tree, monkeypatch):
     assert report["created"] == []
     assert report["failed"] == []
     assert _state(memory_tree)["plain.md"]["status"] == "no-todo"
+
+
+def test_query_block_and_tag_syntax_not_extracted(memory_tree, monkeypatch):
+    """Obsidian query 代码块与 tag:#todo 查询语法不触发显式通道。"""
+    called = []
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        todos_module.httpx,
+        "post",
+        lambda *a, **k: called.append(1) or _FakeLLMResponse(_todos_payload([])),
+    )
+    memory_tree.create_note(
+        "主页.md",
+        "# 主页\n\n```query\ntag:#待办\n```\n\n```query\ntag:#待确认\n```\n",
+        source="manual",
+    )
+
+    report = TodoDispatcher(memory_tree).run()
+
+    assert report["created"] == []
+    assert called  # 无显式命中才走 LLM，且 LLM 也判无
+    assert _state(memory_tree)["主页.md"]["status"] == "no-todo"

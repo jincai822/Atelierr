@@ -1,0 +1,23 @@
+# Atelierr 晨间摘要服务（oneshot）
+#
+# 每天清晨创建一条"今日摘要-YYYY-MM-DD.md"笔记：待确认清单、待办
+# 进行中、昨日新入库（见 scripts/dispatch/digest.py）。只新建笔记，
+# 不改写既有笔记；当天已存在则跳过（幂等）。
+#
+# 用户级 systemd unit:
+#   cp docker/systemd/atelierr-digest.service docker/systemd/atelierr-digest.timer \
+#     ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now atelierr-digest.timer
+
+[Unit]
+Description=Atelierr morning digest (daily)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/workspaces/Atelierr
+Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli digest
+StandardOutput=append:%h/atelierr-data/state/logs/digest.log
+StandardError=append:%h/atelierr-data/state/logs/digest.log
