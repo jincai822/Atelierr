@@ -652,3 +652,6 @@ frontmatter 与正文追加互不干扰。
   已实现（onnxruntime），整页扫描 CPU 实测 ~0.8s/页（vs paddle 12-14s），
   截图类 ~0.8s；PDF 经 `processors.pdf.ocr_engine` 透传
 - **完整版验收**: 覆盖率 ≥85%、mypy/pylint 门禁、负载测试（1000+ 笔记）
+- **链接笔记观点总结（LLM）**: 抖音等链接笔记的"观点总结 + 分观点论述"需 LLM
+  生成；方案已定（`processors.link.llm` 配置节，httpx 调 DeepSeek 兼容接口，
+  失败降级不阻塞管线），待用户提供 API key 后实施（2026-09-01 决定暂不配）
