@@ -61,7 +61,10 @@ class _FakeVideoProcessor:
 
 @pytest.fixture
 def fake_pipeline(monkeypatch):
-    """替换下载与转写为假实现，返回记录下载目录的列表。"""
+    """替换下载与转写为假实现，返回记录下载目录的列表。
+
+    同时摘除 LLM key 环境变量：缺省测试路径不打真实 API。
+    """
     made_dirs = []
 
     class _RecordingYT(_FakeYoutubeDL):
@@ -71,7 +74,30 @@ def fake_pipeline(monkeypatch):
 
     monkeypatch.setattr(link_module.yt_dlp, "YoutubeDL", _RecordingYT)
     monkeypatch.setattr(link_module, "VideoProcessor", _FakeVideoProcessor)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     return made_dirs
+
+
+class _FakeLLMResponse:
+    """假 httpx 响应：raise_for_status 通过，json 返回固定负载。"""
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+def _llm_payload(summary="核心观点总结。", points=("观点一。", "观点二。")):
+    import json as _json
+
+    content = _json.dumps(
+        {"summary": summary, "points": list(points)}, ensure_ascii=False
+    )
+    return {"choices": [{"message": {"content": content}}]}
 
 
 def test_extract_url_from_share_text():
@@ -323,3 +349,75 @@ def test_cli_link_command(fake_pipeline):
     code = ProcessCLI().main(["link", SHARE_TEXT])
 
     assert code == 0
+
+
+def test_llm_summary_inserted(fake_pipeline, monkeypatch):
+    """LLM 正常返回：摘要两节插入来源行与转写全文之间，metadata 记 ok。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        link_module.httpx, "post", lambda *a, **k: _FakeLLMResponse(_llm_payload())
+    )
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "## 观点总结\n\n核心观点总结。" in result.markdown
+    assert "## 分观点论述\n\n1. 观点一。\n2. 观点二。" in result.markdown
+    assert result.markdown.index("## 观点总结") < result.markdown.index("## 转写全文")
+    assert result.metadata["llm"]["status"] == "ok"
+
+
+def test_llm_failure_degrades(fake_pipeline, monkeypatch):
+    """LLM 调用异常：笔记仍建成，无摘要节，状态 failed（降级不阻塞）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("api down")
+
+    monkeypatch.setattr(link_module.httpx, "post", _boom)
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "## 观点总结" not in result.markdown
+    assert "## 转写全文" in result.markdown
+    assert result.metadata["llm"]["status"].startswith("failed:")
+
+
+def test_llm_skipped_without_key(fake_pipeline):
+    """无 key 环境变量：跳过摘要，状态 skipped（不算失败）。"""
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "## 观点总结" not in result.markdown
+    assert result.metadata["llm"]["status"] == "skipped:no-DEEPSEEK_API_KEY"
+
+
+def test_llm_skipped_too_long(fake_pipeline, monkeypatch):
+    """转写超过 max_transcript_chars（成本护栏）：跳过，不发请求。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    called = []
+    monkeypatch.setattr(
+        link_module.httpx, "post", lambda *a, **k: called.append(1) or None
+    )
+
+    result = LinkProcessor({"llm": {"max_transcript_chars": 2}}).process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert result.metadata["llm"]["status"] == "skipped:too-long"
+    assert not called
+
+
+def test_llm_bad_json_degrades(fake_pipeline, monkeypatch):
+    """LLM 返回非 JSON：降级为无摘要笔记，不抛异常。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    payload = {"choices": [{"message": {"content": "这不是 JSON"}}]}
+    monkeypatch.setattr(
+        link_module.httpx, "post", lambda *a, **k: _FakeLLMResponse(payload)
+    )
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "## 观点总结" not in result.markdown
+    assert result.metadata["llm"]["status"].startswith("failed:")

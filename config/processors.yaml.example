@@ -42,6 +42,15 @@ processors:
                         # 把新 cookie 刷进此专用 profile 后自动重试，
                         # 不需要人工打开浏览器；无头刷新也失败才报错
     chrome_binary: ""   # 空=自动探测 google-chrome/chromium
+    llm:                # 观点总结/分观点论述（可选；key 缺失或调用失败时
+                        # 自动降级为无摘要笔记，不阻塞入库）
+      base_url: https://api.deepseek.com   # OpenAI 兼容接口
+      model: deepseek-v4-flash
+      api_key_env: DEEPSEEK_API_KEY   # key 只从环境变量读取，绝不写进本文件；
+                                      # 定时任务经 ~/.config/atelierr/env（权限 600）注入
+      max_tokens: 800
+      timeout: 60
+      max_transcript_chars: 6000      # 成本护栏：转写超过此长度跳过摘要（约 10 分钟视频）
 
   wechat:                 # backlog：导出格式不稳定，不在 MVP/完整版验收范围
     input_format: txt     # 微信导出格式

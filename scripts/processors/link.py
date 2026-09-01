@@ -5,9 +5,12 @@
 yt-dlp 下载视频到临时目录 → 复用 :class:`VideoProcessor` 转写 →
 组装带来源行的 Markdown → 清理临时文件。
 
-输出格式（v2）：标题 + 来源行 + ``## 转写全文``——转写去除逐句
-时间戳、按标点合并为自然段、繁体转简体（OpenCC）。"观点总结 /
-分观点论述"两节依赖 LLM，待 API key 配置后补入（暂不留占位）。
+输出格式（v3）：标题 + 来源行 + ``## 观点总结`` / ``## 分观点论述``
+（LLM 生成）+ ``## 转写全文``——转写去除逐句时间戳、按句界合并为
+自然段、繁体转简体（OpenCC）。LLM 摘要经配置 ``processors.link.llm``
+启用：API key 从环境变量读取（默认 DEEPSEEK_API_KEY，不落盘到
+config）；key 缺失、转写超长（成本护栏）或调用失败时自动降级为
+无摘要笔记，绝不阻塞入库管线。
 
 反爬约束（2026-08-31/09-01 真实样本实测）：抖音详情 API 对匿名请求
 403，yt-dlp 借浏览器 cookie（``cookiesfrombrowser``）可拿到视频流
@@ -25,6 +28,8 @@ yt-dlp 下载视频到临时目录 → 复用 :class:`VideoProcessor` 转写 →
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import shutil
 import subprocess
@@ -32,6 +37,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import httpx
 import opencc
 import yt_dlp
 
@@ -56,6 +62,10 @@ _URL_TRAILING = "。，、！？；：）》\"'…"
 
 #: 视频下载后按扩展名在临时目录里定位产物
 _VIDEO_EXTS: Tuple[str, ...] = (".mp4", ".mkv", ".webm", ".mov", ".flv")
+
+#: LLM 摘要默认接入点（OpenAI 兼容接口）与模型
+_LLM_DEFAULT_BASE_URL = "https://api.deepseek.com"
+_LLM_DEFAULT_MODEL = "deepseek-v4-flash"
 
 #: 视频处理器输出里的逐句时间戳行（"- [00:00] 文本"）
 _SEGMENT_LINE_RE = re.compile(r"^- \[\d{2}:\d{2}\]\s*", re.M)
@@ -208,6 +218,13 @@ class LinkProcessor(BaseProcessor):
             )
         )
         self.chrome_binary = str(self.config.get("chrome_binary", ""))
+        llm_cfg = self.config.get("llm") or {}
+        self.llm_base_url = str(llm_cfg.get("base_url", _LLM_DEFAULT_BASE_URL))
+        self.llm_model = str(llm_cfg.get("model", _LLM_DEFAULT_MODEL))
+        self.llm_api_key_env = str(llm_cfg.get("api_key_env", "DEEPSEEK_API_KEY"))
+        self.llm_max_tokens = int(llm_cfg.get("max_tokens", 800))
+        self.llm_timeout = float(llm_cfg.get("timeout", 60))
+        self.llm_max_chars = int(llm_cfg.get("max_transcript_chars", 6000))
 
     def process(self, input_path: Union[str, Path]) -> ProcessResult:
         """抓取链接指向的视频并转写。
@@ -238,11 +255,14 @@ class LinkProcessor(BaseProcessor):
                 return self._fail(video_result.error or "视频转写失败")
             title = str(info.get("title") or "").strip() or share_title
             author = str(info.get("uploader") or "").strip() or share_author
+            transcript_text = _T2S.convert(video_result.text).strip()
+            summary, llm_status = self._summarize(transcript_text)
             markdown = self._build_markdown(
                 title or (video_path.stem if video_path else "link"),
                 author,
                 url,
                 video_result.markdown,
+                summary,
             )
             metadata = {
                 "engine": "yt-dlp+whisper",
@@ -251,6 +271,7 @@ class LinkProcessor(BaseProcessor):
                 "url": url,
                 "video_id": str(info.get("id") or ""),
                 "segments": video_result.metadata.get("segments", 0),
+                "llm": {"status": llm_status, "model": self.llm_model},
             }
             return ProcessResult(
                 success=True,
@@ -385,11 +406,68 @@ class LinkProcessor(BaseProcessor):
             return False
         return proc.returncode == 0
 
+    def _summarize(self, transcript: str) -> Tuple[Optional[Dict[str, Any]], str]:
+        """调 LLM 生成观点总结；任何失败/跳过返回 (None, 状态)，绝不抛出。
+
+        跳过条件（不算错误）：API key 环境变量未设置、转写为空、
+        转写超过 max_transcript_chars（成本护栏，长视频留给人工）。
+
+        Args:
+            transcript: 简体转写全文。
+
+        Returns:
+            Tuple[Optional[Dict[str, Any]], str]: ({"summary", "points"}
+            或 None, 状态串 ok / skipped:* / failed:*）。
+        """
+        api_key = os.environ.get(self.llm_api_key_env, "").strip()
+        if not api_key:
+            return None, f"skipped:no-{self.llm_api_key_env}"
+        if not transcript:
+            return None, "skipped:empty-transcript"
+        if len(transcript) > self.llm_max_chars:
+            return None, "skipped:too-long"
+        prompt = (
+            "请阅读以下视频转写全文，只输出 JSON："
+            '{"summary": "...", "points": ["...", "..."]}。'
+            "summary 是 80-120 字的观点总结，一段话概括核心论点；"
+            "points 是 3-5 条分观点论述，每条一句不超过 40 字，按论述顺序。"
+            "不要输出 JSON 以外的任何内容。\n\n转写全文：\n" + transcript
+        )
+        try:
+            response = httpx.post(
+                f"{self.llm_base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": self.llm_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "response_format": {"type": "json_object"},
+                    "max_tokens": self.llm_max_tokens,
+                    "temperature": 0.3,
+                },
+                timeout=self.llm_timeout,
+            )
+            response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"]
+            data = json.loads(content)
+            summary_text = str(data.get("summary") or "").strip()
+            points = [
+                str(p).strip() for p in (data.get("points") or []) if str(p).strip()
+            ][:5]
+            if not summary_text:
+                return None, "failed:empty-summary"
+            return {"summary": summary_text, "points": points}, "ok"
+        except Exception as exc:  # noqa: BLE001 - LLM 失败降级，不阻塞管线
+            return None, f"failed:{type(exc).__name__}"
+
     @staticmethod
     def _build_markdown(
-        title: str, author: str, url: str, transcript_markdown: str
+        title: str,
+        author: str,
+        url: str,
+        transcript_markdown: str,
+        summary: Optional[Dict[str, Any]] = None,
     ) -> str:
-        """组装最终 Markdown：标题 + 来源行 + 转写全文（分段简体，无时间戳）。
+        """组装最终 Markdown：标题 + 来源行 +（可选）摘要两节 + 转写全文。
 
         Args:
             title: 笔记标题。
@@ -397,13 +475,25 @@ class LinkProcessor(BaseProcessor):
             url: 来源链接。
             transcript_markdown: 视频处理器的输出（逐句时间戳格式，
             在此转换，原标题行丢弃）。
+            summary: LLM 摘要 {"summary", "points"}；None 时不出现
+            摘要两节（降级形态）。
 
         Returns:
             str: 完整 Markdown。
         """
         source = f"> 来源：抖音 @{author} {url}" if author else f"> 来源：抖音 {url}"
+        sections = [f"# {_T2S.convert(title)}", "", source, ""]
+        if summary:
+            sections += ["## 观点总结", "", summary["summary"]]
+            if summary.get("points"):
+                sections += ["", "## 分观点论述", ""]
+                sections += [
+                    f"{i}. {point}" for i, point in enumerate(summary["points"], 1)
+                ]
+            sections.append("")
         body = _transcript_to_paragraphs(transcript_markdown)
-        return f"# {_T2S.convert(title)}\n\n{source}\n\n## 转写全文\n\n{body}\n"
+        sections += ["## 转写全文", "", body]
+        return "\n".join(sections) + "\n"
 
     @staticmethod
     def _cleanup(download_dir: str) -> None:
