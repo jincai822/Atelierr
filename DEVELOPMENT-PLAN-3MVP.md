@@ -628,7 +628,9 @@ frontmatter 与正文追加互不干扰。
   不移动既有笔记；实现为独立顶层模块（dispatch），memory 与 processors 互相
   不引入依赖。链接路由 ✅ 已实现（2026-08-31）：`dispatch/links.py` + 15 分钟
   定时器（`docker/systemd/atelierr-links.*`），产出笔记带"待确认"标签由人确认；
-  图片/录音路由仍在 backlog。待办路由 ✅ 已实现（2026-09-01）：
+  图片/录音路由 ✅ 已实现（2026-09-01）：`dispatch/media.py` 随同一定时器
+  （links→media→todos 顺序）扫描 attachments/，OCR/Whisper 入库（30s 防半文件
+  守卫，3 次熔断）。待办路由 ✅ 已实现（2026-09-01）：
   `dispatch/todos.py` 同一定时器顺带跑——显式 `- [ ]`/`#todo` 直转（不带
   待确认），其余内容 LLM 保守判定（产出带"待确认"），待办 = 普通笔记 +
   `待办` 标签，层级由 confidence 自动决定，不开新层
@@ -642,8 +644,8 @@ frontmatter 与正文追加互不干扰。
 
 ```
 文字速记   ✅ 已通（Obsidian 速记 → watcher 入库）
-截图       处理器就绪（OCR），待分发器自动路由；现可 process_cli 手动处理
-录音       处理器就绪（Whisper），同上
+截图       ✅ 自动处理（dispatch media 随 links 定时器扫描 attachments/）
+录音       ✅ 自动处理（同上，Whisper 转写）
 小红书     待链接抓取处理器（待真实样本）
 抖音       ✅ 自动处理（dispatch links 每 15 分钟扫描，产出"待确认"笔记；
            也可 process_cli link 手动单条处理）
@@ -661,3 +663,9 @@ frontmatter 与正文追加互不干扰。
   + systemd `EnvironmentFile=`），config 只记变量名；key 缺失/调用失败/
   转写超 6000 字自动降级为无摘要笔记，不阻塞管线。DeepSeek 后台建议专开
   独立 key 并设额度上限
+- **控制中台（Web 控制台）**: 系统状态看板 + 安全操作扳机（触发 sync/decay/
+  digest；purge 不进控制台，保持命令行人工确认）。2026-09-01 方案已探明：
+  推荐 Streamlit（纯 Python、单人看板性价比最高），refine 属多用户产品级
+  重方案不采用；数据层设计（console_data 只读采集器）已成形，随"暂用老
+  方案"裁决搁置删除，重启时按此重建。用户裁决：Web 端继续 Flatnotes +
+  Obsidian（2026-09-01）
