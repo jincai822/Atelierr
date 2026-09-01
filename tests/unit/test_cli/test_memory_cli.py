@@ -1,6 +1,9 @@
-"""memory_cli 单元测试：CliRunner 冒烟 create/search/stats + sync 对齐。"""
+"""memory_cli 单元测试：CliRunner 冒烟 create/search/stats/resurface + sync 对齐。"""
 
 from __future__ import annotations
+
+import os
+import time
 
 import frontmatter
 from click.testing import CliRunner
@@ -82,3 +85,29 @@ def test_cli_create_search_stats_smoke(tmp_path):
     result = runner.invoke(cli, ["stats"])
     assert result.exit_code == 0, result.output
     assert "总数: 1" in result.output
+
+
+def test_cli_resurface_empty(tmp_path):
+    """resurface：全新库 → 空队列提示。"""
+    cli, _, _ = _make_cli(tmp_path)
+
+    result = CliRunner().invoke(cli, ["resurface"])
+
+    assert result.exit_code == 0, result.output
+    assert "今日复习队列为空" in result.output
+
+
+def test_cli_resurface_lists_old_note(tmp_path):
+    """resurface：闲置 20 天的笔记入队并展示置信度与闲置天数。"""
+    cli, _, notes_dir = _make_cli(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["create", "old.md", "--content", "旧内容"])
+    assert result.exit_code == 0, result.output
+    old_ns = int((time.time() - 20 * 86400) * 1e9)
+    os.utime(notes_dir / "old.md", ns=(old_ns, old_ns))
+
+    result = runner.invoke(cli, ["resurface"])
+
+    assert result.exit_code == 0, result.output
+    assert "old.md" in result.output
+    assert "闲置20天" in result.output

@@ -6,6 +6,7 @@ Atelierr MVP 分阶段验收测试（架构 v1.2：平面存储 + sidecar 索引
     python tools/acceptance_test.py [--phase {1,2,3,all}]
 
 - phase 1: 记忆模块（init/create/read/search/move/list/access/decay/stats）
+          + 复习队列（resurface 窗口/冷却/摘要集成）
           + CLI（MemoryCLI + CliRunner）+ 工具函数冒烟
 - phase 2: 追加 Web 集成（scripts/web.integration.FlatnotesIntegration）
 - phase 3: 追加输入处理器（scripts/processors 导入 + fixtures 冒烟）
@@ -98,6 +99,45 @@ def run_memory_section() -> bool:
             assert set(stats.keys()) >= {"total", "layers", "pending_delete"}
 
             print("  ✅ 记忆模块验收通过")
+            return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ❌ 失败: {exc}")
+        return False
+
+
+def run_resurface_section() -> bool:
+    """复习队列验收：窗口筛选 / 推送冷却 / 摘要集成 / 绝不改笔记。"""
+    print("🧪 复习队列...")
+    try:
+        import os
+        import time
+
+        from scripts.dispatch.digest import DigestDispatcher
+        from scripts.memory.core import MemoryTree
+        from scripts.memory.resurface import ResurfaceManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tree = MemoryTree(str(root / "memory"), state_dir=str(root / "state"))
+            tree.create_note("fresh.md", "新笔记")
+            old = tree.create_note("old.md", "旧笔记")
+            old_ns = int((time.time() - 20 * 86400) * 1e9)
+            os.utime(old, ns=(old_ns, old_ns))
+
+            manager = ResurfaceManager(tree)
+            picked = manager.candidates()
+            assert [c["filename"] for c in picked] == ["old.md"], "窗口筛选失败"
+
+            before = old.read_bytes()
+            manager.mark_pushed([picked[0]["id"]])
+            assert old.read_bytes() == before, "笔记被改写"
+            assert (tree.state_dir / "resurface.json").exists(), "状态未落 state_dir"
+            assert not manager.candidates(), "冷却未生效"
+
+            report = DigestDispatcher(tree).run(today="2026-09-01")
+            assert "今日复习" in report["markdown"], "摘要缺复习节"
+
+            print("  ✅ 复习队列验收通过")
             return True
     except Exception as exc:  # noqa: BLE001
         print(f"  ❌ 失败: {exc}")
@@ -429,6 +469,7 @@ def main() -> int:
 
     results = {
         "记忆模块": run_memory_section(),
+        "复习队列": run_resurface_section(),
         "CLI": run_cli_section(args.phase),
         "工具函数": run_utils_section(),
     }

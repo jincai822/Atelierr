@@ -5,6 +5,7 @@ frontmatter 解析与分节为真实代码路径；无网络（摘要不联网�
 
 from __future__ import annotations
 
+import json
 import re
 
 import frontmatter
@@ -72,11 +73,45 @@ def test_digest_dry_run(memory_tree):
 
 
 def test_digest_empty_vault(memory_tree):
-    """空库：三节都显示"无"，正常建。"""
+    """空库：四节都显示"无"，正常建。"""
     report = DigestDispatcher(memory_tree).run(today="2026-09-01")
 
     assert report["created"]
-    assert report["markdown"].count("- 无") == 3
+    assert report["markdown"].count("- 无") == 4
+
+
+def test_digest_includes_resurface_section(memory_tree, make_note):
+    """遗忘临界区笔记进"今日复习"节；摘要创建成功后写入冷却状态。"""
+    make_note(memory_tree, "old.md", "旧笔记", idle_days=20)
+    make_note(memory_tree, "fresh.md", "新笔记")
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-01")
+
+    assert report["counts"]["resurface"] == 1
+    body = frontmatter.loads(
+        (memory_tree.notes_dir / report["created"]).read_text(encoding="utf-8")
+    ).content
+    assert "## 🔁 今日复习（1）" in body
+    assert "[[old]]" in body
+    state = json.loads(
+        (memory_tree.state_dir / "resurface.json").read_text(encoding="utf-8")
+    )
+    assert len(state) == 1
+
+    # 冷却生效：次日（若摘要不存在）同一条不再推送
+    from scripts.memory.resurface import ResurfaceManager
+
+    assert ResurfaceManager(memory_tree).candidates() == []
+
+
+def test_digest_dry_run_does_not_burn_cooldown(memory_tree, make_note):
+    """dry-run：复习节照常渲染，但不写冷却状态。"""
+    make_note(memory_tree, "old.md", "旧笔记", idle_days=20)
+
+    report = DigestDispatcher(memory_tree).run(dry_run=True, today="2026-09-01")
+
+    assert "今日复习（1）" in report["markdown"]
+    assert not (memory_tree.state_dir / "resurface.json").exists()
 
 
 def test_digest_note_skipped_by_todos_dispatch(memory_tree):

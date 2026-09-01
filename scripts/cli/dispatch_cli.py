@@ -31,6 +31,7 @@ from scripts.dispatch.media import MediaDispatcher
 from scripts.dispatch.notify import send_ntfy
 from scripts.dispatch.todos import TodoDispatcher
 from scripts.memory.core import MemoryTree
+from scripts.memory.resurface import ResurfaceManager
 
 DEFAULT_ROOT = "~/atelierr-data/memory"
 DEFAULT_STATE_DIR = "~/atelierr-data/state"
@@ -59,11 +60,11 @@ def _notify_media_failures(failures: List[Dict[str, Any]]) -> None:
 
 
 def _notify_digest(counts: Dict[str, int]) -> None:
-    """今日摘要创建成功后推送三节计数（未配置/失败静默）。"""
+    """今日摘要创建成功后推送四节计数（未配置/失败静默）。"""
     send_ntfy(
         "Atelierr 今日摘要",
         f"待确认 {counts['pending']}，待办 {counts['todos']}，"
-        f"昨日新入库 {counts['yesterday_new']}",
+        f"今日复习 {counts['resurface']}，昨日新入库 {counts['yesterday_new']}",
     )
 
 
@@ -169,13 +170,17 @@ class DispatchCLI:
         def digest_command(dry_run: bool) -> None:
             """创建今日摘要笔记（当天已存在则跳过）。"""
             tree = self._build_tree()
-            report = DigestDispatcher(tree).run(dry_run=dry_run)
+            dispatcher = DigestDispatcher(
+                tree, resurface=self._build_resurface(tree)
+            )
+            report = dispatcher.run(dry_run=dry_run)
             if report["skipped"]:
                 click.echo("今日摘要已存在，跳过")
                 return
             counts = report["counts"]
             click.echo(
                 f"待确认 {counts['pending']}，待办 {counts['todos']}，"
+                f"今日复习 {counts['resurface']}，"
                 f"昨日新入库 {counts['yesterday_new']}"
             )
             if dry_run:
@@ -196,6 +201,18 @@ class DispatchCLI:
             except (OSError, ValueError) as exc:
                 raise click.ClickException(f"配置加载失败: {resolved}: {exc}")
         return MemoryTree(DEFAULT_ROOT, state_dir=DEFAULT_STATE_DIR)
+
+    def _build_resurface(self, tree: MemoryTree) -> ResurfaceManager:
+        """按同一配置构造复习队列管理器（无配置用默认窗口）。"""
+        resolved = resolve_config_path(self.config_path)
+        if resolved:
+            try:
+                return ResurfaceManager.from_config(resolved, tree=tree)
+            except (OSError, ValueError) as exc:
+                raise click.ClickException(
+                    f"复习队列配置加载失败: {resolved}: {exc}"
+                )
+        return ResurfaceManager(tree)
 
     def main(self, args: Optional[List[str]] = None) -> int:
         """命令行入口；整体失败（ClickException）时返回 1。

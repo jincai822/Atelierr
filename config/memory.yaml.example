@@ -24,3 +24,10 @@ memory:
     ref_cap: 10           # 引用因子封顶（factor 最大 3.0）
     delete_threshold: 0.1 # 低于此值置 pending_delete 标记；
                           # 只有 memory_cli review→purge 才移入 trash/
+
+  # 复习队列「回响」（decay 的反面）：晨间摘要把快被遗忘的笔记送回面前
+  resurface:
+    window_low: 0.15      # 低于此值交给 decay 的待删除通道
+    window_high: 0.5      # 高于此值说明还"热"，不必推送（约闲置 < 2 周）
+    daily_count: 3        # 每天晨报最多推几条
+    cooldown_days: 3      # 同一笔记几天内不重复推送

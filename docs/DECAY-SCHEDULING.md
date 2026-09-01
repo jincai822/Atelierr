@@ -117,3 +117,34 @@ systemctl --user daemon-reload
 ```bash
 cat ~/atelierr-data/state/reports/decay-$(date +%F).md
 ```
+
+---
+
+## 复习调度「回响」（每日 07:53 随晨报）
+
+decay 的反面：confidence 跌入遗忘临界区（默认 [0.15, 0.5)，无引用笔记约
+闲置 2~4 周）的笔记，由晨间摘要（`atelierr-digest.timer`，见
+`docker/systemd/`）以"🔁 今日复习"一节送回你面前，并随 ntfy 晨报推送计数。
+
+- 点开看一眼 → `on_note_accessed` 重置时钟，笔记自然离开队列；
+- 确认无价值 → 不做任何事，任其继续衰减进 pending_delete，
+  走 `review → purge`；
+- 同一笔记 3 天内不重复推送（冷却时钟只写
+  `<state_dir>/resurface.json`，绝不触碰笔记文件）；
+- 机器生成的历史摘要（source=digest）不进复习队列。
+
+配置（`config/memory.yaml` 的 `memory.resurface` 节，缺省用默认值）：
+
+| 键 | 默认 | 含义 |
+|---|---|---|
+| `window_low` | 0.15 | 低于此值交给 decay 的待删除通道 |
+| `window_high` | 0.5 | 高于此值说明还"热"，不推 |
+| `daily_count` | 3 | 每天晨报最多推几条 |
+| `cooldown_days` | 3 | 同一笔记重复推送的最小间隔天数 |
+
+人工预览今日队列（只读）：
+
+```bash
+cd /srv/workspaces/Atelierr
+python -m scripts.cli.memory_cli resurface
+```

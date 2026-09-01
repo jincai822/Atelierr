@@ -1,12 +1,13 @@
 """Atelierr 记忆模块 CLI。
 
-子命令：create / show / search / stats / decay / review / purge / sync。
+子命令：create / show / search / stats / decay / review / purge / sync / resurface。
 配置解析顺序：--config 显式参数 > 环境变量 ATELIERR_CONFIG >
 ./config/memory.yaml（若存在）> 内置默认 ~/atelierr-data/{memory,state}。
 
 用法:
     python -m scripts.cli.memory_cli create note.md --content "正文"
     python -m scripts.cli.memory_cli decay --dry-run
+    python -m scripts.cli.memory_cli resurface
     python -m scripts.cli.memory_cli sync
 """
 
@@ -90,7 +91,7 @@ class MemoryCLI:
         )
         @click.pass_context
         def cli(ctx: click.Context, config_path: Optional[str]) -> None:
-            """Atelierr 记忆模块（create/show/search/stats/decay/review/purge/sync）。"""
+            """Atelierr 记忆模块（create/show/search/stats/decay/review/purge/sync/resurface）。"""
             # --config 选项 > 构造参数 self.config_path > 默认解析链
             resolved = resolve_config_path(config_path or self.config_path)
             ctx.obj = (
@@ -292,6 +293,37 @@ class MemoryCLI:
             click.echo(f"新登记: {len(result['registered'])}")
             click.echo(f"注销: {len(result['deregistered'])}")
             click.echo(f"跳过: {len(result['skipped'])}")
+
+        @cli.command()
+        @click.option(
+            "--limit",
+            default=None,
+            type=int,
+            help="最多列出几条（默认按配置 memory.resurface.daily_count）",
+        )
+        @click.pass_context
+        def resurface(ctx: click.Context, limit: Optional[int]) -> None:
+            """列出今日复习队列（遗忘临界区内的笔记；只读，绝不改笔记）。"""
+            from scripts.memory.resurface import ResurfaceManager
+
+            tree: MemoryTree = ctx.obj
+            resolved = resolve_config_path(self.config_path)
+            manager = (
+                ResurfaceManager.from_config(resolved, tree=tree)
+                if resolved
+                else ResurfaceManager(tree)
+            )
+            picked = manager.candidates(limit=limit)
+            if not picked:
+                click.echo("今日复习队列为空")
+                return
+            click.echo(f"今日复习（{len(picked)} 条，点开看一眼即重置时钟）:")
+            for item in picked:
+                click.echo(
+                    f"  - conf={item['confidence']:.3f} "
+                    f"闲置{item['idle_days']}天 "
+                    f"{item['filename']} — {item['title']}"
+                )
 
         return cli
 
