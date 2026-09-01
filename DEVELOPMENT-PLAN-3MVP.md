@@ -628,7 +628,10 @@ frontmatter 与正文追加互不干扰。
   不移动既有笔记；实现为独立顶层模块（dispatch），memory 与 processors 互相
   不引入依赖。链接路由 ✅ 已实现（2026-08-31）：`dispatch/links.py` + 15 分钟
   定时器（`docker/systemd/atelierr-links.*`），产出笔记带"待确认"标签由人确认；
-  图片/录音路由仍在 backlog
+  图片/录音路由仍在 backlog。待办路由 ✅ 已实现（2026-09-01）：
+  `dispatch/todos.py` 同一定时器顺带跑——显式 `- [ ]`/`#todo` 直转（不带
+  待确认），其余内容 LLM 保守判定（产出带"待确认"），待办 = 普通笔记 +
+  `待办` 标签，层级由 confidence 自动决定，不开新层
 - **链接抓取处理器**: 通用网页抓取；小红书（图文提取 + OCR）有反爬与登录墙，
   待真实样本验证（同微信的冻结纪律）。抖音路径 ✅ 已验证并实现（2026-08-31）：
   `processors/link.py`，人工触发 `process_cli link "<分享文本>"` → yt-dlp 借

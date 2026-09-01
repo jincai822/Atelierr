@@ -32,5 +32,7 @@ Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
 EnvironmentFile=-%h/.config/atelierr/env
 ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
 ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli links
+# 同轮顺带做待办分发（显式标记直转 + LLM 判定，见 scripts/dispatch/todos.py）
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli todos
 StandardOutput=append:%h/atelierr-data/state/logs/links.log
 StandardError=append:%h/atelierr-data/state/logs/links.log

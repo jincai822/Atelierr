@@ -3,12 +3,14 @@
 用法:
     python -m scripts.cli.dispatch_cli links            # 扫描并处理抖音链接
     python -m scripts.cli.dispatch_cli links --dry-run  # 只报告不处理
+    python -m scripts.cli.dispatch_cli todos            # 扫描并抽取待办事项
+    python -m scripts.cli.dispatch_cli todos --dry-run  # 只报告不建笔记
 
 配置解析顺序与 memory_cli 一致：--config > 环境变量 ATELIERR_CONFIG >
 ./config/memory.yaml > 内置默认 ~/atelierr-data/{memory,state}。
 
 定时部署见 docker/systemd/atelierr-links.service / .timer。
-单条链接的失败不影响退出码（记入 processed_links.json，下次自动重试，
+单条链接/单篇笔记的失败不影响退出码（记入状态文件，下次自动重试，
 3 次熔断）；仅当整体无法运行（如配置缺失）时 exit 1。
 """
 
@@ -21,6 +23,7 @@ import click
 
 from scripts.cli.memory_cli import _resolve_config_path
 from scripts.dispatch.links import LinkDispatcher
+from scripts.dispatch.todos import TodoDispatcher
 from scripts.memory.core import MemoryTree
 
 DEFAULT_ROOT = "~/atelierr-data/memory"
@@ -44,7 +47,7 @@ class DispatchCLI:
 
         @click.group()
         def cli() -> None:
-            """Atelierr 通道产物自动分发（links）。"""
+            """Atelierr 通道产物自动分发（links / todos）。"""
 
         @cli.command(name="links")
         @click.option(
@@ -66,6 +69,29 @@ class DispatchCLI:
                 click.echo(f"  已创建: {filename}（待确认）")
             for failure in report["failed"]:
                 click.echo(f"  失败: {failure['url']} — {failure['error']}")
+            if dry_run:
+                click.echo("（dry-run：未做处理）")
+
+        @cli.command(name="todos")
+        @click.option(
+            "--dry-run",
+            "dry_run",
+            is_flag=True,
+            help="只扫描报告，不建待办笔记、不写状态",
+        )
+        def todos_command(dry_run: bool) -> None:
+            """扫描笔记中的行动意图（- [ ] / #todo 直转，其余 LLM 判定）。"""
+            tree = self._build_tree()
+            report = TodoDispatcher(tree).run(dry_run=dry_run)
+            click.echo(
+                f"扫描 {report['scanned']} 篇笔记，"
+                f"行动项 {report['candidates']} 条，"
+                f"跳过 {report['skipped']} 篇"
+            )
+            for filename in report["created"]:
+                click.echo(f"  已创建待办: {filename}")
+            for failure in report["failed"]:
+                click.echo(f"  失败: {failure['note']} — {failure['error']}")
             if dry_run:
                 click.echo("（dry-run：未做处理）")
 
