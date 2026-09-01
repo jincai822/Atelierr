@@ -69,6 +69,9 @@ cache           = "cache"
 # long-term). Managed by scripts/memory/; served to Flatnotes via Docker mount.
 memory          = "memory"
 
+# Atelierr cognition module (approved belief/hypothesis/question knowledge surface).
+cognition       = "cognition"
+
 # Private operational extensions. This surface is excluded from semantic
 # retrieval because `_tools` is an operational directory at any depth.
 private_features = "_tools/features"

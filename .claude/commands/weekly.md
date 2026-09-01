@@ -20,14 +20,22 @@ When to invoke:
 
 ## Prerequisites
 
-1. Check if `profile/identity.md` exists. If not: "Run `/introspect` first to build your self-model." Stop.
-2. Check `Last built:` date. If >7 days stale, warn and continue.
+1. Check if `profile/identity.md` exists. If it is absent, record
+   "profile unavailable; using available context and the read-only bridge" and
+   continue. Do not run `/introspect` as part of this review: a first-run
+   review must remain useful without creating profile state, and
+   identity/direction claims remain `未提供`.
+2. If the profile exists, check its `Last built:` date. If >7 days stale, warn
+   and continue.
 
 ## Context Loading
 
 1. Reuse the current `weekly` context projection from `$hi`; for direct
    invocation, run `uv run scripts/atelier/context_bundle.py --intent weekly
    --byte-budget 20480 --format json`.
+   This existing projection supplies the bounded profile/session/reflection
+   continuity context. Memory and cognition are read separately below through
+   bounded file commands; they are not injected into this bundle.
 
 2. Use the projected reflection headings and closing sections as the first
    pass. Search the seven-day window semantically and read only the source
@@ -43,6 +51,24 @@ When to invoke:
 4. **Search for recent activity in the vault:**
    - Build the recency window: `Bash: find "$OV"/daily-notes "$OV"/reflections "$OV"/gtd -type f -name "*.md" -mtime -7 2>/dev/null | sort`
    - Grep the recency window for progress markers: `Bash: find "$OV"/daily-notes "$OV"/reflections "$OV"/gtd -type f -name "*.md" -mtime -7 -print0 | xargs -0 grep -HnE "progress|进展" 2>/dev/null`. Using `find -print0 | xargs -0` is safe when `find` returns nothing (xargs with no input simply exits); never use `grep $(find ...)`, which silently scans the current directory on empty input.
+
+5. **Search and cite the Atelierr bridge (read-only):**
+   - List recent flat-store notes with a bounded, missing-directory-safe command:
+     `find "$OV/memory" "$OV/cognition" -type f -name '*.md' -mtime -7 -print 2>/dev/null | sort | head -n 50`.
+   - If a term needs confirmation, search only those registered tiers with a
+     bounded read-only command: `rg -n -i --glob '*.md' --max-count 2
+     --max-filesize 64K '<term>' "$OV/memory" "$OV/cognition" 2>/dev/null |
+     head -n 40`. Read only selected files, capped to a small section (for
+     example `sed -n '1,80p' "$OV/memory/<filename>.md"`).
+   - Cite each claim with the exact vault-relative source path in backticks,
+     e.g. `memory/<filename>.md` or `cognition/<filename>.md`, and quote only
+     the smallest source passage needed. A missing cognition note is evidence
+     of no available cognition entry, not a reason to infer one.
+   - Never invoke an operation that updates frontmatter, state, or either
+     Atelierr store. CLI use is limited to read-only commands; specifically,
+     do not run lifecycle/write commands such as `decay`, `resurface`, or
+     `create`. API use must not call write-side operations such as
+     `on_note_accessed()` or `create_note()`. The bridge is read-only.
 
 ## The Weekly Review Framework
 

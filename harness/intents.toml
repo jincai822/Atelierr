@@ -250,6 +250,7 @@ parallel = false
 [intents.weekly]
 patterns = [
     "weekly review",
+    "weekly",
     "this week",
     "past 7 days",
     "past week",

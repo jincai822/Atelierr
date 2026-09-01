@@ -66,6 +66,14 @@ Claude Code command specs are the current workflow source. In Codex, adapt them:
   content recorded verbatim by the Scribe agent (`daily_note` operation); any
   other system write targeting a daily note is refused.
 
+### Atelierr read-only bridge
+
+Workflows may search, list, and read the registered `$OV/memory/` and
+`$OV/cognition/` tiers as source material. This bridge is frozen in the
+read-only direction: never write, move, delete, or edit notes/frontmatter
+there, and never invoke memory lifecycle or write-back operations. Cite the
+exact source path and keep excerpts to the minimum needed for the claim.
+
 For command discovery, type `$` in the Codex composer. Do not guess an
 unavailable command.
 
