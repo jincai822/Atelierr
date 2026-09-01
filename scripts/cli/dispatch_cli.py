@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import sys
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import click
 
@@ -33,10 +33,26 @@ DEFAULT_ROOT = "~/atelierr-data/memory"
 DEFAULT_STATE_DIR = "~/atelierr-data/state"
 
 
-def _notify_pending(count: int) -> None:
-    """有新待确认内容时发 ntfy 推送（未配置/失败静默，不影响主流程）。"""
-    if count > 0:
-        send_ntfy("Atelierr 待确认", f"{count} 条新内容待确认")
+def _notify_failures(failures: List[Dict[str, Any]]) -> None:
+    """有抓取失败时发 ntfy 推送（未配置/失败静默，不影响主流程）。
+
+    处理成功不推送（用户自己贴的链接，无需马后炮）；失败必须推，
+    否则用户无从知晓系统没抓到。
+    """
+    if failures:
+        send_ntfy(
+            "Atelierr 抓取失败",
+            f"{len(failures)} 条链接抓取失败，请检查后重新粘贴",
+        )
+
+
+def _notify_digest(counts: Dict[str, int]) -> None:
+    """今日摘要创建成功后推送三节计数（未配置/失败静默）。"""
+    send_ntfy(
+        "Atelierr 今日摘要",
+        f"待确认 {counts['pending']}，待办 {counts['todos']}，"
+        f"昨日新入库 {counts['yesterday_new']}",
+    )
 
 
 class DispatchCLI:
@@ -79,7 +95,7 @@ class DispatchCLI:
             for failure in report["failed"]:
                 click.echo(f"  失败: {failure['url']} — {failure['error']}")
             if not dry_run:
-                _notify_pending(len(report["created"]))
+                _notify_failures(report["failed"])
             if dry_run:
                 click.echo("（dry-run：未做处理）")
 
@@ -103,8 +119,6 @@ class DispatchCLI:
                 click.echo(f"  已创建待办: {filename}")
             for failure in report["failed"]:
                 click.echo(f"  失败: {failure['note']} — {failure['error']}")
-            if not dry_run:
-                _notify_pending(len(report["created_review"]))
             if dry_run:
                 click.echo("（dry-run：未做处理）")
 
@@ -132,6 +146,7 @@ class DispatchCLI:
                 click.echo("（dry-run：未建笔记）")
             else:
                 click.echo(f"  已创建: {report['created']}")
+                _notify_digest(report["counts"])
 
         return cli
 
