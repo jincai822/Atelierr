@@ -691,3 +691,5 @@ frontmatter 与正文追加互不干扰。
   📜 最新反思（`FROM "reflections"`）。裁决记录：reflections（时间戳报告）
   与 cognition（审批纪律）均不并入 wiki/ 目录——同 vault 已打通互链/图谱/
   查询，目录合并收益接近装饰、成本是动锁定规格；彻底档留待回路三启用再议
+- **架构图纪律**: 2026-09-02 起只维护计划版一份（`exports/atelierr-plan.html`，
+  IR 在 /tmp/archify-work/atelierr-target.architecture.json），不再出现状图
