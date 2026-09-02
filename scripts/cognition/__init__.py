@@ -1,9 +1,9 @@
 """Atelierr 认知模块（Phase 5，独立包）。
 
-COGNITION-SPEC v1.0：belief/question/hypothesis 生命周期与人工审批工作流；
+COGNITION-SPEC v1.1：belief/question/hypothesis 生命周期与人工审批工作流；
 certainty 确信度与 memory confidence 新鲜度字段级隔离。数据目录为
-$OV/cognition/（与 memory/ 平级），本包与 scripts/memory 解耦，仅复用其
-generate_id 工具函数。
+$OV/memory/wiki/cognition/（wiki 总库内的 cognition 房间，同库分间），
+本包与 scripts/memory 解耦，仅复用其 generate_id 工具函数。
 
 主要类 re-export：
 - CognitionManager / CognitionEntry（条目与生命周期）
