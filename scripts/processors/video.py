@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import whisper
+import torch
 
 from scripts.processors.base import BaseProcessor, ProcessResult
 
@@ -50,9 +51,14 @@ DEFAULT_INITIAL_PROMPT = "以下是普通话转写，使用规范书面标点，
 def _load_model(model_name: str) -> Any:
     """按名称加载 Whisper 模型（懒加载并缓存实例）。
 
-    设备由 whisper 自动选择：CUDA GPU 可用则用 GPU，否则回退 CPU
-    （2026-09-02 裁决：GPU 优先）。加载时打印一行设备日志，便于
-    定时器日志（state/logs/）里排查"为什么在用 CPU"。
+    设备：有 CUDA GPU 则上卡（fp32），否则 CPU（2026-09-02 裁决：
+    GPU 优先）。注意不能 ``load_model(device="cuda")``——whisper 会用
+    ``map_location`` 把 fp32 检查点直接放卡上再 ``.to()`` 复制，瞬时
+    占用 ~9GB，桌面占着显存时必 OOM（2026-09-02 实测）；先 CPU 加载
+    再 ``.to("cuda")`` 稳态 ~3GB。也不做 ``.half()``：whisper 20250625
+    版内部有 fp32 假设，fp16 会报 dtype mismatch（同日实测）。加载时
+    打印一行设备日志，便于在定时器日志（state/logs/）里排查
+    "为什么在用 CPU"。
 
     Args:
         model_name: whisper 模型名（tiny/base/small/medium/large）。
@@ -61,7 +67,9 @@ def _load_model(model_name: str) -> Any:
         Any: 加载后的模型对象（带 ``transcribe`` 方法）。
     """
     if model_name not in _model_cache:
-        model = whisper.load_model(model_name)
+        model = whisper.load_model(model_name, device="cpu")
+        if torch.cuda.is_available():
+            model = model.to("cuda")
         try:
             device = next(model.parameters()).device
         except Exception:  # noqa: BLE001 - 假模型/未知实现时日志降级

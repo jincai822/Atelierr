@@ -162,6 +162,7 @@ def test_process_success(fake_pipeline):
     assert "你好" in result.markdown
     assert "[00:00]" not in result.markdown
     assert result.metadata["platform"] == "douyin"
+    assert result.metadata["title"] == "信息标题"
     assert result.metadata["model"] == "large-v3"
     assert result.confidence == 0.9
     assert fake_pipeline and not fake_pipeline[0].exists()
@@ -499,6 +500,7 @@ def test_xhs_video_success(fake_xhs_page):
     assert result.success, result.error
     assert result.metadata["platform"] == "xhs"
     assert result.metadata["note_id"] == "abc123"
+    assert result.metadata["title"] == "健脑小课堂"
     assert result.metadata["engine"] == "xhs-page+whisper"
     assert result.metadata["url"] == _XHS_FINAL_URL
     assert fake_xhs_page["downloaded"][0][0] == "http://cdn.example/v.mp4"

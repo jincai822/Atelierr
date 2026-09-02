@@ -257,3 +257,53 @@ def test_auto_note_links_not_recycled(memory_tree):
     report2 = _dispatcher(memory_tree).run()
     assert report2["found"] == 1
     assert report2["created"] == ["xhs-vid123.md"]
+
+
+def test_title_based_filename(memory_tree):
+    """产出文件名用 平台-标题（人读）；文件系统非法字符净化为 -。"""
+    memory_tree.create_note("daily.md", f"链接 {DOUYIN_URL}", source="test")
+
+    class _TitledProcessor:
+        def process(self, url):
+            return ProcessResult(
+                success=True,
+                text="t",
+                markdown="# t",
+                confidence=0.9,
+                metadata={"video_id": "v1", "title": "健脑小课堂/运动篇"},
+            )
+
+    report = LinkDispatcher(memory_tree, processor_factory=_TitledProcessor).run()
+
+    assert report["created"] == ["抖音-健脑小课堂-运动篇.md"]
+    assert (memory_tree.notes_dir / "抖音-健脑小课堂-运动篇.md").exists()
+
+
+def test_title_fallback_to_id(memory_tree):
+    """无标题时回退 平台-内容id 命名（现状兼容）。"""
+    memory_tree.create_note("daily.md", f"链接 {DOUYIN_URL}", source="test")
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["created"] == ["douyin-vid123.md"]
+
+
+def test_title_collision_appends_doc_id(memory_tree):
+    """同名不同内容：追加内容 id 短码，不静默丢弃。"""
+    memory_tree.create_note("daily.md", f"链接 {DOUYIN_URL}", source="test")
+    memory_tree.create_note("抖音-撞名.md", "别人已占用的同名笔记", source="test")
+
+    class _CollisionProcessor:
+        def process(self, url):
+            return ProcessResult(
+                success=True,
+                text="t",
+                markdown="# t",
+                confidence=0.9,
+                metadata={"video_id": "v789", "title": "撞名"},
+            )
+
+    report = LinkDispatcher(memory_tree, processor_factory=_CollisionProcessor).run()
+
+    assert report["created"] == ["抖音-撞名-v789.md"]
+    assert (memory_tree.notes_dir / "抖音-撞名-v789.md").exists()

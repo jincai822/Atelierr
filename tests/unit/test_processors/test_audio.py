@@ -16,6 +16,12 @@ from scripts.processors.audio import AudioProcessor
 class _FakeWhisperModel:
     """假 whisper 模型：返回固定 dict 形态的转写结果。"""
 
+    def half(self):
+        return self
+
+    def to(self, *args, **kwargs):
+        return self
+
     def transcribe(self, audio_path, **kwargs):
         return {
             "text": "fake audio transcription",
@@ -30,7 +36,7 @@ def fake_whisper(monkeypatch):
     """替换 whisper.load_model 为假模型并清空共享模型缓存。"""
     video_module._model_cache.clear()
     monkeypatch.setattr(
-        audio_module.whisper, "load_model", lambda name: _FakeWhisperModel()
+        audio_module.whisper, "load_model", lambda name, **kw: _FakeWhisperModel()
     )
     return _FakeWhisperModel
 
@@ -74,7 +80,7 @@ def test_audio_initial_prompt_passed(monkeypatch, audio_wav):
 
     video_module._model_cache.clear()
     monkeypatch.setattr(
-        audio_module.whisper, "load_model", lambda name: _RecordingModel()
+        audio_module.whisper, "load_model", lambda name, **kw: _RecordingModel()
     )
 
     result = AudioProcessor().process(str(audio_wav))

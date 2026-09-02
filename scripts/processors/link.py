@@ -300,6 +300,7 @@ class LinkProcessor(BaseProcessor):
                 "model": self.model,
                 "url": url,
                 "video_id": str(info.get("id") or ""),
+                "title": title,
                 "segments": video_result.metadata.get("segments", 0),
                 "llm": {"status": llm_status, "model": self.llm_model},
             }
@@ -337,6 +338,7 @@ class LinkProcessor(BaseProcessor):
             "platform": "xhs",
             "url": final_url,
             "note_id": note_id,
+            "title": title,
         }
         if not video_url:
             # 图文笔记：正文即内容，无转写

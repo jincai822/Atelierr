@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -149,7 +150,8 @@ class LinkDispatcher:
             doc_id = str(
                 result.metadata.get("video_id") or result.metadata.get("note_id") or ""
             )
-            filename = self._note_filename(url, platform, doc_id)
+            title = str(result.metadata.get("title") or "")
+            filename = self._note_filename(url, platform, doc_id, title)
             try:
                 self.tree.create_note(
                     filename,
@@ -157,8 +159,23 @@ class LinkDispatcher:
                     source="link",
                     tags=[REVIEW_TAG, _PLATFORM_TAGS.get(platform, "链接")],
                 )
-            except (ValueError, FileExistsError):
-                # 同名笔记已存在（状态丢失后的重跑）：视为已处理
+            except FileExistsError:
+                # 同名不同源（标题撞车）：追加内容 id 短码再试一次；
+                # 仍冲突视为同内容重跑（状态丢失后的重放），不再建
+                if doc_id:
+                    filename = self._note_filename(
+                        url, platform, doc_id, f"{title}-{doc_id[:6]}" if title else ""
+                    )
+                try:
+                    self.tree.create_note(
+                        filename,
+                        result.markdown,
+                        source="link",
+                        tags=[REVIEW_TAG, _PLATFORM_TAGS.get(platform, "链接")],
+                    )
+                except (ValueError, FileExistsError):
+                    pass
+            except ValueError:
                 pass
             entry["status"] = "done"
             entry["note"] = filename
@@ -170,8 +187,20 @@ class LinkDispatcher:
         report["failed"].append({"url": url, "error": result.error})
 
     @staticmethod
-    def _note_filename(url: str, platform: str, doc_id: str) -> str:
-        """产出笔记文件名：<平台>-<内容id>.md；无 id 时用 URL 短哈希。"""
+    def _note_filename(url: str, platform: str, doc_id: str, title: str = "") -> str:
+        """产出笔记文件名：<平台中文>-<标题>.md（人读优先）。
+
+        标题做文件系统净化（半框非法字符转 -、压缩空白、截 60 字）；
+        无标题回退 <平台>-<内容id>.md；两者皆无回退 URL 短哈希。
+        """
+        label = _PLATFORM_TAGS.get(platform, platform)
+        if title:
+            safe = re.sub(r'[/\\:*?"<>|\x00-\x1f]', "-", title)
+            safe = re.sub(r"\s+", " ", safe).strip().strip(".")
+            if len(safe) > 60:
+                safe = safe[:60].rstrip()
+            if safe:
+                return f"{label}-{safe}.md"
         if doc_id:
             return f"{platform}-{doc_id}.md"
         digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:8]
