@@ -9,7 +9,8 @@
 纪律（与 DEVELOPMENT-PLAN-3MVP.md backlog 约定一致）：
 - 只新增笔记，绝不改写/移动/删除既有笔记（源笔记原样保留）；
 - 幂等：URL 处理状态记录于 ``<state_dir>/processed_links.json``，
-  同一链接只成功处理一次（含自动产出笔记里的来源行，不会自我循环）；
+  同一链接只成功处理一次；自动产出笔记（source: link）不回收，
+  其来源行链接（落地页 URL 与短链字符串不同）不会自我循环；
 - 失败最多重试 3 次，超限标记 failed 不再重试——避免 Whisper 模型
   每 15 分钟为空转反复加载；
 - pending_delete 笔记跳过；
@@ -26,6 +27,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+import frontmatter
+
 from scripts.memory.core import LAYERS, MemoryTree
 from scripts.memory.watcher import MemoryWatcher
 from scripts.processors.link import LinkProcessor, URL_RE, detect_platform
@@ -38,6 +41,11 @@ REVIEW_TAG = "待确认"
 
 #: 分发支持的平台 → 产出笔记的平台标签
 _PLATFORM_TAGS = {"douyin": "抖音", "xhs": "小红书"}
+
+#: 自动产出笔记的 source 值；这类笔记是"产出"不是"输入"，其中的来源行
+#: 链接不再回收（短链与落地页 URL 字符串不同，仅靠状态去重挡不住自我循环，
+#: 2026-09-02 小红书真实样本踩坑）
+_AUTO_NOTE_SOURCE = "link"
 
 
 class LinkDispatcher:
@@ -96,12 +104,19 @@ class LinkDispatcher:
         return report
 
     def _collect_urls(self, report: Dict[str, Any]) -> List[str]:
-        """扫描全部已登记笔记正文，收集去重后的支持平台链接（保持出现顺序）。"""
+        """扫描全部已登记笔记正文，收集去重后的支持平台链接（保持出现顺序）。
+
+        跳过 pending_delete 笔记与自动产出笔记（source: link）——后者是
+        产出而非输入，其来源行里的链接（落地页 URL 与原短链字符串不同）
+        不回收，杜绝自我循环。
+        """
         urls: List[str] = []
         seen = set()
         for layer in LAYERS:
             for note_path in self.tree.list_notes(layer):
                 if self.tree.is_pending_delete(note_path):
+                    continue
+                if self._is_auto_note(note_path):
                     continue
                 report["scanned"] += 1
                 body = self.tree.read_note(note_path)
@@ -111,6 +126,15 @@ class LinkDispatcher:
                         seen.add(url)
                         urls.append(url)
         return urls
+
+    @staticmethod
+    def _is_auto_note(note_path: Path) -> bool:
+        """是否自动产出笔记（frontmatter source 为 link）；损坏按人工笔记处理。"""
+        try:
+            post = frontmatter.loads(Path(note_path).read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - 损坏不误跳过
+            return False
+        return str(post.get("source") or "") == _AUTO_NOTE_SOURCE
 
     def _process_one(
         self, url: str, state: Dict[str, Any], report: Dict[str, Any]

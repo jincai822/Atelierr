@@ -233,3 +233,27 @@ def test_mixed_platform_links(memory_tree):
     report = LinkDispatcher(memory_tree, processor_factory=_MixedProcessor).run()
 
     assert sorted(report["created"]) == ["douyin-v9.md", "xhs-n9.md"]
+
+
+def test_auto_note_links_not_recycled(memory_tree):
+    """自动产出笔记（source: link）里的链接不回收——防自我循环回归。
+
+    复现 2026-09-02 真实事故：小红书短链处理后，产出笔记来源行里的
+    落地页 URL 与原短链字符串不同，被下一轮当成新链接重复下载转写。
+    """
+    memory_tree.create_note(
+        "xhs-abc123.md",
+        f"# 标题\n\n> 来源：小红书 @某人 {XHS_URL}\n\n正文",
+        source="link",
+        tags=["待确认", "小红书"],
+    )
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["found"] == 0
+    assert report["created"] == []
+    # 人工笔记里的同一链接仍会被收集（跳过只针对自动产出）
+    memory_tree.create_note("daily.md", f"再看一次 {XHS_URL}", source="test")
+    report2 = _dispatcher(memory_tree).run()
+    assert report2["found"] == 1
+    assert report2["created"] == ["xhs-vid123.md"]
