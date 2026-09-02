@@ -1,7 +1,7 @@
 # wiki 合库方案（同库分间）草案
 
-> 状态：**已审定，待实施**（2026-09-02 用户裁决：cognition 与 reflections 均并入
-> wiki/；KM 复审后由"平铺 + type 字段"修正为"同库分间"）。
+> 状态：**✅ 已实施完成（2026-09-02）**。pytest 316 全绿、验收 8/8、
+> smoke exit 0；COGNITION-SPEC 升 v1.1；迁移为纯移动零改写。
 > 前置阅读：`reflections/2026-09-02-decision-exit-convergence.md`（被本方案修订，
 > 实施时另写决策修订日志，原日志不改写）。
 
