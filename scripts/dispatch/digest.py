@@ -4,7 +4,8 @@
 - 待我确认：当前带"待确认"标签的笔记（摘除标签后次日自然消失）；
 - 待办进行中：当前带"待办"标签的笔记；
 - 今日复习：遗忘临界区内的笔记（ResurfaceManager，decay 的反面；
-  点开看一眼即重置时钟，确认无价值的留给 review→purge）；
+  检索式推送——只列标题，提示"先回忆再点开"，点开看一眼即重置时钟，
+  确认无价值的留给 review→purge，值得留存的提炼进 wiki/）；
 - 昨日新入库：frontmatter created 日期为昨天的笔记。
 
 纪律（与 dispatch 模块同源）：
@@ -143,7 +144,14 @@ class DigestDispatcher:
         sections = [f"# 今日摘要 {today}", ""]
         sections += [f"## ⏳ 待我确认（{len(pending)}）", "", *_lines(pending), ""]
         sections += [f"## ✅ 待办进行中（{len(todos)}）", "", *_lines(todos), ""]
-        sections += [f"## 🔁 今日复习（{len(review)}）", "", *_lines(review), ""]
+        sections += [f"## 🔁 今日复习（{len(review)}）", ""]
+        if review:
+            sections += [
+                "> 检索练习：看着标题先想「它讲了什么」，再点开核对；",
+                "> 想不起来的，值得就提炼进 wiki/，不值得就留给 review→purge。",
+                "",
+            ]
+        sections += [*_lines(review), ""]
         sections += [
             f"## 📥 昨日新入库（{len(yesterday_new)}）",
             "",

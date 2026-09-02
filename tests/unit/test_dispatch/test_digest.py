@@ -95,6 +95,7 @@ def test_digest_includes_resurface_section(memory_tree, make_note):
     ).content
     assert "## 🔁 今日复习（1）" in body
     assert "[[old]]" in body
+    assert "先想" in body  # 检索式提示：先回忆再点开
     state = json.loads(
         (memory_tree.state_dir / "resurface.json").read_text(encoding="utf-8")
     )
