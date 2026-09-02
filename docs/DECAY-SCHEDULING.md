@@ -1,8 +1,12 @@
 # 定时衰减（生产部署）
 
-每天 03:00 自动执行两步：先 **sync**（归一化登记手机/网页新来的裸笔记），
-再**记忆衰减**。衰减任务**只写 sidecar 索引与报告，
+每天 03:00 自动执行三步：先 **sync**（归一化登记手机/网页新来的裸笔记），
+再**记忆衰减**，最后对整个数据目录做一次 **git 快照**（版本历史，
+2026-09-02 起；排除 state/、sessions/、exports/，`.git` 不同步手机）。
+衰减任务**只写 sidecar 索引与报告，
 绝不改动笔记文件**；报告写入 `<state_dir>/reports/decay-YYYY-MM-DD.md`。
+快照失败不阻塞衰减（`|| true` 兜底）；回看历史：
+`git -C ~/atelierr-data log --oneline` / `git -C ~/atelierr-data diff <提交>`。
 
 - 推荐方案：**systemd timer**（用户级，Persistent 补跑）
 - 备选方案：**crontab**

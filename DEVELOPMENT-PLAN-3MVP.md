@@ -699,3 +699,7 @@ frontmatter 与正文追加互不干扰。
   查询，目录合并收益接近装饰、成本是动锁定规格；彻底档留待回路三启用再议
 - **架构图纪律**: 2026-09-02 起只维护计划版一份（`exports/atelierr-plan.html`，
   IR 在 /tmp/archify-work/atelierr-target.architecture.json），不再出现状图
+- **git 每日快照（借鉴 MemFS 的版本历史）**: ✅ 已上线（2026-09-02）：
+  数据目录 `~/atelierr-data` 已 git 化（排除 state/sessions/exports，`.git`
+  经 `.stignore` 不同步手机），挂在 decay 定时器 ExecStartPost 每日 03:00
+  自动 commit（`|| true` 兜底不阻塞衰减）。回看：`git -C ~/atelierr-data log`

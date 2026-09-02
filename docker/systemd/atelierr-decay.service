@@ -27,5 +27,9 @@ Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
 ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
 ExecStart=-/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.memory_cli sync
 ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.memory_cli decay
+# 每日 git 快照（版本历史）：数据目录整体 commit；无变更时 commit 失败由
+# || true 吞掉，快照失败绝不阻塞 decay。排除规则见 %h/atelierr-data/.gitignore
+#（state/ sessions/ exports/ 不入库）；.git 经 .stignore 排除不同步手机。
+ExecStartPost=/bin/bash -c '/usr/bin/git -C %h/atelierr-data add -A && /usr/bin/git -C %h/atelierr-data commit -q -m "snapshot $(date +\%%F)" || true'
 StandardOutput=append:%h/atelierr-data/state/logs/decay.log
 StandardError=append:%h/atelierr-data/state/logs/decay.log
