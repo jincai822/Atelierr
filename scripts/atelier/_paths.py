@@ -20,7 +20,7 @@ Usage:
     OV = vault_root()                # absolute Path; for filesystem operations
     WIP_DIR = tier("wip")            # registry-aware
     WIKI_DIRS = wiki_dirs()          # list[Path]: primary wiki + localized
-    print(fmt(some_file))            # '$OV/wiki/Foo.md' (token-efficient output)
+    print(fmt(some_file))            # '$OV/memory/wiki/Foo.md' (token-efficient output)
 """
 
 from __future__ import annotations

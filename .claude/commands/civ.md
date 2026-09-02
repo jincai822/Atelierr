@@ -36,7 +36,7 @@ Each stock from a **specific vault artifact** with a known date. If >30 days sta
 
 - **金**: Most recent explicit NW/asset figure from financial plan or reflection. Report value + source date.
 - **气**: Weight from plan file or daily notes. Sleep pattern (regular/drifting/unknown). Exercise frequency estimate.
-- **识**: Wiki count (`find "$OV/wiki" -name '*.md' ! -name 'index.md' | wc -l`; the wiki is bucketed into topic subdirectories, so a flat `ls` undercounts) + reading sessions in 30d. Note bulk-sync caveat.
+- **识**: Wiki count (`find "<paths.wiki>" -name '*.md' ! -name 'index.md' | wc -l`; the wiki is bucketed into topic subdirectories, so a flat `ls` undercounts) + reading sessions in 30d. Note bulk-sync caveat.
 - **缘**: Estimate: distinct social interactions in daily notes + reflections (30d). DL0 count from PRM.
 - **心**: Qualitative read from recent reflections: evidence of self-efficacy, resilience, hope, optimism. Report as `high/stable/fragile/unknown`.
 - **誉**: Role level + tenure + ownership areas + publications/reviews. From profile + career reflections.

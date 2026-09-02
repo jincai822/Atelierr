@@ -19,9 +19,9 @@
 # itself stores bare segment paths.
 
 [paths]
-# L4 — locally certified (wiki). Primary surface is always `wiki`; localized
-# variants live under `[paths.wiki_localized]` per user.
-wiki            = "wiki"
+# L4 — locally certified (wiki). The primary surface is registry-mapped to
+# `memory/wiki`; localized variants live under `[paths.wiki_localized]` per user.
+wiki            = "memory/wiki"
 
 # L3 — externally certified
 papers          = "papers"

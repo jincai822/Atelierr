@@ -15,9 +15,9 @@ Executable tooling for the Atelier knowledge layer. All scripts are stdlib-only 
 | `_paths.py` | Shared path-resolution helpers — fail-loud `$OV` resolution plus logical-tier → physical-segment mapping from `harness/paths.toml` (+ gitignored local layer) | ops | stdlib |
 | `paper_cache.py` | Extracts an L3 paper PDF into a reusable L1 `<paths.cache>/<slug>/paper.txt` with source freshness metadata; refuses repo-local scratch and non-vault sources | ops | stdlib, `pdftotext` CLI |
 | `dining_audit.py` | Validates the private dining registry, canonical 14-column meal-history schema, event-date order, local links, eligibility/live-state separation, health taxonomy, and per-person arithmetic; can render sourced recent trends | ops | stdlib |
-| `trust.py` | TrustRank for `$OV/wiki/` — Personalized PageRank with external anchor seeds, claim-level granularity, bi-temporal filtering, floor trust | B | stdlib |
+| `trust.py` | TrustRank for `<paths.wiki>/` — Personalized PageRank with external anchor seeds, claim-level granularity, bi-temporal filtering, floor trust | B | stdlib |
 | `snapshot_anchors.py` | Saves `url:` / `gist:` wiki anchors to Readwise and backfills the `readwise:` document ID so anchor evidence stays durable | B | `readwise` CLI |
-| `lint.py` | Structural + corpus-level lint over `$OV/wiki/` — parse errors, duplicate titles, slug drift, orphan entries, graph topology | D | stdlib |
+| `lint.py` | Structural + corpus-level lint over `<paths.wiki>/` — parse errors, duplicate titles, slug drift, orphan entries, graph topology | D | stdlib |
 | `harness_lint.py` | Claude Code and Codex portability lint — root instructions, model profiles, capability mappings, command and agent registries | ops | stdlib |
 | `harness_smoke.py` | Smoke test for native command skills, agent adapters, hooks, and lint JSON | ops | stdlib |
 | `atelier_runtime.py` | Native runtime selector: resolves the Codex or Claude default, persists a gitignored local preference, and launches registered workflows without generating adapter prompts | ops | stdlib |
@@ -91,11 +91,11 @@ remove content from existing Git history or remote forks.
 
 ## `trust.py` — quick reference
 
-Walks `$OV/wiki/*.md`, parses each wiki entry into claims and markers, builds a directed trust graph, runs Personalized PageRank, applies the claim-level floor trust of 0.1, and reports per-claim and per-note scores.
+Walks `<paths.wiki>/*.md`, parses each wiki entry into claims and markers, builds a directed trust graph, runs Personalized PageRank, applies the claim-level floor trust of 0.1, and reports per-claim and per-note scores.
 
 ```
-scripts/trust.py                                   # default table over $OV/wiki/
-scripts/trust.py --note "$OV"/wiki/<file>.md       # per-claim breakdown
+scripts/trust.py                                   # default table over <paths.wiki>/
+scripts/trust.py --note "$OV"/memory/wiki/<file>.md # per-claim breakdown
 scripts/trust.py --as-of 2025-06-01                # bi-temporal snapshot
 scripts/trust.py --json                            # structured output for /lint
 ```
@@ -108,6 +108,6 @@ scripts/trust.py --json                            # structured output for /lint
 
 **Structural integrity.** `trust.py` enforces items 1 to 10 of `protocols/wiki-schema.md` § Structural Integrity Check. A note that fails parse contributes no seeds and no propagation edges, but its claims still appear in the report with score 0 and a `fail` status. Corpus-level lint (items 11 to 15) is implemented by `scripts/lint.py`, surfaced through `/lint`.
 
-**Exit codes.** `0` on success. `2` on usage error (missing file, invalid date, note outside `$OV/wiki/`).
+**Exit codes.** `0` on success. `2` on usage error (missing file, invalid date, note outside `<paths.wiki>/`).
 
 See `protocols/wiki-schema.md` for the schema and the trust-model rationale.
