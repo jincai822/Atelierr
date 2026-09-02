@@ -683,9 +683,15 @@ frontmatter 与正文追加互不干扰。
   `$OV → /data` + `.stignore` 排除机器目录；应用代码零改动、文件级解耦不变。
   语义不合并：wiki（描述性知识）与 cognition（带确信度的判断，审批工作流）
   保持两类条目。彻底档（单库两类 + COGNITION-SPEC 升版）留待回路三启用时再议
-- **控制台唤起会话**: Obsidian Shell Commands 插件把 `$weekly` 等命令做成
-  控制台按钮（桌面端 `codex exec` 非交互包装；交互式教练流不适合，只覆盖
-  非交互命令）
+- ~~**控制台唤起会话**~~ ✅ 已完成（2026-09-02，实测点通）：桌面 Obsidian
+  打开 atelierr-data 库 + Shell Commands 插件（desktop-only，手机自动不加载）
+  + Advanced URI；控制台「车间口令」节五个场景各配 ▶ 链接，点开弹
+  gnome-terminal 跑 `atelier-session '<口令>'`（~/.local/bin，交互式 codex
+  会话）。踩过的坑：插件 data.json 必须 settings_version="0.23.0" 且
+  shell_commands 为数组（写错插件会自我禁用）；Obsidian 1.13 自带 CLI
+  （已注册 ~/.local/bin/obsidian），URI 处理器新建 obsidian-uri.desktop
+  指向 CLI shim（原 Obsidian.desktop 的 Exec 不带 %U 会丢 URI）。
+  手机端保持口令卡（物理边界：Codex 只跑桌面）
 - **控制台三节**: ✅ 已上线（2026-09-02）：🛠 车间口令（场景→Codex 命令
   对照，门面里的车间指示牌）、🧭 判断登记处（Dataview `FROM "cognition"`）、
   📜 最新反思（`FROM "reflections"`）。裁决记录：reflections（时间戳报告）
