@@ -36,5 +36,7 @@ services:
       STGUIADDRESS: "127.0.0.1:8384"
     volumes:
       - "./syncthing-config:/var/syncthing/config"
-      - "${MEMORY_DATA_DIR:-./data}:/data/memory"
+      # 同步整个 $OV 数据树（memory/cognition/reflections 都进手机）；
+      # 排除规则见 $OV/.stignore（state/、sessions/、exports/ 不同步）
+      - "${OV_DATA_DIR:-./data}:/data"
     restart: unless-stopped

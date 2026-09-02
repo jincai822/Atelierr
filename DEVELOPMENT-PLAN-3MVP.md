@@ -678,3 +678,11 @@ frontmatter 与正文追加互不干扰。
   （反复推送 ≥2 次且未提炼，经 frontmatter `undistilled` 桥接给控制台
   Dataview）+ wiki 体检。待办：paths.toml 登记 wiki 是 Codex 侧的活；
   回响响应率实验 0 判据到期后接实验 1（注意力精排）
+- **出口收敛（最小档）**: ✅ 已落地（2026-09-02）：Obsidian vault 根上移到
+  `$OV`（cognition/、reflections/ 进 Obsidian 视野），Syncthing 挂载改
+  `$OV → /data` + `.stignore` 排除机器目录；应用代码零改动、文件级解耦不变。
+  语义不合并：wiki（描述性知识）与 cognition（带确信度的判断，审批工作流）
+  保持两类条目。彻底档（单库两类 + COGNITION-SPEC 升版）留待回路三启用时再议
+- **控制台唤起会话**: Obsidian Shell Commands 插件把 `$weekly` 等命令做成
+  控制台按钮（桌面端 `codex exec` 非交互包装；交互式教练流不适合，只覆盖
+  非交互命令）

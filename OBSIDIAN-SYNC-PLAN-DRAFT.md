@@ -4,6 +4,12 @@
 > 手机侧华为 PTP-AN10（Syncthing-Fork v2.1.3.0 + Obsidian），局域网配对，
 > 验收 5/5 通过（见"验收"节实测记录）。
 > 起草日期：2026-08-30
+>
+> **2026-09-02 修订（最小档出口收敛）**：vault 根从 `memory/` 上移到 `$OV`，
+> cognition/、reflections/ 进入 Obsidian 视野；Syncthing 挂载改
+> `$OV → /data`（整棵数据树），`.stignore` 排除 `state/`、`sessions/`、
+> `exports/`；附件目录固定为 `memory/attachments`，QuickAdd 宏与日记
+> 插件加 `memory/` 路径前缀。应用代码零改动。
 
 ## 目标
 
@@ -16,9 +22,9 @@ Syncthing 同步，电脑端工作流不变。Flatnotes 保留，可双轨运行
 
 | 不变量 | 结论 | 依据 |
 |---|---|---|
-| 平面存储、无子目录 | ✅ 兼容，带一条使用纪律 | watcher 非递归扫描（`scripts/memory/watcher.py:79,150`）；Obsidian 内**不建子文件夹**，子目录笔记会静默脱离索引 |
+| 平面存储、无子目录 | ✅ 兼容，带一条使用纪律 | watcher 非递归扫描（`scripts/memory/watcher.py:79,150`）；`memory/` 根层保持平面，`wiki/`、`templates/`、`attachments/` 为有意子目录（沉淀层/模板/附件），memory 机制不扫子目录 |
 | 机器绝不移动/改写笔记 | ✅ 兼容 | 条款约束系统代码；Obsidian 写入由用户键盘触发，Syncthing 仅传播用户编辑。唯一机器写入仍是 watcher 一次性补 frontmatter（`watcher.py:111-119`，`os.utime` 还原 mtime）。副作用：补写后的 frontmatter 会回传手机，显示为"属性"块 |
-| 动态状态只进 sidecar | ✅ 兼容 | 只同步 `memory/` 目录，`state/` 不离开电脑；`.obsidian/`、`.stfolder` 为隐藏项，watcher 跳过（`watcher.py:80`，有测试兜底） |
+| 动态状态只进 sidecar | ✅ 兼容 | 同步整个 `$OV` 数据树；`state/`、`sessions/`、`exports/` 经 `.stignore` 排除不离开电脑；`.obsidian/`、`.stfolder` 为隐藏项，watcher 跳过（`watcher.py:80`，有测试兜底） |
 | confidence 无状态纯函数 | ✅ 不触碰 | Syncthing 默认同步 mtime，decay 的 modified 信号保持真实 |
 | 无自动删除 | ✅ 兼容 | 手机删笔记 = Flatnotes 删笔记的同一已测试路径（外部删除 → watcher 注销，`test_external_deletion_deregisters`）；`trash/` 在 `$OV/state/`（`memory_cli.py:266`），在同步范围之外，purge 副本安全 |
 
@@ -46,7 +52,8 @@ compose，镜像仓库可用、免 sudo）。镜像 `syncthing/syncthing:latest`
 
 1. `docker/docker-compose.yml` 新增 `syncthing` 服务：host 网络
    （局域网发现 + WireGuard 直连）、PUID/PGID=1000、挂载
-   `$OV/memory` → `/data/memory`、配置落 `docker/syncthing-config/`
+   `$OV` → `/data`（2026-09-02 起为整棵数据树，原为 `$OV/memory`）、
+   配置落 `docker/syncthing-config/`
 2. 容器 `atelierr-syncthing` 运行中；经 REST 注册文件夹
    `atelierr-memory`（Send & Receive、fsWatcher 开启、版本控制关闭），
    已扫描现有笔记（4 个文件 ≈16KB），`.stfolder` 标记已生成
@@ -73,8 +80,10 @@ compose，镜像仓库可用、免 sudo）。镜像 `syncthing/syncthing:latest`
    - 等首次同步完成（现有笔记全部落到手机）
 5. Obsidian 设置：
    - 「打开文件夹作为仓库」→ 选 `Documents/atelierr-memory`
-   - 不装任何社区插件（用不上）
-   - 新笔记位置保持默认（仓库根目录）；附件保持默认（不建子文件夹）
+     （2026-09-02 起库根 = 同步根；笔记在 `memory/` 子目录，
+     沉淀层在 `memory/wiki/`，判断登记处在 `cognition/`）
+   - 社区插件（Dataview/QuickAdd）与模板随 `.obsidian/` 自动同步
+   - 新笔记位置默认；附件已配置固定为 `memory/attachments`
 6. 远程同步：**✅ 2026-08-30 当晚打通**。实测机制为**公网 IPv6 端到端
    直连**（电信宽带与 5G 均分配公网 v6，经全球发现服务器交换地址），
    不依赖 WG 隧道；WG（`tcp://10.66.0.2`）作为备选通道。白天排查走过
@@ -102,7 +111,8 @@ compose，镜像仓库可用、免 sudo）。镜像 `syncthing/syncthing:latest`
 
 ## 使用纪律
 
-- Obsidian 内不建子文件夹；附件保持默认（根目录，非 md 被忽略）
+- `memory/` 根层保持平面（笔记只落在根层）；wiki 条目进 `wiki/`，
+  附件自动进 `attachments/`，模板放 `templates/`——这些是豁免子目录
 - sync-conflict 文件合并内容后删除
 - cognition（认知条目）操作只在电脑 CLI 进行（批准闸门，刻意设计）
 

@@ -2,7 +2,8 @@
 # 语义契约见 docs/ACCEPTANCE-CRITERIA.md 与 docs/prd/ARCHITECTURE-LOCKED-V1.md (v1.2)
 
 memory:
-  # 平面笔记目录（即 $OV/memory；Flatnotes 直接挂载此目录，无子目录）
+  # 平面笔记目录（即 $OV/memory；Flatnotes 直接挂载此目录；根层保持平面，
+  # wiki/、templates/、attachments/ 为有意子目录，memory 机制只扫根层 *.md）
   root: ~/atelierr-data/memory
 
   # 机器状态目录（sidecar 索引 index.json、衰减报告 reports/、回收站 trash/）
