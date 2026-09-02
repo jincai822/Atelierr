@@ -6,11 +6,12 @@
 组装带来源行的 Markdown → 清理临时文件。
 
 输出格式（v3）：标题 + 来源行 + ``## 观点总结`` / ``## 分观点论述``
-（LLM 生成）+ ``## 转写全文``——转写去除逐句时间戳、按句界合并为
-自然段、繁体转简体（OpenCC）。LLM 摘要经配置 ``processors.link.llm``
-启用：API key 从环境变量读取（默认 DEEPSEEK_API_KEY，不落盘到
-config）；key 缺失、转写超长（成本护栏）或调用失败时自动降级为
-无摘要笔记，绝不阻塞入库管线。
+（LLM 生成）+ ``## 转写全文``——转写优先经 LLM 整理（按语义分段、
+补全标点、逐字不改写）；LLM 不可用/失败时降级为机械分段（去除逐句
+时间戳、按句界合并自然段、繁体转简体 OpenCC）。LLM 摘要与整理经配置
+``processors.link.llm`` 启用：API key 从环境变量读取（默认
+DEEPSEEK_API_KEY，不落盘到 config）；key 缺失、转写超长（成本护栏）
+或调用失败时自动降级，绝不阻塞入库管线。
 
 反爬约束（2026-08-31/09-01 真实样本实测）：抖音详情 API 对匿名请求
 403，yt-dlp 借浏览器 cookie（``cookiesfrombrowser``）可拿到视频流
@@ -253,6 +254,7 @@ class LinkProcessor(BaseProcessor):
         self.llm_max_tokens = int(llm_cfg.get("max_tokens", 800))
         self.llm_timeout = float(llm_cfg.get("timeout", 60))
         self.llm_max_chars = int(llm_cfg.get("max_transcript_chars", 6000))
+        self.llm_format_max_tokens = int(llm_cfg.get("format_max_tokens", 8000))
 
     def process(self, input_path: Union[str, Path]) -> ProcessResult:
         """抓取链接指向的视频并转写。
@@ -287,12 +289,14 @@ class LinkProcessor(BaseProcessor):
             author = str(info.get("uploader") or "").strip() or share_author
             transcript_text = _T2S.convert(video_result.text).strip()
             summary, llm_status = self._summarize(transcript_text)
+            formatted, fmt_status = self._format_transcript(transcript_text)
             markdown = self._build_markdown(
                 title or (video_path.stem if video_path else "link"),
                 author,
                 url,
                 video_result.markdown,
                 summary,
+                body_override=formatted,
             )
             metadata = {
                 "engine": "yt-dlp+whisper",
@@ -302,7 +306,7 @@ class LinkProcessor(BaseProcessor):
                 "video_id": str(info.get("id") or ""),
                 "title": title,
                 "segments": video_result.metadata.get("segments", 0),
-                "llm": {"status": llm_status, "model": self.llm_model},
+                "llm": {"status": llm_status, "format": fmt_status, "model": self.llm_model},
             }
             return ProcessResult(
                 success=True,
@@ -373,6 +377,7 @@ class LinkProcessor(BaseProcessor):
             return self._fail(video_result.error or "视频转写失败")
         transcript_text = _T2S.convert(video_result.text).strip()
         summary, llm_status = self._summarize(transcript_text)
+        formatted, fmt_status = self._format_transcript(transcript_text)
         markdown = self._build_markdown(
             title or note_id or "小红书笔记",
             author,
@@ -380,11 +385,12 @@ class LinkProcessor(BaseProcessor):
             video_result.markdown,
             summary,
             source_label="小红书",
+            body_override=formatted,
         )
         metadata["engine"] = "xhs-page+whisper"
         metadata["model"] = self.model
         metadata["segments"] = video_result.metadata.get("segments", 0)
-        metadata["llm"] = {"status": llm_status, "model": self.llm_model}
+        metadata["llm"] = {"status": llm_status, "format": fmt_status, "model": self.llm_model}
         return ProcessResult(
             success=True,
             text=video_result.text,
@@ -594,6 +600,41 @@ class LinkProcessor(BaseProcessor):
             return False
         return proc.returncode == 0
 
+    def _llm_chat(
+        self, prompt: str, max_tokens: int, json_mode: bool = False
+    ) -> str:
+        """调 LLM chat 接口返回 content 文本；任何失败抛异常（调用方降级）。
+
+        Args:
+            prompt: 用户提示词。
+            max_tokens: 输出上限。
+            json_mode: True 时要求 JSON 对象输出（response_format）。
+
+        Returns:
+            str: 模型输出的 content 原文。
+        """
+        api_key = os.environ.get(self.llm_api_key_env, "").strip()
+        payload: Dict[str, Any] = {
+            "model": self.llm_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": 0.3,
+            # 摘要/整理是机械任务，禁用思考链：deepseek-v4-flash 默认开
+            # 推理，长输出任务会把 max_tokens 全耗在 reasoning 上导致
+            # content 为空（2026-09-02 实测 finish_reason=length）
+            "thinking": {"type": "disabled"},
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        response = httpx.post(
+            f"{self.llm_base_url.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json=payload,
+            timeout=self.llm_timeout,
+        )
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
+
     def _summarize(self, transcript: str) -> Tuple[Optional[Dict[str, Any]], str]:
         """调 LLM 生成观点总结；任何失败/跳过返回 (None, 状态)，绝不抛出。
 
@@ -607,8 +648,7 @@ class LinkProcessor(BaseProcessor):
             Tuple[Optional[Dict[str, Any]], str]: ({"summary", "points"}
             或 None, 状态串 ok / skipped:* / failed:*）。
         """
-        api_key = os.environ.get(self.llm_api_key_env, "").strip()
-        if not api_key:
+        if not os.environ.get(self.llm_api_key_env, "").strip():
             return None, f"skipped:no-{self.llm_api_key_env}"
         if not transcript:
             return None, "skipped:empty-transcript"
@@ -622,20 +662,7 @@ class LinkProcessor(BaseProcessor):
             "不要输出 JSON 以外的任何内容。\n\n转写全文：\n" + transcript
         )
         try:
-            response = httpx.post(
-                f"{self.llm_base_url.rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                json={
-                    "model": self.llm_model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "response_format": {"type": "json_object"},
-                    "max_tokens": self.llm_max_tokens,
-                    "temperature": 0.3,
-                },
-                timeout=self.llm_timeout,
-            )
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
+            content = self._llm_chat(prompt, self.llm_max_tokens, json_mode=True)
             data = json.loads(content)
             summary_text = str(data.get("summary") or "").strip()
             points = [
@@ -646,6 +673,43 @@ class LinkProcessor(BaseProcessor):
             return {"summary": summary_text, "points": points}, "ok"
         except Exception as exc:  # noqa: BLE001 - LLM 失败降级，不阻塞管线
             return None, f"failed:{type(exc).__name__}"
+
+    def _format_transcript(self, transcript: str) -> Tuple[Optional[str], str]:
+        """调 LLM 把口语转写整理为分段书面文本；失败/跳过返回 (None, 状态)。
+
+        跳过条件与 _summarize 相同。整理指令要求逐字保留内容、只分段补
+        标点；返回为空或不足原文一半（疑似被改写成摘要）视为失败，降级
+        为机械分段，绝不阻塞管线。
+
+        Args:
+            transcript: 简体转写全文。
+
+        Returns:
+            Tuple[Optional[str], str]: (整理后正文 或 None, 状态串）。
+        """
+        if not os.environ.get(self.llm_api_key_env, "").strip():
+            return None, f"skipped:no-{self.llm_api_key_env}"
+        if not transcript:
+            return None, "skipped:empty-transcript"
+        if len(transcript) > self.llm_max_chars:
+            return None, "skipped:too-long"
+        prompt = (
+            "以下是一段语音转写的原始文字（无标点、无分段）。"
+            "请整理为易读的书面文本："
+            "1) 按语义自然分段，每段聚焦一个意思，段间空行；"
+            "2) 补全规范标点（含书名号《》）；"
+            "3) 逐字保留原内容，不增删、不改写、不总结；"
+            "4) 只输出整理后的正文，不要任何解释。\n\n原始文字：\n" + transcript
+        )
+        try:
+            text = self._llm_chat(prompt, self.llm_format_max_tokens).strip()
+        except Exception as exc:  # noqa: BLE001 - LLM 失败降级，不阻塞管线
+            return None, f"failed:{type(exc).__name__}"
+        if not text:
+            return None, "failed:empty-format"
+        if len(text) < len(transcript) // 2:
+            return None, "failed:suspiciously-short"
+        return text, "ok"
 
     @staticmethod
     def _build_markdown(
@@ -658,6 +722,7 @@ class LinkProcessor(BaseProcessor):
         source_label: str = "抖音",
         body_label: str = "转写全文",
         raw_body: bool = False,
+        body_override: Optional[str] = None,
     ) -> str:
         """组装最终 Markdown：标题 + 来源行 +（可选）摘要两节 + 正文。
 
@@ -673,6 +738,8 @@ class LinkProcessor(BaseProcessor):
             body_label: 正文小节标题（转写全文/笔记正文）。
             raw_body: True 时 transcript_markdown 为纯文本正文，不做
             时间戳剥离与句界分段；正文为空时不产出正文小节。
+            body_override: LLM 整理后的正文（分段+补标点）；提供时
+            优先于 transcript_markdown 的机械分段结果。
 
         Returns:
             str: 完整 Markdown。
@@ -691,11 +758,12 @@ class LinkProcessor(BaseProcessor):
                     f"{i}. {point}" for i, point in enumerate(summary["points"], 1)
                 ]
             sections.append("")
-        body = (
-            _T2S.convert(transcript_markdown.strip())
-            if raw_body
-            else _transcript_to_paragraphs(transcript_markdown)
-        )
+        if body_override and body_override.strip():
+            body = body_override.strip()
+        elif raw_body:
+            body = _T2S.convert(transcript_markdown.strip())
+        else:
+            body = _transcript_to_paragraphs(transcript_markdown)
         if body:
             sections += [f"## {body_label}", "", body]
         return "\n".join(sections) + "\n"

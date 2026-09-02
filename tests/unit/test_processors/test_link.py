@@ -105,6 +105,23 @@ def _llm_payload(summary="核心观点总结。", points=("观点一。", "观�
     return {"choices": [{"message": {"content": content}}]}
 
 
+def _branching_llm(monkeypatch, format_text="", format_error=False):
+    """假 LLM：按提示词分流——含"整理为易读"是整理调用，否则是摘要调用。
+
+    format_text 缺省为空串（触发 empty-format 拒绝，正文走机械分段）。
+    """
+
+    def _post(url, headers=None, json=None, timeout=None):
+        prompt = json["messages"][0]["content"]
+        if "整理为易读" in prompt:
+            if format_error:
+                raise RuntimeError("format api down")
+            return _FakeLLMResponse({"choices": [{"message": {"content": format_text}}]})
+        return _FakeLLMResponse(_llm_payload())
+
+    monkeypatch.setattr(link_module.httpx, "post", _post)
+
+
 def test_extract_url_from_share_text():
     """从整段分享文本中提取短链（去掉后随内容）。"""
     assert _extract_url(SHARE_TEXT) == "https://v.douyin.com/eQOGBXJdlwQ/"
@@ -360,9 +377,7 @@ def test_cli_link_command(fake_pipeline):
 def test_llm_summary_inserted(fake_pipeline, monkeypatch):
     """LLM 正常返回：摘要两节插入来源行与转写全文之间，metadata 记 ok。"""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
-    monkeypatch.setattr(
-        link_module.httpx, "post", lambda *a, **k: _FakeLLMResponse(_llm_payload())
-    )
+    _branching_llm(monkeypatch)
 
     result = LinkProcessor().process(SHARE_TEXT)
 
@@ -371,6 +386,44 @@ def test_llm_summary_inserted(fake_pipeline, monkeypatch):
     assert "## 分观点论述\n\n1. 观点一。\n2. 观点二。" in result.markdown
     assert result.markdown.index("## 观点总结") < result.markdown.index("## 转写全文")
     assert result.metadata["llm"]["status"] == "ok"
+
+
+def test_llm_format_replaces_body(fake_pipeline, monkeypatch):
+    """LLM 整理成功：转写全文用整理后文本（带分段），metadata 记 format ok。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _branching_llm(monkeypatch, format_text="整理后第一段。\n\n整理后第二段。")
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "## 转写全文\n\n整理后第一段。\n\n整理后第二段。" in result.markdown
+    assert result.metadata["llm"]["format"] == "ok"
+    assert result.metadata["llm"]["status"] == "ok"
+
+
+def test_llm_format_failure_falls_back(fake_pipeline, monkeypatch):
+    """整理调用失败：摘要照常，正文降级为机械分段。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _branching_llm(monkeypatch, format_error=True)
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "## 观点总结" in result.markdown
+    assert "你好" in result.markdown  # 机械分段来自假转写
+    assert result.metadata["llm"]["format"].startswith("failed:")
+
+
+def test_llm_format_short_output_rejected(fake_pipeline, monkeypatch):
+    """整理结果不足原文一半（疑似被写成摘要）：拒绝，回退机械分段。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _branching_llm(monkeypatch, format_text="短")
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert result.metadata["llm"]["format"] == "failed:suspiciously-short"
+    assert "你好" in result.markdown
 
 
 def test_llm_failure_degrades(fake_pipeline, monkeypatch):
