@@ -1,0 +1,463 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Atelierr 双平面架构（合库版）",
+    "locale": "zh-CN",
+    "output": "atelierr-plan.html",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1280,
+      680
+    ],
+    "views": [
+      {
+        "id": "overview",
+        "label": "总览：双平面",
+        "focus": [
+          "you",
+          "atelier",
+          "capture",
+          "dispatch",
+          "processors",
+          "memory",
+          "loop",
+          "console",
+          "wiki"
+        ],
+        "note": "Atelier 会话工作台垂直贯穿各层（人在会话中驱动）；Atelierr 后台管线横向流动（定时器、无人值守）；交接只走 $OV 数据面。沉淀层合为一个 wiki/ 总库（同库分间已实施 09-02）"
+      },
+      {
+        "id": "note-journey",
+        "label": "一条笔记的命运",
+        "focus": [
+          "you",
+          "capture",
+          "dispatch",
+          "processors",
+          "memory",
+          "loop",
+          "wiki"
+        ],
+        "note": "入库 → 老化 → 检索式晨报（先想再点开）→ 三选一：提炼进 wiki / 点开重置时钟 / 遗忘进回收站；反复推送未提炼的进晨报「待提炼」节"
+      },
+      {
+        "id": "distill-flow",
+        "label": "沉淀流（两条路汇于总库）",
+        "focus": [
+          "you",
+          "memory",
+          "loop",
+          "console",
+          "wiki"
+        ],
+        "note": "晨报提醒 → QuickAdd「提炼为 Wiki」60 秒 → concept 落 wiki/ 根层（from 指回来源 + ≥1 条互链）；或会话里 /promote。WikiManager 只校验根层，绝不改写"
+      },
+      {
+        "id": "session-flow",
+        "label": "会话流（工作台如何触达）",
+        "focus": [
+          "atelier",
+          "memory",
+          "wiki",
+          "console"
+        ],
+        "note": "控制台「车间口令」节是入口牌；只读桥当前仅 /weekly；/promote 写根层、/decision 写 cognition 间（回路三冻结）、周报/决策日志写 reflections 间——全部落进 wiki/ 总库"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "you",
+      "type": "external",
+      "label": "你（手机/电脑）",
+      "sublabel": "Obsidian · 唯一的法官",
+      "pos": [
+        520,
+        30
+      ],
+      "size": [
+        240,
+        60
+      ]
+    },
+    {
+      "id": "atelier",
+      "type": "external",
+      "label": "Atelier 框架",
+      "sublabel": "20 命令 · 15 角色 · 23 思维框架",
+      "pos": [
+        40,
+        140
+      ],
+      "size": [
+        220,
+        440
+      ],
+      "tag": "会话工作台 · 贯穿各层"
+    },
+    {
+      "id": "capture",
+      "type": "cloud",
+      "label": "捕获入口",
+      "sublabel": "速记 · 链接 · 截图 · 录音",
+      "pos": [
+        520,
+        120
+      ],
+      "size": [
+        240,
+        60
+      ]
+    },
+    {
+      "id": "console",
+      "type": "frontend",
+      "label": "控制台.md",
+      "sublabel": "全 vault 渲染 · 车间口令 · 登记处",
+      "pos": [
+        940,
+        120
+      ],
+      "size": [
+        220,
+        64
+      ],
+      "tag": "总入口 · Obsidian 内"
+    },
+    {
+      "id": "dispatch",
+      "type": "backend",
+      "label": "dispatch 分发",
+      "sublabel": "每 15 分钟 · links · media · todos",
+      "pos": [
+        400,
+        220
+      ],
+      "size": [
+        220,
+        60
+      ]
+    },
+    {
+      "id": "processors",
+      "type": "backend",
+      "label": "processors 引擎",
+      "sublabel": "OCR · Whisper · LLM 摘要",
+      "pos": [
+        680,
+        220
+      ],
+      "size": [
+        220,
+        60
+      ]
+    },
+    {
+      "id": "memory",
+      "type": "database",
+      "label": "memory/ 工作记忆",
+      "sublabel": "平面 .md · 缓冲区 · 耗材（每日 git 快照）",
+      "pos": [
+        400,
+        320
+      ],
+      "size": [
+        220,
+        64
+      ],
+      "tag": "会遗忘"
+    },
+    {
+      "id": "loop",
+      "type": "backend",
+      "label": "decay + 回响",
+      "sublabel": "03:00 分层 · 07:53 检索式晨报 · 响应观测",
+      "pos": [
+        680,
+        320
+      ],
+      "size": [
+        220,
+        64
+      ],
+      "tag": "复习即提炼入口"
+    },
+    {
+      "id": "wiki",
+      "type": "database",
+      "label": "wiki/ 知识总库",
+      "sublabel": "concept 根层 · cognition/ 间 · reflections/ 间",
+      "pos": [
+        500,
+        480
+      ],
+      "size": [
+        300,
+        76
+      ],
+      "tag": "永久资产 · 同库分间"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "① 捕获层",
+      "wraps": [
+        "capture"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "② 加工层（全自动）",
+      "wraps": [
+        "dispatch",
+        "processors"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "③ 工作记忆层（缓冲区）",
+      "wraps": [
+        "memory",
+        "loop"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "④ 沉淀层（知识资产 · 一个总库）",
+      "wraps": [
+        "wiki"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "会话工作台（垂直贯穿各层）",
+      "wraps": [
+        "atelier"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "you-capture",
+      "from": "you",
+      "to": "capture",
+      "label": "扔进来",
+      "variant": "emphasis",
+      "labelAt": [
+        706,
+        105
+      ]
+    },
+    {
+      "id": "you-console",
+      "from": "you",
+      "to": "console",
+      "label": "查看",
+      "fromSide": "right",
+      "toSide": "top",
+      "via": [
+        [
+          1050,
+          60
+        ]
+      ],
+      "labelAt": [
+        905,
+        50
+      ]
+    },
+    {
+      "id": "capture-dispatch",
+      "from": "capture",
+      "to": "dispatch",
+      "label": "扫描",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          640,
+          192
+        ],
+        [
+          510,
+          192
+        ]
+      ],
+      "labelAt": [
+        575,
+        208
+      ]
+    },
+    {
+      "id": "dispatch-processors",
+      "from": "dispatch",
+      "to": "processors",
+      "label": "调用引擎"
+    },
+    {
+      "id": "processors-memory",
+      "from": "processors",
+      "to": "memory",
+      "label": "入库",
+      "variant": "emphasis",
+      "fromSide": "left",
+      "toSide": "right",
+      "via": [
+        [
+          640,
+          250
+        ],
+        [
+          640,
+          352
+        ]
+      ],
+      "labelAt": [
+        640,
+        230
+      ]
+    },
+    {
+      "id": "memory-loop",
+      "from": "memory",
+      "to": "loop",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [
+        [
+          510,
+          302
+        ],
+        [
+          790,
+          302
+        ]
+      ]
+    },
+    {
+      "id": "loop-you",
+      "from": "loop",
+      "to": "you",
+      "label": "检索式晨报：复习 + 待提炼 · 冷却 3 天",
+      "fromSide": "right",
+      "toSide": "right",
+      "via": [
+        [
+          1200,
+          352
+        ],
+        [
+          1200,
+          60
+        ]
+      ],
+      "labelAt": [
+        1190,
+        200
+      ]
+    },
+    {
+      "id": "loop-console",
+      "from": "loop",
+      "to": "console",
+      "label": "undistilled 桥",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          1050,
+          352
+        ]
+      ],
+      "labelAt": [
+        1062,
+        268
+      ]
+    },
+    {
+      "id": "memory-wiki",
+      "from": "memory",
+      "to": "wiki",
+      "label": "你提炼（QuickAdd 60 秒）· from 指回来源",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          510,
+          432
+        ],
+        [
+          650,
+          432
+        ]
+      ],
+      "labelAt": [
+        640,
+        420
+      ]
+    },
+    {
+      "id": "atelier-memory",
+      "from": "atelier",
+      "to": "memory",
+      "label": "只读桥（当前仅 /weekly）",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [
+        330,
+        340
+      ]
+    },
+    {
+      "id": "atelier-wiki",
+      "from": "atelier",
+      "to": "wiki",
+      "label": "/promote · /decision · 周报（分房间写入）",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [
+        380,
+        502
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "认知规律对照",
+      "items": [
+        "间隔重复+检索练习 → 检索式晨报（先想再点）",
+        "精细加工 → QuickAdd 60 秒提炼进 wiki",
+        "结构化沉淀 → wiki/ 总库（同库分间）",
+        "元认知校准 → $weekly + /decision"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "总库铁律（同库分间）",
+      "items": [
+        "一个总库 wiki/：concept 根层 + 两房间",
+        "纪律按房间：只增不改 · 审批写 · 只新建",
+        "无 decay 无 purge：进来就是永久资产",
+        "进入两条路：晨报提醒后人提炼 / /promote"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "双平面分工",
+      "items": [
+        "工作台=Atelier：人在场，20 命令贯穿各层",
+        "管线=Atelierr 应用：定时器驱动，无人值守",
+        "交接只走 $OV 数据面，代码零互调",
+        "合库已实施（09-02）· Codex 登记对齐待办",
+        "每日 03:00 git 快照（全库版本历史）"
+      ]
+    }
+  ]
+}
