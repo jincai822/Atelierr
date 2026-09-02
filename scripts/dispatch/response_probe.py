@@ -156,6 +156,30 @@ class ResponseProbe:
             "pending": len(state["pending"]),
         }
 
+    def push_counts(self) -> Dict[str, Dict[str, Any]]:
+        """每条笔记的累计推送次数（观察中 + 已结案）与最新文件名。
+
+        供晨间摘要计算"反复推送但从未提炼"。注意 resolved 有 FIFO
+        上限（MAX_RESOLVED），超出后次数是真实值的下限。
+
+        Returns:
+            Dict: {note_id: {"count": 推送次数, "filename": 最新文件名}}。
+        """
+        state = self._load_state()
+        counts: Dict[str, Dict[str, Any]] = {}
+
+        def _bump(note_id: str, filename: Optional[str]) -> None:
+            slot = counts.setdefault(note_id, {"count": 0, "filename": filename})
+            slot["count"] += 1
+            if filename:
+                slot["filename"] = filename
+
+        for note_id, obs in state["pending"].items():
+            _bump(note_id, obs.get("filename"))
+        for item in state["resolved"]:
+            _bump(str(item["note_id"]), item.get("filename"))
+        return counts
+
     @staticmethod
     def _resolve(
         state: Dict[str, Any],

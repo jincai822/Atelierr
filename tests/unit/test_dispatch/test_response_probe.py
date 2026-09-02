@@ -165,3 +165,22 @@ def test_probe_never_touches_notes(memory_tree, make_note):
 
     assert path.read_bytes() == before_bytes
     assert path.stat().st_mtime_ns == before_mtime
+
+
+def test_push_counts_accumulate_pending_and_resolved(memory_tree, make_note):
+    """push_counts 累计观察中 + 已结案，并保留最新文件名。"""
+    path = make_note(memory_tree, "due.md", "内容", idle_days=20)
+    note_id = memory_tree._find_entry_id(path)
+    probe = ResponseProbe(memory_tree)
+    now0 = datetime.now().astimezone()
+
+    assert probe.push_counts() == {}
+
+    probe.register([_item(note_id, "due.md")], now=now0)
+    probe.check_pending(now=now0 + timedelta(hours=49))  # 结案 1 次
+    probe.register([_item(note_id, "due.md")], now=now0 + timedelta(days=3))
+
+    counts = probe.push_counts()
+
+    assert counts[note_id]["count"] == 2  # 1 次结案 + 1 次观察中
+    assert counts[note_id]["filename"] == "due.md"

@@ -671,3 +671,10 @@ frontmatter 与正文追加互不干扰。
   手机端随 Syncthing 免费同步。约束：Dataview 只读 frontmatter，
   sidecar 指标（confidence/响应率）须经"每日新建状态笔记"搭桥。
   Streamlit/refine 路线废弃。
+- **沉淀层 wiki（五层规划第④层）**: ✅ v0 已落地（2026-09-02）：
+  `scripts/wiki/`（WikiManager 只读盘点 + validate 纪律校验，绝不改写），
+  库根子目录 `wiki/`（memory 机制只扫根层，互不干扰）；入口 =
+  Obsidian QuickAdd「提炼为 Wiki」60 秒流程；晨报新增"待提炼"节
+  （反复推送 ≥2 次且未提炼，经 frontmatter `undistilled` 桥接给控制台
+  Dataview）+ wiki 体检。待办：paths.toml 登记 wiki 是 Codex 侧的活；
+  回响响应率实验 0 判据到期后接实验 1（注意力精排）

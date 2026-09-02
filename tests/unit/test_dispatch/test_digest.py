@@ -75,11 +75,11 @@ def test_digest_dry_run(memory_tree):
 
 
 def test_digest_empty_vault(memory_tree):
-    """空库：四节都显示"无"，正常建。"""
+    """空库：五节都显示"无"，正常建。"""
     report = DigestDispatcher(memory_tree).run(today="2026-09-01")
 
     assert report["created"]
-    assert report["markdown"].count("- 无") == 4
+    assert report["markdown"].count("- 无") == 5
 
 
 def test_digest_includes_resurface_section(memory_tree, make_note):
@@ -154,3 +154,78 @@ def test_digest_note_skipped_by_todos_dispatch(memory_tree):
 
     assert report["created"] == []
     assert report["skipped"] == 1
+
+
+def _seed_probe(tree, pushes: dict) -> None:
+    """直接铺 response_probe.json：{文件名: 已推送次数}（均已结案）。"""
+    state = {"pending": {}, "resolved": []}
+    for filename, count in pushes.items():
+        for _ in range(count):
+            state["resolved"].append(
+                {
+                    "note_id": filename,
+                    "filename": filename,
+                    "pushed_at": "2026-08-20T07:00:00+08:00",
+                    "resolved_at": "2026-08-21T07:00:00+08:00",
+                    "responded": False,
+                    "reason": "expired",
+                    "delay_hours": None,
+                }
+            )
+    tree.state_dir.mkdir(parents=True, exist_ok=True)
+    (tree.state_dir / "response_probe.json").write_text(
+        json.dumps(state, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def test_digest_undistilled_section_and_frontmatter_bridge(memory_tree, make_note):
+    """推送 ≥2 次且未提炼的笔记进"待提炼"节，并写进 frontmatter 桥。"""
+    make_note(memory_tree, "old.md", "反复被推送", idle_days=30)
+    make_note(memory_tree, "once.md", "只推过一次", idle_days=30)
+    _seed_probe(memory_tree, {"old.md": 2, "once.md": 1})
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-01")
+
+    assert report["counts"]["undistilled"] == 1
+    assert "## 🧠 待提炼（1）" in report["markdown"]
+    section = report["markdown"].split("## 🧠 待提炼")[1].split("## 📥")[0]
+    assert "[[old]]" in section
+    assert "[[once]]" not in section  # 只推过 1 次，未到反复阈值
+    post = frontmatter.loads(
+        (memory_tree.notes_dir / report["created"]).read_text(encoding="utf-8")
+    )
+    assert post["undistilled"] == ["[[old]]"]  # 控制台 Dataview 桥
+
+
+def test_digest_undistilled_excludes_distilled_and_gone(memory_tree, make_note):
+    """已提炼（wiki 条目 from 引用）与已删除（purge）的笔记不进待提炼。"""
+    make_note(memory_tree, "done.md", "已提炼", idle_days=30)
+    _seed_probe(memory_tree, {"done.md": 3, "purged.md": 5})  # purged 无文件
+    wiki_dir = memory_tree.notes_dir / "wiki"
+    wiki_dir.mkdir(parents=True)
+    (wiki_dir / "条目.md").write_text(
+        "---\ncreated: '2026-09-01T09:00:00+08:00'\nsource: distilled\n"
+        'from: "[[done]]"\n---\n\n正文\n',
+        encoding="utf-8",
+    )
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-01")
+
+    assert report["counts"]["undistilled"] == 0
+    assert "## 🧠 待提炼（0）" in report["markdown"]
+
+
+def test_digest_surfaces_wiki_validate_issues(memory_tree, make_note):
+    """wiki 体检：缺互链的条目在待提炼节末尾列出示。"""
+    wiki_dir = memory_tree.notes_dir / "wiki"
+    wiki_dir.mkdir(parents=True)
+    (wiki_dir / "孤岛.md").write_text(
+        "---\ncreated: '2026-09-01T09:00:00+08:00'\nsource: distilled\n"
+        'from: "[[x]]"\n---\n\n没有互链的正文\n',
+        encoding="utf-8",
+    )
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-01")
+
+    assert "wiki 体检（1 条待修）" in report["markdown"]
+    assert "[[孤岛]]" in report["markdown"]

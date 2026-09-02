@@ -31,3 +31,7 @@ memory:
     window_high: 0.5      # 高于此值说明还"热"，不必推送（约闲置 < 2 周）
     daily_count: 3        # 每天晨报最多推几条
     cooldown_days: 3      # 同一笔记几天内不重复推送
+
+  # 沉淀层 wiki：库根下的子目录名（人工提炼进入；机器只增不改，
+  # 无 decay/purge；memory 机制只扫根层 *.md，与子目录互不干扰）
+  wiki_dirname: wiki
