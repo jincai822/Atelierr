@@ -1,8 +1,8 @@
-"""链接抓取处理器（抖音：分享文本 → 视频下载 → Whisper 转写）。
+"""链接抓取处理器（抖音/小红书：分享文本 → 视频下载 → Whisper 转写）。
 
 与其他处理器不同，``process()`` 的 ``input_path`` 形参承载的是**一段
 分享文本或 URL**，不是文件路径。流程：提取 URL → 识别平台 →
-yt-dlp 下载视频到临时目录 → 复用 :class:`VideoProcessor` 转写 →
+下载视频到临时目录 → 复用 :class:`VideoProcessor` 转写 →
 组装带来源行的 Markdown → 清理临时文件。
 
 输出格式（v3）：标题 + 来源行 + ``## 观点总结`` / ``## 分观点论述``
@@ -19,11 +19,18 @@ config）；key 缺失、转写超长（成本护栏）或调用失败时自动�
 无需人工打开浏览器。标题/作者优先取 yt-dlp 元数据，缺失时回退解析
 分享文本（``【作者的作品】标题 https://...`` 结构）。
 
+小红书（2026-09-02 真实样本实测）：短链 xhslink.cn 302 跳转到
+xiaohongshu.com 详情页（须手机 UA）；页面内嵌 ``__INITIAL_STATE__``
+JSON（``noteData.data.noteData``）给出标题/正文/作者/视频流地址，
+yt-dlp 的 XiaoHongShu 提取器已失效（No video formats found），故
+直接解析页面并用 httpx 带 Referer 下载视频流；图文笔记（无视频流）
+直接以正文入库，不走 Whisper。
+
 触发方式：dispatch 定时器自动分发（scripts/dispatch/links.py）或
 人工执行 CLI（process_cli link 子命令）。
 
-单元测试 monkeypatch ``yt_dlp.YoutubeDL`` 与 ``VideoProcessor``，
-无真实网络与模型下载。
+单元测试 monkeypatch ``yt_dlp.YoutubeDL``、``VideoProcessor`` 与
+httpx 页面获取，无真实网络与模型下载。
 """
 
 from __future__ import annotations
@@ -49,6 +56,24 @@ _DOUYIN_HOSTS: Tuple[str, ...] = (
     "v.douyin.com",
     "www.douyin.com",
     "www.iesdouyin.com",
+)
+
+#: 小红书域名（短链 / 详情页）
+_XHS_HOSTS: Tuple[str, ...] = (
+    "xhslink.cn",
+    "www.xiaohongshu.com",
+    "xiaohongshu.com",
+)
+
+#: 小红书页面抓取用的手机 UA（桌面 UA 会被短链 404 / 详情页风控）
+_XHS_UA = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+)
+
+#: 详情页内嵌数据块 ``window.__INITIAL_STATE__ = {...}``
+_XHS_STATE_RE = re.compile(
+    r"window\.__INITIAL_STATE__\s*=\s*(\{.*?\})\s*</script>", re.S
 )
 
 #: 分享文本中作者的结构（"看看【武世红的作品】..."）
@@ -153,11 +178,14 @@ def detect_platform(url: str) -> Optional[str]:
         url: 完整 URL。
 
     Returns:
-        Optional[str]: "douyin" 或 None（不支持的平台）。
+        Optional[str]: "douyin" / "xhs" 或 None（不支持的平台）。
     """
     for host in _DOUYIN_HOSTS:
         if host in url:
             return "douyin"
+    for host in _XHS_HOSTS:
+        if host in url:
+            return "xhs"
     return None
 
 
@@ -190,7 +218,7 @@ def _parse_share_text(text: str) -> Tuple[str, str]:
 
 
 class LinkProcessor(BaseProcessor):
-    """链接抓取处理器（当前支持抖音分享文本/链接）。
+    """链接抓取处理器（支持抖音/小红书的分享文本或链接）。
 
     Examples:
         >>> result = LinkProcessor().process("看看【张三的作品】... https://v.douyin.com/abc/")
@@ -241,12 +269,14 @@ class LinkProcessor(BaseProcessor):
         if url is None:
             return self._fail("未找到链接：请粘贴分享文本或 URL")
         platform = detect_platform(url)
-        if platform != "douyin":
-            return self._fail(f"暂不支持的平台（已支持: 抖音）: {url}")
+        if platform not in ("douyin", "xhs"):
+            return self._fail(f"暂不支持的平台（已支持: 抖音、小红书）: {url}")
 
         share_title, share_author = _parse_share_text(text)
         download_dir = tempfile.mkdtemp(prefix="atelierr-link-")
         try:
+            if platform == "xhs":
+                return self._process_xhs(url, download_dir)
             video_path, info, error = self._download(url, download_dir)
             if error is not None:
                 return self._fail(error)
@@ -282,6 +312,162 @@ class LinkProcessor(BaseProcessor):
             )
         finally:
             self._cleanup(download_dir)
+
+    def _process_xhs(self, url: str, download_dir: str) -> ProcessResult:
+        """处理小红书链接：解析详情页内嵌数据，视频走 Whisper，图文直接入库。
+
+        Args:
+            url: 小红书短链或详情页 URL。
+            download_dir: 视频下载临时目录（由 process() 负责清理）。
+
+        Returns:
+            ProcessResult: 含带来源行的 markdown；页面获取/解析失败、
+            视频下载/转写失败、笔记无有效内容时 success=False。
+        """
+        note, final_url, error = self._fetch_xhs_note(url)
+        if error is not None:
+            return self._fail(error)
+        assert note is not None  # error 为 None 时 note 必存在
+        title = str(note.get("title") or "").strip()
+        author = str((note.get("user") or {}).get("nickName") or "").strip()
+        desc = _T2S.convert(str(note.get("desc") or "").strip())
+        note_id = str(note.get("noteId") or "").strip()
+        video_url = self._xhs_video_url(note)
+        metadata: Dict[str, Any] = {
+            "platform": "xhs",
+            "url": final_url,
+            "note_id": note_id,
+        }
+        if not video_url:
+            # 图文笔记：正文即内容，无转写
+            if not title and not desc:
+                return self._fail("小红书笔记无有效内容（无标题无正文）")
+            summary, llm_status = self._summarize(desc)
+            markdown = self._build_markdown(
+                title or note_id or "小红书笔记",
+                author,
+                final_url,
+                desc,
+                summary,
+                source_label="小红书",
+                body_label="笔记正文",
+                raw_body=True,
+            )
+            metadata["engine"] = "xhs-page"
+            metadata["llm"] = {"status": llm_status, "model": self.llm_model}
+            return ProcessResult(
+                success=True,
+                text=desc,
+                markdown=markdown,
+                confidence=1.0,
+                metadata=metadata,
+            )
+        video_path = Path(download_dir) / f"{note_id or 'xhs'}.mp4"
+        dl_error = self._download_xhs_video(video_url, video_path)
+        if dl_error is not None:
+            return self._fail(dl_error)
+        video_result = VideoProcessor({"model": self.model}).process(video_path)
+        if not video_result.success:
+            return self._fail(video_result.error or "视频转写失败")
+        transcript_text = _T2S.convert(video_result.text).strip()
+        summary, llm_status = self._summarize(transcript_text)
+        markdown = self._build_markdown(
+            title or note_id or "小红书笔记",
+            author,
+            final_url,
+            video_result.markdown,
+            summary,
+            source_label="小红书",
+        )
+        metadata["engine"] = "xhs-page+whisper"
+        metadata["model"] = self.model
+        metadata["segments"] = video_result.metadata.get("segments", 0)
+        metadata["llm"] = {"status": llm_status, "model": self.llm_model}
+        return ProcessResult(
+            success=True,
+            text=video_result.text,
+            markdown=markdown,
+            confidence=video_result.confidence,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _fetch_xhs_note(
+        url: str,
+    ) -> Tuple[Optional[Dict[str, Any]], str, Optional[str]]:
+        """抓取小红书详情页并解析内嵌笔记数据。
+
+        短链经 302 跳到详情页（httpx 自动跟随）；数据在页面内嵌的
+        ``window.__INITIAL_STATE__`` JSON 里（``undefined`` 字面量替换为
+        null 后可解析），笔记本体在 ``noteData.data.noteData``。
+
+        Args:
+            url: 小红书短链或详情页 URL。
+
+        Returns:
+            Tuple[Optional[Dict[str, Any]], str, Optional[str]]:
+            (note 字典, 最终 URL, 错误信息)；成功时 error 为 None。
+        """
+        try:
+            response = httpx.get(
+                url,
+                headers={"User-Agent": _XHS_UA},
+                timeout=30,
+                follow_redirects=True,
+            )
+            response.raise_for_status()
+        except Exception as exc:  # noqa: BLE001 - 网络/状态码错误统一降级
+            return None, url, f"小红书页面获取失败: {exc}"
+        final_url = str(response.url)
+        match = _XHS_STATE_RE.search(response.text)
+        if not match:
+            return None, final_url, "小红书页面解析失败: 未找到 __INITIAL_STATE__"
+        try:
+            data = json.loads(match.group(1).replace(":undefined", ":null"))
+            note = data["noteData"]["data"]["noteData"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            return None, final_url, "小红书页面解析失败: 数据结构不符"
+        if not isinstance(note, dict):
+            return None, final_url, "小红书页面解析失败: 数据结构不符"
+        return note, final_url, None
+
+    @staticmethod
+    def _xhs_video_url(note: Dict[str, Any]) -> Optional[str]:
+        """从笔记数据里取视频流地址（h264 优先，其余编码兜底）。"""
+        streams = ((note.get("video") or {}).get("media") or {}).get("stream") or {}
+        for codec in ("h264", "h265", "av1", "h266"):
+            for item in streams.get(codec) or []:
+                master = str((item or {}).get("masterUrl") or "")
+                if master:
+                    return master
+        return None
+
+    @staticmethod
+    def _download_xhs_video(video_url: str, dest: Path) -> Optional[str]:
+        """下载小红书视频流到本地（cdn 校验 Referer，须带详情页域）。
+
+        Args:
+            video_url: 视频流地址（masterUrl）。
+            dest: 目标文件路径。
+
+        Returns:
+            Optional[str]: 错误信息；成功为 None。
+        """
+        try:
+            with httpx.stream(
+                "GET",
+                video_url,
+                headers={"User-Agent": _XHS_UA, "Referer": "https://www.xiaohongshu.com/"},
+                timeout=120,
+                follow_redirects=True,
+            ) as response:
+                response.raise_for_status()
+                with open(dest, "wb") as fh:
+                    for chunk in response.iter_bytes(256 * 1024):
+                        fh.write(chunk)
+        except Exception as exc:  # noqa: BLE001 - 下载异常转为错误信息
+            return f"视频下载失败: {exc}"
+        return None
 
     def _download(
         self, url: str, download_dir: str
@@ -466,22 +652,34 @@ class LinkProcessor(BaseProcessor):
         url: str,
         transcript_markdown: str,
         summary: Optional[Dict[str, Any]] = None,
+        *,
+        source_label: str = "抖音",
+        body_label: str = "转写全文",
+        raw_body: bool = False,
     ) -> str:
-        """组装最终 Markdown：标题 + 来源行 +（可选）摘要两节 + 转写全文。
+        """组装最终 Markdown：标题 + 来源行 +（可选）摘要两节 + 正文。
 
         Args:
             title: 笔记标题。
             author: 作者（可为空串）。
             url: 来源链接。
             transcript_markdown: 视频处理器的输出（逐句时间戳格式，
-            在此转换，原标题行丢弃）。
+            在此转换，原标题行丢弃）；raw_body=True 时按原文使用。
             summary: LLM 摘要 {"summary", "points"}；None 时不出现
             摘要两节（降级形态）。
+            source_label: 来源行平台名（抖音/小红书）。
+            body_label: 正文小节标题（转写全文/笔记正文）。
+            raw_body: True 时 transcript_markdown 为纯文本正文，不做
+            时间戳剥离与句界分段；正文为空时不产出正文小节。
 
         Returns:
             str: 完整 Markdown。
         """
-        source = f"> 来源：抖音 @{author} {url}" if author else f"> 来源：抖音 {url}"
+        source = (
+            f"> 来源：{source_label} @{author} {url}"
+            if author
+            else f"> 来源：{source_label} {url}"
+        )
         sections = [f"# {_T2S.convert(title)}", "", source, ""]
         if summary:
             sections += ["## 观点总结", "", summary["summary"]]
@@ -491,8 +689,13 @@ class LinkProcessor(BaseProcessor):
                     f"{i}. {point}" for i, point in enumerate(summary["points"], 1)
                 ]
             sections.append("")
-        body = _transcript_to_paragraphs(transcript_markdown)
-        sections += ["## 转写全文", "", body]
+        body = (
+            _T2S.convert(transcript_markdown.strip())
+            if raw_body
+            else _transcript_to_paragraphs(transcript_markdown)
+        )
+        if body:
+            sections += [f"## {body_label}", "", body]
         return "\n".join(sections) + "\n"
 
     @staticmethod

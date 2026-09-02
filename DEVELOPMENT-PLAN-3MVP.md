@@ -634,11 +634,14 @@ frontmatter 与正文追加互不干扰。
   `dispatch/todos.py` 同一定时器顺带跑——显式 `- [ ]`/`#todo` 直转（不带
   待确认），其余内容 LLM 保守判定（产出带"待确认"），待办 = 普通笔记 +
   `待办` 标签，层级由 confidence 自动决定，不开新层
-- **链接抓取处理器**: 通用网页抓取；小红书（图文提取 + OCR）有反爬与登录墙，
-  待真实样本验证（同微信的冻结纪律）。抖音路径 ✅ 已验证并实现（2026-08-31）：
+- **链接抓取处理器**: 通用网页抓取。抖音路径 ✅ 已验证并实现（2026-08-31）：
   `processors/link.py`，人工触发 `process_cli link "<分享文本>"` → yt-dlp 借
   Chrome cookie 下载视频（详情 API 403 但视频流可取）→ Whisper（large-v3）
-  转写 → 带来源行的 Markdown；标题/作者优先取 yt-dlp 元数据，回退解析分享文本
+  转写 → 带来源行的 Markdown；标题/作者优先取 yt-dlp 元数据，回退解析分享文本。
+  小红书路径 ✅ 已验证并实现（2026-09-02，真实样本 xhslink.cn 短链）：手机 UA
+  跟随 302 到详情页 → 解析内嵌 `__INITIAL_STATE__`（yt-dlp 的 XiaoHongShu
+  提取器已失效）→ 视频笔记 httpx 带 Referer 下载视频流走 Whisper；图文笔记
+  正文直入库不走 Whisper
 
 信息源覆盖现状（2026-08-31）：
 
@@ -646,7 +649,7 @@ frontmatter 与正文追加互不干扰。
 文字速记   ✅ 已通（Obsidian 速记 → watcher 入库）
 截图       ✅ 自动处理（dispatch media 随 links 定时器扫描 attachments/）
 录音       ✅ 自动处理（同上，Whisper 转写）
-小红书     待链接抓取处理器（待真实样本）
+小红书     ✅ 自动处理（同抖音管线；视频走 Whisper，图文直入库）
 抖音       ✅ 自动处理（dispatch links 每 15 分钟扫描，产出"待确认"笔记；
            也可 process_cli link 手动单条处理）
 ```

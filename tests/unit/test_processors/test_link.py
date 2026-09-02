@@ -13,7 +13,12 @@ import yt_dlp
 
 import scripts.processors.link as link_module
 from scripts.processors.base import ProcessResult
-from scripts.processors.link import LinkProcessor, _extract_url, _parse_share_text
+from scripts.processors.link import (
+    LinkProcessor,
+    _extract_url,
+    _parse_share_text,
+    detect_platform,
+)
 
 SHARE_TEXT = (
     "1.58 复制打开抖音，看看【武世红的作品】德国著名哲学家叔本华写了两本书，"
@@ -421,3 +426,163 @@ def test_llm_bad_json_degrades(fake_pipeline, monkeypatch):
     assert result.success, result.error
     assert "## 观点总结" not in result.markdown
     assert result.metadata["llm"]["status"].startswith("failed:")
+
+
+# ---- 小红书 ----
+
+XHS_SHARE_TEXT = (
+    '健脑小课堂｜"英年早呆"？别怕还有救 出门用导航，... '
+    "https://xhslink.cn/o/2Vhl2blNpHM 【小红书】里的笔记已备好，复制后快来~"
+)
+
+_XHS_FINAL_URL = "https://www.xiaohongshu.com/discovery/item/abc123"
+
+_XHS_NOTE_VIDEO = {
+    "title": "健脑小课堂",
+    "desc": "出门用导航，遇事问AI",
+    "type": "video",
+    "noteId": "abc123",
+    "user": {"nickName": "Olga姐姐"},
+    "video": {
+        "media": {"stream": {"h264": [{"masterUrl": "http://cdn.example/v.mp4"}]}}
+    },
+}
+
+_XHS_NOTE_TEXT = {
+    "title": "图文笔记标题",
+    "desc": "这是图文笔记的正文内容。",
+    "type": "normal",
+    "noteId": "txt456",
+    "user": {"nickName": "某人"},
+}
+
+
+@pytest.fixture
+def fake_xhs_page(monkeypatch):
+    """替换小红书页面抓取与视频下载为假实现；摘除 LLM key。
+
+    返回可控状态字典：note（页面解析结果）/ error（抓取错误）/
+    downloaded（下载调用记录）。
+    """
+    state = {"note": _XHS_NOTE_VIDEO, "error": None, "downloaded": []}
+
+    def _fake_fetch(url):
+        return state["note"], _XHS_FINAL_URL, state["error"]
+
+    def _fake_download(video_url, dest):
+        state["downloaded"].append((video_url, Path(dest)))
+        Path(dest).write_bytes(b"fake video bytes")
+        return None
+
+    monkeypatch.setattr(
+        LinkProcessor, "_fetch_xhs_note", staticmethod(_fake_fetch)
+    )
+    monkeypatch.setattr(
+        LinkProcessor, "_download_xhs_video", staticmethod(_fake_download)
+    )
+    monkeypatch.setattr(link_module, "VideoProcessor", _FakeVideoProcessor)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    return state
+
+
+def test_detect_platform_xhs():
+    """xhslink.cn 短链与 xiaohongshu.com 详情页都识别为 xhs。"""
+    assert detect_platform("https://xhslink.cn/o/2Vhl2blNpHM") == "xhs"
+    assert detect_platform("https://www.xiaohongshu.com/explore/abc123") == "xhs"
+    assert detect_platform("https://example.com/x") is None
+
+
+def test_xhs_video_success(fake_xhs_page):
+    """视频笔记：下载视频走 Whisper，markdown 含小红书来源行。"""
+    result = LinkProcessor().process(XHS_SHARE_TEXT)
+
+    assert result.success, result.error
+    assert result.metadata["platform"] == "xhs"
+    assert result.metadata["note_id"] == "abc123"
+    assert result.metadata["engine"] == "xhs-page+whisper"
+    assert result.metadata["url"] == _XHS_FINAL_URL
+    assert fake_xhs_page["downloaded"][0][0] == "http://cdn.example/v.mp4"
+    assert result.markdown.startswith("# 健脑小课堂")
+    assert f"> 来源：小红书 @Olga姐姐 {_XHS_FINAL_URL}" in result.markdown
+    assert "## 转写全文" in result.markdown
+
+
+def test_xhs_text_note_success(fake_xhs_page):
+    """图文笔记：不下载不转写，正文直入库。"""
+    fake_xhs_page["note"] = _XHS_NOTE_TEXT
+
+    result = LinkProcessor().process(XHS_SHARE_TEXT)
+
+    assert result.success, result.error
+    assert fake_xhs_page["downloaded"] == []
+    assert result.metadata["engine"] == "xhs-page"
+    assert "## 笔记正文" in result.markdown
+    assert "这是图文笔记的正文内容。" in result.markdown
+    assert "## 转写全文" not in result.markdown
+
+
+def test_xhs_fetch_failure(fake_xhs_page):
+    """页面获取失败 → success=False（不抛异常）。"""
+    fake_xhs_page["note"] = None
+    fake_xhs_page["error"] = "小红书页面获取失败: 403"
+
+    result = LinkProcessor().process(XHS_SHARE_TEXT)
+
+    assert not result.success
+    assert "小红书页面获取失败" in (result.error or "")
+
+
+def test_xhs_empty_note_fails(fake_xhs_page):
+    """无标题无正文无视频的笔记 → success=False。"""
+    fake_xhs_page["note"] = {"noteId": "x", "type": "normal"}
+
+    result = LinkProcessor().process(XHS_SHARE_TEXT)
+
+    assert not result.success
+    assert "无有效内容" in (result.error or "")
+
+
+def test_fetch_xhs_note_parses_initial_state(monkeypatch):
+    """真实解析路径：内嵌 JSON 含 undefined 字面量也能解析。"""
+    html = (
+        "<html><script>window.__INITIAL_STATE__="
+        '{"noteData":{"data":{"noteData":'
+        '{"noteId":"n1","title":"标题","desc":undefined,'
+        '"user":{"nickName":"作者"}}}}}'
+        "</script></html>"
+    )
+
+    class _Resp:
+        text = html
+        url = _XHS_FINAL_URL
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(link_module.httpx, "get", lambda *a, **k: _Resp())
+
+    note, final_url, error = LinkProcessor._fetch_xhs_note("https://xhslink.cn/o/xyz")
+
+    assert error is None
+    assert note is not None
+    assert note["noteId"] == "n1"
+    assert note["desc"] is None
+    assert final_url == _XHS_FINAL_URL
+
+
+def test_fetch_xhs_note_bad_structure(monkeypatch):
+    """页面结构不符 → 返回解析错误（不抛异常）。"""
+
+    class _Resp:
+        text = "<html><script>window.__INITIAL_STATE__={\"a\":1}</script></html>"
+        url = _XHS_FINAL_URL
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(link_module.httpx, "get", lambda *a, **k: _Resp())
+
+    note, _, error = LinkProcessor._fetch_xhs_note("https://xhslink.cn/o/xyz")
+
+    assert note is None
+    assert error is not None and "解析失败" in error

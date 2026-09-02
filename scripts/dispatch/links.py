@@ -1,4 +1,4 @@
-"""链接自动分发：扫描笔记中的抖音链接 → 抓取转写 → 建"待确认"笔记。
+"""链接自动分发：扫描笔记中的抖音/小红书链接 → 抓取转写 → 建"待确认"笔记。
 
 定位：独立顶层组合模块（composition root），是 memory 与 processors
 之间唯一的接线点（两者互不 import）。触发由 systemd 定时器驱动
@@ -35,6 +35,9 @@ MAX_ATTEMPTS = 3
 
 #: 自动产出笔记的标签（人工确认后由人移除）
 REVIEW_TAG = "待确认"
+
+#: 分发支持的平台 → 产出笔记的平台标签
+_PLATFORM_TAGS = {"douyin": "抖音", "xhs": "小红书"}
 
 
 class LinkDispatcher:
@@ -93,7 +96,7 @@ class LinkDispatcher:
         return report
 
     def _collect_urls(self, report: Dict[str, Any]) -> List[str]:
-        """扫描全部已登记笔记正文，收集去重后的抖音链接（保持出现顺序）。"""
+        """扫描全部已登记笔记正文，收集去重后的支持平台链接（保持出现顺序）。"""
         urls: List[str] = []
         seen = set()
         for layer in LAYERS:
@@ -104,7 +107,7 @@ class LinkDispatcher:
                 body = self.tree.read_note(note_path)
                 for match in URL_RE.finditer(body):
                     url = match.group(0)
-                    if detect_platform(url) == "douyin" and url not in seen:
+                    if detect_platform(url) in _PLATFORM_TAGS and url not in seen:
                         seen.add(url)
                         urls.append(url)
         return urls
@@ -118,13 +121,17 @@ class LinkDispatcher:
         result = self._factory().process(url)
         entry["last_attempt"] = datetime.now(timezone.utc).isoformat()
         if result.success:
-            filename = self._note_filename(url, result.metadata.get("video_id", ""))
+            platform = detect_platform(url) or "link"
+            doc_id = str(
+                result.metadata.get("video_id") or result.metadata.get("note_id") or ""
+            )
+            filename = self._note_filename(url, platform, doc_id)
             try:
                 self.tree.create_note(
                     filename,
                     result.markdown,
                     source="link",
-                    tags=[REVIEW_TAG, "抖音"],
+                    tags=[REVIEW_TAG, _PLATFORM_TAGS.get(platform, "链接")],
                 )
             except (ValueError, FileExistsError):
                 # 同名笔记已存在（状态丢失后的重跑）：视为已处理
@@ -139,12 +146,12 @@ class LinkDispatcher:
         report["failed"].append({"url": url, "error": result.error})
 
     @staticmethod
-    def _note_filename(url: str, video_id: str) -> str:
-        """产出笔记文件名：douyin-<视频id>.md；无 id 时用 URL 短哈希。"""
-        if video_id:
-            return f"douyin-{video_id}.md"
+    def _note_filename(url: str, platform: str, doc_id: str) -> str:
+        """产出笔记文件名：<平台>-<内容id>.md；无 id 时用 URL 短哈希。"""
+        if doc_id:
+            return f"{platform}-{doc_id}.md"
         digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:8]
-        return f"douyin-{digest}.md"
+        return f"{platform}-{digest}.md"
 
     def _load_state(self) -> Dict[str, Any]:
         """加载 URL 处理状态；文件缺失/损坏返回空表（不抛异常）。"""

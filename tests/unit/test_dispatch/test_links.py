@@ -169,3 +169,67 @@ def test_cli_links_command(memory_tree, tmp_path, monkeypatch):
 
     assert code == 0
     assert (memory_tree.notes_dir / "douyin-vid123.md").exists()
+
+
+XHS_URL = "https://xhslink.cn/o/2Vhl2blNpHM"
+
+
+class _FakeXhsProcessor:
+    """假小红书处理器：返回带 note_id 的成功结果。"""
+
+    def process(self, url):
+        return ProcessResult(
+            success=True,
+            text="正文",
+            markdown="# 小红书标题\n\n## 笔记正文\n\n内容",
+            confidence=1.0,
+            metadata={"note_id": "n123", "platform": "xhs"},
+        )
+
+
+def test_processes_xhs_link(memory_tree):
+    """含小红书链接的笔记 → 自动建带"待确认"标签的 xhs-<id>.md。"""
+    memory_tree.create_note("daily.md", f"看看这个 {XHS_URL}", source="test")
+
+    report = LinkDispatcher(memory_tree, processor_factory=_FakeXhsProcessor).run()
+
+    assert report["found"] == 1
+    assert report["created"] == ["xhs-n123.md"]
+    created = memory_tree.notes_dir / "xhs-n123.md"
+    assert created.exists()
+    post = frontmatter.loads(created.read_text(encoding="utf-8"))
+    assert post["tags"] == ["待确认", "小红书"]
+    assert post["source"] == "link"
+    # 源笔记不被改写
+    assert memory_tree.read_note(memory_tree.notes_dir / "daily.md").startswith("看看这个")
+    state = json.loads((memory_tree.state_dir / "processed_links.json").read_text())
+    assert state[XHS_URL]["status"] == "done"
+
+
+def test_mixed_platform_links(memory_tree):
+    """抖音与小红书链接同一轮都能被收集处理。"""
+    memory_tree.create_note(
+        "daily.md", f"抖音 {DOUYIN_URL} 和小红书 {XHS_URL}", source="test"
+    )
+
+    class _MixedProcessor:
+        def process(self, url):
+            if "xhslink" in url:
+                return ProcessResult(
+                    success=True,
+                    text="正文",
+                    markdown="# t",
+                    confidence=1.0,
+                    metadata={"note_id": "n9"},
+                )
+            return ProcessResult(
+                success=True,
+                text="转写",
+                markdown="# t",
+                confidence=0.9,
+                metadata={"video_id": "v9"},
+            )
+
+    report = LinkDispatcher(memory_tree, processor_factory=_MixedProcessor).run()
+
+    assert sorted(report["created"]) == ["douyin-v9.md", "xhs-n9.md"]
