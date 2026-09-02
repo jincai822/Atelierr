@@ -44,17 +44,21 @@ def _cognition_dependencies(tree: MemoryTree, note_id: str) -> List:
     """查询引用该 memory 的在研 cognition（active/testing/questioned）。
 
     COG-PROMOTION-05：仅显示依赖警告，不阻止 purge、不恢复 memory、
-    不改变 confidence。memory-only 部署（cognition 目录不存在）直接跳过，
+    不改变 confidence。memory-only 部署（cognition 房间不存在）直接跳过，
     绝不因查询而创建 cognition 目录。
     """
     if not note_id:
         return []
-    ov_path = tree.notes_dir.parent
-    if not (ov_path / "cognition").is_dir():
+    from scripts.wiki import WIKI_DIRNAME
+
+    room = tree.notes_dir / WIKI_DIRNAME / "cognition"  # 同库分间（v1.1）
+    if not room.is_dir():
         return []
     from scripts.cognition import CognitionManager
 
-    manager = CognitionManager(ov_path, state_dir=tree.state_dir)
+    manager = CognitionManager(
+        tree.notes_dir.parent, state_dir=tree.state_dir, cognition_dir=room
+    )
     return manager.memory_dependencies(note_id)
 
 

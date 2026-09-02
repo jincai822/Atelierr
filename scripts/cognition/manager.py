@@ -1,7 +1,8 @@
-"""认知模块：CognitionManager 与认知条目数据模型（COGNITION-SPEC v1.0）。
+"""认知模块：CognitionManager 与认知条目数据模型（COGNITION-SPEC v1.1）。
 
 认知条目（belief/question/hypothesis）以平面 Markdown 存于
-$OV/cognition/（平面目录，无子层级），是批准后语义状态的
+`$OV/memory/wiki/cognition/`（wiki 总库内的 cognition 房间，v1.1 起；
+同库分间：平面目录，无子层级），是批准后语义状态的
 唯一源真相；<state_dir>/cognition/ 下只有派生索引（index.json，可完整
 重建）与未批准的 proposal 队列（proposals.json）。
 
@@ -10,8 +11,9 @@ memory 用 confidence（新鲜度，无状态纯函数）；两者不同步、�
 cognition 语义变更必须携带显式 ApprovalRecord（人工批准）；本模块不提供
 delete_entry，也没有任何自动删除路径。
 
-布局假定（架构 v1.3 §5.1）：ov_path 为 $OV 根，memory 在 $OV/memory，
-cognition 在 $OV/cognition，状态在 state_dir（默认 ov_path/state）。
+布局假定（COGNITION-SPEC v1.1 §5.1）：ov_path 为 $OV 根，memory 在
+$OV/memory，cognition 在 $OV/memory/wiki/cognition，状态在 state_dir
+（默认 ov_path/state）。
 """
 
 from __future__ import annotations
@@ -369,17 +371,26 @@ class CognitionManager:
     """
 
     def __init__(
-        self, ov_path: "str | Path", state_dir: "str | Path | None" = None
+        self,
+        ov_path: "str | Path",
+        state_dir: "str | Path | None" = None,
+        cognition_dir: "str | Path | None" = None,
     ) -> None:
         """初始化 $OV 布局下的 cognition 存储（不存在则创建目录）。
 
         Args:
-            ov_path: $OV 根目录（memory/ 与 cognition/ 的公共父目录）。
+            ov_path: $OV 根目录（memory/ 的父目录）。
             state_dir: 状态目录；默认 ov_path/state，与 memory sidecar 同级。
+            cognition_dir: cognition 房间目录；默认
+                ov_path/memory/wiki/cognition/（同库分间，v1.1）。
         """
         self.ov_path = Path(ov_path).expanduser()
         self.memory_dir = self.ov_path / "memory"
-        self.cognition_dir = self.ov_path / "cognition"
+        self.cognition_dir = (
+            Path(cognition_dir).expanduser()
+            if cognition_dir
+            else self.ov_path / "memory" / "wiki" / "cognition"
+        )
         self.state_dir = (
             Path(state_dir).expanduser() if state_dir else self.ov_path / "state"
         )
@@ -394,10 +405,11 @@ class CognitionManager:
 
     @classmethod
     def from_config(cls, config_path: str) -> "CognitionManager":
-        """从 YAML 配置构造（读 memory.root/state_dir 推导 $OV 布局）。
+        """从 YAML 配置构造（读 memory.root/state_dir/wiki_dirname 推导布局）。
 
         memory.root 以 "memory" 结尾时取其父目录为 $OV；否则把 root 当 $OV
-        （假定标准布局）。缺失字段沿用 ~/atelierr-data 默认。
+        （假定标准布局）。cognition 房间 = memory.root/wiki_dirname/cognition
+        （同库分间，COGNITION-SPEC v1.1）。缺失字段沿用 ~/atelierr-data 默认。
 
         Args:
             config_path: YAML 配置文件路径。
@@ -413,7 +425,10 @@ class CognitionManager:
         root = Path(memory.get("root", "~/atelierr-data/memory")).expanduser()
         ov = root.parent if root.name == "memory" else root
         state_dir = memory.get("state_dir", "~/atelierr-data/state")
-        return cls(ov, state_dir=state_dir)
+        wiki_dirname = str(memory.get("wiki_dirname", "wiki"))
+        return cls(
+            ov, state_dir=state_dir, cognition_dir=root / wiki_dirname / "cognition"
+        )
 
     # ------------------------------------------------------------------
     # sidecar：派生索引与 proposal 队列（原子写；损坏隔离不猜测修复）

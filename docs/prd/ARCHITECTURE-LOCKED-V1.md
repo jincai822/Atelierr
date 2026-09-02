@@ -493,7 +493,8 @@ asyncio 是为 I/O 密集型任务设计的...
 
 ### 认知文件格式
 
-认知条目存于 `$OV/cognition/*.md` 平面目录。认知的 `certainty` 表示确信度，
+认知条目存于 `$OV/memory/wiki/cognition/*.md` 平面目录（v1.3 勘误 2026-09-02：
+同库分间，原 `$OV/cognition/`）。认知的 `certainty` 表示确信度，
 不随时间衰减；它与 memory sidecar 中表示新鲜度的 `confidence` 无换算、同步或
 比较关系。完整 schema、证据枚举、状态机、API 与 CLI 以
 `docs/prd/COGNITION-SPEC.md` v1.0 为准。
@@ -967,7 +968,7 @@ logs/memory.log
 
 ```
 ✅ 新增正式契约 docs/prd/COGNITION-SPEC.md v1.0
-✅ 认知条目固定为 belief/question/hypothesis，存于 $OV/cognition/ 平面目录
+✅ 认知条目固定为 belief/question/hypothesis，存于 $OV/memory/wiki/cognition/ 平面目录（勘误同上）
 ✅ 认知确信度字段锁定为 certainty，与 memory confidence 从结构上隔离
 ✅ memory → cognition 采用 Agent 提名 + 人工批准，来源 memory 原地不变
 ✅ 挑战、证伪和实质修订保留状态历史与 successor 关系，不物理降级或删除

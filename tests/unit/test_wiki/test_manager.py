@@ -172,3 +172,25 @@ def test_from_config_dirname_override(memory_tree, tmp_path):
     manager = WikiManager.from_config(str(config))
 
     assert manager.wiki_dir == memory_tree.notes_dir / "kb"
+
+
+def test_subdir_rooms_invisible_to_wiki_manager(memory_tree):
+    """同库分间（v1.1）：wiki/cognition/、wiki/reflections/ 子目录的
+    文件不进 entries/validate/orphans/distilled_stems（各管各的房间）。"""
+    _write_wiki(memory_tree, "a.md", _valid_meta("[[x]]"), body="见 [[b]]")
+    for room in ("cognition", "reflections"):
+        room_dir = memory_tree.notes_dir / WIKI_DIRNAME / room
+        room_dir.mkdir(parents=True)
+        (room_dir / "房间条目.md").write_text(
+            "---\nno-frontmatter-contract: true\n---\n\n房间里随便写\n",
+            encoding="utf-8",
+        )
+
+    manager = WikiManager(memory_tree)
+
+    assert [e["stem"] for e in manager.entries()] == ["a"]
+    assert manager.orphans() == ["a"]  # 房间文件不产生也不接收互链
+    assert manager.distilled_stems() == {"x"}
+    # a 缺 from 目标（x 不存在于 memory）→ 只有这一条问题，房间零误报
+    problems = manager.validate()
+    assert [p["stem"] for p in problems] == ["a"]

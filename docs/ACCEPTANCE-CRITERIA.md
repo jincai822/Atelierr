@@ -586,7 +586,7 @@ pytest tests/unit/test_processors/test_pdf.py -v
 
 ```python
 ✅ COG-SCHEMA-01 平面存储:
-  - 已批准 cognition 只创建在 $OV/cognition/ 根层
+  - 已批准 cognition 只创建在 $OV/memory/wiki/cognition/ 根层（v1.1 同库分间）
   - 文件名为 <slug>--<short-id>.md，创建后机器不自动重命名
   - frontmatter id 是稳定身份；标题、类型、状态变化不改变 id
 

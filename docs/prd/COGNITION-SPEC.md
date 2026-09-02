@@ -1,6 +1,6 @@
 # Atelierr 认知模块规格
 
-**版本**: v1.0
+**版本**: v1.1
 
 **状态**: 🔒 已锁定
 
@@ -15,7 +15,7 @@
 本文档是 Atelierr Phase 5 认知模块的正式规格，与以下现行契约共同生效：
 
 1. 架构：`docs/prd/ARCHITECTURE-LOCKED-V1.md` v1.3
-2. 认知模块：`docs/prd/COGNITION-SPEC.md` v1.0（本文档）
+2. 认知模块：`docs/prd/COGNITION-SPEC.md` v1.1（本文档）
 3. 验收：`docs/ACCEPTANCE-CRITERIA.md` v1.1
 4. 应用层边界：`docs/AGENT-ONBOARDING.md`
 
@@ -345,7 +345,8 @@ cognition id；系统不得仅因存在一条相关 belief 就自动关闭问题
 
 ### 5.1 Cognition 目录结构
 
-cognition 与 memory 分离，且 `$OV/cognition/*.md` 内部保持平面。文件名为
+cognition 是 wiki 总库内的独立房间（同库分间，v1.1 起）：
+`$OV/memory/wiki/cognition/*.md` 内部保持平面。文件名为
 `<slug>--<short-id>.md`，创建后机器不因标题、类型或状态改变而重命名；
 稳定身份始终来自 frontmatter `id`。
 
@@ -353,10 +354,13 @@ cognition 与 memory 分离，且 `$OV/cognition/*.md` 内部保持平面。文�
 
 ```text
 $OV/
-├── memory/                         # v1.3 平面 memory；保持不变
-└── cognition/                      # 平面、批准后的认知源真相
-    ├── asyncio-for-io--p0a1b3c4.md
-    └── when-to-use-threads--x7y8z9q0.md
+└── memory/                         # v1.3 平面 memory；保持不变
+    └── wiki/                       # 知识总库（同库分间）
+        ├── <concept>.md            # 根层：常青知识（人写，机器只增不改）
+        ├── cognition/              # 本房间：平面、批准后的认知源真相
+        │   ├── asyncio-for-io--p0a1b3c4.md
+        │   └── when-to-use-threads--x7y8z9q0.md
+        └── reflections/            # 反思产物房间（周报、决策日志）
 
 <state_dir>/
 ├── index.json                      # 既有 memory sidecar；保持不变
@@ -364,6 +368,9 @@ $OV/
     ├── index.json                  # 可从 cognition Markdown 完整重建
     └── proposals.json              # 未批准的 promotion/challenge 工作流状态
 ```
+
+分间纪律：cognition 房间的机器写入纪律不变（审批后写入/改写，原子替换）；
+wiki 根层与 reflections/ 房间各有自己的纪律，工具按路径认房间。
 
 ### 5.2 Sidecar 边界
 
@@ -381,7 +388,7 @@ Markdown 胜出并触发 reindex；索引不得反向覆盖 Markdown。
 
 Phase 5 不挂载 cognition，不改 Flatnotes 配置，也不引入 Web Dashboard。现有
 Flatnotes 继续只访问 `$OV/memory/`；cognition 通过 CLI、Obsidian 或文件系统访问。
-以后若需要 Web UI，必须单独评审，并保持 `$OV/cognition/` 为源真相。
+以后若需要 Web UI，必须单独评审，并保持 `$OV/memory/wiki/cognition/` 为源真相。
 
 ---
 
@@ -673,7 +680,7 @@ Phase 5 明确**不做**：
 
 ```python
 ✅ 必须实现:
-  - cognition 文件只创建在 $OV/cognition/ 根层
+  - cognition 文件只创建在 $OV/memory/wiki/cognition/ 根层（v1.1 同库分间）
   - 每个文件具有稳定 id、schema_version、type、statement、status
   - belief/hypothesis 必须有 [0.0, 1.0] certainty
   - question 必须拒绝 certainty 字段
@@ -805,6 +812,15 @@ Phase 5 使用 10,000 条 cognition 做容量正确性测试，必须验证结�
 
 ## 9. 版本历史
 
+### v1.1 (2026-09-02) - 同库分间迁移
+
+```text
+✅ cognition 存储位置：$OV/cognition/ → $OV/memory/wiki/cognition/
+   （wiki 总库内的独立房间；用户裁决：三库合一，KM 复审后由平铺修正为分间）
+✅ 房间内平面、文件名纪律、审批工作流、certainty 语义全部不变
+✅ 机器按路径认房间：cognition 审批写 / wiki 根层只增不改 / reflections 只新建
+```
+
 ### v1.0 (2026-08-29) - 初始锁定
 
 ```text
@@ -818,4 +834,4 @@ Phase 5 使用 10,000 条 cognition 做容量正确性测试，必须验证结�
 
 ---
 
-**🔒 本文档已锁定为 v1.0。**
+**🔒 本文档已锁定为 v1.1。**
