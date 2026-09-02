@@ -51,6 +51,29 @@ Pull prior thinking from the local vault.
 - `Grep(pattern: "<key terms>", path: "$OV/")` — exact-match related notes for structural follow-up. Try both languages.
 - `Grep(pattern: "<goal keyword>", path: "<paths.gtd>/")` AND `Grep(pattern: "<goal keyword>", path: "<paths.wiki>/")` — two separate calls; `Grep`'s `path` takes a single root, not a space-separated list. Checks which active goals (gtd) and which certified directions (wiki) are affected by this decision.
 
+#### Atelierr History Bridge (Read-Only)
+
+Use the Atelierr bridge to check related historical decisions, memory notes,
+and cognition entries before applying the frameworks. Keep the bridge as
+source evidence for the decision history; it does not decide or write anything:
+
+- List recent flat-store notes with a bounded, missing-directory-safe command:
+  `find "<paths.memory>" "<paths.cognition>" -type f -name '*.md' -mtime -7 -print 2>/dev/null | sort | head -n 50`.
+- If a term needs confirmation, search only those registered tiers with a
+  bounded read-only command: `rg -n -i --glob '*.md' --max-count 2
+  --max-filesize 64K '<term>' "<paths.memory>" "<paths.cognition>" 2>/dev/null |
+  head -n 40`. Read only selected files, capped to a small section (for
+  example `sed -n '1,80p' "<paths.memory>/<filename>.md"`).
+- Cite each claim with the exact vault-relative source path in backticks,
+  e.g. `<paths.memory>/<filename>.md` or `<paths.cognition>/<filename>.md`, and quote only
+  the smallest source passage needed. A missing cognition note is evidence
+  of no available cognition entry, not a reason to infer one.
+- Never invoke an operation that updates frontmatter, state, or either
+  Atelierr store. CLI use is limited to read-only commands; specifically,
+  do not run lifecycle/write commands such as `decay`, `resurface`, or
+  `create`. API use must not call write-side operations such as
+  `on_note_accessed()` or `create_note()`. The bridge is read-only.
+
 ### Step 4: Apply Two Frameworks (Cross-Validation)
 
 Based on the decision type, select the right pairing from `frameworks/cross-validation.md`:

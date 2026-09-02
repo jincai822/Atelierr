@@ -11,6 +11,33 @@ Two-step workflow to promote existing L2 working notes (daily notes, reflections
 
 **Scope:** one wiki entry per invocation. The user names a topic or set of source notes; the command produces a draft wiki entry with pre-populated `@anchor` markers for user review.
 
+### Atelierr Source Bridge (Read-Only)
+
+Use the Atelierr bridge to locate and read the source notes and any relevant
+cognition entries whose claims may be promoted. Keep source evidence separate
+from the approved target draft: this bridge may read source material, but it
+never writes the source notes or cognition entries. The existing Phase 3 write
+still requires approval and is limited to the target under `<paths.wiki>`; it
+does not grant write access to `<paths.cognition>` even though cognition is
+physically nested under the wiki library.
+
+- List recent flat-store notes with a bounded, missing-directory-safe command:
+  `find "<paths.memory>" "<paths.cognition>" -type f -name '*.md' -mtime -7 -print 2>/dev/null | sort | head -n 50`.
+- If a term needs confirmation, search only those registered tiers with a
+  bounded read-only command: `rg -n -i --glob '*.md' --max-count 2
+  --max-filesize 64K '<term>' "<paths.memory>" "<paths.cognition>" 2>/dev/null |
+  head -n 40`. Read only selected files, capped to a small section (for
+  example `sed -n '1,80p' "<paths.memory>/<filename>.md"`).
+- Cite each claim with the exact vault-relative source path in backticks,
+  e.g. `<paths.memory>/<filename>.md` or `<paths.cognition>/<filename>.md`, and quote only
+  the smallest source passage needed. A missing cognition note is evidence
+  of no available cognition entry, not a reason to infer one.
+- Never invoke an operation that updates frontmatter, state, or either
+  Atelierr store. CLI use is limited to read-only commands; specifically,
+  do not run lifecycle/write commands such as `decay`, `resurface`, or
+  `create`. API use must not call write-side operations such as
+  `on_note_accessed()` or `create_note()`. The bridge is read-only.
+
 ## Prerequisites
 
 1. Source notes must already exist under `$OV/` (any tier except L4).
@@ -90,7 +117,7 @@ Instructions:
 ### Phase 3: Validate and Write
 
 1. **Present the draft** to the user for review. Show the full markdown.
-2. On user approval, **write the file** to `<paths.wiki>/<Title>.md` (title-case with spaces, matching the H1).
+2. On user approval, **write the file** to `<paths.wiki>/<Title>.md` (title-case with spaces, matching the H1), only when that target is outside `<paths.cognition>`. Never write a promoted entry under `<paths.cognition>`; cognition remains read-only even though it is physically nested under the wiki library.
 3. Run `scripts/atelier/trust.py --note "<paths.wiki>/<Title>.md"` to verify structural integrity.
    - If errors: show them, ask the user if they want to fix or abort.
    - If clean: report the initial trust score (will be raw PageRank, no floor until a reviewer pass).
