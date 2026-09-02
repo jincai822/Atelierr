@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+REFLECTIONS_REL = Path("memory/wiki/reflections")
 
 
 def _run(vault: Path, *argv: str) -> subprocess.CompletedProcess[str]:
@@ -43,7 +44,7 @@ def _make_vault(tmp: str) -> Path:
         "research/alpha",
         "research/beta",
         "research/cache",
-        "reflections",
+        str(REFLECTIONS_REL),
         "cache",
         "archive",
         "agent-findings",
@@ -96,7 +97,7 @@ class PlanTest(unittest.TestCase):
                 [
                     str(vault / "wip"),
                     str(vault / "research" / "beta"),
-                    str(vault / "reflections"),
+                    str(vault / REFLECTIONS_REL),
                 ],
             )
             self.assertEqual(

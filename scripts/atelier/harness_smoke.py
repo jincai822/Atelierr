@@ -79,6 +79,11 @@ def expect(condition: bool, message: str) -> None:
         raise SmokeFailure(message)
 
 
+def fixture_tier(vault: Path, name: str) -> Path:
+    """Resolve a registry tier under a smoke-test vault."""
+    return vault / _paths.tier_segments()[name]
+
+
 def parse_intent_route(output: str) -> tuple[dict[str, object], str]:
     expect(bool(output), "contextual intent hook did not emit a route packet")
     try:
@@ -1539,10 +1544,10 @@ def check_autoevo_reliability() -> None:
             "agent-findings",
             "wip",
             "research",
-            "reflections",
             "_meta",
         ):
             (vault / segment).mkdir()
+        fixture_tier(vault, "reflections").mkdir(parents=True)
 
         def git(*args: str) -> subprocess.CompletedProcess[str]:
             result = subprocess.run(
@@ -3856,7 +3861,7 @@ def check_runtime_selector() -> None:
 
 def check_runtime_cue_syntax() -> None:
     with tempfile.TemporaryDirectory(prefix="atelier-cue-runtime-") as temp_dir:
-        (Path(temp_dir) / "reflections").mkdir()
+        fixture_tier(Path(temp_dir), "reflections").mkdir(parents=True)
         codex = json.loads(
             run(
                 ["scripts/atelier/cues.py", "--only", "weekly", "--json", "--runtime", "codex"],
@@ -3894,11 +3899,12 @@ def check_context_bundle() -> None:
         for relative in (
             "profile",
             "sessions",
-            "reflections",
             "daily-notes/2099/01",
             "research",
         ):
             (vault / relative).mkdir(parents=True, exist_ok=True)
+        reflection_dir = fixture_tier(vault, "reflections")
+        reflection_dir.mkdir(parents=True, exist_ok=True)
 
         (vault / "profile" / "identity.md").write_text(
             "Last built: 2099-01-03\n\n## Identity\nstable identity\n",
@@ -3921,8 +3927,8 @@ def check_context_bundle() -> None:
             "status: discussion-open\n",
             encoding="utf-8",
         )
-        (vault / "reflections" / "2099-01").mkdir(parents=True, exist_ok=True)
-        (vault / "reflections" / "2099-01" / "2099-01-02-reflection.md").write_text(
+        (reflection_dir / "2099-01").mkdir(parents=True, exist_ok=True)
+        (reflection_dir / "2099-01" / "2099-01-02-reflection.md").write_text(
             "## Theme\nbody must stay out of the heading projection\n\n"
             "## Next Action\ndo one bounded thing\n",
             encoding="utf-8",

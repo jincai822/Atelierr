@@ -68,15 +68,17 @@ Claude Code command specs are the current workflow source. In Codex, adapt them:
 
 ### Atelierr read-only bridge
 
-Workflows may search, list, and read Atelierr's top-level `$OV/memory/` note
-files and `$OV/cognition/` as source material. These application-owned
-surfaces remain read-only: never write, move, delete, or edit their
-notes/frontmatter, and never invoke memory lifecycle or write-back operations.
-The independently registered `<paths.wiki>` surface (`$OV/memory/wiki/`) is
-framework-owned persistence: writes there still require the orchestrator and
-explicit user approval under the existing approval/write rules. This exception
-grants no write access to any other `$OV/memory/` path. Cite the exact source
-path and keep excerpts to the minimum needed for the claim.
+Workflows may search, list, and read Atelierr's top-level application-owned
+memory note files under `<paths.memory>` and cognition entries under
+`<paths.cognition>` as source material. Both surfaces are always read-only:
+never write, move, delete, or edit their notes/frontmatter, and never invoke
+memory lifecycle or write-back operations. The framework-owned `<paths.wiki>`
+and `<paths.reflections>` surfaces follow the existing orchestrator plus
+explicit user-approval write rules. `<paths.cognition>` is physically nested
+under `<paths.wiki>` but is a read-only exception, so cognition files and their
+frontmatter must never be written. This exception grants no write access to
+any other `<paths.memory>` path. Cite the exact source path and keep excerpts
+to the minimum needed for the claim.
 
 For command discovery, type `$` in the Codex composer. Do not guess an
 unavailable command.

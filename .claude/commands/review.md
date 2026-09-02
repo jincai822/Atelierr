@@ -20,8 +20,8 @@ Review progress on near/mid/long-term goals. Surface what's progressing, what's 
 Inspect the last full review and the last pulse-equivalent so the monthly cadence does not produce duplicate pulses within 30 days. A pulse-equivalent is either a standalone `*-review-pulse.md` OR a `*-weekly.md` (because `/weekly` §6 Honest Assessment doubles as the monthly pulse — see Cadence table). Take whichever is most recent:
 
 ```
-Bash: last_full=$(find "$OV/reflections" -name '*-review.md' ! -name '*-review-pulse.md' 2>/dev/null | sort | tail -1)
-Bash: last_pulse=$(find "$OV/reflections" \( -name '*-review-pulse.md' -o -name '*-weekly.md' \) 2>/dev/null | sort | tail -1)
+Bash: last_full=$(find "<paths.reflections>" -name '*-review.md' ! -name '*-review-pulse.md' 2>/dev/null | sort | tail -1)
+Bash: last_pulse=$(find "<paths.reflections>" \( -name '*-review-pulse.md' -o -name '*-weekly.md' \) 2>/dev/null | sort | tail -1)
 ```
 
 Note: a no-change pulse intentionally skips writing a file (per Output → Pulse write gate), so `last_pulse` may understate by up to 30 days. That's tolerable — the cost of suggesting one extra pulse during the gap is far lower than the cost of a missed pulse.
@@ -55,7 +55,7 @@ Stale-goal floor: if `directions.md` lists goals older than 1 year with no progr
    source sections. Do not preload every reflection in the window.
 
 3. **Pull goal-related updates from the local vault, bounded to the lookback window.** Do NOT issue an unbounded `Grep(path: "$OV/")` — an unbounded grep will pull stale historical matches that skew the review. Use `find -print0 | xargs -0 grep` so recency actually binds. Substitute `<N>` with the lookback (90 for full, 30 for pulse):
-   - `Bash: find "$OV"/daily-notes "$OV"/reflections "$OV"/gtd "$OV"/wiki -type f -name "*.md" -mtime -<N> -print0 2>/dev/null | xargs -0 grep -HnE "目标|goal|progress|进展|milestone" 2>/dev/null` — recency-bounded goal and progress mentions across both languages in one pass. Safe with an empty working set (xargs does nothing if stdin is empty).
+   - `Bash: find "<paths.daily_notes>" "<paths.reflections>" "<paths.gtd>" "<paths.wiki>" -type f -name "*.md" -mtime -<N> -print0 2>/dev/null | xargs -0 grep -HnE "目标|goal|progress|进展|milestone" 2>/dev/null` — recency-bounded goal and progress mentions across both languages in one pass. Safe with an empty working set (xargs does nothing if stdin is empty).
    - Add today's daily note only if current capture is necessary for a disputed
      or missing goal state.
 

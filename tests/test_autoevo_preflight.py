@@ -28,6 +28,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+REFLECTIONS_REL = Path("memory/wiki/reflections")
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -48,7 +49,15 @@ def _git(cwd: Path, *args: str) -> None:
 
 def _make_vault(root: Path) -> Path:
     vault = root / "vault"
-    for rel in ("wip", "research", "reflections", "agent-findings", "personal", "cache", "_meta"):
+    for rel in (
+        Path("wip"),
+        Path("research"),
+        REFLECTIONS_REL,
+        Path("agent-findings"),
+        Path("personal"),
+        Path("cache"),
+        Path("_meta"),
+    ):
         (vault / rel).mkdir(parents=True)
     (vault / ".gitignore").write_text("cache/\n_meta/\n", encoding="utf-8")
     (vault / "wip" / "note.md").write_text("base\n", encoding="utf-8")

@@ -167,7 +167,7 @@ scripts/atelier/semantic.py query "curiosity vectors"
 Restricted to reflections in the last 30 days, JSON output:
 ```
 scripts/atelier/semantic.py query "energy drain" \
-    --path "$OV"/reflections \
+    --path "$OV"/memory/wiki/reflections \
     --after 2026-03-07 \
     --scope active \
     --context \
@@ -178,7 +178,7 @@ Multiple paths, top 20 hits:
 ```
 scripts/atelier/semantic.py query "研究 方向" \
     --path "$OV"/daily-notes \
-    --path "$OV"/reflections \
+    --path "$OV"/memory/wiki/reflections \
     --top 20
 ```
 

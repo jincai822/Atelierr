@@ -1,7 +1,7 @@
 """认知模块单元测试：COG-SCHEMA / COG-CERTAINTY / COG-INDEX / COG-API。
 
 断言以 docs/ACCEPTANCE-CRITERIA.md v1.1 §4.1/4.2/4.5/4.8 与
-docs/prd/COGNITION-SPEC.md v1.0 为准。
+docs/prd/COGNITION-SPEC.md v1.1 为准。
 """
 
 from __future__ import annotations
@@ -85,7 +85,7 @@ def _hand_file(mgr: CognitionManager, name: str, meta_overrides: dict) -> Path:
 
 
 def test_create_belief_in_flat_cognition_root(manager):
-    """COG-SCHEMA-01：只创建在 $OV/cognition/ 根层，文件名 <slug>--<short-id>.md。"""
+    """COG-SCHEMA-01：只创建在 $OV/memory/wiki/cognition/ 根层，文件名 <slug>--<short-id>.md。"""
     entry = _belief(manager)
     assert entry.path.parent == manager.cognition_dir
     assert re.match(r"^.+--[0-9a-z]{8}\.md$", entry.path.name)

@@ -27,9 +27,10 @@ wiki            = "memory/wiki"
 papers          = "papers"
 preprints       = "preprints"
 
-# L2 — working / half-baked. The persistent surfaces.
+# L2 — working / half-baked. Persistent surfaces; session reflections live in
+# the framework-owned room under the wiki library.
 daily_notes     = "daily-notes"
-reflections     = "reflections"
+reflections     = "memory/wiki/reflections"
 research        = "research"
 agent_findings  = "agent-findings"
 wip             = "wip"
@@ -69,8 +70,9 @@ cache           = "cache"
 # long-term). Managed by scripts/memory/; served to Flatnotes via Docker mount.
 memory          = "memory"
 
-# Atelierr cognition module (approved belief/hypothesis/question knowledge surface).
-cognition       = "cognition"
+# Atelierr cognition module (approved belief/hypothesis/question knowledge
+# surface), kept as an application-owned read-only room under the wiki library.
+cognition       = "memory/wiki/cognition"
 
 # Private operational extensions. This surface is excluded from semantic
 # retrieval because `_tools` is an operational directory at any depth.

@@ -49,19 +49,19 @@ When to invoke:
    missing evidence. Daily notes are user-authored and read-only.
 
 4. **Search for recent activity in the vault:**
-   - Build the recency window: `Bash: find "$OV"/daily-notes "$OV"/reflections "$OV"/gtd -type f -name "*.md" -mtime -7 2>/dev/null | sort`
-   - Grep the recency window for progress markers: `Bash: find "$OV"/daily-notes "$OV"/reflections "$OV"/gtd -type f -name "*.md" -mtime -7 -print0 | xargs -0 grep -HnE "progress|进展" 2>/dev/null`. Using `find -print0 | xargs -0` is safe when `find` returns nothing (xargs with no input simply exits); never use `grep $(find ...)`, which silently scans the current directory on empty input.
+   - Build the recency window: `Bash: find "<paths.daily_notes>" "<paths.reflections>" "<paths.gtd>" -type f -name "*.md" -mtime -7 2>/dev/null | sort`
+   - Grep the recency window for progress markers: `Bash: find "<paths.daily_notes>" "<paths.reflections>" "<paths.gtd>" -type f -name "*.md" -mtime -7 -print0 | xargs -0 grep -HnE "progress|进展" 2>/dev/null`. Using `find -print0 | xargs -0` is safe when `find` returns nothing (xargs with no input simply exits); never use `grep $(find ...)`, which silently scans the current directory on empty input.
 
 5. **Search and cite the Atelierr bridge (read-only):**
    - List recent flat-store notes with a bounded, missing-directory-safe command:
-     `find "$OV/memory" "$OV/cognition" -type f -name '*.md' -mtime -7 -print 2>/dev/null | sort | head -n 50`.
+     `find "<paths.memory>" "<paths.cognition>" -type f -name '*.md' -mtime -7 -print 2>/dev/null | sort | head -n 50`.
    - If a term needs confirmation, search only those registered tiers with a
      bounded read-only command: `rg -n -i --glob '*.md' --max-count 2
-     --max-filesize 64K '<term>' "$OV/memory" "$OV/cognition" 2>/dev/null |
+     --max-filesize 64K '<term>' "<paths.memory>" "<paths.cognition>" 2>/dev/null |
      head -n 40`. Read only selected files, capped to a small section (for
-     example `sed -n '1,80p' "$OV/memory/<filename>.md"`).
+     example `sed -n '1,80p' "<paths.memory>/<filename>.md"`).
    - Cite each claim with the exact vault-relative source path in backticks,
-     e.g. `memory/<filename>.md` or `cognition/<filename>.md`, and quote only
+     e.g. `<paths.memory>/<filename>.md` or `<paths.cognition>/<filename>.md`, and quote only
      the smallest source passage needed. A missing cognition note is evidence
      of no available cognition entry, not a reason to infer one.
    - Never invoke an operation that updates frontmatter, state, or either
@@ -93,7 +93,7 @@ Daily `/hi` may not run every day. Detect missing days from the past 7 by checki
 
 ```
 # macOS/BSD date syntax; Linux: replace `date -v-${d}d +%Y-%m-%d` with `date -d "${d} days ago" +%Y-%m-%d`
-Bash: for d in $(seq 0 6); do date_str=$(date -v-${d}d +%Y-%m-%d); find "$OV/reflections" -name "${date_str}-reflection*.md" 2>/dev/null | grep -q . || echo "missing: $date_str"; done
+Bash: for d in $(seq 0 6); do date_str=$(date -v-${d}d +%Y-%m-%d); find "<paths.reflections>" -name "${date_str}-reflection*.md" 2>/dev/null | grep -q . || echo "missing: $date_str"; done
 ```
 
 Check whether daily notes exist for reflection-missing days. Read a note only

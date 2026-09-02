@@ -1,6 +1,7 @@
 """Regression tests for bucket-aware tier readers.
 
-Glitch (2026-08-22): `reflections/` was split into `YYYY-MM/` buckets by
+Glitch (2026-08-22): the registry-mapped `reflections/` room was split into
+`YYYY-MM/` buckets by
 `scripts/atelier/fission.py`, but several readers still used non-recursive
 `tier("reflections").glob(...)`. `cues.py` then raised a hard "never ran
 weekly" cue every session although weekly files existed, and
@@ -25,19 +26,29 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO_ROOT / "scripts" / "atelier"
+REFLECTIONS_REL = Path("memory/wiki/reflections")
+WIKI_REL = Path("memory/wiki")
 
 
 def _make_vault(root: Path, weekly_date: str) -> Path:
     vault = root / "vault"
-    (vault / "reflections" / weekly_date[:7]).mkdir(parents=True)
-    (vault / "reflections" / weekly_date[:7] / f"{weekly_date}-weekly.md").write_text(
+    reflection_bucket = vault / REFLECTIONS_REL / weekly_date[:7]
+    reflection_bucket.mkdir(parents=True)
+    (reflection_bucket / f"{weekly_date}-weekly.md").write_text(
         "## Energy\nfine\n", encoding="utf-8"
     )
-    (vault / "reflections" / weekly_date[:7] / f"{weekly_date}-reflection.md").write_text(
+    (reflection_bucket / f"{weekly_date}-reflection.md").write_text(
         "## Theme\nt\n\n## Next Action\n- [ ] do the thing\n", encoding="utf-8"
     )
     # Directories the cue runner expects to be able to probe.
-    for rel in ("daily-notes", "gtd", "wiki", "cache", "_meta", "sessions"):
+    for rel in (
+        Path("daily-notes"),
+        Path("gtd"),
+        WIKI_REL,
+        Path("cache"),
+        Path("_meta"),
+        Path("sessions"),
+    ):
         (vault / rel).mkdir(parents=True, exist_ok=True)
     return vault
 
@@ -76,11 +87,18 @@ class StalenessBucketedScanTest(unittest.TestCase):
     def test_staleness_scores_bucketed_notes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="atelier-staleness-") as tmp:
             vault = Path(tmp) / "vault"
-            (vault / "reflections" / "2099-01").mkdir(parents=True)
-            (vault / "reflections" / "2099-01" / "2099-01-05-reflection.md").write_text(
+            (vault / REFLECTIONS_REL / "2099-01").mkdir(parents=True)
+            (vault / REFLECTIONS_REL / "2099-01" / "2099-01-05-reflection.md").write_text(
                 "# Old Thought\nbody\n", encoding="utf-8"
             )
-            for rel in ("wiki", "daily-notes", "wip", "gtd", "preprints", "agent-findings"):
+            for rel in (
+                WIKI_REL,
+                Path("daily-notes"),
+                Path("wip"),
+                Path("gtd"),
+                Path("preprints"),
+                Path("agent-findings"),
+            ):
                 (vault / rel).mkdir(parents=True, exist_ok=True)
             proc = subprocess.run(
                 [sys.executable, "scripts/atelier/staleness.py", "--json"],
