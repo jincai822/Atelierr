@@ -686,3 +686,8 @@ frontmatter 与正文追加互不干扰。
 - **控制台唤起会话**: Obsidian Shell Commands 插件把 `$weekly` 等命令做成
   控制台按钮（桌面端 `codex exec` 非交互包装；交互式教练流不适合，只覆盖
   非交互命令）
+- **控制台三节**: ✅ 已上线（2026-09-02）：🛠 车间口令（场景→Codex 命令
+  对照，门面里的车间指示牌）、🧭 判断登记处（Dataview `FROM "cognition"`）、
+  📜 最新反思（`FROM "reflections"`）。裁决记录：reflections（时间戳报告）
+  与 cognition（审批纪律）均不并入 wiki/ 目录——同 vault 已打通互链/图谱/
+  查询，目录合并收益接近装饰、成本是动锁定规格；彻底档留待回路三启用再议
