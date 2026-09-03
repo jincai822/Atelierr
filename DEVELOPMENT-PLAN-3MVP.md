@@ -712,3 +712,17 @@ frontmatter 与正文追加互不干扰。
   ② 确认疲劳纪律（晨报每节限 5 条、积压自动降频）；③ 提炼草稿（晨报
   "待提炼"附候选 wiki 骨架，wiki 仍保持人写）。全文与实现要点见
   `docs/INFO-PROCESSING-3STAGE.md`，用户点名调用后动工
+- **Cognitive OS 整合（方案 A）**: 2026-09-03 用户批准方案 A（资产接入 +
+  协议选择性吸收；双系统并行/全面替换/裸搬资产三案均否决）。
+  **① 资产只读接入 ✅ 已落地（2026-09-03）**：`/srv/knowledge-active/`
+  知识库复制为 vault 内 `legacy/` 区（549 文件 4.4M：208 概念卡 + 280
+  术语卡 + 39 章笔记 + 11 认知条目 + 4 份 Source 记录；sources/raw 255M
+  原件与 backups/batches/templates 不复制，留 /srv 存档）；区规则见
+  `legacy/README.md`——只读参考、不参与 decay/purge（memory 机制只扫
+  `memory/` 根层天然隔离，实测 stats 仍 12 条）、演化走提炼进 wiki/。
+  三项裁决（用户授权推荐默认，可否决）：规则仓库 `/srv/Cognitive   OS`
+  归档只读不动；卡库物理上复制进 `~/atelierr-data/legacy/`（手机可同步）；
+  488 张卡按 legacy 观望区对待（内容直接可用，draft 身份见各自
+  frontmatter）。**② wiki 格式升级**（概念卡五节 + 建卡前全库查重 + 机检）
+  随「信息加工三步法」建议 3 一起等调用；**③ 认知条目迁移**（11 条 →
+  cognition/ 判断登记处）随回路三解冻再议。架构计划版 IR 已同步重渲染

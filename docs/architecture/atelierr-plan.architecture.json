@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "Atelierr 双平面架构（合库版）",
+    "title": "Atelierr 双平面架构（合库版 + legacy 卡库）",
     "locale": "zh-CN",
     "output": "atelierr-plan.html",
     "quality_profile": "showcase",
@@ -23,9 +23,10 @@
           "memory",
           "loop",
           "console",
-          "wiki"
+          "wiki",
+          "legacy"
         ],
-        "note": "Atelier 会话工作台垂直贯穿各层（人在会话中驱动）；Atelierr 后台管线横向流动（定时器、无人值守）；交接只走 $OV 数据面。沉淀层合为一个 wiki/ 总库（同库分间已实施 09-02）"
+        "note": "Atelier 会话工作台垂直贯穿各层（人在会话中驱动）；Atelierr 后台管线横向流动（定时器、无人值守）；交接只走 $OV 数据面。沉淀层合为一个 wiki/ 总库（同库分间已实施 09-02）；legacy 卡库区只读接入 Cognitive OS 资产（方案 A · ① 已实施 09-03）"
       },
       {
         "id": "note-journey",
@@ -197,6 +198,21 @@
         76
       ],
       "tag": "永久资产 · 同库分间"
+    },
+    {
+      "id": "legacy",
+      "type": "database",
+      "label": "legacy/ 卡库区",
+      "sublabel": "Cognitive OS 资产：208 概念卡 · 280 术语卡 · 11 认知条目",
+      "pos": [
+        940,
+        480
+      ],
+      "size": [
+        300,
+        76
+      ],
+      "tag": "只读接入 ✅ 09-03 · 无 decay 无 purge"
     }
   ],
   "boundaries": [
@@ -228,6 +244,13 @@
       "label": "④ 沉淀层（知识资产 · 一个总库）",
       "wraps": [
         "wiki"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "⑤ legacy 卡库区（Cognitive OS · 只读接入）",
+      "wraps": [
+        "legacy"
       ]
     },
     {
@@ -425,6 +448,43 @@
         380,
         502
       ]
+    },
+    {
+      "id": "legacy-console",
+      "from": "legacy",
+      "to": "console",
+      "label": "vault 内可搜可链（只读）",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "via": [
+        [
+          1100,
+          480
+        ],
+        [
+          1100,
+          184
+        ]
+      ],
+      "labelAt": [
+        1120,
+        330
+      ]
+    },
+    {
+      "id": "legacy-wiki",
+      "from": "legacy",
+      "to": "wiki",
+      "label": "②③ 待触发",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "right",
+      "route": "straight",
+      "labelAt": [
+        870,
+        470
+      ]
     }
   ],
   "cards": [
@@ -457,6 +517,16 @@
         "交接只走 $OV 数据面，代码零互调",
         "合库已实施（09-02）· Codex 登记对齐待办",
         "每日 03:00 git 快照（全库版本历史）"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "legacy 卡库区（方案 A）",
+      "items": [
+        "① ✅ 已接入（09-03）：549 文件只读复制进 vault，/srv 原件存档不动",
+        "只读参考：可搜可链可引用；演化走提炼进 wiki/，不回写本区",
+        "② wiki 格式升级（概念卡五节+查重）随「信息加工三步法」建议 3 调用",
+        "③ 11 条认知条目迁移随回路三解冻再议"
       ]
     }
   ]

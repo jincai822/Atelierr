@@ -40,10 +40,17 @@ Atelierr 应用（后台管线，定时器无人值守）。两平面代码零�
 根层 concept（人写，只增不改）、`cognition/` 间（判断登记处，审批写）、
 `reflections/` 间（周报与决策日志，只新建）。无 decay 无 purge。
 
+**legacy 卡库区（方案 A · ① 已接入 09-03）**：`legacy/` 为 Cognitive OS
+知识库的只读副本（549 文件：208 概念卡 + 280 术语卡 + 39 章笔记 + 11 认知
+条目），vault 内可搜可链；不参与 decay/purge，memory 机制只扫 `memory/`
+根层天然隔离；原件存档 `/srv/knowledge-active/` 不动，区规则见
+`legacy/README.md`。② wiki 格式升级随「信息加工三步法」建议 3 调用；
+③ 认知条目迁移随回路三解冻再议。
+
 **入口**：控制台.md 是总入口（Obsidian 内 Dataview 全 vault 渲染 +
 车间口令 + 桌面 ▶ 快捷按钮经 Shell Commands/Advanced URI 拉起 Codex 会话）。
 手机端口令卡（Codex 只跑桌面）。Flatnotes 降为兜底入口。
 
-**冻结/待办**：wechat/小红书处理器等真实样本；回路三（决策校准）等预测；
+**冻结/待办**：wechat 处理器等真实导出样本；回路三（决策校准）等预测；
 Codex 侧 paths.toml 三 tier 对齐（`memory/wiki`、`memory/wiki/cognition`、
 `memory/wiki/reflections`）待其会话执行。
