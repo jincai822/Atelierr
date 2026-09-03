@@ -239,6 +239,22 @@ def test_todo_tagged_notes_skipped(memory_tree, llm_ok):
     assert llm_ok == []
 
 
+def test_highlights_checklist_skipped(memory_tree, llm_ok):
+    """划重点清单（source: highlights）不喂显式通道也不喂 LLM：
+    候选勾选框是知识向内容，整清单进待办是噪音。"""
+    memory_tree.create_note(
+        "划重点-x.md",
+        "- [ ] **概念甲**（第 3 页）\n  - 内容：甲是什么\n",
+        source="highlights",
+        tags=["划重点"],
+    )
+
+    report = TodoDispatcher(memory_tree).run()
+
+    assert report["created"] == []
+    assert llm_ok == []
+
+
 def test_pending_delete_skipped(memory_tree, make_note, llm_ok):
     """pending_delete 笔记不判定。"""
     from scripts.memory.decay import DecayManager

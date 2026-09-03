@@ -7,6 +7,7 @@
     python -m scripts.cli.dispatch_cli todos --dry-run  # 只报告不建笔记
     python -m scripts.cli.dispatch_cli media            # 扫描 attachments/ 截图录音并 OCR/转写
     python -m scripts.cli.dispatch_cli media --dry-run  # 只报告不处理
+    python -m scripts.cli.dispatch_cli highlights       # 划重点清单勾中项转正式笔记
     python -m scripts.cli.dispatch_cli digest           # 创建今日摘要笔记
 
 配置解析顺序与 memory_cli 一致：--config > 环境变量 ATELIERR_CONFIG >
@@ -26,6 +27,7 @@ import click
 
 from scripts.cli.memory_cli import resolve_config_path
 from scripts.dispatch.digest import DigestDispatcher
+from scripts.dispatch.highlights import HighlightsDispatcher
 from scripts.dispatch.links import LinkDispatcher
 from scripts.dispatch.media import MediaDispatcher
 from scripts.dispatch.notify import send_ntfy
@@ -85,7 +87,7 @@ class DispatchCLI:
 
         @click.group()
         def cli() -> None:
-            """Atelierr 通道产物自动分发（links / todos / digest）。"""
+            """Atelierr 通道产物自动分发（links / media / todos / highlights / digest）。"""
 
         @cli.command(name="links")
         @click.option(
@@ -152,11 +154,34 @@ class DispatchCLI:
                 f"跳过已处理 {report['skipped']} 个"
             )
             for filename in report["created"]:
-                click.echo(f"  已创建: {filename}（待确认）")
+                # 划重点清单不带"待确认"（确认动作在勾中项转出的笔记上）
+                suffix = "" if filename.startswith("划重点-") else "（待确认）"
+                click.echo(f"  已创建: {filename}{suffix}")
             for failure in report["failed"]:
                 click.echo(f"  失败: {failure['file']} — {failure['error']}")
             if not dry_run:
                 _notify_media_failures(report["failed"])
+            if dry_run:
+                click.echo("（dry-run：未做处理）")
+
+        @cli.command(name="highlights")
+        @click.option(
+            "--dry-run",
+            "dry_run",
+            is_flag=True,
+            help="只扫描报告，不建笔记、不写状态",
+        )
+        def highlights_command(dry_run: bool) -> None:
+            """扫描划重点清单，把人工勾中的候选转为正式笔记。"""
+            tree = self._build_tree()
+            report = HighlightsDispatcher(tree).run(dry_run=dry_run)
+            click.echo(
+                f"扫描 {report['scanned']} 份清单，"
+                f"勾中 {report['ticked']} 条，"
+                f"跳过已转记 {report['skipped']} 条"
+            )
+            for filename in report["created"]:
+                click.echo(f"  已创建: {filename}（待确认）")
             if dry_run:
                 click.echo("（dry-run：未做处理）")
 

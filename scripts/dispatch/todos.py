@@ -215,8 +215,13 @@ class TodoDispatcher:
             report["skipped"] += 1
             return
         tags = post.get("tags") or []
-        # 防自循环（含本模块产出）；摘要笔记不再喂 LLM（内容全是既有待办）
-        if TODO_TAG in tags or "todo" in tags or post.get("source") == "digest":
+        # 防自循环（含本模块产出）；摘要笔记不再喂 LLM（内容全是既有待办）；
+        # 划重点清单不喂：候选项是知识向勾选框，不是行动意图（防整清单进待办）
+        if (
+            TODO_TAG in tags
+            or "todo" in tags
+            or post.get("source") in ("digest", "highlights")
+        ):
             report["skipped"] += 1
             return
         body = post.content

@@ -6,9 +6,11 @@
     python -m scripts.cli.process_cli video lecture.mp4 --output out.md
     python -m scripts.cli.process_cli audio note.wav --model base
     python -m scripts.cli.process_cli link "看看【张三的作品】… https://v.douyin.com/xx/"
+    python -m scripts.cli.process_cli highlights book.pdf --output checklist.md
 
 无 --output 时 Markdown 打印到 stdout；处理失败 exit code 1 并打印错误。
 link 子命令的 argument 是分享文本或 URL（不是文件路径）。
+highlights 子命令生成划重点勾选清单（需 DEEPSEEK_API_KEY）。
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import click
 
 from scripts.processors.audio import AudioProcessor
 from scripts.processors.base import BaseProcessor
+from scripts.processors.highlights import HighlightsProcessor
 from scripts.processors.image import ImageProcessor
 from scripts.processors.link import LinkProcessor
 from scripts.processors.pdf import PDFProcessor
@@ -32,6 +35,7 @@ PROCESSORS: Dict[str, Type[BaseProcessor]] = {
     "pdf": PDFProcessor,
     "video": VideoProcessor,
     "audio": AudioProcessor,
+    "highlights": HighlightsProcessor,
 }
 
 #: --model 选项实际生效的处理器

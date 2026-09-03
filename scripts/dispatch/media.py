@@ -1,4 +1,6 @@
-"""附件自动路由：attachments/ 里的截图/录音 → OCR/Whisper → 建"待确认"笔记。
+"""附件自动路由：attachments/ 里的截图/录音 → OCR/Whisper → 建"待确认"笔记；
+PDF（书籍/长文）→ 划重点清单笔记（机器代读出可勾选候选，勾中条目由
+:mod:`scripts.dispatch.highlights` 转为正式笔记）。
 
 定位：与 links/todos 同源的 dispatch 顶层组合模块（memory 与 processors
 之间唯一的接线点）。触发由 systemd 定时器驱动
@@ -27,15 +29,18 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from scripts.dispatch.highlights import CHECKLIST_SOURCE, ITEM_TAG
 from scripts.memory.core import MemoryTree
 from scripts.processors.audio import SUPPORTED_EXTENSIONS as AUDIO_EXTS
 from scripts.processors.audio import AudioProcessor
+from scripts.processors.highlights import HighlightsProcessor
 from scripts.processors.image import SUPPORTED_EXTENSIONS as IMAGE_EXTS
 from scripts.processors.image import ImageProcessor
 
@@ -51,8 +56,14 @@ ATTACHMENTS_DIR = "attachments"
 #: 跳过 mtime 距今不足该秒数的文件（防读到仍在写入的文件）
 MIN_AGE_SECONDS = 30
 
+#: PDF 附件路由到划重点清单（书籍/长文：机器代读 → 可勾选候选清单，
+#: 人工勾中的条目由 dispatch/highlights.py 转为正式笔记）
+_PDF_EXTS = {".pdf"}
+
 _KIND_BY_EXT = {ext: "截图" for ext in IMAGE_EXTS}
 _KIND_BY_EXT.update({ext: "录音" for ext in AUDIO_EXTS})
+
+_PDF_ILLEGAL_RE = re.compile(r'[\\/:*?"<>|]')
 
 
 class MediaDispatcher:
@@ -68,6 +79,7 @@ class MediaDispatcher:
         tree: MemoryTree,
         image_factory: Optional[Callable[[], ImageProcessor]] = None,
         audio_factory: Optional[Callable[[], AudioProcessor]] = None,
+        highlights_factory: Optional[Callable[[], HighlightsProcessor]] = None,
     ) -> None:
         """初始化。
 
@@ -76,12 +88,16 @@ class MediaDispatcher:
             image_factory: 图片处理器工厂（测试注入假处理器用），
             缺省为 ImageProcessor；每轮运行最多构造一次。
             audio_factory: 音频处理器工厂，缺省为 AudioProcessor。
+            highlights_factory: PDF 划重点处理器工厂，缺省为
+            HighlightsProcessor；每轮运行最多构造一次。
         """
         self.tree = tree
         self._image_factory = image_factory or ImageProcessor
         self._audio_factory = audio_factory or AudioProcessor
+        self._highlights_factory = highlights_factory or HighlightsProcessor
         self._image: Optional[ImageProcessor] = None
         self._audio: Optional[AudioProcessor] = None
+        self._highlights: Optional[HighlightsProcessor] = None
         self.state_path = Path(tree.state_dir) / "processed_media.json"
 
     def run(self, dry_run: bool = False) -> Dict[str, Any]:
@@ -125,7 +141,7 @@ class MediaDispatcher:
         for path in sorted(attach_dir.iterdir()):
             if not path.is_file() or path.name.startswith("."):
                 continue
-            if path.suffix.lower() not in _KIND_BY_EXT:
+            if path.suffix.lower() not in _KIND_BY_EXT and path.suffix.lower() not in _PDF_EXTS:
                 continue
             report["scanned"] += 1
             try:
@@ -145,19 +161,23 @@ class MediaDispatcher:
         key = self._key(path)
         entry = state.setdefault(key, {"attempts": 0})
         entry["attempts"] += 1
-        kind = _KIND_BY_EXT[path.suffix.lower()]
+        is_pdf = path.suffix.lower() in _PDF_EXTS
         processor = self._get_processor(path)
         result = processor.process(path)
         entry["last_attempt"] = datetime.now(timezone.utc).isoformat()
         if result.success:
-            filename = self._note_filename(path)
+            if is_pdf:
+                # PDF → 划重点清单（不带"待确认"：清单本身无需确认，
+                # 确认动作在"勾中条目转出的正式笔记"上）
+                filename = self._pdf_note_filename(path)
+                body, source, tags = result.markdown, CHECKLIST_SOURCE, [ITEM_TAG]
+            else:
+                kind = _KIND_BY_EXT[path.suffix.lower()]
+                filename = self._note_filename(path)
+                body = self._build_note(path, kind, result.text)
+                source, tags = "media", [REVIEW_TAG, kind]
             try:
-                self.tree.create_note(
-                    filename,
-                    self._build_note(path, kind, result.text),
-                    source="media",
-                    tags=[REVIEW_TAG, kind],
-                )
+                self.tree.create_note(filename, body, source=source, tags=tags)
             except (ValueError, FileExistsError):
                 # 同名笔记已存在（状态丢失后的重跑）：视为已处理
                 pass
@@ -172,13 +192,25 @@ class MediaDispatcher:
 
     def _get_processor(self, path: Path):
         """按扩展名取处理器实例（每轮每类只构造一次，引擎加载昂贵）。"""
-        if path.suffix.lower() in IMAGE_EXTS:
+        suffix = path.suffix.lower()
+        if suffix in _PDF_EXTS:
+            if self._highlights is None:
+                self._highlights = self._highlights_factory()
+            return self._highlights
+        if suffix in IMAGE_EXTS:
             if self._image is None:
                 self._image = self._image_factory()
             return self._image
         if self._audio is None:
             self._audio = self._audio_factory()
         return self._audio
+
+    @staticmethod
+    def _pdf_note_filename(path: Path) -> str:
+        """PDF 产出清单文件名：划重点-<净化主名>-<哈希前6>.md。"""
+        cleaned = _PDF_ILLEGAL_RE.sub("-", path.stem).strip(". ")[:40] or "未命名"
+        digest = hashlib.sha1(path.name.encode("utf-8")).hexdigest()[:6]
+        return f"划重点-{cleaned}-{digest}.md"
 
     @staticmethod
     def _key(path: Path) -> str:

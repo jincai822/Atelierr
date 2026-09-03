@@ -58,6 +58,21 @@ processors:
       max_transcript_chars: 6000      # 成本护栏：转写超过此长度跳过摘要与整理（约 10 分钟视频）
       format_max_tokens: 8000         # 转写整理的输出上限（需容纳整理后全文）
 
+  highlights:           # 划重点清单（书籍/长文 PDF → 可勾选候选清单，
+                        # 见 scripts/processors/highlights.py；attachments/ 里的
+                        # PDF 由 dispatch/media.py 自动路由到此，勾中条目由
+                        # dispatch/highlights.py 转正式笔记）
+    chunk_chars: 6000   # 每个 LLM 片段的正文上限（按页聚合，不切断单页）
+    max_chunks: 80      # 成本护栏：片段数上限（约 48 万字），超出截断记 warning
+    max_candidates: 20  # 清单候选上限（防确认疲劳，宁缺毋滥）
+    llm:                # 代读挑候选（必需；key 缺失处理失败并进熔断重试，
+                        # 不会像 link 那样降级——清单的产品就是候选本身）
+      base_url: https://api.deepseek.com
+      model: deepseek-v4-flash
+      api_key_env: DEEPSEEK_API_KEY
+      max_tokens: 4000  # 单块候选 JSON 的输出上限
+      timeout: 120
+
 # 自动分发的待办判定（dispatch/todos.py 读此节；key 同样只走环境变量，
 # 显式 - [ ] / #todo 通道不经过 LLM；LLM 判定产出带"待确认"标签）
 # dispatch:
