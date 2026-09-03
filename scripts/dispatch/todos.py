@@ -272,6 +272,7 @@ class TodoDispatcher:
                 report["failed"].append({"note": key, "error": type(exc).__name__})
             else:
                 llm_done = True
+                work.pop("last_error", None)  # 重试成功，清掉旧失败记录
                 for item in llm_items:
                     filename = self._create_todo_note(
                         item, note_path, review=True, dry_run=False

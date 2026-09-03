@@ -277,6 +277,30 @@ def test_failure_retries_then_circuit_breaks(memory_tree, monkeypatch):
     assert len(calls) == 3
 
 
+def test_success_clears_stale_last_error(memory_tree, monkeypatch):
+    """首次失败留下 last_error；重试成功后必须清除，避免误导排查。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    calls = []
+
+    def _flaky(url, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise json.JSONDecodeError("bad", "doc", 0)
+        return _FakeLLMResponse(_todos_payload([]))
+
+    monkeypatch.setattr(todos_module.httpx, "post", _flaky)
+    memory_tree.create_note("idea.md", "一些想法", source="test")
+    dispatcher = TodoDispatcher(memory_tree)
+
+    dispatcher.run()
+    assert _state(memory_tree)["idea.md"]["last_error"] == "JSONDecodeError"
+
+    dispatcher.run()
+    entry = _state(memory_tree)["idea.md"]
+    assert entry["llm_done"] is True
+    assert "last_error" not in entry
+
+
 def test_dry_run_creates_nothing(memory_tree, llm_ok):
     """dry-run：不建笔记、不写状态、不发 LLM 请求。"""
     memory_tree.create_note("daily.md", "- [ ] 买牛奶\n", source="test")
