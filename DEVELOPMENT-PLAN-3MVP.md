@@ -706,3 +706,9 @@ frontmatter 与正文追加互不干扰。
   数据目录 `~/atelierr-data` 已 git 化（排除 state/sessions/exports，`.git`
   经 `.stignore` 不同步手机），挂在 decay 定时器 ExecStartPost 每日 03:00
   自动 commit（`|| true` 兜底不阻塞衰减）。回看：`git -C ~/atelierr-data log`
+- **信息加工三步法（意见建议，未实施）**: 2026-09-03 评审登记。把"两步论"
+  （自动化→人工确认）修正为三步（+人工消化），含三条可独立实施的建议：
+  ① 意见通道（`#重做`/`#没用` 标签，dispatch 识别重跑/加速衰减）；
+  ② 确认疲劳纪律（晨报每节限 5 条、积压自动降频）；③ 提炼草稿（晨报
+  "待提炼"附候选 wiki 骨架，wiki 仍保持人写）。全文与实现要点见
+  `docs/INFO-PROCESSING-3STAGE.md`，用户点名调用后动工
