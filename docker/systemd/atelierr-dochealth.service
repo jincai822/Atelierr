@@ -1,0 +1,29 @@
+# Atelierr 文档健康月检服务（oneshot）
+#
+# 每月核对"文档说的"与"盘上实际"是否一致（数据区目录 / systemd 单元 /
+# 文档内路径引用 / 配置文件），见 scripts/utils/doc_health.py。
+# 有异常才建"待确认"笔记并推送 ntfy；无异常只写报告文件，零打扰。
+#
+# 用户级 systemd unit:
+#   mkdir -p ~/.config/systemd/user
+#   cp docker/systemd/atelierr-dochealth.service docker/systemd/atelierr-dochealth.timer \
+#     ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now atelierr-dochealth.timer
+#
+# 报告: ~/atelierr-data/state/reports/doc-health-YYYY-MM-DD.md
+# 日志: ~/atelierr-data/state/logs/dochealth.log
+
+[Unit]
+Description=Atelierr doc health check (monthly)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/workspaces/Atelierr
+Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+# ntfy 推送配置经此环境文件注入（缺失静默，不影响主流程）
+EnvironmentFile=-%h/.config/atelierr/env
+ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs %h/atelierr-data/state/reports
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.utils.doc_health
+StandardOutput=append:%h/atelierr-data/state/logs/dochealth.log
+StandardError=append:%h/atelierr-data/state/logs/dochealth.log

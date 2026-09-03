@@ -725,4 +725,15 @@ frontmatter 与正文追加互不干扰。
   488 张卡按 legacy 观望区对待（内容直接可用，draft 身份见各自
   frontmatter）。**② wiki 格式升级**（概念卡五节 + 建卡前全库查重 + 机检）
   随「信息加工三步法」建议 3 一起等调用；**③ 认知条目迁移**（11 条 →
-  cognition/ 判断登记处）随回路三解冻再议。架构计划版 IR 已同步重渲染
+  cognition/ 判断登记处）随回路三解冻再议。架构计划版 IR 已同步重渲染。
+  **矿藏复用 ✅（2026-09-03）**：①「划重点清单」（准入协议 §7.9）已落地——
+  `processors/highlights.py`（PDF 逐页提取 → 分块 LLM 代读 → 可勾选候选
+  清单）+ attachments/ PDF 自动路由（dispatch/media.py）+ 勾中项转正式
+  笔记（`dispatch/highlights.py`，待确认标签，清单 source=highlights 被
+  todos 跳过防整清单进待办）；已实测：demo PDF → 清单 → 生产扫描通过。
+  ③「文档防失修月审」已落地——`scripts/utils/doc_health.py`（数据区目录/
+  systemd 单元/文档路径引用含花括号展开/配置可解析四项机检），异常才建
+  "待确认"笔记 + ntfy，月检定时器 `atelierr-dochealth.timer`（每月 2 日
+  04:17）已安装启用；首日实测抓到 1 条误报（花括号记法）并修复。
+  ② RALPH 自动开发循环**不装**：它改变"谁写代码"（无人值守代理改仓库），
+  与现行"主会话实现 + 人工裁决"纪律冲突，留 /srv 原地，需要时单独立项

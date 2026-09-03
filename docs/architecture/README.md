@@ -27,14 +27,16 @@ cp /tmp/archify-work/atelierr-plan.html ~/atelierr-data/exports/
 Atelierr 应用（后台管线，定时器无人值守）。两平面代码零互调，交接只走
 `$OV` 数据面；只读桥当前仅 `/weekly` 启用。
 
-**后台管线**（横向）：捕获入口（速记/链接/截图/录音）→ dispatch 分发
-（15 分钟轮询，links→media→todos）→ processors 引擎（OCR/Whisper/LLM 摘要）
-→ memory/ 工作记忆（平面 .md 缓冲区，会遗忘）→ wiki/ 知识总库。
+**后台管线**（横向）：捕获入口（速记/链接/截图/录音/PDF）→ dispatch 分发
+（15 分钟轮询，links→media→todos→highlights）→ processors 引擎
+（OCR/Whisper/LLM 摘要/LLM 划重点代读）→ memory/ 工作记忆（平面 .md
+缓冲区，会遗忘）→ wiki/ 知识总库。PDF 走划重点通道：机器代读出可勾选
+候选清单，人工勾中才转正式笔记（Cognitive OS §7.9 机制，09-03 落地）。
 
 **回响回路**：decay（03:00 分层，只写 sidecar）+ 检索式晨报（07:53，
-复习 + 待提炼，冷却 3 天）+ 响应观测（实验 0 在跑）。每日 03:00 对整个
-数据目录做 git 快照（版本历史；排除 state/sessions/exports，`.git`
-不同步手机）。
+复习 + 待提炼，冷却 3 天）+ 响应观测（实验 0 在跑）+ 文档健康月检
+（每月 2 日 04:17，异常才提醒）。每日 03:00 对整个数据目录做 git 快照
+（版本历史；排除 state/sessions/exports，`.git` 不同步手机）。
 
 **沉淀层（同库分间，COGNITION-SPEC v1.1）**：`memory/wiki/` 一个总库——
 根层 concept（人写，只增不改）、`cognition/` 间（判断登记处，审批写）、
