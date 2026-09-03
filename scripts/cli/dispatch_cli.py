@@ -62,11 +62,12 @@ def _notify_media_failures(failures: List[Dict[str, Any]]) -> None:
 
 
 def _notify_digest(counts: Dict[str, int]) -> None:
-    """今日摘要创建成功后推送四节计数（未配置/失败静默）。"""
+    """今日摘要创建成功后推送五节计数（未配置/失败静默）。"""
     send_ntfy(
         "Atelierr 今日摘要",
-        f"待确认 {counts['pending']}，待办 {counts['todos']}，"
-        f"今日复习 {counts['resurface']}，昨日新入库 {counts['yesterday_new']}",
+        f"待确认 {counts['pending']}，提炼候选 {counts['undistilled']}，"
+        f"待办 {counts['todos']}，今日复习 {counts['resurface']}，"
+        f"昨日新入库 {counts['yesterday_new']}",
     )
 
 

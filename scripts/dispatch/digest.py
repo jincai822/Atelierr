@@ -2,14 +2,18 @@
 
 内容五节（wikilink 列表，点开即达）：
 - 待我确认：当前带"待确认"标签的笔记（摘除标签后次日自然消失）；
+- 提炼候选：从未提炼进 wiki/ 且值得动笔的笔记，两路汇合——
+  ①被反复推送（≥2 次，ResponseProbe 推算）仍未提炼；
+  ②已确认且创建满 DISTILL_MIN_AGE_DAYS 天（"沉一沉再提炼"）。
+  日报/控制台/摘要/划重点清单/待确认/待办不算候选；最多列
+  MAX_DISTILL_CANDIDATES 条（推送多的在前，其次最旧的在前）。
+  同时把 stem 写进摘要 frontmatter 的 undistilled 字段，供控制台
+  Dataview 桥接——sidecar 数据它看不见；并附 wiki 体检（validate
+  出的缺字段/缺互链条目）；
 - 待办进行中：当前带"待办"标签的笔记；
 - 今日复习：遗忘临界区内的笔记（ResurfaceManager，decay 的反面；
   检索式推送——只列标题，提示"先回忆再点开"，点开看一眼即重置时钟，
   确认无价值的留给 review→purge，值得留存的提炼进 wiki/）；
-- 待提炼：被反复推送（≥2 次）但从未提炼进 wiki/ 的笔记（WikiManager
-  + ResponseProbe 推算；同时把 stem 写进摘要 frontmatter 的
-  undistilled 字段，供控制台 Dataview 桥接——sidecar 数据它看不见），
-  并附 wiki 体检（validate 出的缺字段/缺互链条目）；
 - 昨日新入库：frontmatter created 日期为昨天的笔记。
 
 纪律（与 dispatch 模块同源）：
@@ -28,6 +32,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -40,7 +45,13 @@ from scripts.memory.resurface import ResurfaceManager
 from scripts.memory.watcher import MemoryWatcher
 from scripts.wiki.manager import WikiManager
 
-MIN_PUSH_COUNT = 2  # 推送达到此次数仍未提炼，进"待提炼"节
+MIN_PUSH_COUNT = 2  # 推送达到此次数仍未提炼，进"提炼候选"节
+DISTILL_MIN_AGE_DAYS = 3  # 已确认笔记创建满此天数即可提炼（沉一沉再动笔）
+MAX_DISTILL_CANDIDATES = 5  # 候选节最多列几条（防长列表制造压力）
+
+DAILY_NOTE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")  # 日记不算知识候选
+DASHBOARD_STEMS = frozenset({"主页", "控制台"})  # 门面文件不算候选
+DISTILL_EXCLUDED_SOURCES = frozenset({"digest", "highlights"})  # 摘要/清单容器
 
 
 class DigestDispatcher:
@@ -87,7 +98,7 @@ class DigestDispatcher:
         review = self.resurface.candidates()
         review_stems = [Path(item["filename"]).stem for item in review]
         wiki = WikiManager(self.tree)
-        undistilled = self._undistilled(wiki)
+        undistilled = self._distill_candidates(wiki, today)
         wiki_issues = wiki.validate()
         markdown = self._build(
             today, pending, todos, review_stems, yesterday_new,
@@ -113,26 +124,58 @@ class DigestDispatcher:
             "markdown": markdown,
         }
 
-    def _undistilled(self, wiki: WikiManager) -> List[str]:
-        """被反复推送（≥MIN_PUSH_COUNT 次）但从未提炼进 wiki 的笔记 stem。
+    def _distill_candidates(self, wiki: WikiManager, today: str) -> List[str]:
+        """提炼候选：从未进 wiki 且值得动笔的笔记 stem（截断到上限）。
 
-        文件已消失（purge 也是加工）或 from 已被 wiki 条目引用的不计。
+        两路汇合，去重后推送多的在前、其次最旧的在前：
+        - 反复推送：ResponseProbe 累计推送 ≥MIN_PUSH_COUNT 次；
+        - 沉一沉：已确认且 created 满 DISTILL_MIN_AGE_DAYS 天。
+        文件已消失（purge 也是加工）自然不计；日报/控制台/摘要/
+        划重点清单/待确认/待办不候选（见 _excluded_from_distill）。
         """
-        counts = self.probe.push_counts()
-        if not counts:
-            return []
+        counts = {
+            str(slot.get("filename") or ""): int(slot.get("count") or 0)
+            for slot in self.probe.push_counts().values()
+        }
         distilled = wiki.distilled_stems()
-        picked: List[str] = []
-        for slot in counts.values():
-            if slot["count"] < MIN_PUSH_COUNT:
+        cutoff = (
+            datetime.strptime(today, "%Y-%m-%d")
+            - timedelta(days=DISTILL_MIN_AGE_DAYS)
+        ).strftime("%Y-%m-%d")
+        pushed: List[Tuple[int, str]] = []  # (-count, stem)
+        settled: List[Tuple[str, str]] = []  # (created, stem)
+        for note_path in sorted(Path(self.tree.notes_dir).glob("*.md")):
+            stem = note_path.stem
+            if stem in distilled:
                 continue
-            filename = str(slot.get("filename") or "")
-            if not filename or not (self.tree.notes_dir / filename).exists():
+            try:
+                post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
                 continue
-            stem = Path(filename).stem
-            if stem not in distilled:
-                picked.append(stem)
-        return sorted(picked)
+            if self._excluded_from_distill(stem, post):
+                continue
+            push_count = counts.get(note_path.name, 0)
+            if push_count >= MIN_PUSH_COUNT:
+                pushed.append((-push_count, stem))
+                continue
+            created = str(post.get("created") or "")[:10]
+            if created and created <= cutoff:
+                settled.append((created, stem))
+        picked = [stem for _, stem in sorted(pushed)]
+        picked += [stem for _, stem in sorted(settled)]
+        return picked[:MAX_DISTILL_CANDIDATES]
+
+    @staticmethod
+    def _excluded_from_distill(stem: str, post: Any) -> bool:
+        """提炼候选排除规则：日报/门面/摘要/清单容器/待确认/待办。"""
+        if stem.startswith("今日摘要-") or DAILY_NOTE_RE.match(stem):
+            return True
+        if stem in DASHBOARD_STEMS:
+            return True
+        tags = post.get("tags") or []
+        if "待确认" in tags or "待办" in tags:
+            return True
+        return str(post.get("source") or "") in DISTILL_EXCLUDED_SOURCES
 
     def _collect(
         self, today: str
@@ -191,20 +234,12 @@ class DigestDispatcher:
 
         sections = [f"# 今日摘要 {today}", ""]
         sections += [f"## ⏳ 待我确认（{len(pending)}）", "", *_lines(pending), ""]
-        sections += [f"## ✅ 待办进行中（{len(todos)}）", "", *_lines(todos), ""]
-        sections += [f"## 🔁 今日复习（{len(review)}）", ""]
-        if review:
-            sections += [
-                "> 检索练习：看着标题先想「它讲了什么」，再点开核对；",
-                "> 想不起来的，值得就提炼进 wiki/，不值得就留给 review→purge。",
-                "",
-            ]
-        sections += [*_lines(review), ""]
-        sections += [f"## 🧠 待提炼（{len(undistilled)}）", ""]
+        sections += [f"## 🧠 提炼候选（{len(undistilled)}）", ""]
         if undistilled:
             sections += [
-                "> 被反复推送还没进 wiki：提炼（QuickAdd「提炼为 Wiki」）或放手，",
-                "> 别让它一直漂着。",
+                "> 每周日周回顾前，从这儿挑 1 条提炼进 wiki：",
+                "> 点开笔记 → QuickAdd「提炼为 Wiki」，五分钟够了。",
+                "> 提炼后自动从本栏消失；不值得留的，留给 review→purge。",
                 "",
             ]
         sections += [*_lines(undistilled)]
@@ -215,6 +250,15 @@ class DigestDispatcher:
                 for item in wiki_issues
             ]
         sections += [""]
+        sections += [f"## ✅ 待办进行中（{len(todos)}）", "", *_lines(todos), ""]
+        sections += [f"## 🔁 今日复习（{len(review)}）", ""]
+        if review:
+            sections += [
+                "> 检索练习：看着标题先想「它讲了什么」，再点开核对；",
+                "> 想不起来的，值得就提炼进 wiki/，不值得就留给 review→purge。",
+                "",
+            ]
+        sections += [*_lines(review), ""]
         sections += [
             f"## 📥 昨日新入库（{len(yesterday_new)}）",
             "",

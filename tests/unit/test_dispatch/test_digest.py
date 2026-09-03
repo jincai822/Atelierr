@@ -179,7 +179,7 @@ def _seed_probe(tree, pushes: dict) -> None:
 
 
 def test_digest_undistilled_section_and_frontmatter_bridge(memory_tree, make_note):
-    """推送 ≥2 次且未提炼的笔记进"待提炼"节，并写进 frontmatter 桥。"""
+    """推送 ≥2 次且未提炼的笔记进"提炼候选"节，并写进 frontmatter 桥。"""
     make_note(memory_tree, "old.md", "反复被推送", idle_days=30)
     make_note(memory_tree, "once.md", "只推过一次", idle_days=30)
     _seed_probe(memory_tree, {"old.md": 2, "once.md": 1})
@@ -187,10 +187,10 @@ def test_digest_undistilled_section_and_frontmatter_bridge(memory_tree, make_not
     report = DigestDispatcher(memory_tree).run(today="2026-09-01")
 
     assert report["counts"]["undistilled"] == 1
-    assert "## 🧠 待提炼（1）" in report["markdown"]
-    section = report["markdown"].split("## 🧠 待提炼")[1].split("## 📥")[0]
+    assert "## 🧠 提炼候选（1）" in report["markdown"]
+    section = report["markdown"].split("## 🧠 提炼候选")[1].split("## ✅")[0]
     assert "[[old]]" in section
-    assert "[[once]]" not in section  # 只推过 1 次，未到反复阈值
+    assert "[[once]]" not in section  # 只推过 1 次且创建未满 3 天
     post = frontmatter.loads(
         (memory_tree.notes_dir / report["created"]).read_text(encoding="utf-8")
     )
@@ -212,7 +212,7 @@ def test_digest_undistilled_excludes_distilled_and_gone(memory_tree, make_note):
     report = DigestDispatcher(memory_tree).run(today="2026-09-01")
 
     assert report["counts"]["undistilled"] == 0
-    assert "## 🧠 待提炼（0）" in report["markdown"]
+    assert "## 🧠 提炼候选（0）" in report["markdown"]
 
 
 def test_digest_surfaces_wiki_validate_issues(memory_tree, make_note):
@@ -229,3 +229,60 @@ def test_digest_surfaces_wiki_validate_issues(memory_tree, make_note):
 
     assert "wiki 体检（1 条待修）" in report["markdown"]
     assert "[[孤岛]]" in report["markdown"]
+
+
+def test_digest_distill_candidates_settled_rule(memory_tree):
+    """沉一沉规则：已确认且创建满 3 天的笔记，无推送也进提炼候选。"""
+    memory_tree.create_note("old.md", "旧内容", source="link")
+    _backdate_created(memory_tree, "old.md", "2026-09-01")
+    memory_tree.create_note("fresh.md", "新内容", source="link")
+    _backdate_created(memory_tree, "fresh.md", "2026-09-09")
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-10")
+
+    assert report["counts"]["undistilled"] == 1
+    section = report["markdown"].split("## 🧠 提炼候选")[1].split("## ✅")[0]
+    assert "[[old]]" in section
+    assert "[[fresh]]" not in section  # 创建未满 3 天，再沉一沉
+    assert "周日" in section  # CTA：提醒每周提炼仪式
+    post = frontmatter.loads(
+        (memory_tree.notes_dir / report["created"]).read_text(encoding="utf-8")
+    )
+    assert post["undistilled"] == ["[[old]]"]
+
+
+def test_digest_distill_candidates_exclusions(memory_tree):
+    """日报/门面/摘要/划重点清单/待确认/待办：再旧也不进提炼候选。"""
+    cases = [
+        ("2026-09-01.md", {}),  # 日报
+        ("控制台.md", {}),  # 门面
+        ("今日摘要-2026-09-01.md", {"source": "digest"}),  # 历史摘要
+        ("清单.md", {"source": "highlights"}),  # 划重点清单容器
+        ("pending.md", {"tags": ["待确认"]}),  # 未确认
+        ("todo.md", {"tags": ["待办"]}),  # 行动项不是知识
+    ]
+    for name, kwargs in cases:
+        memory_tree.create_note(name, "内容", **kwargs)
+        _backdate_created(memory_tree, name, "2026-09-01")
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-10")
+
+    assert report["counts"]["undistilled"] == 0
+    assert "## 🧠 提炼候选（0）" in report["markdown"]
+
+
+def test_digest_distill_candidates_capped_oldest_first(memory_tree):
+    """候选超过上限时截断到 5 条，最旧的优先留下。"""
+    for i in range(7):
+        name = f"n{i}.md"
+        memory_tree.create_note(name, "内容")
+        _backdate_created(memory_tree, name, f"2026-08-2{i}")
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-10")
+
+    assert report["counts"]["undistilled"] == 5
+    section = report["markdown"].split("## 🧠 提炼候选")[1].split("## ✅")[0]
+    assert "[[n0]]" in section  # 最旧
+    assert "[[n4]]" in section
+    assert "[[n5]]" not in section  # 超出上限被截掉
+    assert "[[n6]]" not in section
