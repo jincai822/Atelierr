@@ -21,8 +21,12 @@
 
 from __future__ import annotations
 
+import fcntl
+import os
 import sys
-from typing import Any, Dict, List, Optional
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Optional
 
 import click
 
@@ -72,6 +76,35 @@ def _notify_digest(counts: Dict[str, int]) -> None:
     )
 
 
+@contextmanager
+def _dispatch_lock(state_dir: str) -> Iterator[bool]:
+    """对 state_dir/dispatch.lock 的 flock 排他互斥（拿不到锁 yield False）。
+
+    links / media / todos / highlights 四个子命令共享这一把锁：手动运行
+    与 15 分钟定时班次撞在同一分钟时，后到进程拿不到锁即跳过（对定时器
+    而言跳过是正常行为，不算错误）。flock 随进程退出或 fd 关闭自动释放，
+    无需清理 stale 锁文件；feishu 常驻守护等不加锁的命令不受影响。
+
+    Args:
+        state_dir: 状态目录（MemoryTree.state_dir，已展开 ~）。
+
+    Yields:
+        bool: 拿到排他锁为 True；被其他分发进程占用为 False。
+    """
+    lock_path = Path(state_dir) / "dispatch.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+        else:
+            yield True
+    finally:
+        os.close(fd)
+
+
 class DispatchCLI:
     """自动分发 CLI（click 组）。"""
 
@@ -101,20 +134,24 @@ class DispatchCLI:
         def links_command(dry_run: bool) -> None:
             """扫描笔记中的抖音链接并自动抓取转写。"""
             tree = self._build_tree()
-            report = LinkDispatcher(tree).run(dry_run=dry_run)
-            click.echo(
-                f"扫描 {report['scanned']} 篇笔记，"
-                f"新发现 {report['found']} 条链接，"
-                f"跳过已处理 {report['skipped']} 条"
-            )
-            for filename in report["created"]:
-                click.echo(f"  已创建: {filename}（待确认）")
-            for failure in report["failed"]:
-                click.echo(f"  失败: {failure['url']} — {failure['error']}")
-            if not dry_run:
-                _notify_failures(report["failed"])
-            if dry_run:
-                click.echo("（dry-run：未做处理）")
+            with _dispatch_lock(tree.state_dir) as locked:
+                if not locked:
+                    click.echo("已有分发任务在运行，本次跳过")
+                    return
+                report = LinkDispatcher(tree).run(dry_run=dry_run)
+                click.echo(
+                    f"扫描 {report['scanned']} 篇笔记，"
+                    f"新发现 {report['found']} 条链接，"
+                    f"跳过已处理 {report['skipped']} 条"
+                )
+                for filename in report["created"]:
+                    click.echo(f"  已创建: {filename}（待确认）")
+                for failure in report["failed"]:
+                    click.echo(f"  失败: {failure['url']} — {failure['error']}")
+                if not dry_run:
+                    _notify_failures(report["failed"])
+                if dry_run:
+                    click.echo("（dry-run：未做处理）")
 
         @cli.command(name="todos")
         @click.option(
@@ -126,18 +163,22 @@ class DispatchCLI:
         def todos_command(dry_run: bool) -> None:
             """扫描笔记中的行动意图（- [ ] / #todo 直转，其余 LLM 判定）。"""
             tree = self._build_tree()
-            report = TodoDispatcher(tree).run(dry_run=dry_run)
-            click.echo(
-                f"扫描 {report['scanned']} 篇笔记，"
-                f"行动项 {report['candidates']} 条，"
-                f"跳过 {report['skipped']} 篇"
-            )
-            for filename in report["created"]:
-                click.echo(f"  已创建待办: {filename}")
-            for failure in report["failed"]:
-                click.echo(f"  失败: {failure['note']} — {failure['error']}")
-            if dry_run:
-                click.echo("（dry-run：未做处理）")
+            with _dispatch_lock(tree.state_dir) as locked:
+                if not locked:
+                    click.echo("已有分发任务在运行，本次跳过")
+                    return
+                report = TodoDispatcher(tree).run(dry_run=dry_run)
+                click.echo(
+                    f"扫描 {report['scanned']} 篇笔记，"
+                    f"行动项 {report['candidates']} 条，"
+                    f"跳过 {report['skipped']} 篇"
+                )
+                for filename in report["created"]:
+                    click.echo(f"  已创建待办: {filename}")
+                for failure in report["failed"]:
+                    click.echo(f"  失败: {failure['note']} — {failure['error']}")
+                if dry_run:
+                    click.echo("（dry-run：未做处理）")
 
         @cli.command(name="media")
         @click.option(
@@ -149,22 +190,26 @@ class DispatchCLI:
         def media_command(dry_run: bool) -> None:
             """扫描 attachments/ 里的截图/录音并自动 OCR/转写入库。"""
             tree = self._build_tree()
-            report = MediaDispatcher(tree).run(dry_run=dry_run)
-            click.echo(
-                f"扫描 {report['scanned']} 个附件，"
-                f"新发现 {report['found']} 个，"
-                f"跳过已处理 {report['skipped']} 个"
-            )
-            for filename in report["created"]:
-                # 划重点清单不带"待确认"（确认动作在勾中项转出的笔记上）
-                suffix = "" if filename.startswith("划重点-") else "（待确认）"
-                click.echo(f"  已创建: {filename}{suffix}")
-            for failure in report["failed"]:
-                click.echo(f"  失败: {failure['file']} — {failure['error']}")
-            if not dry_run:
-                _notify_media_failures(report["failed"])
-            if dry_run:
-                click.echo("（dry-run：未做处理）")
+            with _dispatch_lock(tree.state_dir) as locked:
+                if not locked:
+                    click.echo("已有分发任务在运行，本次跳过")
+                    return
+                report = MediaDispatcher(tree).run(dry_run=dry_run)
+                click.echo(
+                    f"扫描 {report['scanned']} 个附件，"
+                    f"新发现 {report['found']} 个，"
+                    f"跳过已处理 {report['skipped']} 个"
+                )
+                for filename in report["created"]:
+                    # 划重点清单不带"待确认"（确认动作在勾中项转出的笔记上）
+                    suffix = "" if filename.startswith("划重点-") else "（待确认）"
+                    click.echo(f"  已创建: {filename}{suffix}")
+                for failure in report["failed"]:
+                    click.echo(f"  失败: {failure['file']} — {failure['error']}")
+                if not dry_run:
+                    _notify_media_failures(report["failed"])
+                if dry_run:
+                    click.echo("（dry-run：未做处理）")
 
         @cli.command(name="highlights")
         @click.option(
@@ -176,16 +221,20 @@ class DispatchCLI:
         def highlights_command(dry_run: bool) -> None:
             """扫描划重点清单，把人工勾中的候选转为 wiki 摘录卡。"""
             tree = self._build_tree()
-            report = HighlightsDispatcher(tree).run(dry_run=dry_run)
-            click.echo(
-                f"扫描 {report['scanned']} 份清单，"
-                f"勾中 {report['ticked']} 条，"
-                f"跳过已转记 {report['skipped']} 条"
-            )
-            for filename in report["created"]:
-                click.echo(f"  已创建摘录卡: wiki/{filename}")
-            if dry_run:
-                click.echo("（dry-run：未做处理）")
+            with _dispatch_lock(tree.state_dir) as locked:
+                if not locked:
+                    click.echo("已有分发任务在运行，本次跳过")
+                    return
+                report = HighlightsDispatcher(tree).run(dry_run=dry_run)
+                click.echo(
+                    f"扫描 {report['scanned']} 份清单，"
+                    f"勾中 {report['ticked']} 条，"
+                    f"跳过已转记 {report['skipped']} 条"
+                )
+                for filename in report["created"]:
+                    click.echo(f"  已创建摘录卡: wiki/{filename}")
+                if dry_run:
+                    click.echo("（dry-run：未做处理）")
 
         @cli.command(name="digest")
         @click.option(
