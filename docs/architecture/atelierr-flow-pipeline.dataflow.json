@@ -3,87 +3,451 @@
   "diagram_type": "dataflow",
   "meta": {
     "title": "信息流细化 ①：捕获 → 加工 → 入库",
-    "subtitle": "设备无关汇入同一个库 → 按内容类型分发 → 引擎逐步加工 → 待确认笔记 · 2026-09-06",
+    "subtitle": "每 15 分钟无人值守跑完全程；你只在最后确认 · 2026-09-06",
     "output": "atelierr-flow-pipeline.html",
-    "viewBox": [1280, 860]
+    "viewBox": [
+      1280,
+      860
+    ]
   },
   "stages": [
-    { "label": "① 捕获 · 同步（设备无关）" },
-    { "label": "② 同一个库 · 按类型分发" },
-    { "label": "③ 加工引擎（逐步）" },
-    { "label": "④ 入库 memory/" },
-    { "label": "⑤ 人工确认" }
+    {
+      "label": "① 捕获 · 同步（手机/电脑同库）"
+    },
+    {
+      "label": "② 同一个库 · 按内容类型分发"
+    },
+    {
+      "label": "③ 加工引擎（逐步拆解）"
+    },
+    {
+      "label": "④ 入库 memory/（只增不改）"
+    },
+    {
+      "label": "⑤ 人工确认（唯一触点）"
+    }
   ],
   "nodes": [
-    { "id": "phone", "type": "frontend", "label": "手机 Obsidian", "sublabel": "QuickAdd 速记 · 贴链接 · 拍照录音", "stage": 0, "row": 0 },
-    { "id": "syncthing", "type": "cloud", "label": "Syncthing", "sublabel": "手机 ↔ 电脑 实时同步", "stage": 0, "row": 2 },
-    { "id": "desktop", "type": "frontend", "label": "电脑 Obsidian", "sublabel": "直接写库 · Flatnotes 兜底", "stage": 0, "row": 4 },
-    { "id": "links", "type": "backend", "label": "links 分发", "sublabel": "URL 正则匹配 · 查重 · 3 次熔断", "stage": 1, "row": 0 },
-    { "id": "vault", "type": "database", "label": "同一个库", "sublabel": "memory/ + attachments/ · 裸笔记自动补 frontmatter", "stage": 1, "row": 2, "tag": "手机电脑同一处" },
-    { "id": "media", "type": "backend", "label": "media 分发", "sublabel": "扩展名路由 · 防读写入中文件", "stage": 1, "row": 4 },
-    { "id": "ytdlp", "type": "backend", "label": "yt-dlp 下载", "sublabel": "页面解析 / 视频下载", "stage": 2, "row": 0 },
-    { "id": "whisper", "type": "backend", "label": "Whisper 转写", "sublabel": "GPU fp32 · OOM 熔断重试", "stage": 2, "row": 1 },
-    { "id": "deepseek", "type": "cloud", "label": "DeepSeek 整理", "sublabel": "补标点分段 + 观点总结", "stage": 2, "row": 2 },
-    { "id": "mediaengine", "type": "backend", "label": "附件加工", "sublabel": "PaddleOCR 图 · Whisper 音", "stage": 2, "row": 3 },
-    { "id": "hlengine", "type": "cloud", "label": "划重点引擎", "sublabel": "fitz 逐页 → 分块 → LLM 挑 ≤20 条", "stage": 2, "row": 4 },
-    { "id": "notes", "type": "database", "label": "正式笔记", "sublabel": "标题净化命名 · 带「待确认」标签", "stage": 3, "row": 0, "tag": "机器不再改" },
-    { "id": "sidecar", "type": "database", "label": "sidecar 索引", "sublabel": "state/index.json · 每日 git 快照", "stage": 3, "row": 2 },
-    { "id": "checklist", "type": "database", "label": "划重点清单", "sublabel": "- [ ] 复选框 · 推荐页码", "stage": 3, "row": 4 },
-    { "id": "you", "type": "external", "label": "你 · 人工确认", "sublabel": "摘待确认标签 · 勾清单复选框", "stage": 4, "row": 1 }
+    {
+      "id": "phone",
+      "type": "frontend",
+      "label": "手机 Obsidian",
+      "sublabel": "QuickAdd 速记 · 正文贴链接 · 拍照/录音进 attachments",
+      "stage": 0,
+      "row": 0
+    },
+    {
+      "id": "syncthing",
+      "type": "cloud",
+      "label": "Syncthing",
+      "sublabel": "实时双向 · 仅排除 state/sessions/exports",
+      "stage": 0,
+      "row": 2
+    },
+    {
+      "id": "desktop",
+      "type": "frontend",
+      "label": "电脑 Obsidian",
+      "sublabel": "Obsidian 直接写库 · 或往 attachments/ 拖文件",
+      "stage": 0,
+      "row": 4
+    },
+    {
+      "id": "links",
+      "type": "backend",
+      "label": "links 分发",
+      "sublabel": "每 15min 扫全部笔记正文 · 正则抓 URL · 状态去重",
+      "stage": 1,
+      "row": 0
+    },
+    {
+      "id": "vault",
+      "type": "database",
+      "label": "同一个库",
+      "sublabel": "memory/ 笔记 + attachments/ 附件 · 新裸笔记自动补 frontmatter（保 mtime）",
+      "stage": 1,
+      "row": 2,
+      "tag": "手机电脑同一处"
+    },
+    {
+      "id": "media",
+      "type": "backend",
+      "label": "media 分发",
+      "sublabel": "每 15min 扫 attachments/ · mtime>30s 才动 · 按扩展名分流",
+      "stage": 1,
+      "row": 4
+    },
+    {
+      "id": "ytdlp",
+      "type": "backend",
+      "label": "yt-dlp 下载",
+      "sublabel": "抖音抓视频 · 小红书抓页面+图文",
+      "stage": 2,
+      "row": 0
+    },
+    {
+      "id": "whisper",
+      "type": "backend",
+      "label": "Whisper 转写",
+      "sublabel": "GPU fp32 全文转写 · OOM 自动熔断重试",
+      "stage": 2,
+      "row": 1
+    },
+    {
+      "id": "deepseek",
+      "type": "cloud",
+      "label": "DeepSeek 整理",
+      "sublabel": "补标点 · 分段 · 观点总结 · 起标题",
+      "stage": 2,
+      "row": 2
+    },
+    {
+      "id": "mediaengine",
+      "type": "backend",
+      "label": "附件加工",
+      "sublabel": "截图→PaddleOCR 文字 · 录音→Whisper 转写",
+      "stage": 2,
+      "row": 3
+    },
+    {
+      "id": "hlengine",
+      "type": "cloud",
+      "label": "划重点引擎",
+      "sublabel": "fitz 逐页提取 → 6000 字分块 → LLM 挑 ≤20 条候选",
+      "stage": 2,
+      "row": 4
+    },
+    {
+      "id": "notes",
+      "type": "database",
+      "label": "正式笔记",
+      "sublabel": "文件名=平台-标题（净化截 60 字）· tags=[待确认]",
+      "stage": 3,
+      "row": 0,
+      "tag": "机器不再改"
+    },
+    {
+      "id": "sidecar",
+      "type": "database",
+      "label": "sidecar 索引",
+      "sublabel": "登记 id/confidence=1.0/layer=short-term · 每日 git 快照",
+      "stage": 3,
+      "row": 2
+    },
+    {
+      "id": "checklist",
+      "type": "database",
+      "label": "划重点清单",
+      "sublabel": "- [ ] 复选框 + 推荐页码 · 不打扰（无待确认标签）",
+      "stage": 3,
+      "row": 4
+    },
+    {
+      "id": "you",
+      "type": "external",
+      "label": "你 · 人工确认",
+      "sublabel": "读完摘「待确认」标签 · 清单勾 [x] 即转正",
+      "stage": 4,
+      "row": 1
+    }
   ],
   "flows": [
-    { "from": "phone", "to": "syncthing", "label": "速记/链接", "classification": "md 笔记", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [58, 271] },
-    { "from": "syncthing", "to": "vault", "label": "双向同步", "classification": "笔记+附件", "variant": "emphasis", "fromSide": "right", "toSide": "left", "route": "straight", "labelAt": [207, 360] },
-    { "from": "desktop", "to": "vault", "label": "直接写 · 扔附件", "classification": "同一目录", "variant": "emphasis", "fromSide": "top", "toSide": "bottom", "via": [[100, 430], [315, 430]], "labelAt": [200, 445] },
-    { "from": "vault", "to": "links", "label": "扫描笔记正文", "classification": "发现 URL", "variant": "emphasis", "fromSide": "top", "toSide": "bottom", "route": "straight", "labelAt": [355, 271] },
-    { "from": "vault", "to": "media", "label": "扫描附件目录", "classification": "图/音/PDF", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [270, 499] },
-    { "from": "links", "to": "ytdlp", "label": "链接正文", "classification": "抖音/小红书/B 站", "variant": "emphasis", "labelAt": [425, 138] },
-    { "from": "ytdlp", "to": "whisper", "label": "视频/页面", "classification": "下载成功", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [575, 214] },
-    { "from": "whisper", "to": "deepseek", "label": "转写全文", "classification": "零标点原文", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [575, 328] },
-    { "from": "deepseek", "to": "notes", "label": "整理成稿", "classification": "标题+总结+分段全文", "variant": "emphasis", "fromSide": "right", "toSide": "left", "labelAt": [700, 271] },
-    { "from": "media", "to": "mediaengine", "label": "截图/录音", "classification": "png · mp3", "variant": "emphasis", "fromSide": "right", "toSide": "left", "labelAt": [385, 560] },
-    { "from": "media", "to": "hlengine", "label": "PDF", "classification": "书籍/长文档", "variant": "emphasis", "fromSide": "bottom", "toSide": "bottom", "route": "straight", "labelAt": [422, 672] },
-    { "from": "mediaengine", "to": "notes", "label": "识别成稿", "classification": "OCR/转写文本", "variant": "emphasis", "fromSide": "right", "toSide": "top", "via": [[660, 499], [660, 110], [745, 110]], "labelAt": [702, 335] },
-    { "from": "hlengine", "to": "checklist", "label": "候选清单", "classification": "≤20 条复选框", "variant": "emphasis", "fromSide": "right", "toSide": "left", "route": "straight", "labelAt": [637, 590] },
-    { "from": "notes", "to": "sidecar", "label": "登记", "classification": "confidence 1.0", "variant": "default", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [693, 305] },
-    { "from": "notes", "to": "you", "label": "待确认", "classification": "摘标签即确认", "variant": "emphasis", "labelAt": [800, 200] },
-    { "from": "checklist", "to": "you", "label": "勾选 [x]", "classification": "转正式笔记", "variant": "default", "fromSide": "right", "toSide": "bottom", "via": [[1090, 613], [1090, 320], [960, 320]], "labelAt": [1025, 500] }
+    {
+      "from": "phone",
+      "to": "syncthing",
+      "label": "速记/链接",
+      "classification": "md 笔记",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [
+        58,
+        271
+      ]
+    },
+    {
+      "from": "syncthing",
+      "to": "vault",
+      "label": "双向同步",
+      "classification": "笔记+附件",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight",
+      "labelAt": [
+        207,
+        360
+      ]
+    },
+    {
+      "from": "desktop",
+      "to": "vault",
+      "label": "直接写 · 扔附件",
+      "classification": "同一目录",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "via": [
+        [
+          100,
+          430
+        ],
+        [
+          315,
+          430
+        ]
+      ],
+      "labelAt": [
+        200,
+        445
+      ]
+    },
+    {
+      "from": "vault",
+      "to": "links",
+      "label": "扫描笔记正文",
+      "classification": "发现 URL",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "route": "straight",
+      "labelAt": [
+        355,
+        271
+      ]
+    },
+    {
+      "from": "vault",
+      "to": "media",
+      "label": "扫描附件目录",
+      "classification": "图/音/PDF",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [
+        270,
+        499
+      ]
+    },
+    {
+      "from": "links",
+      "to": "ytdlp",
+      "label": "链接正文",
+      "classification": "抖音/小红书/B 站",
+      "variant": "emphasis",
+      "labelAt": [
+        425,
+        138
+      ]
+    },
+    {
+      "from": "ytdlp",
+      "to": "whisper",
+      "label": "视频/页面",
+      "classification": "下载成功",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [
+        575,
+        214
+      ]
+    },
+    {
+      "from": "whisper",
+      "to": "deepseek",
+      "label": "转写全文",
+      "classification": "零标点原文",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [
+        575,
+        328
+      ]
+    },
+    {
+      "from": "deepseek",
+      "to": "notes",
+      "label": "整理成稿",
+      "classification": "标题+总结+分段全文",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [
+        700,
+        271
+      ]
+    },
+    {
+      "from": "media",
+      "to": "mediaengine",
+      "label": "截图/录音",
+      "classification": "png · mp3",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [
+        385,
+        560
+      ]
+    },
+    {
+      "from": "media",
+      "to": "hlengine",
+      "label": "PDF",
+      "classification": "书籍/长文档",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "route": "straight",
+      "labelAt": [
+        422,
+        672
+      ]
+    },
+    {
+      "from": "mediaengine",
+      "to": "notes",
+      "label": "识别成稿",
+      "classification": "OCR/转写文本",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "top",
+      "via": [
+        [
+          660,
+          499
+        ],
+        [
+          660,
+          110
+        ],
+        [
+          745,
+          110
+        ]
+      ],
+      "labelAt": [
+        702,
+        335
+      ]
+    },
+    {
+      "from": "hlengine",
+      "to": "checklist",
+      "label": "候选清单",
+      "classification": "≤20 条复选框",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight",
+      "labelAt": [
+        637,
+        590
+      ]
+    },
+    {
+      "from": "notes",
+      "to": "sidecar",
+      "label": "登记",
+      "classification": "confidence 1.0",
+      "variant": "default",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [
+        693,
+        305
+      ]
+    },
+    {
+      "from": "notes",
+      "to": "you",
+      "label": "待确认",
+      "classification": "摘标签即确认",
+      "variant": "emphasis",
+      "labelAt": [
+        800,
+        200
+      ]
+    },
+    {
+      "from": "checklist",
+      "to": "you",
+      "label": "勾选 [x]",
+      "classification": "转正式笔记",
+      "variant": "default",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          1090,
+          613
+        ],
+        [
+          1090,
+          320
+        ],
+        [
+          960,
+          320
+        ]
+      ],
+      "labelAt": [
+        1025,
+        500
+      ]
+    }
   ],
   "cards": [
     {
-      "dot": "emerald",
-      "title": "三条加工主路（全部无人值守）",
-      "items": [
-        "链接路：URL → yt-dlp 下载 → Whisper 转写 → DeepSeek 整理 → 待确认笔记",
-        "附件路：截图/录音 → OCR/Whisper → 待确认笔记（内嵌原附件）",
-        "PDF 路：LLM 代读出候选清单 → 你勾中的条目才转正式笔记"
-      ]
-    },
-    {
       "dot": "cyan",
-      "title": "设备无关（你上次对齐的点）",
+      "title": "① 捕获：两条入口进同一处",
       "items": [
-        "手机和电脑写进同一个库，系统分不清也不关心来源设备",
-        "attachments/ 双向同步：手机拍照一样进附件路",
-        "裸笔记进库先被 watcher 补 frontmatter 并登记（保 mtime）"
+        "手机：QuickAdd 速记（模板自动带 frontmatter）；正文贴链接；拍照/录音进 attachments/",
+        "电脑：Obsidian 直接写笔记；或往 attachments/ 拖截图/录音/PDF；Flatnotes 网页兜底",
+        "Syncthing 实时双向同步整个库；state/sessions/exports 不上手机"
       ]
     },
     {
-      "dot": "rose",
-      "title": "红线",
+      "dot": "emerald",
+      "title": "② 分发：15 分钟一轮，问内容不问设备",
       "items": [
-        "笔记入库后机器不改、不移、不删",
-        "动态状态只写 sidecar（confidence/layer/回收站标记）",
-        "删除只有一条路：pending_delete → review → purge → trash/"
+        "links：先 process_pending() 登记新裸笔记，再扫全部笔记正文抓抖音/小红书/B 站 URL",
+        "media：扫 attachments/ 新文件（mtime 超 30 秒才动，防读到写入中的文件）",
+        "幂等：processed_links/media.json 记状态，同一 URL/文件只成功处理一次；失败 3 次熔断"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "③ 引擎：每条路的逐步动作",
+      "items": [
+        "链接路：yt-dlp 下载 → Whisper GPU 全文转写 → DeepSeek 整理（标点/分段/观点/标题）",
+        "附件路：截图→PaddleOCR；录音→Whisper；产出笔记内嵌 ![[attachments/原文件]]",
+        "PDF 路：fitz 逐页提取 → 6000 字分块 → DeepSeek 挑 ≤20 条 → 带推荐页码的复选框清单"
+      ]
+    },
+    {
+      "dot": "blue",
+      "title": "④ 入库：笔记从此归你",
+      "items": [
+        "文件名=平台-净化标题（非法字符转 -、截 60 字；撞名加内容 id 短码）",
+        "frontmatter 自动带 id/created/source/tags=[待确认]；sidecar 登记 confidence 1.0",
+        "铁律：笔记文件创建后机器绝不改写、移动、删除（红线见右卡）"
       ]
     },
     {
       "dot": "amber",
-      "title": "本图涉及的人工触点",
+      "title": "⑤ 你只做两件事",
       "items": [
-        "① 摘「待确认」标签：读完转写/识别稿后手动摘除",
-        "② 勾清单复选框：划重点清单勾 [x]，15 分钟内自动转正式笔记",
-        "提炼/删除/会话在下一张图（回响 · 沉淀 · 会话）"
+        "摘标签：读完转写/识别稿，手动摘掉「待确认」= 确认入库",
+        "勾清单：划重点清单里勾 [x]，15 分钟内自动转正式笔记（带待确认再走一遍①）",
+        "不确认不勾也行：会进晨报反复提醒，不会静默消失"
       ]
     }
   ]

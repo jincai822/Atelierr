@@ -18,12 +18,19 @@ node $ARCH/renderers/architecture/render-architecture.mjs \
   docs/architecture/atelierr-plan.architecture.json /tmp/atelierr-plan.html
 node $ARCH/renderers/dataflow/render-dataflow.mjs \
   docs/architecture/atelierr-plan.dataflow.json /tmp/atelierr-flow.html
+node $ARCH/renderers/dataflow/render-dataflow.mjs \
+  docs/architecture/atelierr-flow-pipeline.dataflow.json /tmp/atelierr-flow-pipeline.html
+node $ARCH/renderers/dataflow/render-dataflow.mjs \
+  docs/architecture/atelierr-flow-loop.dataflow.json /tmp/atelierr-flow-loop.html
 # 注入流线动画（archify 无动画能力，渲染后加 CSS）：
 .venv-atelierr/bin/python tools/archify_animate.py \
-  /tmp/atelierr-plan.html /tmp/atelierr-flow.html
+  /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
+  /tmp/atelierr-flow-pipeline.html /tmp/atelierr-flow-loop.html
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-plan.html  # 全 ok:true
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-flow.html
-cp /tmp/atelierr-plan.html /tmp/atelierr-flow.html ~/atelierr-data/exports/
+cp /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
+   /tmp/atelierr-flow-pipeline.html /tmp/atelierr-flow-loop.html \
+   ~/atelierr-data/exports/
 ```
 
 ## 架构速记（与图一致）
