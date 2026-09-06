@@ -5,13 +5,14 @@
 下载视频到临时目录 → 复用 :class:`VideoProcessor` 转写 →
 组装带来源行的 Markdown → 清理临时文件。
 
-输出格式（v3）：标题 + 来源行 + ``## 观点总结`` / ``## 分观点论述``
-（LLM 生成）+ ``## 转写全文``——转写优先经 LLM 整理（按语义分段、
-补全标点、逐字不改写）；LLM 不可用/失败时降级为机械分段（去除逐句
-时间戳、按句界合并自然段、繁体转简体 OpenCC）。LLM 摘要与整理经配置
-``processors.link.llm`` 启用：API key 从环境变量读取（默认
-DEEPSEEK_API_KEY，不落盘到 config）；key 缺失、转写超长（成本护栏）
-或调用失败时自动降级，绝不阻塞入库管线。
+输出格式（v4）：标题 + 来源行 + 观点总结 / 分观点论述 / 金句摘录 /
+提到的人·书·概念（LLM 生成，附中图法分类与主题词，经笔记 frontmatter
+``tags`` 追加到"待确认"与平台标签之后）+ ``## 转写全文``——转写优先经
+LLM 整理（按语义分段、补全标点、逐字不改写）；LLM 不可用/失败时降级
+为机械分段（去除逐句时间戳、按句界合并自然段、繁体转简体 OpenCC），
+不带分类标签。LLM 摘要与整理经配置 ``processors.link.llm`` 启用：
+API key 从环境变量读取（默认 DEEPSEEK_API_KEY，不落盘到 config）；
+key 缺失、转写超长（成本护栏）或调用失败时自动降级，绝不阻塞入库管线。
 
 反爬约束（2026-08-31/09-01 真实样本实测）：抖音详情 API 对匿名请求
 403，yt-dlp 借浏览器 cookie（``cookiesfrombrowser``）可拿到视频流
@@ -92,6 +93,45 @@ _VIDEO_EXTS: Tuple[str, ...] = (".mp4", ".mkv", ".webm", ".mov", ".flv")
 #: LLM 摘要默认接入点（OpenAI 兼容接口）与模型
 _LLM_DEFAULT_BASE_URL = "https://api.deepseek.com"
 _LLM_DEFAULT_MODEL = "deepseek-v4-flash"
+
+#: 产出笔记的"人工确认"标签（与 dispatch/links.py REVIEW_TAG 同值；
+#: 笔记经该标签进入晨报待确认清单，人在 Obsidian 阅读后自行移除）
+_REVIEW_TAG = "待确认"
+
+#: 链接整理（_summarize）的 v4 提示词，末尾拼转写全文。
+#: 输出：summary / points / insights / entities / category / topics；
+#: category 取自中图法两级分类表（二级优先，大类兜底，Z 综合收尾）。
+_SUMMARIZE_V4_PROMPT = """请阅读以下视频转写全文，为个人知识库生成结构化笔记元数据，只输出 JSON：
+{"summary": "...", "points": ["..."], "insights": ["..."], "entities": ["..."], "category": "...", "topics": ["..."]}。
+要求：
+- summary：150-250 字，一段话讲清核心论点和论证脉络。
+- points：分观点论述，覆盖原文全部独立论点，不限条数；每条独立成句、不依赖上下文，不超过 60 字，按论述顺序排列。
+- insights：金句摘录，原文中最有价值的原话（关键判断/反常识观点），3-8 条，保持原话不改写。
+- entities：原文提到的书籍/人物/概念，格式"名称（谁的作品/什么人/什么意思）"；没有则空数组。
+- category：从下方分类表选 1 个最贴切的类目，优先选二级类（如 B84-心理学）；二级无合适的用大类（如 B-哲学）；无法归类用 Z-综合。禁止编造表外编号，拿不准就选更宽的类。
+- topics：3-6 个自由主题词，短语，覆盖跨领域内容。
+只依据原文，不得补充原文没有的内容。不要输出 JSON 以外的任何内容。
+
+分类表：
+B 哲学·宗教：B80思维科学 B81逻辑学 B82伦理·价值观 B83美学 B84心理学
+C 社会科学：C91社会学 C93管理·领导 C96职业·人才
+D 政治·法律：D6政治 D9法律
+F 经济：F0经济学原理 F27企业·创业 F83金融·投资
+G 文化·教育·体育：G2传媒·传播 G4教育·学习方法 G61幼儿教育 G63中小学教育 G78家庭教育 G79自学·自我提升 G8体育·运动
+H 语言·文字：H1汉语·写作 H3外语学习
+I 文学：I1外国文学 I2中国文学
+J 艺术：J2绘画·书法 J6音乐 J9影视
+K 历史·地理：K1世界史 K2中国史 K81人物传记 K9地理·旅行
+N 自然科学：N49科普
+Q 生物：Q生物·进化
+R 医药·卫生：R15营养·饮食 R16保健·运动 R2中医 R4疾病·医疗
+S 农业：S种植·宠物
+T 工业技术：TP18人工智能 TP3计算机·软件 TN91通信·数码 TS97美食·烹饪 TU建筑·家装
+U 交通：U46汽车
+X 环境·安全：X环境·安全
+Z 综合：Z综合
+
+转写全文："""
 
 #: 视频处理器输出里的逐句时间戳行（"- [00:00] 文本"）
 _SEGMENT_LINE_RE = re.compile(r"^- \[\d{2}:\d{2}\]\s*", re.M)
@@ -218,6 +258,24 @@ def _parse_share_text(text: str) -> Tuple[str, str]:
     return title, author
 
 
+def _tag_clean(text: str) -> str:
+    """Obsidian 标签清洗：去首尾空白，内部空白替换为 ``-``。
+
+    Obsidian 标签不能含空格；LLM 可能给出带空白的类目/主题词
+    （如 ``B 哲学·宗教`` → ``B-哲学·宗教``）。
+
+    Args:
+        text: 原始文本。
+
+    Returns:
+        str: 清洗后的标签；空串表示无有效内容。
+    """
+    cleaned = text.strip()
+    if re.search(r"\s", cleaned):
+        cleaned = re.sub(r"\s+", "-", cleaned)
+    return cleaned
+
+
 class LinkProcessor(BaseProcessor):
     """链接抓取处理器（支持抖音/小红书的分享文本或链接）。
 
@@ -251,7 +309,7 @@ class LinkProcessor(BaseProcessor):
         self.llm_base_url = str(llm_cfg.get("base_url", _LLM_DEFAULT_BASE_URL))
         self.llm_model = str(llm_cfg.get("model", _LLM_DEFAULT_MODEL))
         self.llm_api_key_env = str(llm_cfg.get("api_key_env", "DEEPSEEK_API_KEY"))
-        self.llm_max_tokens = int(llm_cfg.get("max_tokens", 800))
+        self.llm_max_tokens = int(llm_cfg.get("max_tokens", 2500))
         self.llm_timeout = float(llm_cfg.get("timeout", 60))
         self.llm_max_chars = int(llm_cfg.get("max_transcript_chars", 6000))
         self.llm_format_max_tokens = int(llm_cfg.get("format_max_tokens", 8000))
@@ -636,17 +694,23 @@ class LinkProcessor(BaseProcessor):
         return response.json()["choices"][0]["message"]["content"]
 
     def _summarize(self, transcript: str) -> Tuple[Optional[Dict[str, Any]], str]:
-        """调 LLM 生成观点总结；任何失败/跳过返回 (None, 状态)，绝不抛出。
+        """调 LLM 生成结构化笔记元数据；任何失败/跳过返回 (None, 状态)。
 
         跳过条件（不算错误）：API key 环境变量未设置、转写为空、
         转写超过 max_transcript_chars（成本护栏，长视频留给人工）。
+
+        LLM 输出 v4 JSON（summary / points / insights / entities /
+        category / topics），旧格式（只有 summary / points）向后兼容，
+        缺失字段按空处理。points/insights/entities/topics 上限分别为
+        20/10/10/6 条；category/topics 清洗为 Obsidian 标签（内部空白
+        替换为 ``-``），category 为空则不产出分类标签。
 
         Args:
             transcript: 简体转写全文。
 
         Returns:
-            Tuple[Optional[Dict[str, Any]], str]: ({"summary", "points"}
-            或 None, 状态串 ok / skipped:* / failed:*）。
+            Tuple[Optional[Dict[str, Any]], str]: (六键字典或 None,
+            状态串 ok / skipped:* / failed:*）。
         """
         if not os.environ.get(self.llm_api_key_env, "").strip():
             return None, f"skipped:no-{self.llm_api_key_env}"
@@ -654,23 +718,42 @@ class LinkProcessor(BaseProcessor):
             return None, "skipped:empty-transcript"
         if len(transcript) > self.llm_max_chars:
             return None, "skipped:too-long"
-        prompt = (
-            "请阅读以下视频转写全文，只输出 JSON："
-            '{"summary": "...", "points": ["...", "..."]}。'
-            "summary 是 80-120 字的观点总结，一段话概括核心论点；"
-            "points 是 3-5 条分观点论述，每条一句不超过 40 字，按论述顺序。"
-            "不要输出 JSON 以外的任何内容。\n\n转写全文：\n" + transcript
-        )
+        prompt = _SUMMARIZE_V4_PROMPT + "\n" + transcript
         try:
             content = self._llm_chat(prompt, self.llm_max_tokens, json_mode=True)
             data = json.loads(content)
             summary_text = str(data.get("summary") or "").strip()
             points = [
-                str(p).strip() for p in (data.get("points") or []) if str(p).strip()
-            ][:5]
+                str(item).strip()
+                for item in (data.get("points") or [])
+                if str(item).strip()
+            ][:20]
+            insights = [
+                str(item).strip()
+                for item in (data.get("insights") or [])
+                if str(item).strip()
+            ][:10]
+            entities = [
+                str(item).strip()
+                for item in (data.get("entities") or [])
+                if str(item).strip()
+            ][:10]
+            topics = [
+                _tag_clean(str(item).strip())
+                for item in (data.get("topics") or [])
+                if str(item).strip()
+            ][:6]
+            category = _tag_clean(str(data.get("category") or ""))
             if not summary_text:
                 return None, "failed:empty-summary"
-            return {"summary": summary_text, "points": points}, "ok"
+            return {
+                "summary": summary_text,
+                "points": points,
+                "insights": insights,
+                "entities": entities,
+                "category": category,
+                "topics": topics,
+            }, "ok"
         except Exception as exc:  # noqa: BLE001 - LLM 失败降级，不阻塞管线
             return None, f"failed:{type(exc).__name__}"
 
@@ -724,7 +807,11 @@ class LinkProcessor(BaseProcessor):
         raw_body: bool = False,
         body_override: Optional[str] = None,
     ) -> str:
-        """组装最终 Markdown：标题 + 来源行 +（可选）摘要两节 + 正文。
+        """组装最终 Markdown：标题 + 来源行 +（可选）摘要各节 + 正文。
+
+        LLM 给出中图法分类/主题词时，Markdown 顶部带 ``tags``
+        frontmatter（[待确认, 平台标签] + category + topics）；无则
+        不带 frontmatter（LLM 失败/跳过时 tags 保持原样）。
 
         Args:
             title: 笔记标题。
@@ -732,9 +819,10 @@ class LinkProcessor(BaseProcessor):
             url: 来源链接。
             transcript_markdown: 视频处理器的输出（逐句时间戳格式，
             在此转换，原标题行丢弃）；raw_body=True 时按原文使用。
-            summary: LLM 摘要 {"summary", "points"}；None 时不出现
-            摘要两节（降级形态）。
-            source_label: 来源行平台名（抖音/小红书）。
+            summary: LLM 摘要 {"summary", "points", "insights",
+            "entities", "category", "topics"}；None 时不出现摘要节
+            （降级形态）。
+            source_label: 来源行平台名（抖音/小红书），也作平台标签。
             body_label: 正文小节标题（转写全文/笔记正文）。
             raw_body: True 时 transcript_markdown 为纯文本正文，不做
             时间戳剥离与句界分段；正文为空时不产出正文小节。
@@ -749,7 +837,28 @@ class LinkProcessor(BaseProcessor):
             if author
             else f"> 来源：{source_label} {url}"
         )
-        sections = [f"# {_T2S.convert(title)}", "", source, ""]
+        classify_tags: List[str] = []
+        if summary:
+            category = str(summary.get("category") or "").strip()
+            topics = [
+                str(topic).strip()
+                for topic in (summary.get("topics") or [])
+                if str(topic).strip()
+            ]
+            classify_tags = ([category] if category else []) + topics
+        sections: List[str] = []
+        if classify_tags:
+            # MemoryTree.create_note 复用 content 自带 frontmatter 的
+            # tags（不覆盖参数 tags），故须带上"待确认"+平台标签，
+            # 使落库笔记仍是 [待确认, 平台] + 分类/主题词。
+            tags = [_REVIEW_TAG, source_label] + classify_tags
+            sections += [
+                "---",
+                f"tags: {json.dumps(tags, ensure_ascii=False)}",
+                "---",
+                "",
+            ]
+        sections += [f"# {_T2S.convert(title)}", "", source, ""]
         if summary:
             sections += ["## 观点总结", "", summary["summary"]]
             if summary.get("points"):
@@ -757,6 +866,12 @@ class LinkProcessor(BaseProcessor):
                 sections += [
                     f"{i}. {point}" for i, point in enumerate(summary["points"], 1)
                 ]
+            if summary.get("insights"):
+                sections += ["", "## 金句摘录", ""]
+                sections += [f"> {item}" for item in summary["insights"]]
+            if summary.get("entities"):
+                sections += ["", "## 提到的人·书·概念", ""]
+                sections += [f"- {item}" for item in summary["entities"]]
             sections.append("")
         if body_override and body_override.strip():
             body = body_override.strip()

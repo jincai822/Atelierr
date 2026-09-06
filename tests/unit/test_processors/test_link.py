@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import frontmatter
 import pytest
 import yt_dlp
 
@@ -96,11 +97,12 @@ class _FakeLLMResponse:
         return self._payload
 
 
-def _llm_payload(summary="核心观点总结。", points=("观点一。", "观点二。")):
+def _llm_payload(summary="核心观点总结。", points=("观点一。", "观点二。"), extra=None):
     import json as _json
 
     content = _json.dumps(
-        {"summary": summary, "points": list(points)}, ensure_ascii=False
+        {"summary": summary, "points": list(points), **(extra or {})},
+        ensure_ascii=False,
     )
     return {"choices": [{"message": {"content": content}}]}
 
@@ -118,6 +120,21 @@ def _branching_llm(monkeypatch, format_text="", format_error=False):
                 raise RuntimeError("format api down")
             return _FakeLLMResponse({"choices": [{"message": {"content": format_text}}]})
         return _FakeLLMResponse(_llm_payload())
+
+    monkeypatch.setattr(link_module.httpx, "post", _post)
+
+
+def _fixed_llm(monkeypatch, payload, format_text=""):
+    """假 LLM：摘要调用返回固定 payload，整理调用按 format_text 返回。
+
+    与 _branching_llm 相同分流规则，但摘要响应内容可控（新字段用例）。
+    """
+
+    def _post(url, headers=None, json=None, timeout=None):
+        prompt = json["messages"][0]["content"]
+        if "整理为易读" in prompt:
+            return _FakeLLMResponse({"choices": [{"message": {"content": format_text}}]})
+        return _FakeLLMResponse(payload)
 
     monkeypatch.setattr(link_module.httpx, "post", _post)
 
@@ -386,6 +403,96 @@ def test_llm_summary_inserted(fake_pipeline, monkeypatch):
     assert "## 分观点论述\n\n1. 观点一。\n2. 观点二。" in result.markdown
     assert result.markdown.index("## 观点总结") < result.markdown.index("## 转写全文")
     assert result.metadata["llm"]["status"] == "ok"
+
+
+def test_llm_v4_full_fields_rendered_with_tags(fake_pipeline, monkeypatch):
+    """v4 JSON 全字段：金句/实体两节按序渲染，frontmatter tags 含分类与主题词。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    payload = _llm_payload(
+        summary="核心观点总结。",
+        points=("观点一。", "观点二。"),
+        extra={
+            "insights": ["这句话是最反常识的判断。"],
+            "entities": [
+                "叔本华（德国哲学家）",
+                "《作为意志和表象的世界》（叔本华著作）",
+            ],
+            "category": "B84-心理学",
+            "topics": ["唯意志论", "人生哲学"],
+        },
+    )
+    _fixed_llm(monkeypatch, payload)
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    markdown = result.markdown
+    order = [
+        markdown.index(head)
+        for head in ("## 观点总结", "## 分观点论述", "## 金句摘录",
+                     "## 提到的人·书·概念", "## 转写全文")
+    ]
+    assert order == sorted(order)
+    assert "## 金句摘录\n\n> 这句话是最反常识的判断。" in markdown
+    assert (
+        "## 提到的人·书·概念\n\n"
+        "- 叔本华（德国哲学家）\n"
+        "- 《作为意志和表象的世界》（叔本华著作）" in markdown
+    )
+    post = frontmatter.loads(markdown)
+    assert post.metadata["tags"] == [
+        "待确认", "抖音", "B84-心理学", "唯意志论", "人生哲学",
+    ]
+
+
+def test_llm_old_format_backward_compatible(fake_pipeline, monkeypatch):
+    """旧格式 JSON（只有 summary/points）：无新节、无分类 tags，照常渲染。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _branching_llm(monkeypatch)
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert result.markdown.startswith("# 信息标题\n")
+    assert "## 观点总结\n\n核心观点总结。" in result.markdown
+    assert "## 分观点论述" in result.markdown
+    assert "## 金句摘录" not in result.markdown
+    assert "## 提到的人·书·概念" not in result.markdown
+
+
+def test_llm_points_over_five_not_truncated(fake_pipeline, monkeypatch):
+    """points 超过 5 条不再截断（v3 硬截断 [:5]）：8 条全保留并按序编号。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    points = tuple(f"观点 {i}。" for i in range(1, 9))
+    _fixed_llm(monkeypatch, _llm_payload(points=points))
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    block = result.markdown.split("## 分观点论述", 1)[1]
+    for i in range(1, 9):
+        assert f"{i}. 观点 {i}。" in block
+    assert "9. 观点" not in block
+
+
+def test_llm_topics_category_whitespace_cleaned(fake_pipeline, monkeypatch):
+    """category/topics 含空白：内部空白替换为 -，空项过滤（Obsidian 标签禁空格）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    payload = _llm_payload(
+        extra={
+            "category": " B 哲学·宗教 ",
+            "topics": ["认知 科学", "  ", "自我 提升", ""],
+        }
+    )
+    _fixed_llm(monkeypatch, payload)
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    post = frontmatter.loads(result.markdown)
+    assert post.metadata["tags"] == [
+        "待确认", "抖音", "B-哲学·宗教", "认知-科学", "自我-提升",
+    ]
 
 
 def test_llm_format_replaces_body(fake_pipeline, monkeypatch):
