@@ -3,22 +3,23 @@
   "diagram_type": "dataflow",
   "meta": {
     "title": "Atelierr 全系统信息流（动态）",
-    "subtitle": "五路捕获 → 15 分钟自动加工 → 工作记忆（含回响回路） → 人工四触点 + Atelier 会话 → wiki 沉淀 · 2026-09-06 现状",
+    "subtitle": "手机/电脑汇入同一个库 → 按内容类型分发（链接/附件/待办） → 加工入库 → 人工四触点 + Atelier 会话 → wiki 沉淀 · 2026-09-06 现状",
     "output": "atelierr-flow.html",
     "viewBox": [1280, 860]
   },
   "stages": [
-    { "label": "① 捕获 · 同步" },
-    { "label": "② 自动分发" },
+    { "label": "① 捕获 · 同步（设备无关）" },
+    { "label": "② 同一个库 · 按内容类型分发" },
     { "label": "③ 加工引擎" },
     { "label": "④ 工作记忆 memory/（含回响）" },
     { "label": "⑤ 人工 · 会话 · 沉淀" }
   ],
   "nodes": [
-    { "id": "phone", "type": "frontend", "label": "手机 Obsidian", "sublabel": "QuickAdd 速记 · 粘贴链接", "stage": 0, "row": 0 },
+    { "id": "phone", "type": "frontend", "label": "手机 Obsidian", "sublabel": "QuickAdd 速记 · 贴链接 · 拍照录音", "stage": 0, "row": 0 },
     { "id": "syncthing", "type": "cloud", "label": "Syncthing", "sublabel": "手机 ↔ 电脑 实时同步", "stage": 0, "row": 2 },
-    { "id": "desktop", "type": "frontend", "label": "电脑投放", "sublabel": "attachments/：截图 录音 PDF", "stage": 0, "row": 4 },
+    { "id": "desktop", "type": "frontend", "label": "电脑 Obsidian", "sublabel": "直接写库 · Flatnotes 兜底", "stage": 0, "row": 4 },
     { "id": "links", "type": "backend", "label": "links 分发", "sublabel": "15 分钟轮询 · 发现新链接", "stage": 1, "row": 0 },
+    { "id": "vault", "type": "database", "label": "同一个库", "sublabel": "memory/ 笔记 + attachments/ 附件", "stage": 1, "row": 2, "tag": "手机电脑同一处" },
     { "id": "media", "type": "backend", "label": "media 分发", "sublabel": "15 分钟轮询 · 附件路由", "stage": 1, "row": 4 },
     { "id": "linkengine", "type": "backend", "label": "链接加工", "sublabel": "yt-dlp · Whisper GPU · DeepSeek 整理", "stage": 2, "row": 0 },
     { "id": "mediaengine", "type": "backend", "label": "附件加工", "sublabel": "PaddleOCR · Whisper 转写", "stage": 2, "row": 2 },
@@ -34,8 +35,10 @@
   ],
   "flows": [
     { "from": "phone", "to": "syncthing", "label": "速记/链接", "classification": "md 笔记", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [58, 271] },
-    { "from": "syncthing", "to": "links", "label": "落到电脑", "classification": "memory/ 根层", "variant": "emphasis", "labelAt": [165, 271] },
-    { "from": "desktop", "to": "media", "label": "扔进附件目录", "classification": "png/mp3/pdf", "variant": "emphasis", "fromSide": "right", "toSide": "left", "route": "straight", "labelAt": [207, 635] },
+    { "from": "syncthing", "to": "vault", "label": "双向同步", "classification": "笔记+附件", "variant": "emphasis", "fromSide": "right", "toSide": "left", "route": "straight", "labelAt": [207, 360] },
+    { "from": "desktop", "to": "vault", "label": "直接写 · 扔附件", "classification": "同一目录", "variant": "emphasis", "fromSide": "top", "toSide": "bottom", "via": [[100, 430], [315, 430]], "labelAt": [200, 445] },
+    { "from": "vault", "to": "links", "label": "扫描笔记正文", "classification": "发现 URL → 链接路", "variant": "emphasis", "fromSide": "top", "toSide": "bottom", "route": "straight", "labelAt": [355, 271] },
+    { "from": "vault", "to": "media", "label": "扫描附件目录", "classification": "按类型：图/音/PDF", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [270, 499] },
     { "from": "links", "to": "linkengine", "label": "链接正文", "classification": "抖音/小红书/B 站", "variant": "emphasis", "labelAt": [422, 138] },
     { "from": "media", "to": "mediaengine", "label": "截图/录音", "classification": "png · mp3", "variant": "emphasis", "fromSide": "right", "toSide": "left", "labelAt": [385, 499] },
     { "from": "media", "to": "hlengine", "label": "PDF", "classification": "书籍/长文档", "variant": "emphasis", "fromSide": "bottom", "toSide": "bottom", "route": "straight", "labelAt": [422, 672] },
@@ -55,11 +58,12 @@
   "cards": [
     {
       "dot": "emerald",
-      "title": "两条主路（全自动到你面前）",
+      "title": "主路（设备无关 · 全自动到你面前）",
       "items": [
-        "链接路：粘贴 → 同步 → 下载转写 → DeepSeek 整理 → 待确认笔记",
-        "PDF 路：扔进 attachments/ → LLM 代读 → 候选清单 → 你勾选才转正式笔记",
-        "截图/录音路：OCR/Whisper 识别 → 待确认笔记"
+        "设备在①汇入同一个库后消失，②只按内容类型分流",
+        "链接路：正文有 URL → 下载转写 → DeepSeek 整理 → 待确认笔记",
+        "附件路：截图/录音 → OCR/Whisper → 待确认笔记；PDF → 候选清单等你勾",
+        "待办路：已确认笔记 → LLM 判行动项 → todo 笔记（晨报待办栏提醒）"
       ]
     },
     {
