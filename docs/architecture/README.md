@@ -1,8 +1,11 @@
 # Atelierr 当前架构（2026-09-02 落盘记录）
 
-> 唯一维护的架构图：`atelierr-plan.architecture.json`（archify IR，同目录）；
-> 全系统动态信息流图：`atelierr-plan.dataflow.json`（archify dataflow IR，同目录）。
-> 渲染产物（可点开看的 HTML/PNG）在 `~/atelierr-data/exports/atelierr-plan.*`、`atelierr-flow.html`。
+> 唯一维护的架构图：`atelierr-plan.architecture.json`（archify IR，同目录）。
+> 信息流图（dataflow IR，同目录）按粒度三层：
+> - 总览：`atelierr-plan.dataflow.json` → `atelierr-flow.html`
+> - 细化①捕获→加工→入库：`atelierr-flow-pipeline.dataflow.json`
+> - 细化②回响·沉淀·删除·会话：`atelierr-flow-loop.dataflow.json`
+> 渲染产物（可点开看的 HTML/PNG）在 `~/atelierr-data/exports/`。
 > 纪律（2026-09-02 用户裁决）：架构图只维护这一份计划版，不再出现状图；
 > 架构有变化就更新这份 IR 并重渲染。
 

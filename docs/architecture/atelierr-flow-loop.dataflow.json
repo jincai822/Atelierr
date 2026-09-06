@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "信息流细化 ②：回响 · 沉淀 · 删除 · 会话",
+    "subtitle": "decay/晨报/todos 围绕同一个库运转 → 你复习、提炼、裁决 → 归宿只有 wiki/ 与 trash/ · 2026-09-06",
+    "output": "atelierr-flow-loop.html",
+    "viewBox": [1280, 860]
+  },
+  "stages": [
+    { "label": "① 工作记忆 memory/" },
+    { "label": "② 回响引擎（定时器驱动）" },
+    { "label": "③ 触达你面前" },
+    { "label": "④ 沉淀动作（你发起）" },
+    { "label": "⑤ 归宿" }
+  ],
+  "nodes": [
+    { "id": "notes", "type": "database", "label": "memory/ 笔记", "sublabel": "已确认 · 已归一化 · 机器不再改", "stage": 0, "row": 0 },
+    { "id": "decay", "type": "backend", "label": "decay 03:00", "sublabel": "反链统计 → confidence → 分层", "stage": 1, "row": 0 },
+    { "id": "sidecar", "type": "database", "label": "sidecar 索引", "sublabel": "state/index.json", "stage": 1, "row": 1 },
+    { "id": "digest", "type": "backend", "label": "晨报 07:53", "sublabel": "五节摘要 · 冷却 3 天", "stage": 1, "row": 3 },
+    { "id": "todos", "type": "backend", "label": "todos 判定", "sublabel": "LLM 判行动项", "stage": 1, "row": 4 },
+    { "id": "ntfy", "type": "cloud", "label": "ntfy 推送", "sublabel": "手机通知", "stage": 2, "row": 0 },
+    { "id": "you", "type": "external", "label": "你", "sublabel": "复习 · 提炼 · 删除裁决 · 发起会话", "stage": 2, "row": 2 },
+    { "id": "quickadd", "type": "backend", "label": "QuickAdd 提炼", "sublabel": "提炼为 Wiki · 60 秒 · from 指回来源 · ≥1 互链", "stage": 3, "row": 1 },
+    { "id": "atelier", "type": "external", "label": "Atelier 会话", "sublabel": "$weekly · /promote · /decision", "stage": 3, "row": 3 },
+    { "id": "wiki", "type": "database", "label": "wiki/ 知识总库", "sublabel": "concept 根层 · cognition/ · reflections/", "stage": 4, "row": 1, "tag": "永久资产" },
+    { "id": "trash", "type": "database", "label": "trash/ 回收站", "sublabel": "purge 后可恢复", "stage": 4, "row": 3 }
+  ],
+  "flows": [
+    { "from": "notes", "to": "decay", "label": "打分输入", "variant": "default", "fromSide": "right", "toSide": "left", "route": "straight", "labelAt": [207, 138] },
+    { "from": "notes", "to": "digest", "label": "扫描全库", "variant": "default", "fromSide": "bottom", "toSide": "left", "via": [[100, 499]], "labelAt": [165, 420] },
+    { "from": "notes", "to": "todos", "label": "已确认笔记", "variant": "default", "fromSide": "top", "toSide": "left", "via": [[100, 90], [230, 90], [230, 613]], "labelAt": [165, 320] },
+    { "from": "decay", "to": "sidecar", "label": "打分/分层", "classification": "只写 sidecar", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [360, 214] },
+    { "from": "digest", "to": "ntfy", "label": "ntfy 推送", "variant": "default", "fromSide": "right", "toSide": "top", "via": [[430, 499], [430, 110], [530, 110]], "labelAt": [465, 90] },
+    { "from": "digest", "to": "you", "label": "今日摘要五节", "variant": "emphasis", "fromSide": "top", "toSide": "left", "via": [[315, 385]], "labelAt": [395, 360] },
+    { "from": "todos", "to": "you", "label": "todo 笔记 · 待办提醒", "variant": "default", "fromSide": "right", "toSide": "bottom", "via": [[560, 613], [560, 430], [530, 430]], "labelAt": [500, 530] },
+    { "from": "you", "to": "quickadd", "label": "挑 1 条提炼", "classification": "周日仪式", "variant": "emphasis", "fromSide": "right", "toSide": "left", "via": [[637, 385], [637, 271]], "labelAt": [620, 410] },
+    { "from": "quickadd", "to": "wiki", "label": "落根层", "classification": "from 指回来源", "variant": "emphasis", "fromSide": "right", "toSide": "left", "route": "straight", "labelAt": [852, 240] },
+    { "from": "sidecar", "to": "atelier", "label": "只读桥", "classification": "$weekly 读全库", "variant": "dashed", "fromSide": "right", "toSide": "left", "via": [[620, 271], [620, 499]], "labelAt": [700, 360] },
+    { "from": "atelier", "to": "wiki", "label": "周报 · 决策日志", "classification": "进 reflections/ 间", "variant": "default", "fromSide": "right", "toSide": "left", "via": [[852, 499], [852, 271]], "labelAt": [905, 390] },
+    { "from": "you", "to": "trash", "label": "review→purge 点头", "variant": "dashed", "fromSide": "bottom", "toSide": "left", "via": [[530, 535], [876, 535], [876, 499]], "labelAt": [700, 552] }
+  ],
+  "cards": [
+    {
+      "dot": "violet",
+      "title": "回响回路（防遗忘）",
+      "items": [
+        "decay 03:00 打分分层，只写 sidecar，绝不碰笔记",
+        "晨报五节：待确认 · 提炼候选 · 待办 · 今日复习 · 昨日新入库",
+        "提炼候选 = 推送 ≥2 次或确认满 3 天未提炼；复习冷却 3 天",
+        "todos 判定：已确认笔记 → LLM 判行动项 → todo 笔记"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "删除通道（唯一路径）",
+      "items": [
+        "decay 把冷却到阈值的笔记标 pending_delete（只写 sidecar）",
+        "memory_cli review 列出 → 你点头 → purge 移入 trash/",
+        "trash/ 可恢复；机器没有任何自动删除路径"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Atelier 会话平面",
+      "items": [
+        "$weekly 经只读桥读全库，周报写 wiki/reflections/ 间",
+        "/promote 提炼写根层；/decision 写 cognition/ 间（回路三冻结）",
+        "与后台管线代码零互调，交接只走数据面"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "本图涉及的人工触点",
+      "items": [
+        "③ 周日提炼：晨报提炼候选里挑 1 条 → QuickAdd 提炼为 Wiki",
+        "④ 删除裁决：review 时点头才 purge",
+        "复习推送：先想「它讲了什么」再点开，点开即重置时钟"
+      ]
+    }
+  ]
+}
