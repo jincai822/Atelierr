@@ -8,9 +8,9 @@
 - 手工提炼条目：frontmatter 需 created / source / from（from 归一化后
   非空且指向仍存在的 memory 笔记）+ 正文至少一条指向其他已存在 wiki
   条目的 wikilink；
-- Cognitive OS 卡（frontmatter 含 type+title 即认定）：需 type / title /
-  description 非空；豁免 from/互链（它们是迁入的存量资产，来源信息在
-  各自的 sources 字段里）。
+- Cognitive OS 卡（frontmatter 含 type 即认定）：需 type / title 非空
+  （description 建议但不强制）；豁免 from/互链（它们是迁入的存量资产，
+  来源信息在各自的 sources 字段里）。
 
 还提供 orphans()（wiki 内零入链条目）与 distilled_stems()（已被
 提炼过的 memory 笔记 stem 集合，供晨间摘要算"反复推送未提炼"）。
@@ -30,9 +30,10 @@ WIKI_DIRNAME = "wiki"  # 库根下的沉淀层子目录名（memory.yaml 可覆�
 
 REQUIRED_FRONTMATTER = ("created", "source", "from")
 
-#: Cognitive OS 迁入卡的必备字段（frontmatter 含 type+title 即走此 schema，
-#: 豁免 from/互链——存量资产的来源在各自 sources 字段里）
-LEGACY_REQUIRED_FRONTMATTER = ("type", "title", "description")
+#: Cognitive OS 迁入卡的必备字段（frontmatter 含 type 即走此 schema，
+#: 豁免 from/互链——存量资产的来源在各自 sources 字段里；description
+#: 不强制：12 份章节导读/总清单迁入时只补了 type+title 最小卡头）
+LEGACY_REQUIRED_FRONTMATTER = ("type", "title")
 
 WIKILINK_RE = re.compile(r"\[\[([^\[\]|#]+)(?:[#|][^\[\]]*)?\]\]")
 
@@ -138,8 +139,8 @@ class WikiManager:
 
     @staticmethod
     def _is_legacy_card(metadata: Dict[str, Any]) -> bool:
-        """是否 Cognitive OS 迁入卡（frontmatter 含 type+title 即认定）。"""
-        return bool(metadata.get("type") and metadata.get("title"))
+        """是否 Cognitive OS 迁入卡（frontmatter 含 type 即认定）。"""
+        return bool(metadata.get("type"))
 
     def orphans(self) -> List[str]:
         """wiki 内部零入链的条目 stem（按名称排序）。"""

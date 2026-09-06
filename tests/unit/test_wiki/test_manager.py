@@ -207,12 +207,19 @@ def test_validate_legacy_card_schema(memory_tree):
 
 
 def test_validate_legacy_card_missing_fields(memory_tree):
-    """迁入卡缺 description → 只报缺字段，不要求 from/互链。"""
-    _write_wiki(memory_tree, "残卡.md", "type: Knowledge Term\ntitle: 残卡")
+    """迁入卡缺 title → 只报缺字段，不要求 from/互链/created。"""
+    _write_wiki(memory_tree, "残卡.md", "type: Knowledge Term")
 
     problems = WikiManager(memory_tree).validate()
     assert [p["stem"] for p in problems] == ["残卡"]
-    assert problems[0]["issues"] == ["缺 frontmatter 字段 description"]
+    assert problems[0]["issues"] == ["缺 frontmatter 字段 title"]
+
+
+def test_validate_legacy_card_without_description(memory_tree):
+    """迁入卡无 description（章节导读迁入补最小卡头）：不报警。"""
+    _write_wiki(memory_tree, "第1课-导读.md", "type: Reading Note\ntitle: 第1课-导读")
+
+    assert WikiManager(memory_tree).validate() == []
 
 
 def test_validate_mixed_schemas(memory_tree):
