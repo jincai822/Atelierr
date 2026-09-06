@@ -2,8 +2,10 @@
 
 推送规则（dispatch_cli 接线）：
 - 链接抓取失败 → "Atelierr 抓取失败"（不推用户无从知晓）；
+- 链接/OCR 笔记转写完成且飞书通道可用 → 逐笔记推送带「✅ 确认」按钮
+  的卡片（confirm_note 携带笔记文件名；ntfy 通道文本照发不受影响）；
 - 晨间摘要创建成功 → "Atelierr 今日摘要"（附五节计数）；
-- 常规处理成功不推送（用户自己贴的链接，无需马后炮）。
+- 其余常规处理成功不推送（用户自己贴的链接，无需马后炮）。
 
 双通道（``send_dispatch_notice``，各自失败隔离）：
 - ntfy：配置节 ``dispatch.notify``（config/processors.yaml 或 .example）：
@@ -80,17 +82,28 @@ def send_ntfy(
         return False
 
 
-def send_dispatch_notice(title: str, message: str) -> Dict[str, bool]:
+def send_dispatch_notice(
+    title: str, message: str, confirm_note: Optional[str] = None
+) -> Dict[str, bool]:
     """双通道推送：ntfy + 飞书卡片，各自独立失败隔离（不抛异常）。
 
     飞书侧未配置（FEISHU_APP_ID/SECRET/CHAT_ID 缺失）时静默跳过。
+
+    Args:
+        title: 通知标题。
+        message: 通知正文（只放数量等非敏感信息）。
+        confirm_note: 待确认笔记相对 memory/ 的文件名；给飞书卡片加
+            「✅ 确认」callback 按钮，ntfy 通道不受影响；None 不加按钮。
 
     Returns:
         Dict[str, bool]: {"ntfy": ..., "feishu": ...} 各通道结果。
     """
     from scripts.dispatch.feishu import send_feishu
 
+    feishu_kwargs: Dict[str, str] = {}
+    if confirm_note:
+        feishu_kwargs["confirm_note"] = confirm_note
     return {
         "ntfy": send_ntfy(title, message),
-        "feishu": send_feishu(title, message),
+        "feishu": send_feishu(title, message, **feishu_kwargs),
     }

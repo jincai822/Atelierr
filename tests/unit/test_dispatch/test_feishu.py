@@ -11,6 +11,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import frontmatter
 import pytest
 
 import scripts.dispatch.feishu as feishu_module
@@ -246,3 +247,151 @@ def test_feishu_cli_without_credentials_exits_one(monkeypatch, tmp_path, capsys)
 
     assert code == 1
     assert "FEISHU_APP_ID" in capsys.readouterr().err
+
+
+def _card_action(value: dict):
+    """构造一条假的 p2.card.action.trigger 回调事件。"""
+    return SimpleNamespace(event=SimpleNamespace(action=SimpleNamespace(value=value)))
+
+
+def test_card_action_confirm_removes_review_tag(memory_tree):
+    """点「✅ 确认」：只删 tags 里的「待确认」，其余字段与正文原样保留。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note(
+        "douyin-x.md", "正文行\n", source="link", tags=["待确认", "抖音"]
+    )
+    path = memory_tree.notes_dir / "douyin-x.md"
+    before = frontmatter.loads(path.read_text(encoding="utf-8"))
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "confirm_note", "note": "douyin-x.md"})
+    )
+
+    assert resp["toast"] == {"type": "success", "content": "已确认"}
+    assert resp["card"]["type"] == "raw"
+    data = resp["card"]["data"]
+    assert data["header"]["template"] == "green"
+    assert "已移除「待确认」标签" in data["elements"][0]["text"]["content"]
+    after = frontmatter.loads(path.read_text(encoding="utf-8"))
+    assert after.metadata == {**before.metadata, "tags": ["抖音"]}
+    assert after.content == before.content
+
+
+def test_card_action_confirm_noop_without_review_tag(memory_tree):
+    """无「待确认」标签：不改写（幂等），toast 仍报成功。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("ready.md", "已确认的笔记\n", source="link", tags=["抖音"])
+    path = memory_tree.notes_dir / "ready.md"
+    before_bytes = path.read_bytes()
+    before_mtime = path.stat().st_mtime_ns
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "confirm_note", "note": "ready.md"})
+    )
+
+    assert resp["toast"] == {"type": "success", "content": "已确认"}
+    assert path.read_bytes() == before_bytes
+    assert path.stat().st_mtime_ns == before_mtime
+
+
+def test_card_action_unknown_action_ignored(memory_tree):
+    """非 confirm_note 动作：返回空表（卡片不变），不动笔记。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("x.md", "正文\n", source="link", tags=["待确认"])
+    path = memory_tree.notes_dir / "x.md"
+    before = path.read_bytes()
+
+    assert (
+        bridge.handle_card_action(_card_action({"action": "other", "note": "x.md"}))
+        == {}
+    )
+    assert path.read_bytes() == before
+
+
+def test_card_action_invalid_path_refused(memory_tree):
+    """路径注入（.. / 子目录 / 空）：error toast，绝不写文件。"""
+    bridge = _bridge(memory_tree)
+    for note in ("../evil.md", "sub/x.md", ""):
+        resp = bridge.handle_card_action(
+            _card_action({"action": "confirm_note", "note": note})
+        )
+        assert resp["toast"]["type"] == "error"
+        assert resp["toast"]["content"] == "笔记不存在或路径非法"
+    assert not (memory_tree.notes_dir.parent / "evil.md").exists()
+    assert not (memory_tree.notes_dir / "sub").exists()
+
+
+def test_card_action_missing_note_returns_error(memory_tree):
+    """笔记不存在：error toast，不抛异常。"""
+    bridge = _bridge(memory_tree)
+    resp = bridge.handle_card_action(
+        _card_action({"action": "confirm_note", "note": "nope.md"})
+    )
+
+    assert resp["toast"] == {"type": "error", "content": "笔记不存在或路径非法"}
+
+
+def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
+    """带 confirm_note 的卡片：追加「✅ 确认」callback 按钮（JSON 编码 value）。"""
+    monkeypatch.setenv("FEISHU_APP_ID", "cli_x")
+    monkeypatch.setenv("FEISHU_APP_SECRET", "secret")
+    monkeypatch.setenv("FEISHU_CHAT_ID", "oc_chat")
+    sent = []
+    _fake_lark(monkeypatch, MagicMock())
+    monkeypatch.setattr(
+        feishu_module,
+        "_send",
+        lambda client, chat_id, msg_type, content: sent.append(
+            (chat_id, msg_type, content)
+        )
+        or True,
+    )
+
+    assert (
+        send_feishu(
+            "Atelierr 链接笔记待确认",
+            "链接笔记已转写入库：douyin-x.md",
+            confirm_note="douyin-x.md",
+        )
+        is True
+    )
+
+    chat_id, msg_type, content = sent[0]
+    assert chat_id == "oc_chat"
+    assert msg_type == "interactive"
+    card = json.loads(content)
+    actions = card["elements"][1]["actions"]
+    assert [a["text"]["content"] for a in actions] == [
+        "在 Obsidian 中打开",
+        "✅ 确认",
+    ]
+    behavior = actions[1]["behaviors"][0]
+    assert behavior["type"] == "callback"
+    assert json.loads(behavior["value"]) == {
+        "action": feishu_module.CONFIRM_ACTION,
+        "note": "douyin-x.md",
+    }
+
+
+def test_dispatch_notice_passes_confirm_note_to_feishu(monkeypatch):
+    """confirm_note 只透传给飞书通道（ntfy 无按钮，文本照发）。"""
+    import scripts.dispatch.notify as notify_module
+
+    calls = []
+    monkeypatch.setattr(notify_module, "send_ntfy", lambda t, m: True)
+    monkeypatch.setattr(
+        feishu_module,
+        "send_feishu",
+        lambda t, m, **kwargs: calls.append((t, kwargs)) or False,
+    )
+
+    result = notify_module.send_dispatch_notice(
+        "Atelierr 链接笔记待确认",
+        "链接笔记已转写入库：douyin-x.md",
+        confirm_note="douyin-x.md",
+    )
+
+    assert result == {"ntfy": True, "feishu": False}
+    assert calls == [
+        ("Atelierr 链接笔记待确认", {"confirm_note": "douyin-x.md"})
+    ]

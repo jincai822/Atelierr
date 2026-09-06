@@ -10,11 +10,18 @@
 - 幂等：message_id 登记 ``<state_dir>/feishu_messages.json``。
 
 发送（系统 → 飞书）：
-- 推送规则与 ntfy 一致：只在"用户不知道的事"发生时提醒（抓取失败、
-  今日摘要），常规成功不推；
+- 推送规则与 ntfy 一致：只在"用户不知道的事"发生时提醒（链接/OCR
+  笔记完成待确认、抓取失败、今日摘要），常规成功不推；
 - 发交互卡片（标题 + 正文 + 「在 Obsidian 中打开」URI 按钮——
-  按钮是纯客户端跳转，无回调、零写入）；卡片失败降级纯文本；
-- 不碰笔记文件：确认/勾选等一切写动作仍由人在 Obsidian 完成。
+  纯客户端跳转，无回调、零写入；带 ``confirm_note`` 时追加
+  「✅ 确认」callback 按钮，点击回调 ``card.action.trigger``）；
+- 卡片失败降级纯文本。
+
+确认回调（用户点「✅ 确认」，系统内唯一机器改写笔记的路径）：
+- 经用户 2026-09-07 批准的人工触发单标签删除例外：仅删除该笔记
+  frontmatter ``tags`` 里的「待确认」一项，其他字段与正文一概不动；
+- 校验笔记路径（memory/ 顶层、*.md、无 ``..``），不合法绝不写文件；
+- 幂等：无「待确认」标签不改写；异常只记日志 + toast，不中断守护。
 
 凭证全部走环境变量（``~/.config/atelierr/env`` 注入，绝不入库）：
 - ``FEISHU_APP_ID`` / ``FEISHU_APP_SECRET``（自建应用凭证，收发都要）；
@@ -34,7 +41,9 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+import frontmatter
 
 from scripts.dispatch.media import ATTACHMENTS_DIR
 from scripts.memory.core import MemoryTree
@@ -46,6 +55,11 @@ ENV_CHAT_ID = "FEISHU_CHAT_ID"
 ENV_CONSOLE_URL = "FEISHU_CONSOLE_URL"
 
 DEFAULT_CONSOLE_URL = "obsidian://"
+
+#: 卡片确认按钮 action 值里的动作名与「确认」标签（后者与
+#: dispatch/links.py、dispatch/media.py 的 REVIEW_TAG 同值）
+CONFIRM_ACTION = "confirm_note"
+CONFIRM_TAG = "待确认"
 
 #: 已处理 message_id 登记表上限（超出裁掉最旧的，防无限膨胀）
 _SEEN_CAP = 2000
@@ -111,11 +125,17 @@ class FeishuBridge:
     # ---- 接收：长连接守护 ------------------------------------------------
 
     def run_forever(self) -> None:
-        """启动 websocket 长连接监听（阻塞；断线由 SDK 自动重连）。"""
+        """启动 websocket 长连接监听（阻塞；断线由 SDK 自动重连）。
+
+        事件与卡片回调（card.action.trigger）注册在同一个
+        EventDispatcherHandler 上；lark-oapi 1.7.3 对回调类事件
+        （p2.*）经 ``_do_without_validation`` 走 callback processor map。
+        """
         lark = _import_lark()
         handler = (
             lark.EventDispatcherHandler.builder("", "")
             .register_p2_im_message_receive_v1(self.handle_event)
+            .register_p2_card_action_trigger(self.handle_card_action)
             .build()
         )
         client = lark.ws.Client(
@@ -150,6 +170,99 @@ class FeishuBridge:
                 self._receive_resource(message_id, msg_type, content)
         finally:
             self._mark_seen(message_id)
+
+    def handle_card_action(self, data: Any) -> Dict[str, Any]:
+        """处理卡片按钮回调（用户点「✅ 确认」）；任何异常只 toast，不中断。
+
+        回调负载结构（lark-oapi P2CardActionTrigger）：
+        ``data.event.action.value`` = {"action": "confirm_note",
+        "note": "<相对 memory/ 的文件名>"}。非 confirm_note 动作原样忽略。
+
+        这是系统内唯一机器改写笔记的路径：经用户 2026-09-07 批准的人工
+        触发单标签删除例外——仅删除笔记 frontmatter tags 里的「待确认」
+        一项，其他字段与正文一概不动；路径不合法绝不写文件。
+
+        Args:
+            data: 卡片回调事件对象（SDK 模型或鸭子类型）。
+
+        Returns:
+            Dict[str, Any]: 回调响应（toast + 可选 card 更新 JSON）；
+            未知动作返回空表（卡片不变）。
+        """
+        try:
+            action = data.event.action
+            value = dict(getattr(action, "value", None) or {})
+        except AttributeError:
+            return {"toast": {"type": "error", "content": "回调解析失败"}}
+        if str(value.get("action") or "") != CONFIRM_ACTION:
+            return {}
+        filename = str(value.get("note") or "").strip()
+        try:
+            ok, detail = self._confirm_note(filename)
+        except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
+            print(f"[feishu] confirm note={filename} fail: {exc}", flush=True)
+            return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
+        print(f"[feishu] confirm note={filename} {'ok' if ok else 'fail'}", flush=True)
+        if not ok:
+            return {"toast": {"type": "error", "content": "笔记不存在或路径非法"}}
+        return {
+            "toast": {"type": "success", "content": "已确认"},
+            "card": {"type": "raw", "data": self._confirmed_card(filename)},
+        }
+
+    def _confirm_note(self, filename: str) -> Tuple[bool, str]:
+        """移除单篇笔记的「待确认」标签（经用户 2026-09-07 批准的例外）。
+
+        校验：文件名须为 memory/ 顶层 ``*.md``（无路径分隔、无 ``..``），
+        文件必须存在；仅当 tags 含「待确认」才改写（幂等：没有不改写）。
+        改写只删该标签一项，frontmatter 其余字段与正文经 round-trip 原样
+        保留。
+
+        Args:
+            filename: 笔记相对 memory/ 的文件名。
+
+        Returns:
+            Tuple[bool, str]: (是否成功, 详情串 ok / noop / 错误原因)。
+        """
+        if (
+            not filename
+            or "/" in filename
+            or "\\" in filename
+            or ".." in filename
+            or not filename.endswith(".md")
+        ):
+            return False, "非法路径"
+        note_path = Path(self.tree.notes_dir) / filename
+        if not note_path.is_file():
+            return False, "笔记不存在"
+        text = note_path.read_text(encoding="utf-8")
+        post = frontmatter.loads(text)
+        tags = post.metadata.get("tags")
+        if not isinstance(tags, list) or CONFIRM_TAG not in tags:
+            return True, "noop"
+        post.metadata["tags"] = [tag for tag in tags if tag != CONFIRM_TAG]
+        self._atomic_write(note_path, frontmatter.dumps(post).encode("utf-8"))
+        return True, "ok"
+
+    @staticmethod
+    def _confirmed_card(filename: str) -> Dict[str, Any]:
+        """确认后的替换卡片：按钮区已由「✅ 已确认」文本取代（无操作区）。"""
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "✅ 已确认"},
+                "template": "green",
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "plain_text",
+                        "content": f"{filename}\n已移除「待确认」标签",
+                    },
+                }
+            ],
+        }
 
     def _receive_text(self, message_id: str, text: str) -> Optional[Path]:
         """文本消息 → memory/ 笔记（source: lark；空文本忽略）。"""
@@ -265,17 +378,24 @@ class FeishuBridge:
 
 
 def send_feishu(
-    title: str, message: str, chat_id: Optional[str] = None
+    title: str,
+    message: str,
+    chat_id: Optional[str] = None,
+    confirm_note: Optional[str] = None,
 ) -> bool:
     """发一条飞书卡片推送；未配置或失败返回 False（绝不抛异常）。
 
     卡片带「在 Obsidian 中打开」URI 按钮（纯客户端跳转，无回调）；
-    卡片发送失败时降级为纯文本消息再试一次。
+    ``confirm_note`` 给定时追加「✅ 确认」callback 按钮（value 携带
+    {"action": "confirm_note", "note": <文件名>}，点击回调
+    ``card.action.trigger``，由 FeishuBridge.handle_card_action 移除该
+    笔记的「待确认」标签）；卡片发送失败时降级为纯文本消息再试一次。
 
     Args:
         title: 通知标题。
         message: 通知正文（只放数量等非敏感信息）。
         chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID`` 环境变量。
+        confirm_note: 待确认笔记相对 memory/ 的文件名；None 不加确认按钮。
 
     Returns:
         bool: 发送成功且服务端 success 返回 True。
@@ -294,6 +414,36 @@ def send_feishu(
             .build()
         )
         console_url = os.environ.get(ENV_CONSOLE_URL, DEFAULT_CONSOLE_URL)
+        actions = [
+            {
+                "tag": "button",
+                "text": {
+                    "tag": "plain_text",
+                    "content": "在 Obsidian 中打开",
+                },
+                "type": "primary",
+                "url": console_url,
+            }
+        ]
+        if confirm_note:
+            actions.append(
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "✅ 确认"},
+                    "type": "primary",
+                    # 新版卡片 callback：value 是 JSON 编码字符串，回调时
+                    # 平台把它解析成对象放进 action.value
+                    "behaviors": [
+                        {
+                            "type": "callback",
+                            "value": json.dumps(
+                                {"action": CONFIRM_ACTION, "note": confirm_note},
+                                ensure_ascii=False,
+                            ),
+                        }
+                    ],
+                }
+            )
         card = {
             "config": {"wide_screen_mode": True},
             "header": {
@@ -302,20 +452,7 @@ def send_feishu(
             },
             "elements": [
                 {"tag": "div", "text": {"tag": "lark_md", "content": message}},
-                {
-                    "tag": "action",
-                    "actions": [
-                        {
-                            "tag": "button",
-                            "text": {
-                                "tag": "plain_text",
-                                "content": "在 Obsidian 中打开",
-                            },
-                            "type": "primary",
-                            "url": console_url,
-                        }
-                    ],
-                },
+                {"tag": "action", "actions": actions},
             ],
         }
         if _send(client, target, "interactive", json.dumps(card)):

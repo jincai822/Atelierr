@@ -66,6 +66,41 @@ def _notify_media_failures(failures: List[Dict[str, Any]]) -> None:
         )
 
 
+def _feishu_ready() -> bool:
+    """飞书通道是否可用（凭证齐备才发确认卡片）。
+
+    链接/OCR 笔记的逐条「待确认」推送只在飞书可用时发出（确认按钮只
+    存在于飞书卡片；ntfy 无按钮，文本推送保持原规则）；测试与
+    ntfy-only 环境没有 FEISHU_* 变量，走原行为不推送。
+    """
+    from scripts.dispatch.feishu import ENV_APP_ID, ENV_APP_SECRET, ENV_CHAT_ID
+
+    return all(
+        os.environ.get(var, "").strip()
+        for var in (ENV_APP_ID, ENV_APP_SECRET, ENV_CHAT_ID)
+    )
+
+
+def _notify_created_notes(
+    title: str,
+    message: str,
+    created: List[str],
+    *,
+    skip_prefix: str = "",
+) -> None:
+    """新产出笔记逐条推送带「✅ 确认」按钮的卡片（confirm_note=文件名）。
+
+    仅当飞书通道可用时推送；skip_prefix 命中的文件名（如划重点清单，
+    不带「待确认」标签）不推。todos/dochealth 等汇总通知不走此路径。
+    """
+    if not _feishu_ready():
+        return
+    for filename in created:
+        if skip_prefix and filename.startswith(skip_prefix):
+            continue
+        send_dispatch_notice(title, f"{message}：{filename}", confirm_note=filename)
+
+
 def _notify_digest(counts: Dict[str, int]) -> None:
     """今日摘要创建成功后推送五节计数（未配置/失败静默）。"""
     send_dispatch_notice(
@@ -150,6 +185,12 @@ class DispatchCLI:
                     click.echo(f"  失败: {failure['url']} — {failure['error']}")
                 if not dry_run:
                     _notify_failures(report["failed"])
+                    if report["created"]:
+                        _notify_created_notes(
+                            "Atelierr 链接笔记待确认",
+                            "链接笔记已转写入库",
+                            report["created"],
+                        )
                 if dry_run:
                     click.echo("（dry-run：未做处理）")
 
@@ -208,6 +249,13 @@ class DispatchCLI:
                     click.echo(f"  失败: {failure['file']} — {failure['error']}")
                 if not dry_run:
                     _notify_media_failures(report["failed"])
+                    if report["created"]:
+                        _notify_created_notes(
+                            "Atelierr OCR 笔记待确认",
+                            "已识别入库",
+                            report["created"],
+                            skip_prefix="划重点-",
+                        )
                 if dry_run:
                     click.echo("（dry-run：未做处理）")
 
