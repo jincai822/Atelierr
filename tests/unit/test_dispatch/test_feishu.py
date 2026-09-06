@@ -44,10 +44,12 @@ def _fake_lark(monkeypatch, client):
     return fake_lark
 
 
-def test_text_message_creates_lark_note(memory_tree):
+def test_text_message_creates_lark_note(memory_tree, capsys):
     """文本消息 → memory/ 笔记：source=lark、正文原样、sidecar 登记。"""
     bridge = _bridge(memory_tree)
-    bridge.handle_event(_event("m1", "text", {"text": "今天想到：\n好点子"}))
+    event = _event("m1", "text", {"text": "今天想到：\n好点子"})
+    event.event.message.chat_id = "oc_demo_chat"
+    bridge.handle_event(event)
 
     notes = list(memory_tree.notes_dir.glob("feishu-*.md"))
     assert len(notes) == 1
@@ -56,6 +58,8 @@ def test_text_message_creates_lark_note(memory_tree):
     assert "好点子" in text
     index_text = (memory_tree.state_dir / "index.json").read_text(encoding="utf-8")
     assert notes[0].stem in index_text
+    # 日志带 chat_id（供用户抄进 FEISHU_CHAT_ID）
+    assert "chat=oc_demo_chat" in capsys.readouterr().out
 
 
 def test_text_with_url_kept_verbatim(memory_tree):

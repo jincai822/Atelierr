@@ -137,6 +137,12 @@ class FeishuBridge:
             return
         if self._seen(message_id):
             return
+        # 日志带 chat_id：往机器人发一条消息即可从 feishu.log 读到推送目标
+        print(
+            f"[feishu] {msg_type} chat={getattr(message, 'chat_id', '?')} "
+            f"msg={message_id}",
+            flush=True,
+        )
         try:
             if msg_type == "text":
                 self._receive_text(message_id, str(content.get("text") or ""))
