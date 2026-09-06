@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Atelierr 全系统信息流（动态）",
+    "subtitle": "五路捕获 → 15 分钟自动加工 → 工作记忆 → 人工四触点 → wiki 沉淀 · 2026-09-06 现状",
+    "output": "atelierr-flow.html",
+    "viewBox": [1280, 860]
+  },
+  "stages": [
+    { "label": "① 捕获 · 同步" },
+    { "label": "② 自动分发" },
+    { "label": "③ 加工引擎" },
+    { "label": "④ 工作记忆 memory/" },
+    { "label": "⑤ 人工 · 沉淀 · 回响" }
+  ],
+  "nodes": [
+    { "id": "phone", "type": "frontend", "label": "手机 Obsidian", "sublabel": "QuickAdd 速记 · 粘贴链接", "stage": 0, "row": 0 },
+    { "id": "syncthing", "type": "cloud", "label": "Syncthing", "sublabel": "手机 ↔ 电脑 实时同步", "stage": 0, "row": 2 },
+    { "id": "desktop", "type": "frontend", "label": "电脑投放", "sublabel": "attachments/：截图 录音 PDF", "stage": 0, "row": 4 },
+    { "id": "links", "type": "backend", "label": "links 分发", "sublabel": "15 分钟轮询 · 发现新链接", "stage": 1, "row": 0 },
+    { "id": "media", "type": "backend", "label": "media 分发", "sublabel": "15 分钟轮询 · 附件路由", "stage": 1, "row": 4 },
+    { "id": "linkengine", "type": "backend", "label": "链接加工", "sublabel": "yt-dlp · Whisper GPU · DeepSeek 整理", "stage": 2, "row": 0 },
+    { "id": "mediaengine", "type": "backend", "label": "附件加工", "sublabel": "PaddleOCR · Whisper 转写", "stage": 2, "row": 2 },
+    { "id": "hlengine", "type": "cloud", "label": "划重点引擎", "sublabel": "LLM 代读 PDF · 出候选清单", "stage": 2, "row": 4 },
+    { "id": "notes", "type": "database", "label": "正式笔记", "sublabel": "带「待确认」标签入库", "stage": 3, "row": 0, "tag": "机器不再改" },
+    { "id": "checklist", "type": "database", "label": "划重点清单", "sublabel": "- [ ] 复选框 · 等你勾", "stage": 3, "row": 4 },
+    { "id": "sidecar", "type": "database", "label": "sidecar 索引", "sublabel": "state/index.json · 每日 git 快照", "stage": 3, "row": 2 },
+    { "id": "you", "type": "external", "label": "你（人工四触点）", "sublabel": "确认 · 勾选 · 提炼 · 删除裁决", "stage": 4, "row": 0 },
+    { "id": "digest", "type": "backend", "label": "晨报 07:53", "sublabel": "复习 + 提炼候选 · ntfy 推送", "stage": 4, "row": 2 },
+    { "id": "decay", "type": "backend", "label": "decay 03:00 + 月检", "sublabel": "只写 sidecar · 绝不碰笔记", "stage": 4, "row": 3 },
+    { "id": "wiki", "type": "database", "label": "wiki/ 知识总库", "sublabel": "concept 根层 · cognition/ · reflections/", "stage": 4, "row": 4, "tag": "永久资产" }
+  ],
+  "flows": [
+    { "from": "phone", "to": "syncthing", "label": "速记/链接", "classification": "md 笔记", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [136, 271] },
+    { "from": "syncthing", "to": "links", "label": "落到电脑", "classification": "memory/ 根层", "variant": "emphasis" },
+    { "from": "desktop", "to": "media", "label": "扔进附件目录", "classification": "png/mp3/pdf", "variant": "emphasis", "fromSide": "right", "toSide": "left", "route": "straight" },
+    { "from": "links", "to": "linkengine", "label": "链接正文", "classification": "抖音/小红书/B 站", "variant": "emphasis" },
+    { "from": "media", "to": "mediaengine", "label": "截图/录音", "classification": "png · mp3", "variant": "emphasis", "fromSide": "right", "toSide": "left" },
+    { "from": "media", "to": "hlengine", "label": "PDF", "classification": "书籍/长文档", "variant": "emphasis", "fromSide": "bottom", "toSide": "bottom", "route": "straight", "labelAt": [330, 690] },
+    { "from": "linkengine", "to": "notes", "label": "整理成稿", "classification": "标题+总结+分段全文", "variant": "emphasis" },
+    { "from": "mediaengine", "to": "notes", "label": "识别成稿", "classification": "OCR/转写文本", "variant": "emphasis", "fromSide": "right", "toSide": "left" },
+    { "from": "hlengine", "to": "checklist", "label": "候选清单", "classification": "≤20 条复选框", "variant": "emphasis", "fromSide": "right", "toSide": "left", "route": "straight" },
+    { "from": "notes", "to": "sidecar", "label": "登记", "classification": "confidence 1.0", "variant": "default", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [756, 240] },
+    { "from": "notes", "to": "you", "label": "待确认", "classification": "摘标签即确认", "variant": "emphasis" },
+    { "from": "checklist", "to": "you", "label": "勾选 [x]", "classification": "人工动作", "variant": "default", "fromSide": "right", "toSide": "left" },
+    { "from": "you", "to": "wiki", "label": "提炼（QuickAdd）", "classification": "周日仪式 · 5 分钟", "variant": "dashed", "fromSide": "right", "toSide": "right", "via": [[1150, 157], [1150, 613]], "labelAt": [1160, 380] },
+    { "from": "decay", "to": "sidecar", "label": "打分/分层", "classification": "只写 sidecar", "variant": "dashed", "fromSide": "left", "toSide": "right" },
+    { "from": "digest", "to": "you", "label": "晨报推送", "classification": "复习+提炼候选+待确认", "variant": "default", "fromSide": "top", "toSide": "bottom", "route": "straight", "labelAt": [1012, 271] }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "两条主路（全自动到你面前）",
+      "items": [
+        "链接路：粘贴 → 同步 → 下载转写 → DeepSeek 整理 → 待确认笔记",
+        "PDF 路：扔进 attachments/ → LLM 代读 → 候选清单 → 你勾选才转正式笔记",
+        "截图/录音路：OCR/Whisper 识别 → 待确认笔记"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "红线（机器绝不越界）",
+      "items": [
+        "笔记入库后机器不改、不移、不删",
+        "动态状态只写 sidecar（confidence/layer/回收站标记）",
+        "删除只有一条路：pending_delete → review → purge → trash/"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "回响回路（防遗忘）",
+      "items": [
+        "decay 03:00 打分；晨报 07:53 把快忘的笔记推回你面前",
+        "提炼候选：推送 ≥2 次或确认满 3 天未提炼，晨报 + 控制台双提醒",
+        "每月 2 日文档健康月检，异常才建笔记提醒你"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "你只做四个动作",
+      "items": [
+        "① 摘「待确认」标签（确认入库内容）",
+        "② 勾清单复选框（划重点转正）",
+        "③ 周日挑 1 条提炼进 wiki（沉淀）",
+        "④ review→purge 时点头（删除裁决）"
+      ]
+    }
+  ]
+}

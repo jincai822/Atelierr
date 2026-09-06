@@ -40,7 +40,7 @@
           "loop",
           "wiki"
         ],
-        "note": "入库 → 老化 → 检索式晨报（先想再点开）→ 三选一：提炼进 wiki / 点开重置时钟 / 遗忘进回收站；反复推送未提炼的进晨报「待提炼」节"
+        "note": "入库 → 老化 → 检索式晨报（先想再点开）→ 三选一：提炼进 wiki / 点开重置时钟 / 遗忘进回收站；反复推送（≥2 次）或确认满 3 天未提炼的进晨报「提炼候选」节"
       },
       {
         "id": "distill-flow",
@@ -101,7 +101,7 @@
       "id": "capture",
       "type": "cloud",
       "label": "捕获入口",
-      "sublabel": "速记 · 链接 · 截图 · 录音",
+      "sublabel": "速记 · 链接 · 截图 · 录音 · PDF",
       "pos": [
         520,
         120
@@ -130,7 +130,7 @@
       "id": "dispatch",
       "type": "backend",
       "label": "dispatch 分发",
-      "sublabel": "每 15 分钟 · links · media · todos",
+      "sublabel": "每 15 分钟 · links · media · todos · highlights",
       "pos": [
         400,
         220
@@ -144,7 +144,7 @@
       "id": "processors",
       "type": "backend",
       "label": "processors 引擎",
-      "sublabel": "OCR · Whisper · LLM 摘要",
+      "sublabel": "OCR · Whisper · LLM 摘要 · LLM 划重点",
       "pos": [
         680,
         220
@@ -173,7 +173,7 @@
       "id": "loop",
       "type": "backend",
       "label": "decay + 回响",
-      "sublabel": "03:00 分层 · 07:53 检索式晨报 · 响应观测",
+      "sublabel": "03:00 分层 · 07:53 检索式晨报 · 响应观测 · 每月文档体检",
       "pos": [
         680,
         320
@@ -363,7 +363,7 @@
       "id": "loop-you",
       "from": "loop",
       "to": "you",
-      "label": "检索式晨报：复习 + 待提炼 · 冷却 3 天",
+      "label": "检索式晨报：复习 + 提炼候选 · 冷却 3 天",
       "fromSide": "right",
       "toSide": "right",
       "via": [
@@ -515,8 +515,8 @@
         "工作台=Atelier：人在场，20 命令贯穿各层",
         "管线=Atelierr 应用：定时器驱动，无人值守",
         "交接只走 $OV 数据面，代码零互调",
-        "合库已实施（09-02）· Codex 登记对齐待办",
-        "每日 03:00 git 快照（全库版本历史）"
+        "每日 03:00 git 快照 + 每月 2 日文档健康月检（异常才提醒）",
+        "划重点通道（09-03）：PDF 机器代读 → 人工勾选 → 转正式笔记"
       ]
     },
     {
