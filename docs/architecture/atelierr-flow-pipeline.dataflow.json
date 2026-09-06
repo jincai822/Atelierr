@@ -138,7 +138,7 @@
       "id": "checklist",
       "type": "database",
       "label": "划重点清单",
-      "sublabel": "- [ ] 复选框 + 推荐页码 · 不打扰（无待确认标签）",
+      "sublabel": "- [ ] 复选框 + 推荐页码 · 勾中 → wiki 摘录卡",
       "stage": 3,
       "row": 4
     },
@@ -380,7 +380,7 @@
       "from": "checklist",
       "to": "you",
       "label": "勾选 [x]",
-      "classification": "转正式笔记",
+      "classification": "转 wiki 摘录卡",
       "variant": "default",
       "fromSide": "right",
       "toSide": "bottom",
@@ -429,7 +429,7 @@
       "items": [
         "链接路：yt-dlp 下载 → Whisper GPU 全文转写 → DeepSeek 整理（标点/分段/观点/标题）",
         "附件路：截图→PaddleOCR；录音→Whisper；产出笔记内嵌 ![[attachments/原文件]]",
-        "PDF 路：fitz 逐页提取 → 6000 字分块 → DeepSeek 挑 ≤20 条 → 带推荐页码的复选框清单"
+        "PDF 路：fitz 逐页提取 → 6000 字分块 → DeepSeek 挑 ≤20 条 → 复选框清单；勾中成 wiki 摘录卡"
       ]
     },
     {
@@ -446,8 +446,8 @@
       "title": "⑤ 你只做两件事",
       "items": [
         "摘标签：读完转写/识别稿，手动摘掉「待确认」= 确认入库",
-        "勾清单：划重点清单里勾 [x]，15 分钟内自动转正式笔记（带待确认再走一遍①）",
-        "不确认不勾也行：会进晨报反复提醒，不会静默消失"
+        "勾清单：划重点清单里勾 [x]，15 分钟内自动转成 wiki 摘录卡（勾选即沉淀，不再带待确认）",
+        "不确认不勾也行：待确认笔记会进晨报反复提醒；清单不打扰，节奏你说了算"
       ]
     }
   ]

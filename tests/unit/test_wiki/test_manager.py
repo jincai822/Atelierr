@@ -234,3 +234,41 @@ def test_validate_mixed_schemas(memory_tree):
     problems = WikiManager(memory_tree).validate()
     assert [p["stem"] for p in problems] == ["坏手工"]
     assert "from 未填（提炼自哪条 memory 笔记）" in problems[0]["issues"]
+
+
+_EXCERPT_META = (
+    "type: Excerpt\n"
+    "title: 概念甲\n"
+    'from: "[[划重点-测试书-abc123]]"\n'
+    "created: '2026-09-06T15:00:00+08:00'\n"
+    "source: highlight\n"
+    "page: 3"
+)
+
+
+def test_validate_excerpt_card_schema(memory_tree):
+    """摘录卡（type: Excerpt）：type/title/from 齐全即合法，豁免互链。"""
+    memory_tree.create_note("划重点-测试书-abc123.md", "清单", source="highlights")
+    _write_wiki(memory_tree, "摘录-概念甲-a1b2c3.md", _EXCERPT_META)
+
+    assert WikiManager(memory_tree).validate() == []
+
+
+def test_validate_excerpt_card_missing_from(memory_tree):
+    """摘录卡缺 from：报专属文案，不要求互链/created/source。"""
+    _write_wiki(memory_tree, "摘录-无源.md", "type: Excerpt\ntitle: 无源")
+
+    problems = WikiManager(memory_tree).validate()
+    assert [p["stem"] for p in problems] == ["摘录-无源"]
+    assert problems[0]["issues"] == ["from 未填（勾选自哪份划重点清单）"]
+
+
+def test_validate_excerpt_card_dangling_from(memory_tree):
+    """摘录卡 from 指向的清单已被 purge（memory 里不存在）：报悬空。"""
+    _write_wiki(memory_tree, "摘录-概念甲-a1b2c3.md", _EXCERPT_META)
+
+    problems = WikiManager(memory_tree).validate()
+    assert [p["stem"] for p in problems] == ["摘录-概念甲-a1b2c3"]
+    assert problems[0]["issues"] == [
+        "from 指向的 memory 笔记不存在: 划重点-测试书-abc123"
+    ]

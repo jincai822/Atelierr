@@ -252,8 +252,10 @@ python -m scripts.cli.process_cli image /path/to/screenshot.jpg --output ~/ateli
 把 PDF 丢进 `~/atelierr-data/memory/attachments/`（手机经 Syncthing 同步亦可），
 15 分钟定时器会自动生成一份「划重点清单」笔记：LLM 代读后给出可勾选的候选
 （每条：内容/对着什么认知/性质/是否推荐勾）。在 Obsidian 里把想要的条目
-勾成 `[x]`，下一轮同步（15 分钟内）勾中条目自动转为正式笔记（带「待确认」）。
-也可手动单条处理（需 `DEEPSEEK_API_KEY`）：
+勾成 `[x]`，下一轮同步（15 分钟内）勾中条目自动转为 wiki/ 根层的「摘录卡」
+（type: Excerpt，from 指回清单+页码——勾选即沉淀为永久资产，不经 memory
+待确认中转；周日提炼时把它改写为自己的 concept 卡并互链）。也可手动单条处理
+（需 `DEEPSEEK_API_KEY`）：
 
 ```bash
 python -m scripts.cli.process_cli highlights book.pdf --output checklist.md

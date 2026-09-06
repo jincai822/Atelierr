@@ -7,7 +7,7 @@
     python -m scripts.cli.dispatch_cli todos --dry-run  # 只报告不建笔记
     python -m scripts.cli.dispatch_cli media            # 扫描 attachments/ 截图录音并 OCR/转写
     python -m scripts.cli.dispatch_cli media --dry-run  # 只报告不处理
-    python -m scripts.cli.dispatch_cli highlights       # 划重点清单勾中项转正式笔记
+    python -m scripts.cli.dispatch_cli highlights       # 划重点清单勾中项转 wiki 摘录卡
     python -m scripts.cli.dispatch_cli digest           # 创建今日摘要笔记
 
 配置解析顺序与 memory_cli 一致：--config > 环境变量 ATELIERR_CONFIG >
@@ -170,10 +170,10 @@ class DispatchCLI:
             "--dry-run",
             "dry_run",
             is_flag=True,
-            help="只扫描报告，不建笔记、不写状态",
+            help="只扫描报告，不建卡片、不写状态",
         )
         def highlights_command(dry_run: bool) -> None:
-            """扫描划重点清单，把人工勾中的候选转为正式笔记。"""
+            """扫描划重点清单，把人工勾中的候选转为 wiki 摘录卡。"""
             tree = self._build_tree()
             report = HighlightsDispatcher(tree).run(dry_run=dry_run)
             click.echo(
@@ -182,7 +182,7 @@ class DispatchCLI:
                 f"跳过已转记 {report['skipped']} 条"
             )
             for filename in report["created"]:
-                click.echo(f"  已创建: {filename}（待确认）")
+                click.echo(f"  已创建摘录卡: wiki/{filename}")
             if dry_run:
                 click.echo("（dry-run：未做处理）")
 

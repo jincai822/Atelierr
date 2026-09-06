@@ -1,4 +1,4 @@
-"""划重点勾中转笔记：清单里被人工勾中的候选 → 正式笔记（带"待确认"）。
+"""划重点勾中转摘录卡：清单里被人工勾中的候选 → wiki/ 根层摘录卡。
 
 与 links/media/todos 同源的 dispatch 顶层组合模块，是「划重点」机制的
 人工侧（机器侧见 :mod:`scripts.processors.highlights`）：
@@ -6,17 +6,21 @@
 1. processors/highlights 产出的清单笔记（``source: highlights``，
    标签"划重点"）里，每条候选是一个 ``- [ ]`` 复选框；
 2. 人在 Obsidian 里把想要的勾成 ``- [x]``；
-3. 本模块下一轮扫描发现新勾项，为其建一条正式笔记（标签"待确认" +
-   "划重点"，``source: highlight`` 单数），内容含候选详情与来源双链。
+3. 本模块下一轮扫描发现新勾项，为其在 wiki/ 根层建一张摘录卡
+   （``type: Excerpt``，``from`` 指回清单 + 页码，``source: highlight``
+   单数），内容含候选详情与来源双链——勾选即沉淀，不再经 memory/
+   待确认笔记中转（2026-09-06 方案③：摘录卡 = Zettelkasten 文献笔记，
+   日后周日提炼仪式把它改写为自己的 concept 卡并与它互链）。
 
 纪律（与 dispatch 各模块一致）：
-- 只新增笔记，绝不改写/移动/删除既有笔记与清单本身；
+- 只新增卡片，绝不改写/移动/删除既有笔记、卡片与清单本身；
 - 幂等：已转记的勾项登记在 ``<state_dir>/processed_highlights.json``
   （键 = 清单文件名 + 条目标题 + 页码），同一条只建一次；
-- 勾了又取消：笔记已建不追回（机器绝不删除），不要可在 review 时标
-  pending_delete；
-- 清单笔记本身 ``source: highlights`` 会被 todos 分发跳过（候选项不是
-  行动意图，防整清单进待办）；转出的正式笔记按普通笔记对待。
+- 勾了又取消：摘录卡已建不追回（机器绝不删除；wiki 无 purge，
+  不要了由人手动删）；
+- 清单笔记本身 ``source: highlights`` 留在 memory/ 正常 decay；
+  若清单日后被 purge，WikiManager.validate 会报摘录卡 from 悬空
+  （只报告，不阻止）。
 
 触发：systemd 定时器（docker/systemd/atelierr-links.*，接在 todos 之后）
 或人工 ``dispatch_cli highlights``。
@@ -36,14 +40,14 @@ from typing import Any, Dict, List, Optional
 import frontmatter
 
 from scripts.memory.core import MemoryTree
+from scripts.wiki.manager import EXCERPT_TYPE, WIKI_DIRNAME
 
 #: 清单笔记的 source 值（复数；todos 分发按此跳过）
 CHECKLIST_SOURCE = "highlights"
-#: 转出正式笔记的 source 值（单数；按普通笔记对待）
+#: 摘录卡的 source 值（单数）
 PROMOTED_SOURCE = "highlight"
 
-#: 转出正式笔记的标签（人工确认后由人移除"待确认"）
-REVIEW_TAG = "待确认"
+#: 摘录卡的标签（不再有"待确认"——勾选即沉淀，无需二次确认）
 ITEM_TAG = "划重点"
 
 #: 勾中行：- [x] **标题**（第 N 页）——与处理器产出的复选框行严格对应
@@ -59,20 +63,23 @@ _LAYERS = ("short-term", "mid-term", "long-term")
 
 
 class HighlightsDispatcher:
-    """扫描划重点清单笔记，把新勾中的候选转为正式笔记。
+    """扫描划重点清单笔记，把新勾中的候选转为 wiki/ 摘录卡。
 
     Attributes:
-        tree: MemoryTree 实例。
+        tree: MemoryTree 实例（只借它定位库根与清单笔记）。
+        wiki_dirname: 库根下的 wiki 子目录名（默认 ``wiki``）。
         state_path: 勾项转记状态文件（processed_highlights.json）。
     """
 
-    def __init__(self, tree: MemoryTree) -> None:
+    def __init__(self, tree: MemoryTree, wiki_dirname: str = WIKI_DIRNAME) -> None:
         """初始化。
 
         Args:
             tree: MemoryTree 实例。
+            wiki_dirname: 库根下的 wiki 子目录名。
         """
         self.tree = tree
+        self.wiki_dirname = wiki_dirname
         self.state_path = Path(tree.state_dir) / "processed_highlights.json"
 
     def run(self, dry_run: bool = False) -> Dict[str, Any]:
@@ -110,7 +117,7 @@ class HighlightsDispatcher:
         report: Dict[str, Any],
         dry_run: bool,
     ) -> None:
-        """处理单份清单：找出新勾中的条目并逐一转记。"""
+        """处理单份清单：找出新勾中的条目并逐一转记为摘录卡。"""
         key = note_path.name
         entry = state.setdefault(key, {"promoted": {}})
         promoted: Dict[str, str] = entry.setdefault("promoted", {})
@@ -124,27 +131,57 @@ class HighlightsDispatcher:
                 continue
             if dry_run:
                 continue
-            filename = self._note_filename(key, title)
-            body = self._build_note(note_path.stem, post.content, match, title, page)
+            filename = self._card_filename(key, title)
+            body = self._build_card_body(note_path.stem, post.content, match, title, page)
             try:
-                self.tree.create_note(
-                    filename,
-                    body,
-                    source=PROMOTED_SOURCE,
-                    tags=[REVIEW_TAG, ITEM_TAG],
-                )
-            except (ValueError, FileExistsError):
-                # 同名笔记已存在（状态丢失后的重跑）：视为已转记
+                self._write_excerpt_card(filename, title, note_path.stem, page, body)
+            except FileExistsError:
+                # 同名卡片已存在（状态丢失后的重跑）：视为已转记
                 pass
             promoted[item_key] = filename
             entry["last_attempt"] = datetime.now(timezone.utc).isoformat()
             report["created"].append(filename)
 
+    def _write_excerpt_card(
+        self, filename: str, title: str, checklist_stem: str, page: int, body: str
+    ) -> None:
+        """在 wiki/ 根层原子创建摘录卡（撞名抛 FileExistsError，绝不覆盖）。
+
+        卡片不进 sidecar 索引、不参与 decay——勾选即沉淀为永久资产。
+        """
+        wiki_dir = Path(self.tree.notes_dir) / self.wiki_dirname
+        wiki_dir.mkdir(parents=True, exist_ok=True)
+        target = wiki_dir / filename
+        if target.exists():
+            raise FileExistsError(f"摘录卡已存在: {target}")
+        metadata: Dict[str, Any] = {
+            "type": EXCERPT_TYPE,
+            "title": title,
+            "from": f"[[{checklist_stem}]]",
+            "created": datetime.now(timezone.utc).isoformat(),
+            "source": PROMOTED_SOURCE,
+            "tags": [ITEM_TAG],
+        }
+        if page:
+            metadata["page"] = page
+        text = frontmatter.dumps(frontmatter.Post(body, **metadata))
+        fd, tmp_path = tempfile.mkstemp(dir=str(wiki_dir), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            os.replace(tmp_path, target)
+        except OSError:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
     @staticmethod
-    def _build_note(
+    def _build_card_body(
         checklist_stem: str, body: str, match: re.Match, title: str, page: int
     ) -> str:
-        """组装转出笔记正文：候选详情块 + 来源双链。"""
+        """组装摘录卡正文：候选详情块 + 来源双链。"""
         details: List[str] = []
         for line in body[match.end():].splitlines():
             stripped = line.strip()
@@ -156,18 +193,18 @@ class HighlightsDispatcher:
         lines = [
             f"# {title}",
             "",
-            f"> 来源：[[{checklist_stem}]]（划重点清单{anchor}，人工勾选转入）",
+            f"> 来源：[[{checklist_stem}]]（划重点清单{anchor}，人工勾选）",
             "",
         ]
         lines += details or ["（清单中未附详情行）"]
         return "\n".join(lines) + "\n"
 
     @staticmethod
-    def _note_filename(checklist_name: str, title: str) -> str:
-        """转出笔记文件名：hl-<净化标题>-<清单哈希前6>.md（跨清单防撞名）。"""
+    def _card_filename(checklist_name: str, title: str) -> str:
+        """摘录卡文件名：摘录-<净化标题>-<清单哈希前6>.md（跨清单防撞名）。"""
         cleaned = _ILLEGAL_RE.sub("-", title).strip(". ")[:40] or "未命名"
         digest = hashlib.sha1(checklist_name.encode("utf-8")).hexdigest()[:6]
-        return f"hl-{cleaned}-{digest}.md"
+        return f"摘录-{cleaned}-{digest}.md"
 
     @staticmethod
     def _load_post(note_path: Path) -> Optional[Any]:

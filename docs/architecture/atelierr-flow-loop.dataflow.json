@@ -391,9 +391,10 @@
     },
     {
       "dot": "cyan",
-      "title": "④ 沉淀：两条路进 wiki",
+      "title": "④ 沉淀：三条路进 wiki",
       "items": [
         "QuickAdd 提炼（60 秒）：点开候选 → 模板 → 写自己的话 → from 指回来源 + ≥1 互链",
+        "划重点勾选：勾中条目 15min 内自动成摘录卡（type: Excerpt，from 回指清单+页码）",
         "Atelier 会话：你发起 $weekly → 只读桥读全库 → 周报/决策日志写 reflections/ 间",
         "wiki 条目纪律：人写、只增不改、无 decay 无 purge；WikiManager 只校验不改写",
         "根层已含 legacy 542 张卡（方案 C 09-06）：Cognitive OS 卡 type+title 即合法"

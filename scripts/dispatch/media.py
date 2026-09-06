@@ -1,6 +1,6 @@
 """附件自动路由：attachments/ 里的截图/录音 → OCR/Whisper → 建"待确认"笔记；
 PDF（书籍/长文）→ 划重点清单笔记（机器代读出可勾选候选，勾中条目由
-:mod:`scripts.dispatch.highlights` 转为正式笔记）。
+:mod:`scripts.dispatch.highlights` 转为 wiki 摘录卡）。
 
 定位：与 links/todos 同源的 dispatch 顶层组合模块（memory 与 processors
 之间唯一的接线点）。触发由 systemd 定时器驱动
@@ -168,7 +168,7 @@ class MediaDispatcher:
         if result.success:
             if is_pdf:
                 # PDF → 划重点清单（不带"待确认"：清单本身无需确认，
-                # 确认动作在"勾中条目转出的正式笔记"上）
+                # 确认动作在"勾中条目转 wiki 摘录卡"的人工勾选上）
                 filename = self._pdf_note_filename(path)
                 body, source, tags = result.markdown, CHECKLIST_SOURCE, [ITEM_TAG]
             else:

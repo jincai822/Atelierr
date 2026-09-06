@@ -43,7 +43,9 @@ Atelierr 应用（后台管线，定时器无人值守）。两平面代码零�
 （15 分钟轮询，links→media→todos→highlights）→ processors 引擎
 （OCR/Whisper/LLM 摘要/LLM 划重点代读）→ memory/ 工作记忆（平面 .md
 缓冲区，会遗忘）→ wiki/ 知识总库。PDF 走划重点通道：机器代读出可勾选
-候选清单，人工勾中才转正式笔记（Cognitive OS §7.9 机制，09-03 落地）。
+候选清单，人工勾中直接转 wiki 摘录卡（type: Excerpt，from 指回清单+页码；
+Cognitive OS §7.9 机制 09-03 落地，09-06 方案③改为勾选即沉淀，不再经
+memory 待确认中转——摘录卡是文献笔记，周日提炼时改写为 concept 卡并互链）。
 
 **回响回路**：decay（03:00 分层，只写 sidecar）+ 检索式晨报（07:53，
 复习 + 提炼候选，冷却 3 天）+ 响应观测（实验 0 在跑）+ 文档健康月检
@@ -51,16 +53,18 @@ Atelierr 应用（后台管线，定时器无人值守）。两平面代码零�
 （版本历史；排除 state/sessions/exports，`.git` 不同步手机）。
 
 **沉淀层（同库分间，COGNITION-SPEC v1.1）**：`memory/wiki/` 一个总库——
-根层 concept（人写，只增不改）、`cognition/` 间（判断登记处，审批写）、
-`reflections/` 间（周报与决策日志，只新建）。无 decay 无 purge。
+根层 concept（人写，只增不改）+ 摘录卡 Excerpt（划重点勾中，机器创建）、
+`cognition/` 间（判断登记处，审批写）、`reflections/` 间（周报与决策日志，
+只新建）。无 decay 无 purge。
 
 **legacy 卡库已并入 wiki 根层（方案 C，09-06）**：Cognitive OS 资产
 542 张卡（208 概念 + 280 术语 + 39 章笔记 + 11 认知条目随迁未激活 +
 4 Source 记录）平铺在 `memory/wiki/` 根层，与手工提炼条目同库；
 管理档案收 `wiki/_cognitive-os/`（含撞名改名规则：2 张术语卡带
-「（术语）」后缀）。WikiManager 双 schema 校验：Cognitive OS 卡
-（type+title）豁免 from/互链。② wiki 格式升级随「信息加工三步法」
-建议 3 调用；③ 认知条目激活随回路三解冻再议。
+「（术语）」后缀）。WikiManager 三 schema 校验：手工条目要
+from+互链；摘录卡（type: Excerpt）要 type/title/from、豁免互链；
+Cognitive OS 卡（type+title）豁免 from/互链。② wiki 格式升级随
+「信息加工三步法」建议 3 调用；③ 认知条目激活随回路三解冻再议。
 
 **入口**：控制台.md 是总入口（Obsidian 内 Dataview 全 vault 渲染 +
 车间口令 + 桌面 ▶ 快捷按钮经 Shell Commands/Advanced URI 拉起 Codex 会话）。

@@ -48,7 +48,7 @@
     { "from": "notes", "to": "sidecar", "label": "登记", "classification": "初始 confidence=1.0", "variant": "default", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [700, 214] },
     { "from": "decay", "to": "sidecar", "label": "打分/分层", "classification": "0.95^(闲置/引用因子)", "variant": "dashed", "fromSide": "top", "toSide": "bottom", "route": "straight", "labelAt": [702, 328] },
     { "from": "digest", "to": "you", "label": "晨报推送", "classification": "ntfy 计数 · 复习+提炼", "variant": "default", "fromSide": "right", "toSide": "left", "via": [[852, 499], [852, 157]], "labelAt": [920, 340] },
-    { "from": "checklist", "to": "you", "label": "勾选 [x]", "classification": "勾中 15min 内转正", "variant": "default", "fromSide": "right", "toSide": "bottom", "via": [[1090, 613], [1090, 186]], "labelAt": [1025, 400] },
+    { "from": "checklist", "to": "you", "label": "勾选 [x]", "classification": "勾选 → wiki 摘录卡", "variant": "default", "fromSide": "right", "toSide": "bottom", "via": [[1090, 613], [1090, 186]], "labelAt": [1025, 400] },
     { "from": "notes", "to": "you", "label": "待确认", "classification": "读完摘标签即确认", "variant": "emphasis", "labelAt": [852, 138] },
     { "from": "sidecar", "to": "atelier", "label": "只读桥", "classification": "$weekly 只读", "variant": "dashed", "fromSide": "right", "toSide": "left", "route": "straight", "labelAt": [815, 225] },
     { "from": "you", "to": "atelier", "label": "发起会话", "classification": "$weekly · /promote · /decision", "variant": "default", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [1005, 214] },
@@ -62,7 +62,7 @@
       "items": [
         "设备在①汇入同一个库后消失，②只按内容类型分流（15 分钟一轮）",
         "链接路：正文有 URL → yt-dlp 下载 → Whisper GPU 转写 → DeepSeek 整理（标点/分段/观点/标题）",
-        "附件路：截图→PaddleOCR / 录音→Whisper → 待确认笔记；PDF → 候选清单等你勾",
+        "附件路：截图→PaddleOCR / 录音→Whisper → 待确认笔记；PDF → 候选清单，勾中直接成 wiki 摘录卡",
         "待办路：已确认笔记 → LLM 判行动项 → todo 笔记（晨报待办栏提醒）"
       ]
     },
@@ -101,7 +101,7 @@
       "title": "你只做四个动作",
       "items": [
         "① 摘「待确认」标签（确认入库内容）",
-        "② 勾清单复选框（划重点转正，15min 内生效）",
+        "② 勾清单复选框（勾中 15min 内成 wiki 摘录卡，勾选即沉淀）",
         "③ 周日挑 1 条提炼进 wiki（60 秒仪式：from 回指 + ≥1 互链）",
         "④ review→purge 时点头（删除裁决）",
         "wiki 根层已含 legacy 542 卡（方案 C 09-06），与你的提炼条目同库混排"

@@ -44,7 +44,7 @@
       },
       {
         "id": "distill-flow",
-        "label": "沉淀流（两条路汇于总库）",
+        "label": "沉淀流（三条路汇于总库）",
         "focus": [
           "you",
           "memory",
@@ -52,7 +52,7 @@
           "console",
           "wiki"
         ],
-        "note": "晨报提醒 → QuickAdd「提炼为 Wiki」60 秒 → concept 落 wiki/ 根层（from 指回来源 + ≥1 条互链）；或会话里 /promote。WikiManager 双 schema 校验根层：手工条目要 from+互链，legacy 卡 type+title 即合法；只校验，绝不改写"
+        "note": "晨报提醒 → QuickAdd「提炼为 Wiki」60 秒 → concept 落 wiki/ 根层（from 指回来源 + ≥1 条互链）；或会话里 /promote；或划重点勾选 → 机器建摘录卡（type: Excerpt，from 回指清单）。WikiManager 三 schema 校验根层：手工条目要 from+互链，摘录卡要 type/title/from，legacy 卡 type+title 即合法；只校验，绝不改写"
       },
       {
         "id": "session-flow",
@@ -190,7 +190,7 @@
       "id": "wiki",
       "type": "database",
       "label": "wiki/ 知识总库",
-      "sublabel": "根层 concept：手工提炼 + legacy 542 卡同库",
+      "sublabel": "根层 concept：手工提炼 + 摘录卡 + legacy 542 卡",
       "pos": [
         560,
         580
@@ -485,9 +485,9 @@
       "dot": "emerald",
       "title": "总库铁律（同库分间 · 无 decay 无 purge）",
       "items": [
-        "一个总库 wiki/：根层 concept（手工 + legacy 542 卡）+ 三个房间",
+        "一个总库 wiki/：根层 concept（手工 + 摘录卡 + legacy 542 卡）+ 三个房间",
         "根层只增不改 · cognition/ 审批写 · reflections/ 只新建",
-        "进入仅两条路：晨报提炼候选 → 你提炼 / 会话里 /promote",
+        "进入三条路：你提炼 / /promote / 划重点勾选成摘录卡",
         "legacy 双 schema：type+title 即合法，豁免 from/互链要求"
       ]
     },
@@ -499,7 +499,7 @@
         "Atelierr = 后台管线：systemd 定时器，无人值守全自动",
         "交接只走 $OV 数据面（读写同一批文件），互不 import",
         "每日 03:00 git 快照 · 每月 2 日 04:17 文档体检（异常才提醒）",
-        "划重点通道：PDF 机器代读出候选 → 你勾选 → 转正式笔记"
+        "划重点通道：PDF 机器代读 → 你勾选 → wiki 摘录卡（方案③ 09-06）"
       ]
     },
     {

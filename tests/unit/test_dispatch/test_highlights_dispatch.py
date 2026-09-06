@@ -1,7 +1,8 @@
-"""划重点勾中转笔记单元测试（无真实网络）。
+"""划重点勾中转摘录卡单元测试（无真实网络）。
 
 扫描、勾选识别、幂等、dry-run、跨清单撞名均为真实代码路径；
 tick/untick 由测试直接改写清单文件（模拟人在 Obsidian 里勾选）。
+勾中产物是 wiki/ 根层的摘录卡（type: Excerpt），不是 memory/ 笔记。
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import json
 import frontmatter
 
 from scripts.dispatch.highlights import HighlightsDispatcher
+from scripts.wiki.manager import WikiManager
 
 _CHECKLIST = """# 划重点清单：测试书
 
@@ -43,6 +45,10 @@ def _tick(tree, path, title):
     path.write_text(ticked, encoding="utf-8")
 
 
+def _wiki_dir(tree):
+    return tree.notes_dir / "wiki"
+
+
 def _state(tree):
     state_file = tree.state_dir / "processed_highlights.json"
     return json.loads(state_file.read_text(encoding="utf-8"))
@@ -59,8 +65,8 @@ def test_unticked_item_not_promoted(memory_tree):
     assert report["created"] == []
 
 
-def test_ticked_item_promoted(memory_tree):
-    """勾中概念甲：转出 hl- 笔记，标签/来源/详情/双链齐全。"""
+def test_ticked_item_becomes_excerpt_card(memory_tree):
+    """勾中概念甲：wiki/ 转出摘录卡，type/from/页码/详情/双链齐全。"""
     path = _make_checklist(memory_tree)
     _tick(memory_tree, path, "概念甲")
 
@@ -69,23 +75,49 @@ def test_ticked_item_promoted(memory_tree):
     assert report["ticked"] == 1
     assert len(report["created"]) == 1
     filename = report["created"][0]
-    assert filename.startswith("hl-概念甲-")
-    post = frontmatter.loads(
-        (memory_tree.notes_dir / filename).read_text(encoding="utf-8")
-    )
+    assert filename.startswith("摘录-概念甲-")
+    card = _wiki_dir(memory_tree) / filename
+    post = frontmatter.loads(card.read_text(encoding="utf-8"))
+    assert post["type"] == "Excerpt"
+    assert post["title"] == "概念甲"
+    assert post["from"] == "[[划重点-测试书-abc123]]"
     assert post["source"] == "highlight"
-    assert "待确认" in post["tags"]
-    assert "划重点" in post["tags"]
+    assert post["page"] == 3
+    assert post["created"]
+    assert post["tags"] == ["划重点"]
     assert "[[划重点-测试书-abc123]]" in post.content
     assert "第 3 页" in post.content
     assert "- 内容：甲是什么" in post.content
     assert "- 性质：支持" in post.content
+    # 摘录卡不进 memory/ 根层
+    assert not list(memory_tree.notes_dir.glob("摘录-*.md"))
     # 未勾中的概念乙不得转出
-    assert not list(memory_tree.notes_dir.glob("hl-概念乙-*"))
+    assert not list(_wiki_dir(memory_tree).glob("摘录-概念乙-*"))
+
+
+def test_excerpt_card_passes_wiki_validation(memory_tree):
+    """转出的摘录卡本身合法：WikiManager 三 schema 校验零问题。"""
+    path = _make_checklist(memory_tree)
+    _tick(memory_tree, path, "概念甲")
+    HighlightsDispatcher(memory_tree).run()
+
+    assert WikiManager(memory_tree).validate() == []
+
+
+def test_excerpt_card_not_registered_in_sidecar(memory_tree):
+    """摘录卡是 wiki 资产：不登记 memory sidecar，不参与 decay。"""
+    path = _make_checklist(memory_tree)
+    _tick(memory_tree, path, "概念甲")
+    HighlightsDispatcher(memory_tree).run()
+
+    index_text = (memory_tree.state_dir / "index.json").read_text(encoding="utf-8")
+    assert "摘录-概念甲" not in index_text
+    # 清单本身是 memory 笔记，正常登记
+    assert "划重点-测试书-abc123" in index_text
 
 
 def test_idempotent_second_run(memory_tree):
-    """第二轮运行：已转记的勾项跳过，不重复建笔记。"""
+    """第二轮运行：已转记的勾项跳过，不重复建卡。"""
     path = _make_checklist(memory_tree)
     _tick(memory_tree, path, "概念甲")
     dispatcher = HighlightsDispatcher(memory_tree)
@@ -96,11 +128,11 @@ def test_idempotent_second_run(memory_tree):
     assert len(first["created"]) == 1
     assert second["created"] == []
     assert second["skipped"] == 1
-    assert len(list(memory_tree.notes_dir.glob("hl-概念甲-*"))) == 1
+    assert len(list(_wiki_dir(memory_tree).glob("摘录-概念甲-*"))) == 1
 
 
-def test_untick_after_promotion_keeps_note(memory_tree):
-    """勾了又取消：笔记已建不追回（机器绝不删除），也不重复建。"""
+def test_untick_after_promotion_keeps_card(memory_tree):
+    """勾了又取消：摘录卡已建不追回（机器绝不删除），也不重复建。"""
     path = _make_checklist(memory_tree)
     _tick(memory_tree, path, "概念甲")
     dispatcher = HighlightsDispatcher(memory_tree)
@@ -111,7 +143,7 @@ def test_untick_after_promotion_keeps_note(memory_tree):
     report = dispatcher.run()
 
     assert report["created"] == []
-    assert len(list(memory_tree.notes_dir.glob("hl-概念甲-*"))) == 1
+    assert len(list(_wiki_dir(memory_tree).glob("摘录-概念甲-*"))) == 1
 
 
 def test_non_checklist_notes_ignored(memory_tree):
@@ -127,7 +159,7 @@ def test_non_checklist_notes_ignored(memory_tree):
 
 
 def test_dry_run_creates_nothing(memory_tree):
-    """dry-run：不建笔记、不写状态。"""
+    """dry-run：不建卡片、不写状态。"""
     path = _make_checklist(memory_tree)
     _tick(memory_tree, path, "概念甲")
 
@@ -135,7 +167,7 @@ def test_dry_run_creates_nothing(memory_tree):
 
     assert report["ticked"] == 1
     assert report["created"] == []
-    assert not list(memory_tree.notes_dir.glob("hl-*.md"))
+    assert not _wiki_dir(memory_tree).exists()
     assert not (memory_tree.state_dir / "processed_highlights.json").exists()
 
 
@@ -150,11 +182,11 @@ def test_cross_checklist_same_title_no_collision(memory_tree):
 
     assert len(report["created"]) == 2
     assert len(set(report["created"])) == 2
-    assert len(list(memory_tree.notes_dir.glob("hl-概念甲-*"))) == 2
+    assert len(list(_wiki_dir(memory_tree).glob("摘录-概念甲-*"))) == 2
 
 
 def test_state_records_promoted(memory_tree):
-    """状态文件登记：清单名 → 勾项键 → 转出文件名。"""
+    """状态文件登记：清单名 → 勾项键 → 摘录卡文件名。"""
     path = _make_checklist(memory_tree)
     _tick(memory_tree, path, "概念乙")
     HighlightsDispatcher(memory_tree).run()
@@ -162,4 +194,4 @@ def test_state_records_promoted(memory_tree):
     state = _state(memory_tree)
     promoted = state["划重点-测试书-abc123.md"]["promoted"]
     assert "概念乙#7" in promoted
-    assert promoted["概念乙#7"].startswith("hl-概念乙-")
+    assert promoted["概念乙#7"].startswith("摘录-概念乙-")

@@ -4,13 +4,17 @@
 单向引用——wiki 条目用 frontmatter ``from`` 指向它提炼自的 memory
 笔记（wikilink 或纯 stem）；memory 机制完全不知道 wiki 的存在。
 
-双 schema 条目（2026-09-06 方案 C：legacy 卡库全量并入根层）：
+三 schema 条目（2026-09-06 方案 C 并入 legacy 卡；同日方案③加摘录卡）：
 - 手工提炼条目：frontmatter 需 created / source / from（from 归一化后
   非空且指向仍存在的 memory 笔记）+ 正文至少一条指向其他已存在 wiki
   条目的 wikilink；
-- Cognitive OS 卡（frontmatter 含 type 即认定）：需 type / title 非空
-  （description 建议但不强制）；豁免 from/互链（它们是迁入的存量资产，
-  来源信息在各自的 sources 字段里）。
+- 摘录卡（``type: Excerpt``，划重点清单人工勾中后由机器创建）：
+  需 type / title / from 非空且 from 指向仍存在的 memory 笔记
+  （勾选自哪份清单）；豁免互链——文献笔记的互链义务在日后提炼出的
+  concept 卡身上（concept 卡互链回摘录卡）；
+- Cognitive OS 卡（frontmatter 含其他 type 即认定）：需 type / title
+  非空（description 建议但不强制）；豁免 from/互链（它们是迁入的
+  存量资产，来源信息在各自的 sources 字段里）。
 
 还提供 orphans()（wiki 内零入链条目）与 distilled_stems()（已被
 提炼过的 memory 笔记 stem 集合，供晨间摘要算"反复推送未提炼"）。
@@ -34,6 +38,11 @@ REQUIRED_FRONTMATTER = ("created", "source", "from")
 #: 豁免 from/互链——存量资产的来源在各自 sources 字段里；description
 #: 不强制：12 份章节导读/总清单迁入时只补了 type+title 最小卡头）
 LEGACY_REQUIRED_FRONTMATTER = ("type", "title")
+
+#: 摘录卡的 type 值与必备字段（划重点勾中产物，机器创建）；
+#: from 额外要求非空且指向仍存在的 memory 笔记；豁免互链
+EXCERPT_TYPE = "Excerpt"
+EXCERPT_REQUIRED_FRONTMATTER = ("type", "title")
 
 WIKILINK_RE = re.compile(r"\[\[([^\[\]|#]+)(?:[#|][^\[\]]*)?\]\]")
 
@@ -116,6 +125,14 @@ class WikiManager:
             issues: List[str] = []
             if entry["broken_frontmatter"]:
                 issues.append("frontmatter 损坏")
+            elif self._is_excerpt_card(entry["metadata"]):
+                for key in EXCERPT_REQUIRED_FRONTMATTER:
+                    if not entry["metadata"].get(key):
+                        issues.append(f"缺 frontmatter 字段 {key}")
+                if not entry["from"]:
+                    issues.append("from 未填（勾选自哪份划重点清单）")
+                elif entry["from"] not in memory_stems:
+                    issues.append(f"from 指向的 memory 笔记不存在: {entry['from']}")
             elif self._is_legacy_card(entry["metadata"]):
                 for key in LEGACY_REQUIRED_FRONTMATTER:
                     if not entry["metadata"].get(key):
@@ -136,6 +153,11 @@ class WikiManager:
             if issues:
                 problems.append({"stem": entry["stem"], "issues": issues})
         return problems
+
+    @staticmethod
+    def _is_excerpt_card(metadata: Dict[str, Any]) -> bool:
+        """是否摘录卡（type == Excerpt；须先于 legacy 判断）。"""
+        return metadata.get("type") == EXCERPT_TYPE
 
     @staticmethod
     def _is_legacy_card(metadata: Dict[str, Any]) -> bool:
