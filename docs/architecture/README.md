@@ -54,12 +54,13 @@ Atelierr 应用（后台管线，定时器无人值守）。两平面代码零�
 根层 concept（人写，只增不改）、`cognition/` 间（判断登记处，审批写）、
 `reflections/` 间（周报与决策日志，只新建）。无 decay 无 purge。
 
-**legacy 卡库区（方案 A · ① 已接入 09-03）**：`legacy/` 为 Cognitive OS
-知识库的只读副本（549 文件：208 概念卡 + 280 术语卡 + 39 章笔记 + 11 认知
-条目），vault 内可搜可链；不参与 decay/purge，memory 机制只扫 `memory/`
-根层天然隔离；原件存档 `/srv/knowledge-active/` 不动，区规则见
-`legacy/README.md`。② wiki 格式升级随「信息加工三步法」建议 3 调用；
-③ 认知条目迁移随回路三解冻再议。
+**legacy 卡库已并入 wiki 根层（方案 C，09-06）**：Cognitive OS 资产
+542 张卡（208 概念 + 280 术语 + 39 章笔记 + 11 认知条目随迁未激活 +
+4 Source 记录）平铺在 `memory/wiki/` 根层，与手工提炼条目同库；
+管理档案收 `wiki/_cognitive-os/`（含撞名改名规则：2 张术语卡带
+「（术语）」后缀）。WikiManager 双 schema 校验：Cognitive OS 卡
+（type+title）豁免 from/互链。② wiki 格式升级随「信息加工三步法」
+建议 3 调用；③ 认知条目激活随回路三解冻再议。
 
 **入口**：控制台.md 是总入口（Obsidian 内 Dataview 全 vault 渲染 +
 车间口令 + 桌面 ▶ 快捷按钮经 Shell Commands/Advanced URI 拉起 Codex 会话）。

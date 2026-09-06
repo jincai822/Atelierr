@@ -31,7 +31,7 @@ def _make_ov(tmp_path, full=True):
     ov = tmp_path / "ov"
     notes = ov / "memory"
     for rel in dh.DATA_DIRS:
-        if not full and rel == "legacy":
+        if not full and rel == "memory/wiki/_cognitive-os":
             continue
         (ov / rel).mkdir(parents=True, exist_ok=True)
     return notes
@@ -55,12 +55,12 @@ def test_clean_run_no_problems(tmp_path, monkeypatch):
     problems, facts = dh.run_checks(repo, notes, home=home)
 
     assert problems == []
-    assert any("legacy" in fact for fact in facts)
+    assert any("_cognitive-os" in fact for fact in facts)
     assert any("atelierr-dochealth.timer" in fact for fact in facts)
 
 
 def test_missing_data_dir_reported(tmp_path, monkeypatch):
-    """legacy/ 缺失：报"数据区目录缺失"。"""
+    """_cognitive-os/ 缺失：报"数据区目录缺失"。"""
     repo = _make_repo(tmp_path / "repo")
     notes = _make_ov(tmp_path, full=False)
     home = tmp_path / "home"
@@ -69,7 +69,7 @@ def test_missing_data_dir_reported(tmp_path, monkeypatch):
 
     problems, _ = dh.run_checks(repo, notes, home=home)
 
-    assert any("legacy" in problem for problem in problems)
+    assert any("_cognitive-os" in problem for problem in problems)
 
 
 def test_missing_timer_and_disabled_reported(tmp_path, monkeypatch):
@@ -139,7 +139,7 @@ def test_main_creates_note_only_on_problems(memory_tree, monkeypatch, tmp_path):
     # 场景 1：有异常 → 建笔记 + 推送 + 报告
     monkeypatch.setattr(
         dh, "run_checks",
-        lambda *_a, **_kw: (["数据区目录缺失: /x/legacy"], ["事实甲"]),
+        lambda *_a, **_kw: (["数据区目录缺失: /x/memory/wiki/_cognitive-os"], ["事实甲"]),
     )
     assert dh.main([]) == 0
     notes = list(memory_tree.notes_dir.glob("文档健康-*.md"))

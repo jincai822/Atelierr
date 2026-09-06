@@ -194,3 +194,36 @@ def test_subdir_rooms_invisible_to_wiki_manager(memory_tree):
     # a 缺 from 目标（x 不存在于 memory）→ 只有这一条问题，房间零误报
     problems = manager.validate()
     assert [p["stem"] for p in problems] == ["a"]
+
+
+_LEGACY_META = "type: Knowledge Concept\ntitle: 感知器\ndescription: 单层神经网络"
+
+
+def test_validate_legacy_card_schema(memory_tree):
+    """Cognitive OS 迁入卡（type+title）：豁免 from/互链，校验自身三字段。"""
+    _write_wiki(memory_tree, "感知器.md", _LEGACY_META)
+
+    assert WikiManager(memory_tree).validate() == []
+
+
+def test_validate_legacy_card_missing_fields(memory_tree):
+    """迁入卡缺 description → 只报缺字段，不要求 from/互链。"""
+    _write_wiki(memory_tree, "残卡.md", "type: Knowledge Term\ntitle: 残卡")
+
+    problems = WikiManager(memory_tree).validate()
+    assert [p["stem"] for p in problems] == ["残卡"]
+    assert problems[0]["issues"] == ["缺 frontmatter 字段 description"]
+
+
+def test_validate_mixed_schemas(memory_tree):
+    """手工条目与迁入卡混排：各按各的 schema 校验，互不误伤。"""
+    memory_tree.create_note("src.md", "来源笔记", source="test")
+    _write_wiki(
+        memory_tree, "手工.md", _valid_meta("[[src]]"), body="关联 [[感知器]]"
+    )
+    _write_wiki(memory_tree, "感知器.md", _LEGACY_META)
+    _write_wiki(memory_tree, "坏手工.md", "created: '2026-09-01'\nsource: x")
+
+    problems = WikiManager(memory_tree).validate()
+    assert [p["stem"] for p in problems] == ["坏手工"]
+    assert "from 未填（提炼自哪条 memory 笔记）" in problems[0]["issues"]

@@ -4,8 +4,8 @@
 就是技术债务——机器每月核对一次，有异常才提醒人，无异常零打扰。
 
 检查项（全部为可机械核验的事实）：
-1. 数据区目录在位：memory/、wiki/ 三房间（cognition、reflections）、
-   legacy/ 卡库区；
+1. 数据区目录在位：memory/、wiki/ 及房间（cognition、reflections、
+   _cognitive-os 归档）；
 2. systemd 用户级定时器在位（decay/digest/links/dochealth）且 enabled；
 3. 关键文档中反引号标注的仓库相对路径真实存在
    （DEVELOPMENT-PLAN-3MVP.md / docs/architecture/README.md /
@@ -41,7 +41,7 @@ DATA_DIRS = (
     "memory/wiki",
     "memory/wiki/cognition",
     "memory/wiki/reflections",
-    "legacy",
+    "memory/wiki/_cognitive-os",
 )
 
 #: systemd 用户级必查定时器

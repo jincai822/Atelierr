@@ -4,10 +4,13 @@
 单向引用——wiki 条目用 frontmatter ``from`` 指向它提炼自的 memory
 笔记（wikilink 或纯 stem）；memory 机制完全不知道 wiki 的存在。
 
-校验规则（validate，只报告）：
-- frontmatter 可解析且含 created / source / from（from 归一化后非空）；
-- 正文至少一条指向其他已存在 wiki 条目的 wikilink；
-- from 指向的 memory 笔记仍存在（缺失只提示，可能是已被 purge）。
+双 schema 条目（2026-09-06 方案 C：legacy 卡库全量并入根层）：
+- 手工提炼条目：frontmatter 需 created / source / from（from 归一化后
+  非空且指向仍存在的 memory 笔记）+ 正文至少一条指向其他已存在 wiki
+  条目的 wikilink；
+- Cognitive OS 卡（frontmatter 含 type+title 即认定）：需 type / title /
+  description 非空；豁免 from/互链（它们是迁入的存量资产，来源信息在
+  各自的 sources 字段里）。
 
 还提供 orphans()（wiki 内零入链条目）与 distilled_stems()（已被
 提炼过的 memory 笔记 stem 集合，供晨间摘要算"反复推送未提炼"）。
@@ -26,6 +29,10 @@ from scripts.memory.core import MemoryTree
 WIKI_DIRNAME = "wiki"  # 库根下的沉淀层子目录名（memory.yaml 可覆盖）
 
 REQUIRED_FRONTMATTER = ("created", "source", "from")
+
+#: Cognitive OS 迁入卡的必备字段（frontmatter 含 type+title 即走此 schema，
+#: 豁免 from/互链——存量资产的来源在各自 sources 字段里）
+LEGACY_REQUIRED_FRONTMATTER = ("type", "title", "description")
 
 WIKILINK_RE = re.compile(r"\[\[([^\[\]|#]+)(?:[#|][^\[\]]*)?\]\]")
 
@@ -108,22 +115,31 @@ class WikiManager:
             issues: List[str] = []
             if entry["broken_frontmatter"]:
                 issues.append("frontmatter 损坏")
+            elif self._is_legacy_card(entry["metadata"]):
+                for key in LEGACY_REQUIRED_FRONTMATTER:
+                    if not entry["metadata"].get(key):
+                        issues.append(f"缺 frontmatter 字段 {key}")
             else:
                 for key in REQUIRED_FRONTMATTER:
                     if not entry["metadata"].get(key):
                         issues.append(f"缺 frontmatter 字段 {key}")
-            if not entry["from"]:
-                issues.append("from 未填（提炼自哪条 memory 笔记）")
-            elif entry["from"] not in memory_stems:
-                issues.append(f"from 指向的 memory 笔记不存在: {entry['from']}")
-            if not any(
-                link in wiki_stems and link != entry["stem"]
-                for link in entry["links"]
-            ):
-                issues.append("缺指向已有 wiki 条目的 wikilink")
+                if not entry["from"]:
+                    issues.append("from 未填（提炼自哪条 memory 笔记）")
+                elif entry["from"] not in memory_stems:
+                    issues.append(f"from 指向的 memory 笔记不存在: {entry['from']}")
+                if not any(
+                    link in wiki_stems and link != entry["stem"]
+                    for link in entry["links"]
+                ):
+                    issues.append("缺指向已有 wiki 条目的 wikilink")
             if issues:
                 problems.append({"stem": entry["stem"], "issues": issues})
         return problems
+
+    @staticmethod
+    def _is_legacy_card(metadata: Dict[str, Any]) -> bool:
+        """是否 Cognitive OS 迁入卡（frontmatter 含 type+title 即认定）。"""
+        return bool(metadata.get("type") and metadata.get("title"))
 
     def orphans(self) -> List[str]:
         """wiki 内部零入链的条目 stem（按名称排序）。"""
