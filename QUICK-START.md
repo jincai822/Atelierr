@@ -263,6 +263,37 @@ python -m scripts.cli.process_cli highlights book.pdf --output checklist.md
 
 ---
 
+### 飞书机器人（可选 · 双向通道）
+
+飞书自建应用机器人可以把手机端交互收敛到一个 app：给机器人发文字/链接/
+图片/文件直接进库；系统有事（抓取失败、今日摘要）推飞书卡片，卡片带
+「在 Obsidian 中打开」按钮。
+
+1. 飞书开放平台建自建应用，拿到 app_id / app_secret，给机器人开通
+   收消息与发消息权限，拿到你与机器人单聊的 chat_id；
+2. 写进 `~/.config/atelierr/env`（权限 600，绝不入库）：
+
+   ```bash
+   FEISHU_APP_ID=cli_xxx
+   FEISHU_APP_SECRET=xxx
+   FEISHU_CHAT_ID=oc_xxx
+   ```
+
+3. 启动常驻守护：
+
+   ```bash
+   cp docker/systemd/atelierr-feishu.service ~/.config/systemd/user/
+   systemctl --user daemon-reload
+   systemctl --user enable --now atelierr-feishu.service
+   ```
+
+收到消息的去向：文本 → memory/ 笔记（`source: lark`，正文含链接由
+links 分发自动捡起）；图片/文件 → attachments/（media 分发自动
+OCR/转写）。确认/勾选等写动作仍在 Obsidian 完成（机器不改笔记）。
+未配置飞书时一切照常（ntfy 单通道）。
+
+---
+
 ## ✅ 验证安装
 
 运行完整的验证脚本（检查 Python/依赖/目录/配置/Docker/Flatnotes 可达性/

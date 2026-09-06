@@ -1,19 +1,22 @@
-"""ntfy 推送：只在"用户不知道的事"发生时提醒（通知只报数量，不含笔记内容）。
+"""通知推送：只在"用户不知道的事"发生时提醒（通知只报数量，不含笔记内容）。
 
 推送规则（dispatch_cli 接线）：
 - 链接抓取失败 → "Atelierr 抓取失败"（不推用户无从知晓）；
-- 晨间摘要创建成功 → "Atelierr 今日摘要"（附三节计数）；
+- 晨间摘要创建成功 → "Atelierr 今日摘要"（附五节计数）；
 - 常规处理成功不推送（用户自己贴的链接，无需马后炮）。
 
-配置节 ``dispatch.notify``（config/processors.yaml 或 .example）：
+双通道（``send_dispatch_notice``，各自失败隔离）：
+- ntfy：配置节 ``dispatch.notify``（config/processors.yaml 或 .example）：
 
-    dispatch:
-      notify:
-        ntfy_url: https://ntfy.sh     # 或自托管实例
-        topic: <随机长串>              # 主题名即口令，勿用可猜名字
+      dispatch:
+        notify:
+          ntfy_url: https://ntfy.sh     # 或自托管实例
+          topic: <随机长串>              # 主题名即口令，勿用可猜名字
 
-未配置（topic 缺失）时静默跳过；推送失败只记日志式返回 False，
-绝不影响分发主流程。
+- 飞书卡片：环境变量 FEISHU_APP_ID/FEISHU_APP_SECRET/FEISHU_CHAT_ID
+  （见 scripts/dispatch/feishu.py）。
+
+未配置时静默跳过；推送失败只记日志式返回 False，绝不影响分发主流程。
 """
 
 from __future__ import annotations
@@ -75,3 +78,19 @@ def send_ntfy(
         return response.status_code < 300
     except Exception:  # noqa: BLE001 - 推送失败不影响主流程
         return False
+
+
+def send_dispatch_notice(title: str, message: str) -> Dict[str, bool]:
+    """双通道推送：ntfy + 飞书卡片，各自独立失败隔离（不抛异常）。
+
+    飞书侧未配置（FEISHU_APP_ID/SECRET/CHAT_ID 缺失）时静默跳过。
+
+    Returns:
+        Dict[str, bool]: {"ntfy": ..., "feishu": ...} 各通道结果。
+    """
+    from scripts.dispatch.feishu import send_feishu
+
+    return {
+        "ntfy": send_ntfy(title, message),
+        "feishu": send_feishu(title, message),
+    }

@@ -1,0 +1,42 @@
+# Atelierr 飞书机器人长连接守护（常驻）
+#
+# 飞书 → 系统的双向桥（见 scripts/dispatch/feishu.py）：
+#   接收：websocket 长连接收消息（免公网暴露）——文本进 memory/
+#   （source: lark；含 URL 由 links 分发下一轮自动捡起），图片/文件
+#   下载进 attachments/（media 分发自动捡起 OCR/转写）；
+#   发送：抓取失败/今日摘要有事时推飞书卡片（与 ntfy 双通道并行，
+#   卡片带「在 Obsidian 中打开」URI 按钮，无回调零写入）。
+# 幂等：message_id 登记 state/feishu_messages.json。
+#
+# 用户级 systemd unit:
+#   mkdir -p ~/.config/systemd/user
+#   cp docker/systemd/atelierr-feishu.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now atelierr-feishu.service
+#
+# 日志: ~/atelierr-data/state/logs/feishu.log（stdout/stderr 追加）
+# 状态: ~/atelierr-data/state/feishu_messages.json
+# 前置: config/memory.yaml 必须存在（同 atelierr-decay.service）；
+#       ~/.config/atelierr/env 须有 FEISHU_APP_ID / FEISHU_APP_SECRET /
+#       FEISHU_CHAT_ID（飞书开放平台自建应用，权限 600，绝不入库）
+
+[Unit]
+Description=Atelierr Feishu bridge (long-lived websocket)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/workspaces/Atelierr
+Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+EnvironmentFile=-%h/.config/atelierr/env
+ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli feishu
+# 断线自愈：SDK 内部自动重连；进程级崩溃 30 秒后拉起
+Restart=on-failure
+RestartSec=30
+StandardOutput=append:%h/atelierr-data/state/logs/feishu.log
+StandardError=append:%h/atelierr-data/state/logs/feishu.log
+
+[Install]
+WantedBy=default.target

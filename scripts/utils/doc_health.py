@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from scripts.cli.memory_cli import resolve_config_path
-from scripts.dispatch.notify import send_ntfy
+from scripts.dispatch.notify import send_dispatch_notice
 from scripts.memory.core import MemoryTree
 
 #: 数据区必查目录（相对 $OV = notes_dir 的父目录）
@@ -229,7 +229,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"已创建异常笔记: {filename}（待确认）")
         except (ValueError, FileExistsError):
             print(f"异常笔记当天已存在，跳过: {filename}")
-        send_ntfy(
+        send_dispatch_notice(
             "Atelierr 文档健康月检",
             f"发现 {len(problems)} 条文档与盘面不一致，请查看异常笔记",
         )

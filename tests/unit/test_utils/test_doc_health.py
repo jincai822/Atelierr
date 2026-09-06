@@ -134,7 +134,7 @@ def test_main_creates_note_only_on_problems(memory_tree, monkeypatch, tmp_path):
     # 用真实 memory_tree 替换 main 内部构造（避免触碰真实数据目录）
     monkeypatch.setattr(dh, "MemoryTree", lambda *_a, **_kw: memory_tree)
     pushed = []
-    monkeypatch.setattr(dh, "send_ntfy", lambda *a: pushed.append(a))
+    monkeypatch.setattr(dh, "send_dispatch_notice", lambda *a: pushed.append(a))
 
     # 场景 1：有异常 → 建笔记 + 推送 + 报告
     monkeypatch.setattr(
@@ -169,7 +169,7 @@ def test_main_dry_run_writes_nothing(memory_tree, monkeypatch):
     monkeypatch.setattr(
         dh, "run_checks", lambda *_a, **_kw: (["异常甲"], ["事实甲"])
     )
-    monkeypatch.setattr(dh, "send_ntfy", lambda *a: None)
+    monkeypatch.setattr(dh, "send_dispatch_notice", lambda *a: None)
 
     assert dh.main(["--dry-run"]) == 0
     assert not list(memory_tree.notes_dir.glob("文档健康-*.md"))

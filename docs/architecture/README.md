@@ -68,7 +68,9 @@ Cognitive OS 卡（type+title）豁免 from/互链。② wiki 格式升级随
 
 **入口**：控制台.md 是总入口（Obsidian 内 Dataview 全 vault 渲染 +
 车间口令 + 桌面 ▶ 快捷按钮经 Shell Commands/Advanced URI 拉起 Codex 会话）。
-手机端口令卡（Codex 只跑桌面）。Flatnotes 降为兜底入口。
+手机端口令卡（Codex 只跑桌面）。Flatnotes 降为兜底入口。飞书机器人桥
+（09-06，可选）：长连接收消息进库（文本 → memory/、图片文件 →
+attachments/），抓取失败/今日摘要推飞书卡片（与 ntfy 双通道）。
 
 **冻结/待办**：wechat 处理器等真实导出样本；回路三（决策校准）等预测；
 Codex 侧 paths.toml 三 tier 已对齐（`memory/wiki`、`memory/wiki/cognition`、

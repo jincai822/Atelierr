@@ -53,6 +53,14 @@
       "row": 4
     },
     {
+      "id": "feishu",
+      "type": "frontend",
+      "label": "飞书机器人",
+      "sublabel": "发文字/链接/图片给机器人 · 长连接进库",
+      "stage": 0,
+      "row": 3
+    },
+    {
       "id": "links",
       "type": "backend",
       "label": "links 分发",
@@ -201,6 +209,33 @@
       "labelAt": [
         200,
         445
+      ]
+    },
+    {
+      "from": "feishu",
+      "to": "vault",
+      "label": "发消息给机器人",
+      "classification": "长连接 · 免公网暴露",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          207,
+          499
+        ],
+        [
+          207,
+          442
+        ],
+        [
+          280,
+          442
+        ]
+      ],
+      "labelAt": [
+        195,
+        545
       ]
     },
     {
@@ -407,10 +442,11 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "① 捕获：两条入口进同一处",
+      "title": "① 捕获：三条入口进同一处",
       "items": [
         "手机：QuickAdd 速记（模板自动带 frontmatter）；正文贴链接；拍照/录音进 attachments/",
         "电脑：Obsidian 直接写笔记；或往 attachments/ 拖截图/录音/PDF；Flatnotes 网页兜底",
+        "飞书：给机器人发文字/链接/图片/文件，长连接直接进库（免公网暴露，可选通道）",
         "Syncthing 实时双向同步整个库；state/sessions/exports 不上手机"
       ]
     },

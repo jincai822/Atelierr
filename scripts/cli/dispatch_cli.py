@@ -9,6 +9,7 @@
     python -m scripts.cli.dispatch_cli media --dry-run  # 只报告不处理
     python -m scripts.cli.dispatch_cli highlights       # 划重点清单勾中项转 wiki 摘录卡
     python -m scripts.cli.dispatch_cli digest           # 创建今日摘要笔记
+    python -m scripts.cli.dispatch_cli feishu           # 飞书机器人长连接守护（收消息进库）
 
 配置解析顺序与 memory_cli 一致：--config > 环境变量 ATELIERR_CONFIG >
 ./config/memory.yaml > 内置默认 ~/atelierr-data/{memory,state}。
@@ -30,7 +31,7 @@ from scripts.dispatch.digest import DigestDispatcher
 from scripts.dispatch.highlights import HighlightsDispatcher
 from scripts.dispatch.links import LinkDispatcher
 from scripts.dispatch.media import MediaDispatcher
-from scripts.dispatch.notify import send_ntfy
+from scripts.dispatch.notify import send_dispatch_notice
 from scripts.dispatch.todos import TodoDispatcher
 from scripts.memory.core import MemoryTree
 from scripts.memory.resurface import ResurfaceManager
@@ -40,13 +41,13 @@ DEFAULT_STATE_DIR = "~/atelierr-data/state"
 
 
 def _notify_failures(failures: List[Dict[str, Any]]) -> None:
-    """有抓取失败时发 ntfy 推送（未配置/失败静默，不影响主流程）。
+    """有抓取失败时双通道推送（未配置/失败静默，不影响主流程）。
 
     处理成功不推送（用户自己贴的链接，无需马后炮）；失败必须推，
     否则用户无从知晓系统没抓到。
     """
     if failures:
-        send_ntfy(
+        send_dispatch_notice(
             "Atelierr 抓取失败",
             f"{len(failures)} 条链接抓取失败，请检查后重新粘贴",
         )
@@ -55,7 +56,7 @@ def _notify_failures(failures: List[Dict[str, Any]]) -> None:
 def _notify_media_failures(failures: List[Dict[str, Any]]) -> None:
     """附件处理失败时推送（同上：成功不推，失败必推）。"""
     if failures:
-        send_ntfy(
+        send_dispatch_notice(
             "Atelierr 处理失败",
             f"{len(failures)} 个附件处理失败，请检查文件后重新放入",
         )
@@ -63,7 +64,7 @@ def _notify_media_failures(failures: List[Dict[str, Any]]) -> None:
 
 def _notify_digest(counts: Dict[str, int]) -> None:
     """今日摘要创建成功后推送五节计数（未配置/失败静默）。"""
-    send_ntfy(
+    send_dispatch_notice(
         "Atelierr 今日摘要",
         f"待确认 {counts['pending']}，提炼候选 {counts['undistilled']}，"
         f"待办 {counts['todos']}，今日复习 {counts['resurface']}，"
@@ -215,6 +216,19 @@ class DispatchCLI:
             else:
                 click.echo(f"  已创建: {report['created']}")
                 _notify_digest(report["counts"])
+
+        @cli.command(name="feishu")
+        def feishu_command() -> None:
+            """启动飞书机器人长连接守护（收消息进库；Ctrl+C 停止）。"""
+            from scripts.dispatch.feishu import FeishuBridge
+
+            tree = self._build_tree()
+            try:
+                bridge = FeishuBridge.from_env(tree)
+            except RuntimeError as exc:
+                raise click.ClickException(str(exc))
+            click.echo("飞书长连接已启动（消息 → memory/ 或 attachments/）")
+            bridge.run_forever()
 
         return cli
 

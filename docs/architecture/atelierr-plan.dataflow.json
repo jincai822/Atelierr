@@ -18,6 +18,7 @@
     { "id": "phone", "type": "frontend", "label": "手机 Obsidian", "sublabel": "QuickAdd 速记免标题 · 贴链接 · 拍照录音", "stage": 0, "row": 0 },
     { "id": "syncthing", "type": "cloud", "label": "Syncthing", "sublabel": "实时双向 · 排除 state/sessions/exports", "stage": 0, "row": 2 },
     { "id": "desktop", "type": "frontend", "label": "电脑 Obsidian", "sublabel": "直接写库 · 拖文件进附件 · Flatnotes 兜底", "stage": 0, "row": 4 },
+    { "id": "feishu", "type": "frontend", "label": "飞书机器人", "sublabel": "发文字/链接/图片给机器人", "stage": 0, "row": 3 },
     { "id": "links", "type": "backend", "label": "links 分发", "sublabel": "15min 轮询 · 先登记裸笔记 · 扫正文抓 URL", "stage": 1, "row": 0 },
     { "id": "vault", "type": "database", "label": "同一个库", "sublabel": "memory/ 笔记 + attachments/ 附件", "stage": 1, "row": 2, "tag": "手机电脑同一处 · 裸笔记自动归一" },
     { "id": "media", "type": "backend", "label": "media 分发", "sublabel": "15min 扫附件 · mtime>30s 才动 · 按类型分流", "stage": 1, "row": 4 },
@@ -37,6 +38,7 @@
     { "from": "phone", "to": "syncthing", "label": "速记/链接/拍照", "classification": "md 笔记 · 附件", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [58, 271] },
     { "from": "syncthing", "to": "vault", "label": "双向同步", "classification": "笔记+附件 · 秒级", "variant": "emphasis", "fromSide": "right", "toSide": "left", "route": "straight", "labelAt": [207, 360] },
     { "from": "desktop", "to": "vault", "label": "直接写 · 扔附件", "classification": "同一目录 · 免同步", "variant": "emphasis", "fromSide": "top", "toSide": "bottom", "via": [[100, 430], [315, 430]], "labelAt": [200, 445] },
+    { "from": "feishu", "to": "vault", "label": "发消息给机器人", "classification": "长连接进库 · 免公网", "variant": "emphasis", "fromSide": "right", "toSide": "bottom", "via": [[207, 499], [207, 442], [280, 442]], "labelAt": [195, 545] },
     { "from": "vault", "to": "links", "label": "扫描笔记正文", "classification": "正则抓 URL · 状态去重", "variant": "emphasis", "fromSide": "top", "toSide": "bottom", "route": "straight", "labelAt": [355, 271] },
     { "from": "vault", "to": "media", "label": "扫描附件目录", "classification": "图/音/PDF 按类型", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [270, 499] },
     { "from": "links", "to": "linkengine", "label": "链接正文", "classification": "抖音/小红书/B 站", "variant": "emphasis", "labelAt": [422, 138] },
@@ -60,7 +62,7 @@
       "dot": "emerald",
       "title": "主路（设备无关 · 全自动到你面前）",
       "items": [
-        "设备在①汇入同一个库后消失，②只按内容类型分流（15 分钟一轮）",
+        "设备在①汇入同一个库后消失（Obsidian 两端 + 飞书机器人），②只按内容类型分流（15 分钟一轮）",
         "链接路：正文有 URL → yt-dlp 下载 → Whisper GPU 转写 → DeepSeek 整理（标点/分段/观点/标题）",
         "附件路：截图→PaddleOCR / 录音→Whisper → 待确认笔记；PDF → 候选清单，勾中直接成 wiki 摘录卡",
         "待办路：已确认笔记 → LLM 判行动项 → todo 笔记（晨报待办栏提醒）"
@@ -81,7 +83,7 @@
       "title": "回响回路（第④阶段内部）",
       "items": [
         "decay 03:00：反链统计 → 0.95^(闲置天数/引用因子) 无状态重算 → 三层迁移",
-        "晨报 07:53 五节：待确认/提炼候选/待办/今日复习/昨日新入库，ntfy 只推计数",
+        "晨报 07:53 五节：待确认/提炼候选/待办/今日复习/昨日新入库，ntfy/飞书双通道只推计数",
         "提炼候选：推送 ≥2 次或确认满 3 天未提炼，晨报 + 控制台双提醒",
         "每月 2 日 04:17 文档体检，异常才建笔记提醒"
       ]

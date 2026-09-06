@@ -1,4 +1,4 @@
-"""分发 CLI 推送规则单元测试（send_ntfy 全部 monkeypatch，无真实网络）。
+"""分发 CLI 推送规则单元测试（send_dispatch_notice 全部 monkeypatch，无真实网络）。
 
 推送规则：链接抓取失败才推；晨间摘要创建成功推三节计数；
 常规处理成功一律不推（防"马后炮"噪音）。
@@ -49,10 +49,11 @@ def _reset_fake():
 
 @pytest.fixture
 def pushes(monkeypatch):
-    """拦截 send_ntfy，返回 [(title, message), ...] 调用记录。"""
+    """拦截 send_dispatch_notice，返回 [(title, message), ...] 调用记录。"""
     calls = []
     monkeypatch.setattr(
-        cli_module, "send_ntfy", lambda title, msg: calls.append((title, msg)) or True
+        cli_module, "send_dispatch_notice",
+        lambda title, msg: calls.append((title, msg)) or {"ntfy": True, "feishu": True},
     )
     return calls
 
