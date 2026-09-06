@@ -9,17 +9,18 @@
 ## 重渲染方法
 
 ```bash
-# archify 本体在 /tmp/archify（重启会丢；丢了重新 clone）：
-#   git clone --depth 1 https://github.com/tt-a1i/archify /tmp/archify
-cd /tmp/archify/archify
-node bin/archify.mjs validate architecture \
-  /srv/workspaces/Atelierr/docs/architecture/atelierr-plan.architecture.json \
-  --quality showcase --json        # 需 ok:true 且 0 issues
-node bin/archify.mjs deliver architecture \
-  /srv/workspaces/Atelierr/docs/architecture/atelierr-plan.architecture.json \
-  /tmp/archify-work/atelierr-plan.html --quality showcase
-node bin/archify.mjs visual-check /tmp/archify-work/atelierr-plan.html --json  # 0 errors
-cp /tmp/archify-work/atelierr-plan.html ~/atelierr-data/exports/
+# archify 本体在 ~/.codex/skills/archify（只读执行，勿改）：
+ARCH=~/.codex/skills/archify
+node $ARCH/renderers/architecture/render-architecture.mjs \
+  docs/architecture/atelierr-plan.architecture.json /tmp/atelierr-plan.html
+node $ARCH/renderers/dataflow/render-dataflow.mjs \
+  docs/architecture/atelierr-plan.dataflow.json /tmp/atelierr-flow.html
+# 注入流线动画（archify 无动画能力，渲染后加 CSS）：
+.venv-atelierr/bin/python tools/archify_animate.py \
+  /tmp/atelierr-plan.html /tmp/atelierr-flow.html
+node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-plan.html  # 全 ok:true
+node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-flow.html
+cp /tmp/atelierr-plan.html /tmp/atelierr-flow.html ~/atelierr-data/exports/
 ```
 
 ## 架构速记（与图一致）
@@ -55,5 +56,5 @@ Atelierr 应用（后台管线，定时器无人值守）。两平面代码零�
 手机端口令卡（Codex 只跑桌面）。Flatnotes 降为兜底入口。
 
 **冻结/待办**：wechat 处理器等真实导出样本；回路三（决策校准）等预测；
-Codex 侧 paths.toml 三 tier 对齐（`memory/wiki`、`memory/wiki/cognition`、
-`memory/wiki/reflections`）待其会话执行。
+Codex 侧 paths.toml 三 tier 已对齐（`memory/wiki`、`memory/wiki/cognition`、
+`memory/wiki/reflections`，09-03 完成）。
