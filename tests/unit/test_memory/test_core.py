@@ -273,3 +273,30 @@ def test_note_info(memory_tree, make_note):
     assert info["layer"] == "long-term"
     assert info["confidence"] == 1.0
     assert info["pending_delete"] is False
+
+
+def test_iter_note_files_excludes_system_dir(memory_tree):
+    """系统/ 目录（摘要/控制台等机器产物）不进笔记扫描域。"""
+    from scripts.memory.core import iter_note_files
+
+    memory_tree.create_note("real.md", "真笔记")
+    system_dir = memory_tree.notes_dir / "系统"
+    system_dir.mkdir()
+    (system_dir / "今日摘要-2026-09-07.md").write_text("摘要", encoding="utf-8")
+    (system_dir / "控制台.md").write_text("控制台", encoding="utf-8")
+
+    names = [path.name for path in iter_note_files(memory_tree.notes_dir)]
+    assert names == ["real.md"]
+
+
+def test_iter_note_files_skips_sync_conflict(memory_tree):
+    """Syncthing 冲突副本（*.sync-conflict-*）不是新笔记，一律跳过。"""
+    from scripts.memory.core import iter_note_files
+
+    memory_tree.create_note("real.md", "真笔记")
+    (memory_tree.notes_dir / "real.sync-conflict-20260907-120000-ABCDE.md").write_text(
+        "冲突副本", encoding="utf-8"
+    )
+
+    names = [path.name for path in iter_note_files(memory_tree.notes_dir)]
+    assert names == ["real.md"]

@@ -1,5 +1,10 @@
 """晨间摘要：每天定时创建一条"今日摘要"笔记（只新建，不改写）。
 
+摘要写入 ``memory/系统/`` 子目录（NOTE_EXCLUDED_DIRS 成员）：
+摘要是 Agent 的输出而非记忆——留在扫描域内会污染搜索排名、并用
+摘要链接给 references 引用信号"刷票"（自我指涉回路）。Obsidian
+里照常可见可读（Dataview 全库查询不受影响），仅记忆机制不扫描。
+
 内容五节（wikilink 列表，点开即达）：
 - 待我确认：当前带"待确认"标签的笔记（摘除标签后次日自然消失）；
 - 提炼候选：从未提炼进 wiki/ 且值得动笔的笔记，两路汇合——
@@ -17,7 +22,7 @@
 - 昨日新入库：frontmatter created 日期为昨天的笔记。
 
 纪律（与 dispatch 模块同源）：
-- 幂等：文件名 ``今日摘要-YYYY-MM-DD.md``，当天已存在则跳过；
+- 幂等：文件名 ``系统/今日摘要-YYYY-MM-DD.md``，当天已存在则跳过；
 - 摘要笔记 ``source="digest"``，todos 分发跳过它（防把摘要里的
   待办文本再喂给 LLM 空转）；
 - 只读全部笔记的 frontmatter/正文，绝不改写；
@@ -32,6 +37,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -40,7 +46,13 @@ from typing import Any, Dict, List, Optional, Tuple
 import frontmatter
 
 from scripts.dispatch.response_probe import ResponseProbe
-from scripts.memory.core import LAYERS, MemoryTree
+from scripts.memory.core import (
+    LAYERS,
+    SYNC_CONFLICT_RE,
+    MemoryTree,
+    _now_iso,
+    generate_id,
+)
 from scripts.memory.resurface import ResurfaceManager
 from scripts.memory.watcher import MemoryWatcher
 from scripts.wiki.manager import WikiManager
@@ -48,6 +60,9 @@ from scripts.wiki.manager import WikiManager
 MIN_PUSH_COUNT = 2  # 推送达到此次数仍未提炼，进"提炼候选"节
 DISTILL_MIN_AGE_DAYS = 3  # 已确认笔记创建满此天数即可提炼（沉一沉再动笔）
 MAX_DISTILL_CANDIDATES = 5  # 候选节最多列几条（防长列表制造压力）
+
+#: 摘要落盘目录（NOTE_EXCLUDED_DIRS 成员，记忆机制不扫描的机器产物区）
+DIGEST_DIRNAME = "系统"
 
 DAILY_NOTE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")  # 日记不算知识候选
 DASHBOARD_STEMS = frozenset({"主页", "控制台"})  # 门面文件不算候选
@@ -92,7 +107,9 @@ class DigestDispatcher:
         MemoryWatcher(self.tree, source="sync").process_pending()
         today = today or datetime.now().strftime("%Y-%m-%d")
         filename = f"今日摘要-{today}.md"
-        if (Path(self.tree.notes_dir) / filename).exists():
+        digest_dir = Path(self.tree.notes_dir) / DIGEST_DIRNAME
+        target = digest_dir / filename
+        if target.exists():
             return {"created": None, "skipped": True, "counts": {}, "markdown": ""}
         pending, todos, yesterday_new = self._collect(today)
         review = self.resurface.candidates()
@@ -106,11 +123,11 @@ class DigestDispatcher:
         )
         created = None
         if not dry_run:
-            self.tree.create_note(filename, markdown, source="digest", tags=["摘要"])
+            self._write_digest(target, filename, markdown)
             self.resurface.mark_pushed([item["id"] for item in review])
             self.probe.register(review)
             self.probe.check_pending()
-            created = filename
+            created = f"{DIGEST_DIRNAME}/{filename}"
         return {
             "created": created,
             "skipped": False,
@@ -123,6 +140,25 @@ class DigestDispatcher:
             },
             "markdown": markdown,
         }
+
+    @staticmethod
+    def _write_digest(target: Path, filename: str, markdown: str) -> None:
+        """写摘要笔记到 系统/（原子写；不登记 sidecar——该目录不扫描）。
+
+        frontmatter 必需字段（id/title/created/source/tags）在此补齐
+        （默认值与 MemoryTree.create_note 同源），undistilled 已由
+        _build 写进 markdown 自带的 frontmatter。
+        """
+        post = frontmatter.loads(markdown)
+        post.metadata.setdefault("id", generate_id())
+        post.metadata.setdefault("title", Path(filename).stem)
+        post.metadata.setdefault("created", _now_iso())
+        post.metadata.setdefault("source", "digest")
+        post.metadata.setdefault("tags", ["摘要"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_text(frontmatter.dumps(post), encoding="utf-8")
+        os.replace(tmp, target)
 
     def _distill_candidates(self, wiki: WikiManager, today: str) -> List[str]:
         """提炼候选：从未进 wiki 且值得动笔的笔记 stem（截断到上限）。
@@ -145,6 +181,8 @@ class DigestDispatcher:
         pushed: List[Tuple[int, str]] = []  # (-count, stem)
         settled: List[Tuple[str, str]] = []  # (created, stem)
         for note_path in sorted(Path(self.tree.notes_dir).glob("*.md")):
+            if SYNC_CONFLICT_RE.search(note_path.name):
+                continue  # Syncthing 冲突副本不是笔记
             stem = note_path.stem
             if stem in distilled:
                 continue

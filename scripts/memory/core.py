@@ -3,10 +3,13 @@
 笔记存储：memory/ 根层 + 用户手动归档子目录（一级平台目录如
 抖音/，二级中图法分类如 抖音/B84-心理学/）。机器创建/改写的文件
 一律在根层；用户可在 Obsidian 里手动移动（机器永不移动笔记）。
-特殊子目录 wiki/、attachments/、trash/ 与隐藏目录（. 开头）是
-机器专用资产，永不参与笔记扫描/搜索/衰减/确认回调。sidecar 索引
-（<state_dir>/index.json）里的 path 是相对 notes_dir 的 POSIX 路径
-（含子目录前缀，如 ``抖音/x.md``）。动态状态
+特殊子目录 wiki/、attachments/、trash/、templates/、系统/ 与隐藏
+目录（. 开头）是机器专用资产，永不参与笔记扫描/搜索/衰减/确认
+回调（系统/ 放摘要、控制台等机器产物：它们是 Agent 的输出而非
+记忆，扫进来会污染搜索排名与 references 引用信号）。
+Syncthing 冲突副本（*.sync-conflict-*）同样一律跳过。sidecar
+索引（<state_dir>/index.json）里的 path 是相对 notes_dir 的
+POSIX 路径（含子目录前缀，如 ``抖音/x.md``）。动态状态
 （confidence/layer/last_accessed/references/pending_delete）只写
 sidecar；笔记文件创建后机器绝不改写。id 为 26 字符 ULID。
 """
@@ -15,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -35,8 +39,12 @@ LAYERS: Tuple[str, str, str] = ("short-term", "mid-term", "long-term")
 
 #: 永不参与笔记扫描的特殊子目录名（机器专用资产 + Obsidian 模板目录）
 NOTE_EXCLUDED_DIRS: frozenset[str] = frozenset(
-    {"wiki", "attachments", "trash", "templates"}
+    {"wiki", "attachments", "trash", "templates", "系统"}
 )
+
+#: Syncthing 冲突副本文件名模式（name.sync-conflict-YYYYMMDD-HHMMSS-XXX.md）：
+#: 双端同改一篇笔记时生成的旁路副本，不是新笔记，扫描/登记/搜索一律跳过
+SYNC_CONFLICT_RE = re.compile(r"\.sync-conflict-\d{8}-\d{6}")
 
 #: Crockford base32 字母表（ULID 用，去除 I/L/O/U）
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -68,9 +76,10 @@ def _str_list(value: object) -> List[str]:
 def iter_note_files(notes_dir: Path) -> Iterator[Path]:
     """递归列出笔记 .md 文件（search/decay/watcher/确认回调共用）。
 
-    排除：wiki/、attachments/、trash/ 等机器专用目录与隐藏目录
-    （. 开头）、隐藏文件（. 开头）；不跟随符号链接目录（防环与
-    目录逃逸）。产出按目录/文件名排序，稳定可复现。
+    排除：NOTE_EXCLUDED_DIRS 机器专用目录（wiki/attachments/trash/
+    templates/系统/）与隐藏目录（. 开头）、隐藏文件（. 开头）、
+    Syncthing 冲突副本（*.sync-conflict-*）；不跟随符号链接目录
+    （防环与目录逃逸）。产出按目录/文件名排序，稳定可复现。
 
     Args:
         notes_dir: 笔记根目录。
@@ -85,7 +94,11 @@ def iter_note_files(notes_dir: Path) -> Iterator[Path]:
             if not name.startswith(".") and name not in NOTE_EXCLUDED_DIRS
         )
         for filename in sorted(filenames):
-            if filename.startswith(".") or not filename.endswith(".md"):
+            if (
+                filename.startswith(".")
+                or not filename.endswith(".md")
+                or SYNC_CONFLICT_RE.search(filename)
+            ):
                 continue
             yield Path(dirpath) / filename
 

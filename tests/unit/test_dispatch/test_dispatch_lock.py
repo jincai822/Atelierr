@@ -150,6 +150,6 @@ def test_digest_not_locked(cli, memory_tree, monkeypatch, pushes, capsys):
         os.close(fd)
 
     today = datetime.now().strftime("%Y-%m-%d")
-    assert (memory_tree.notes_dir / f"今日摘要-{today}.md").exists()
+    assert (memory_tree.notes_dir / "系统" / f"今日摘要-{today}.md").exists()
     assert SKIP_MESSAGE not in capsys.readouterr().out
     assert pushes

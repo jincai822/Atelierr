@@ -133,7 +133,9 @@ def test_digest_pushes_counts(cli, memory_tree, pushes):
 def test_digest_skipped_no_push(cli, memory_tree, pushes):
     """当天摘要已存在（幂等跳过）→ 不推。"""
     today = datetime.now().strftime("%Y-%m-%d")
-    memory_tree.create_note(f"今日摘要-{today}.md", "已有摘要", source="digest")
+    digest_dir = memory_tree.notes_dir / "系统"
+    digest_dir.mkdir()
+    (digest_dir / f"今日摘要-{today}.md").write_text("已有摘要", encoding="utf-8")
 
     assert cli.main(["digest"]) == 0
     assert pushes == []

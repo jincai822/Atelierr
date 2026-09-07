@@ -181,3 +181,19 @@ def test_bad_last_accessed_tolerated(memory_tree, make_note):
     results = MemorySearcher(memory_tree).search("损坏")
     assert len(results) == 1
     assert 0.0 <= results[0].confidence <= 1.0
+
+
+def test_search_skips_system_dir_and_sync_conflict(memory_tree, make_note):
+    """搜索扫描域与 iter_note_files 一致：系统/ 与冲突副本不可见。"""
+    make_note(memory_tree, filename="real.md", content="叔本华唯意志论")
+    system_dir = memory_tree.notes_dir / "系统"
+    system_dir.mkdir()
+    (system_dir / "今日摘要-2026-09-07.md").write_text(
+        "---\ntags: [摘要]\n---\n提到叔本华", encoding="utf-8"
+    )
+    (memory_tree.notes_dir / "real.sync-conflict-20260907-120000-ABCDE.md").write_text(
+        "叔本华冲突副本", encoding="utf-8"
+    )
+
+    results = MemorySearcher(memory_tree).search("叔本华")
+    assert [r.title for r in results] == ["real"]

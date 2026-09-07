@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 import frontmatter
 
 from scripts.memory.confidence import ConfidenceCalculator
-from scripts.memory.core import NOTE_EXCLUDED_DIRS
+from scripts.memory.core import NOTE_EXCLUDED_DIRS, SYNC_CONFLICT_RE
 from scripts.utils.date_utils import parse_date
 
 if TYPE_CHECKING:
@@ -98,7 +98,9 @@ class MemorySearcher:
                             if dent.is_dir(follow_symlinks=False):
                                 if dent.name not in NOTE_EXCLUDED_DIRS:
                                     _walk(Path(dent.path), prefix + dent.name + "/")
-                            elif dent.name.endswith(".md"):
+                            elif dent.name.endswith(".md") and not SYNC_CONFLICT_RE.search(
+                                dent.name
+                            ):
                                 found[prefix + dent.name] = dent.stat()
                         except OSError:  # 枚举期间文件被删
                             continue

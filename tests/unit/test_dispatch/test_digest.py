@@ -36,11 +36,13 @@ def test_digest_created_with_sections(memory_tree):
 
     report = DigestDispatcher(memory_tree).run(today="2026-09-01")
 
-    assert report["created"] == "今日摘要-2026-09-01.md"
+    assert report["created"] == "系统/今日摘要-2026-09-01.md"
     post = frontmatter.loads(
         (memory_tree.notes_dir / report["created"]).read_text(encoding="utf-8")
     )
     assert post["source"] == "digest"
+    assert post["tags"] == ["摘要"]
+    assert post["id"] and post["created"]  # 与 create_note 同源的默认字段
     body = post.content
     assert "## ⏳ 待我确认（2）" in body
     assert "[[a]]" in body and "[[b]]" in body
@@ -58,7 +60,7 @@ def test_digest_idempotent_same_day(memory_tree):
 
     second = dispatcher.run(today="2026-09-01")
 
-    assert first["created"] == "今日摘要-2026-09-01.md"
+    assert first["created"] == "系统/今日摘要-2026-09-01.md"
     assert second["skipped"] is True
     assert second["created"] is None
 
@@ -71,7 +73,9 @@ def test_digest_dry_run(memory_tree):
 
     assert report["created"] is None
     assert "[[a]]" in report["markdown"]
-    assert not (memory_tree.notes_dir / "今日摘要-2026-09-01.md").exists()
+    assert not (
+        memory_tree.notes_dir / "系统" / "今日摘要-2026-09-01.md"
+    ).exists()
 
 
 def test_digest_empty_vault(memory_tree):
@@ -145,7 +149,7 @@ def test_digest_registers_and_resolves_probe(memory_tree, make_note):
 
 
 def test_digest_note_skipped_by_todos_dispatch(memory_tree):
-    """摘要笔记不会被待办分发捡去（防摘要内容空转 LLM）。"""
+    """摘要落 系统/（不进扫描域）；根层遗留摘要仍按 source 显式跳过。"""
     from scripts.dispatch.todos import TodoDispatcher
 
     DigestDispatcher(memory_tree).run(today="2026-09-01")
@@ -153,7 +157,24 @@ def test_digest_note_skipped_by_todos_dispatch(memory_tree):
     report = TodoDispatcher(memory_tree).run()
 
     assert report["created"] == []
+    assert report["scanned"] == 0  # 系统/ 里的摘要根本不进记忆扫描域
+
+    # 双保险：根层遗留 source=digest 笔记仍被跳过（防摘要内容空转 LLM）
+    memory_tree.create_note("legacy-摘要.md", "- [ ] 旧事", source="digest")
+    report = TodoDispatcher(memory_tree).run()
+    assert report["created"] == []
     assert report["skipped"] == 1
+
+
+def test_digest_outside_memory_scan_domain(memory_tree):
+    """摘要在 系统/：iter_note_files 扫不到，sidecar 索引也不登记。"""
+    from scripts.memory.core import iter_note_files
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-01")
+
+    assert report["created"].startswith("系统/")
+    scanned = [path.name for path in iter_note_files(memory_tree.notes_dir)]
+    assert "今日摘要-2026-09-01.md" not in scanned
 
 
 def _seed_probe(tree, pushes: dict) -> None:
