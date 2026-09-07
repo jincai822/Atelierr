@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import sys
 from contextlib import contextmanager
@@ -38,6 +39,7 @@ from scripts.dispatch.highlights import HighlightsDispatcher
 from scripts.dispatch.links import LinkDispatcher
 from scripts.dispatch.media import MediaDispatcher
 from scripts.dispatch.notify import send_dispatch_notice
+from scripts.dispatch.prompt import PromptStore
 from scripts.dispatch.todos import TodoDispatcher
 from scripts.memory.core import MemoryTree
 from scripts.memory.resurface import ResurfaceManager
@@ -332,6 +334,65 @@ class DispatchCLI:
                     click.echo(f"  已创建摘录卡: wiki/{filename}")
                 if dry_run:
                     click.echo("（dry-run：未做处理）")
+
+        @cli.command(name="prompt-open")
+        @click.argument("kind")
+        @click.argument("message")
+        @click.option(
+            "--no-send",
+            "no_send",
+            is_flag=True,
+            help="只登记会话，不推送（问题已另行发出时用）",
+        )
+        def prompt_open_command(kind: str, message: str, no_send: bool) -> None:
+            """开启飞书问答会话：推送问题并登记待答状态。
+
+            会话 open 期间，用户在飞书里的文本回复计入答案（不捕获为
+            笔记），回「跳过」/「完成」结束。供周回顾等反思仪式使用。
+            """
+            tree = self._build_tree()
+            store = PromptStore(tree.state_dir)
+            if store.is_open():
+                click.echo("已有进行中的问答会话，先 prompt-collect 或等用户结束")
+                return
+            if not no_send:
+                if not _feishu_ready():
+                    click.echo("飞书未配置，无法推送问题")
+                    return
+                from scripts.dispatch.feishu import send_feishu
+
+                if not send_feishu(f"Atelierr 问答（{kind}）", message):
+                    click.echo("飞书推送失败，会话未登记")
+                    return
+            store.open(kind, [message])
+            click.echo(f"问答会话已开启（kind={kind}），等待飞书回复")
+
+        @cli.command(name="prompt-collect")
+        def prompt_collect_command() -> None:
+            """汇总当前问答会话的答案（JSON 输出）并关闭会话。"""
+            tree = self._build_tree()
+            data = PromptStore(tree.state_dir).close()
+            if not data:
+                click.echo("无问答会话")
+                return
+            answers = data.get("answers") or []
+            click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+            click.echo(f"共 {len(answers)} 条回答，会话已关闭")
+
+        @cli.command(name="prompt-status")
+        def prompt_status_command() -> None:
+            """查看当前问答会话状态。"""
+            tree = self._build_tree()
+            data = PromptStore(tree.state_dir).load()
+            if not data or data.get("status") != "open":
+                click.echo("无进行中的问答会话")
+                return
+            answers = data.get("answers") or []
+            click.echo(
+                f"会话 open：kind={data.get('kind')}，"
+                f"已收到 {len(answers)} 条回答，"
+                f"提问于 {data.get('asked_at')}"
+            )
 
         @cli.command(name="digest")
         @click.option(

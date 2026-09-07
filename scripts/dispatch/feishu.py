@@ -57,6 +57,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import frontmatter
 
+from scripts.dispatch.prompt import CLOSE_WORDS, PromptStore
+
 from scripts.dispatch.archive import derive_archive_dir
 from scripts.dispatch.media import ATTACHMENTS_DIR
 from scripts.memory.core import MemoryTree
@@ -183,7 +185,11 @@ class FeishuBridge:
         )
         try:
             if msg_type == "text":
-                self._receive_text(message_id, str(content.get("text") or ""))
+                self._receive_text(
+                    message_id,
+                    str(content.get("text") or ""),
+                    chat_id=str(getattr(message, "chat_id", "") or "") or None,
+                )
             elif msg_type in ("image", "file"):
                 self._receive_resource(message_id, msg_type, content)
         finally:
@@ -504,10 +510,26 @@ class FeishuBridge:
             ],
         }
 
-    def _receive_text(self, message_id: str, text: str) -> Optional[Path]:
-        """文本消息 → memory/ 笔记（source: lark；空文本忽略）。"""
+    def _receive_text(
+        self, message_id: str, text: str, chat_id: Optional[str] = None
+    ) -> Optional[Path]:
+        """文本消息 → memory/ 笔记（source: lark；空文本忽略）。
+
+        待答问题会话 open 期间（scripts/dispatch/prompt.py），文本视为
+        周回顾等仪式的**回答**：追加进会话状态、回执条数，不捕获为
+        笔记；回答「跳过」/「完成」关闭会话。会话关闭后恢复捕获。
+        """
         text = text.strip()
         if not text:
+            return None
+        store = PromptStore(Path(self.tree.state_dir))
+        if store.is_open():
+            if text.lower() in CLOSE_WORDS:
+                store.close()
+                self._send_feedback(chat_id, "好的，本次问答已结束 ✅")
+            else:
+                count = store.append(text)
+                self._send_feedback(chat_id, f"已收到（第 {count} 条回答）")
             return None
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         suffix = hashlib.sha1(message_id.encode("utf-8")).hexdigest()[:6]
