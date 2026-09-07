@@ -122,22 +122,23 @@ def _notify_created_notes(
 ) -> None:
     """新产出笔记逐条推送带「✅ 确认」按钮的卡片（confirm_note=文件名）。
 
-    仅当飞书通道可用时推送；skip_prefix 命中的文件名（如划重点清单，
-    不带「待确认」标签）不推。正文末尾附「建议归档」提示行（读笔记
-    取平台/中图法标签，取不到就省略，绝不影响推送）。todos/dochealth
-    等汇总通知不走此路径。
+    仅当飞书通道可用时推送；skip_prefix 按文件名（basename）匹配
+    （created 可能带 ``系统/`` 前缀——划重点清单落在机器产物区），
+    命中者（不带「待确认」标签）不推。正文末尾附「建议归档」提示行
+    （读笔记取平台/中图法标签，取不到就省略，绝不影响推送）。
+    todos/dochealth 等汇总通知不走此路径。
 
     Args:
         title: 通知标题。
         message: 通知正文前缀。
-        created: 新产出笔记文件名列表。
+        created: 新产出笔记相对路径列表（可能含 ``系统/`` 前缀）。
         notes_dir: 笔记根目录（读 frontmatter 建议归档提示用）。
-        skip_prefix: 命中该前缀的文件名不推送（如 划重点-）。
+        skip_prefix: 按 basename 命中该前缀的不推送（如 划重点-）。
     """
     if not _feishu_ready():
         return
     for filename in created:
-        if skip_prefix and filename.startswith(skip_prefix):
+        if skip_prefix and Path(filename).name.startswith(skip_prefix):
             continue
         body = f"{message}：{filename}"
         hint = _archive_hint(notes_dir / filename)
@@ -288,8 +289,9 @@ class DispatchCLI:
                     f"跳过已处理 {report['skipped']} 个"
                 )
                 for filename in report["created"]:
-                    # 划重点清单不带"待确认"（确认动作在勾中项转出的笔记上）
-                    suffix = "" if filename.startswith("划重点-") else "（待确认）"
+                    # 划重点清单不带"待确认"（确认动作在勾中项转出的笔记上）；
+                    # 清单在 系统/ 下（created 带前缀），按文件名判断
+                    suffix = "" if Path(filename).name.startswith("划重点-") else "（待确认）"
                     click.echo(f"  已创建: {filename}{suffix}")
                 for failure in report["failed"]:
                     click.echo(f"  失败: {failure['file']} — {failure['error']}")

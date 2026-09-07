@@ -286,3 +286,21 @@ def test_archive_hint_missing_note_file_omitted(memory_tree, feishu_sends):
     (memory_tree.notes_dir / "已移走.md").unlink()
     _, body, _ = _notify_created(memory_tree, feishu_sends, "已移走.md")
     assert "建议归档" not in body
+
+
+def test_skip_prefix_matches_basename(memory_tree, feishu_sends):
+    """skip_prefix 按文件名匹配：带 系统/ 前缀的划重点清单不推送。"""
+    from scripts.dispatch.sysdir import write_machine_note
+
+    write_machine_note(
+        memory_tree.notes_dir, "划重点-测试书-abc123.md",
+        "# 划重点清单\n", source="highlights", tags=["划重点"],
+    )
+    cli_module._notify_created_notes(
+        "Atelierr OCR 笔记待确认",
+        "已识别入库",
+        ["系统/划重点-测试书-abc123.md"],
+        notes_dir=memory_tree.notes_dir,
+        skip_prefix="划重点-",
+    )
+    assert feishu_sends == []

@@ -272,3 +272,16 @@ def test_validate_excerpt_card_dangling_from(memory_tree):
     assert problems[0]["issues"] == [
         "from 指向的 memory 笔记不存在: 划重点-测试书-abc123"
     ]
+
+
+def test_validate_excerpt_from_checklist_in_system_dir(memory_tree):
+    """摘录卡 from 指向 系统/ 里的清单（机器产物区）：不误报悬空。"""
+    from scripts.dispatch.sysdir import write_machine_note
+
+    write_machine_note(
+        memory_tree.notes_dir, "划重点-测试书-abc123.md",
+        "# 划重点清单\n", source="highlights", tags=["划重点"],
+    )
+    _write_wiki(memory_tree, "摘录-概念甲-a1b2c3.md", _EXCERPT_META)
+
+    assert WikiManager(memory_tree).validate() == []
