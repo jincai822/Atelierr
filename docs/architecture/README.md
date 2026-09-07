@@ -42,7 +42,10 @@ Atelierr 应用（后台管线，定时器无人值守）。两平面代码零�
 **后台管线**（横向）：捕获入口（速记/链接/截图/录音/PDF）→ dispatch 分发
 （15 分钟轮询，links→media→todos→highlights）→ processors 引擎
 （OCR/Whisper/LLM 摘要/LLM 划重点代读）→ memory/ 工作记忆（平面 .md
-缓冲区，会遗忘）→ wiki/ 知识总库。PDF 走划重点通道：机器代读出可勾选
+缓冲区，会遗忘）→ wiki/ 知识总库。memory/ 根=收件箱；确认后归子目录
+（平台/ · 书籍/分类/ · 日记/想法/目标/）：你手动拖或点飞书 📁 按钮，
+机器只在你触发时移动且衰减状态跟随；搜索/衰减递归覆盖子目录
+（wiki/attachments/trash/templates 排除）。PDF 走划重点通道：机器代读出可勾选
 候选清单，人工勾中直接转 wiki 摘录卡（type: Excerpt，from 指回清单+页码；
 Cognitive OS §7.9 机制 09-03 落地，09-06 方案③改为勾选即沉淀，不再经
 memory 待确认中转——摘录卡是文献笔记，周日提炼时改写为 concept 卡并互链）。
@@ -70,7 +73,9 @@ Cognitive OS 卡（type+title）豁免 from/互链。② wiki 格式升级随
 车间口令 + 桌面 ▶ 快捷按钮经 Shell Commands/Advanced URI 拉起 Codex 会话）。
 手机端口令卡（Codex 只跑桌面）。Flatnotes 降为兜底入口。飞书机器人桥
 （09-06，可选）：长连接收消息进库（文本 → memory/、图片文件 →
-attachments/），抓取失败/今日摘要推飞书卡片（与 ntfy 双通道）。
+attachments/），抓取失败/今日摘要推飞书卡片（与 ntfy 双通道）；
+09-07 起处理完成卡片带三按钮（看全文/✅确认/📁确认并归档，附文字回复），
+点确认或归档属人工触发例外：机器才删单标签 / 移单篇进子目录。
 
 **冻结/待办**：wechat 处理器等真实导出样本；回路三（决策校准）等预测；
 Codex 侧 paths.toml 三 tier 已对齐（`memory/wiki`、`memory/wiki/cognition`、

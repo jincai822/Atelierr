@@ -3,7 +3,7 @@
   "diagram_type": "dataflow",
   "meta": {
     "title": "信息流细化 ①：捕获 → 加工 → 入库",
-    "subtitle": "每 15 分钟无人值守跑完全程；你只在最后确认 · 2026-09-06",
+    "subtitle": "每 15 分钟无人值守跑完全程；你只在最后点按钮 · 2026-09-07",
     "output": "atelierr-flow-pipeline.html",
     "viewBox": [
       1280,
@@ -24,7 +24,7 @@
       "label": "④ 入库 memory/（只增不改）"
     },
     {
-      "label": "⑤ 人工确认（唯一触点）"
+      "label": "⑤ 一键确认 · 归档（飞书卡片）"
     }
   ],
   "nodes": [
@@ -105,7 +105,7 @@
       "id": "deepseek",
       "type": "cloud",
       "label": "DeepSeek 整理",
-      "sublabel": "补标点 · 分段 · 观点总结 · 起标题",
+      "sublabel": "分段 · 观点/金句 · 人物书籍 · 中图法分类标签",
       "stage": 2,
       "row": 2
     },
@@ -132,7 +132,7 @@
       "sublabel": "文件名=平台-标题（净化截 60 字）· tags=[待确认]",
       "stage": 3,
       "row": 0,
-      "tag": "机器不再改"
+      "tag": "机器不再改（按钮例外）"
     },
     {
       "id": "sidecar",
@@ -153,8 +153,8 @@
     {
       "id": "you",
       "type": "external",
-      "label": "你 · 人工确认",
-      "sublabel": "读完摘「待确认」标签 · 清单勾 [x] 即转正",
+      "label": "你 · 一键确认",
+      "sublabel": "飞书卡片三按钮 · 清单勾 [x] 即转正",
       "stage": 4,
       "row": 1
     }
@@ -309,7 +309,7 @@
       "from": "deepseek",
       "to": "notes",
       "label": "整理成稿",
-      "classification": "标题+总结+分段全文",
+      "classification": "标题+观点+金句+分类标签",
       "variant": "emphasis",
       "fromSide": "right",
       "toSide": "left",
@@ -403,8 +403,8 @@
     {
       "from": "notes",
       "to": "you",
-      "label": "待确认",
-      "classification": "摘标签即确认",
+      "label": "待确认卡片",
+      "classification": "✅确认 / 📁确认并归档",
       "variant": "emphasis",
       "labelAt": [
         800,
@@ -456,14 +456,14 @@
       "items": [
         "links：先 process_pending() 登记新裸笔记，再扫全部笔记正文抓抖音/小红书/B 站 URL",
         "media：扫 attachments/ 新文件（mtime 超 30 秒才动，防读到写入中的文件）",
-        "幂等：processed_links/media.json 记状态，同一 URL/文件只成功处理一次；失败 3 次熔断"
+        "幂等：processed_links/media.json 记状态，同一 URL/文件只成功处理一次；失败 3 次熔断；flock 互斥，手动/定时撞车只跑一个"
       ]
     },
     {
       "dot": "violet",
       "title": "③ 引擎：每条路的逐步动作",
       "items": [
-        "链接路：yt-dlp 下载 → Whisper GPU 全文转写 → DeepSeek 整理（标点/分段/观点/标题）",
+        "链接路：yt-dlp 下载 → Whisper GPU 全文转写 → DeepSeek v4 整理（分段/观点/金句/人物书籍/中图法分类标签）",
         "附件路：截图→PaddleOCR；录音→Whisper；产出笔记内嵌 ![[attachments/原文件]]",
         "PDF 路：fitz 逐页提取 → 6000 字分块 → DeepSeek 挑 ≤20 条 → 复选框清单；勾中成 wiki 摘录卡"
       ]
@@ -474,14 +474,14 @@
       "items": [
         "文件名=平台-净化标题（非法字符转 -、截 60 字；撞名加内容 id 短码）",
         "frontmatter 自动带 id/created/source/tags=[待确认]；sidecar 登记 confidence 1.0",
-        "铁律：笔记文件创建后机器绝不改写、移动、删除（红线见右卡）"
+        "铁律：笔记文件创建后机器绝不改写、移动、删除（唯一例外：你点飞书按钮时删单标签/移单篇，09-07 你批准）"
       ]
     },
     {
       "dot": "amber",
       "title": "⑤ 你只做两件事",
       "items": [
-        "摘标签：读完转写/识别稿，手动摘掉「待确认」= 确认入库",
+        "点按钮：✅确认（留收件箱）或 📁确认并归档（自动移到 平台/分类/ 子目录，sidecar 状态跟随，附文字回复）",
         "勾清单：划重点清单里勾 [x]，15 分钟内自动转成 wiki 摘录卡（勾选即沉淀，不再带待确认）",
         "不确认不勾也行：待确认笔记会进晨报反复提醒；清单不打扰，节奏你说了算"
       ]

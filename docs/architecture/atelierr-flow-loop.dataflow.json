@@ -3,7 +3,7 @@
   "diagram_type": "dataflow",
   "meta": {
     "title": "信息流细化 ②：回响 · 沉淀 · 删除 · 会话",
-    "subtitle": "decay/晨报/todos 三个定时器围着库转；你的动作只有复习、提炼、点头删除 · 2026-09-06",
+    "subtitle": "decay/晨报/todos 三个定时器围着库转；你的动作只有复习、提炼、点头删除 · 2026-09-07",
     "output": "atelierr-flow-loop.html",
     "viewBox": [
       1280,
@@ -385,7 +385,7 @@
       "title": "③ 触达：笔记 + 推送 + 控制台",
       "items": [
         "晨报是 memory/ 里的普通笔记：Obsidian 直接看，五节都是可点开的 wikilink",
-        "ntfy 只推计数摘要（待确认 N/提炼候选 N/复习 N），点开手机 Obsidian 看全文",
+        "ntfy+飞书双通道推计数摘要（待确认 N/提炼候选 N/复习 N），点开手机 Obsidian 看全文",
         "飞书卡片与 ntfy 双通道（09-06 起，可选）：卡片带「在 Obsidian 中打开」按钮",
         "控制台.md 用 Dataview 读摘要 frontmatter 的 undistilled 桥，提炼候选常年可见"
       ]
