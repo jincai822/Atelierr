@@ -33,8 +33,10 @@ if TYPE_CHECKING:
 #: 合法逻辑层级（存于 sidecar，不是物理目录）
 LAYERS: Tuple[str, str, str] = ("short-term", "mid-term", "long-term")
 
-#: 永不参与笔记扫描的特殊子目录名（机器专用资产）
-NOTE_EXCLUDED_DIRS: frozenset[str] = frozenset({"wiki", "attachments", "trash"})
+#: 永不参与笔记扫描的特殊子目录名（机器专用资产 + Obsidian 模板目录）
+NOTE_EXCLUDED_DIRS: frozenset[str] = frozenset(
+    {"wiki", "attachments", "trash", "templates"}
+)
 
 #: Crockford base32 字母表（ULID 用，去除 I/L/O/U）
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
