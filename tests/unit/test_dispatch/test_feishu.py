@@ -804,3 +804,26 @@ def test_card_feedback_archive_tag_fail_hint(memory_tree, monkeypatch):
     assert (memory_tree.notes_dir / "抖音" / "douyin-x.md").exists()  # 移动不回滚
     assert len(sent) == 1
     assert _sent_text(sent) == "⚠️ 已归档，标签请到 Obsidian 手动摘除：跑步教学合集"
+
+
+def test_console_url_points_at_note(monkeypatch):
+    """「在 Obsidian 中打开」缺省直达本条笔记（percent-encode + 库内路径）。"""
+    monkeypatch.delenv("FEISHU_CONSOLE_URL", raising=False)
+    monkeypatch.delenv("FEISHU_VAULT_NAME", raising=False)
+
+    url = feishu_module._console_url("抖音-内核稳定 #标签.md")
+
+    assert url.startswith("obsidian://open?vault=atelierr-data&file=memory%2F") or (
+        "file=memory/" in url
+    )
+    assert "%23" in url  # 井号必须编码，否则 Obsidian 解析截断
+    assert url.endswith(".md") is False
+
+
+def test_console_url_env_override_and_fallback(monkeypatch):
+    """FEISHU_CONSOLE_URL 优先；无笔记名退回 bare scheme。"""
+    monkeypatch.setenv("FEISHU_CONSOLE_URL", "https://example.com/console")
+    assert feishu_module._console_url("x.md") == "https://example.com/console"
+
+    monkeypatch.delenv("FEISHU_CONSOLE_URL")
+    assert feishu_module._console_url(None) == "obsidian://"

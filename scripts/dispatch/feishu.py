@@ -54,6 +54,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 import frontmatter
 
@@ -68,6 +69,9 @@ ENV_APP_ID = "FEISHU_APP_ID"
 ENV_APP_SECRET = "FEISHU_APP_SECRET"
 ENV_CHAT_ID = "FEISHU_CHAT_ID"
 ENV_CONSOLE_URL = "FEISHU_CONSOLE_URL"
+#: Obsidian 库名（obsidian://open?vault=…；可用 FEISHU_VAULT_NAME 覆盖）
+ENV_VAULT_NAME = "FEISHU_VAULT_NAME"
+DEFAULT_VAULT_NAME = "atelierr-data"
 
 DEFAULT_CONSOLE_URL = "obsidian://"
 
@@ -639,6 +643,25 @@ class FeishuBridge:
             raise
 
 
+def _console_url(confirm_note: Optional[str]) -> str:
+    """「在 Obsidian 中打开」按钮 URL。
+
+    ``FEISHU_CONSOLE_URL`` 环境变量优先（自定义控制台地址）；否则
+    生成 ``obsidian://open?vault=<库名>&file=memory/<笔记去后缀>``
+    直达本条笔记（percent-encode 防中文/井号/空格截断；库名可用
+    ``FEISHU_VAULT_NAME`` 覆盖）。bare ``obsidian://`` 只开应用不定位，
+    手机端落到空白启动页，属反人机交互；无笔记名时才退回 bare scheme。
+    """
+    console_url = os.environ.get(ENV_CONSOLE_URL, "").strip()
+    if console_url:
+        return console_url
+    if not confirm_note:
+        return DEFAULT_CONSOLE_URL
+    vault = os.environ.get(ENV_VAULT_NAME, DEFAULT_VAULT_NAME)
+    stem = confirm_note[:-3] if confirm_note.endswith(".md") else confirm_note
+    return f"obsidian://open?vault={quote(vault)}&file={quote(f'memory/{stem}')}"
+
+
 def send_feishu(
     title: str,
     message: str,
@@ -675,7 +698,7 @@ def send_feishu(
             .app_secret(app_secret)
             .build()
         )
-        console_url = os.environ.get(ENV_CONSOLE_URL, DEFAULT_CONSOLE_URL)
+        console_url = _console_url(confirm_note)
         actions = [
             {
                 "tag": "button",
