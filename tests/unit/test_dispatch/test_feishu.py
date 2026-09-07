@@ -423,7 +423,7 @@ def test_card_action_file_only_in_trash_not_found(memory_tree):
 
 
 def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
-    """带 confirm_note 的卡片：追加「✅ 确认」callback 按钮（JSON 编码 value）。"""
+    """带 confirm_note 的卡片：追加「✅ 确认」「📁 确认并归档」两 callback 按钮。"""
     monkeypatch.setenv("FEISHU_APP_ID", "cli_x")
     monkeypatch.setenv("FEISHU_APP_SECRET", "secret")
     monkeypatch.setenv("FEISHU_CHAT_ID", "oc_chat")
@@ -455,12 +455,19 @@ def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
     assert [a["text"]["content"] for a in actions] == [
         "在 Obsidian 中打开",
         "✅ 确认",
+        "📁 确认并归档",
     ]
-    behavior = actions[1]["behaviors"][0]
-    assert behavior["type"] == "callback"
-    # value 必须是 dict 而非 JSON 字符串：平台回传字符串会被 SDK 校验丢弃
-    assert behavior["value"] == {
+    for button in actions[1:]:
+        behavior = button["behaviors"][0]
+        assert behavior["type"] == "callback"
+        # value 必须是 dict 而非 JSON 字符串：平台回传字符串会被 SDK 校验丢弃
+        assert isinstance(behavior["value"], dict)
+    assert actions[1]["behaviors"][0]["value"] == {
         "action": feishu_module.CONFIRM_ACTION,
+        "note": "douyin-x.md",
+    }
+    assert actions[2]["behaviors"][0]["value"] == {
+        "action": feishu_module.ARCHIVE_ACTION,
         "note": "douyin-x.md",
     }
 
@@ -487,3 +494,147 @@ def test_dispatch_notice_passes_confirm_note_to_feishu(monkeypatch):
     assert calls == [
         ("Atelierr 链接笔记待确认", {"confirm_note": "douyin-x.md"})
     ]
+
+
+def _card_archive(filename):
+    """构造一条 archive_note 回调事件。"""
+    return _card_action({"action": "archive_note", "note": filename})
+
+
+def test_card_archive_moves_note_and_strips_tag(memory_tree):
+    """📁 确认并归档：文件到 抖音/、标签删、index path 即时迁移。"""
+    bridge = _bridge(memory_tree)
+    note = memory_tree.create_note(
+        "douyin-x.md", "正文行\n", source="link", tags=["待确认", "抖音"]
+    )
+    memory_tree.move_note(note, "mid-term")
+    memory_tree.on_note_accessed(note)
+    entry_before = memory_tree._entry(note)
+    note_id = memory_tree._find_entry_id(note)
+    assert entry_before["layer"] == "mid-term"
+
+    resp = bridge.handle_card_action(_card_archive("douyin-x.md"))
+
+    assert resp["toast"] == {"type": "success", "content": "已确认并归档到 抖音/"}
+    assert resp["card"]["type"] == "raw"
+    assert "已归档到 抖音/" in resp["card"]["data"]["elements"][0]["text"]["content"]
+    target = memory_tree.notes_dir / "抖音" / "douyin-x.md"
+    assert target.exists()
+    assert not note.exists()
+    post = frontmatter.loads(target.read_text(encoding="utf-8"))
+    assert post.metadata["tags"] == ["抖音"]
+    assert post.metadata["source"] == "link"
+    # sidecar 已即时迁移（不等 watcher），动态状态原样保留
+    entry = memory_tree._load_index().get(str(note_id))
+    assert entry is not None
+    assert entry["path"] == "抖音/douyin-x.md"
+    assert entry["layer"] == "mid-term"
+    assert entry["last_accessed"] == entry_before["last_accessed"]
+
+
+def test_card_archive_uses_cclass_subdir(memory_tree):
+    """带中图法分类标签：归档进 平台/分类/ 二级目录。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note(
+        "douyin-psy.md",
+        "正文\n",
+        source="link",
+        tags=["待确认", "抖音", "B84-心理学"],
+    )
+
+    resp = bridge.handle_card_action(_card_archive("douyin-psy.md"))
+
+    assert resp["toast"]["content"] == "已确认并归档到 抖音/B84-心理学/"
+    target = memory_tree.notes_dir / "抖音" / "B84-心理学" / "douyin-psy.md"
+    assert target.exists()
+    assert not (memory_tree.notes_dir / "douyin-psy.md").exists()
+    assert "待确认" not in frontmatter.loads(
+        target.read_text(encoding="utf-8")
+    ).metadata["tags"]
+
+
+def test_card_archive_lark_and_fallback_media_dirs(memory_tree):
+    """source=lark → 飞书/；平台推不出（media 无平台标签）→ 媒体/。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("fl-想法.md", "正文\n", source="lark", tags=["待确认"])
+    memory_tree.create_note("ocr-截图.md", "正文\n", source="media", tags=["待确认", "截图"])
+
+    resp = bridge.handle_card_action(_card_archive("fl-想法.md"))
+    assert resp["toast"]["content"] == "已确认并归档到 飞书/"
+    assert (memory_tree.notes_dir / "飞书" / "fl-想法.md").exists()
+
+    resp = bridge.handle_card_action(_card_archive("ocr-截图.md"))
+    assert resp["toast"]["content"] == "已确认并归档到 媒体/"
+    assert (memory_tree.notes_dir / "媒体" / "ocr-截图.md").exists()
+
+
+def test_card_archive_idempotent_when_already_in_target(memory_tree):
+    """已在目标目录：只删标签不移动（幂等，可重复点）。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note(
+        "douyin-x.md", "正文行\n", source="link", tags=["待确认", "抖音"]
+    )
+    bridge.handle_card_action(_card_archive("douyin-x.md"))
+    target = memory_tree.notes_dir / "抖音" / "douyin-x.md"
+    before = (target.read_bytes(), target.stat().st_mtime_ns)
+
+    resp = bridge.handle_card_action(_card_archive("douyin-x.md"))
+
+    assert resp["toast"] == {"type": "success", "content": "已确认并归档到 抖音/"}
+    assert (target.read_bytes(), target.stat().st_mtime_ns) == before  # 文件未再动
+    assert target.exists()
+
+
+def test_card_archive_target_collision_no_overwrite(memory_tree):
+    """目标位置被占用（同名目录/竞态文件）：冲突 toast，绝不覆盖。"""
+    bridge = _bridge(memory_tree)
+    top = memory_tree.create_note(
+        "douyin-x.md", "顶层待归档\n", source="link", tags=["待确认", "抖音"]
+    )
+    # 同名 .md 会被定位歧义前置拦截；此处用同名目录占位目标路径，
+    # 命中"目标重名"防御分支（不覆盖目录/文件）
+    collide_dir = memory_tree.notes_dir / "抖音"
+    collide_dir.mkdir(parents=True)
+    (collide_dir / "douyin-x.md").mkdir()
+    collide_marker = collide_dir / "douyin-x.md" / "占位.txt"
+    collide_marker.write_text("别覆盖我", encoding="utf-8")
+
+    resp = bridge.handle_card_action(_card_archive("douyin-x.md"))
+
+    assert resp["toast"] == {
+        "type": "error",
+        "content": "目标文件夹已有同名笔记，请到 Obsidian 处理",
+    }
+    assert "card" not in resp
+    assert top.exists()  # 顶层笔记原样（未移动未改标签）
+    assert "待确认" in frontmatter.loads(top.read_text(encoding="utf-8")).metadata["tags"]
+    assert collide_marker.read_text(encoding="utf-8") == "别覆盖我"  # 占位未被覆盖
+
+
+def test_card_archive_missing_and_ambiguous(memory_tree):
+    """0 匹配 → 笔记不存在；多匹配（跨目录同名）→ 歧义，绝不乱动。"""
+    bridge = _bridge(memory_tree)
+    resp = bridge.handle_card_action(_card_archive("nope.md"))
+    assert resp["toast"] == {"type": "error", "content": "笔记不存在或路径非法"}
+
+    top = memory_tree.create_note(
+        "douyin-x.md", "甲\n", source="link", tags=["待确认", "抖音"]
+    )
+    other_dir = memory_tree.notes_dir / "小红书"
+    other_dir.mkdir(parents=True)
+    other = other_dir / "douyin-x.md"
+    other.write_text(
+        "---\nsource: link\ntags: [待确认, 小红书]\n---\n乙", encoding="utf-8"
+    )
+    resp = bridge.handle_card_action(_card_archive("douyin-x.md"))
+
+    assert resp["toast"]["content"] == "存在多篇同名笔记，请到 Obsidian 处理"
+    # 两份都原样未动
+    for path in (top, other):
+        assert path.exists()
+        assert "待确认" in frontmatter.loads(
+            path.read_text(encoding="utf-8")
+        ).metadata["tags"]
+    assert not (memory_tree.notes_dir / "小红书").exists() or sorted(
+        (memory_tree.notes_dir / "小红书").iterdir()
+    ) == [other]

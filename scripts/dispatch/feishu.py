@@ -14,17 +14,26 @@
   笔记完成待确认、抓取失败、今日摘要），常规成功不推；
 - 发交互卡片（标题 + 正文 + 「在 Obsidian 中打开」URI 按钮——
   纯客户端跳转，无回调、零写入；带 ``confirm_note`` 时追加
-  「✅ 确认」callback 按钮，点击回调 ``card.action.trigger``）；
+  「✅ 确认」与「📁 确认并归档」两个 callback 按钮，点击回调
+  ``card.action.trigger``，value 为 dict：{"action": confirm_note |
+  archive_note, "note": <文件名>}）；
 - 卡片失败降级纯文本。
 
-确认回调（用户点「✅ 确认」，系统内唯一机器改写笔记的路径）：
-- 经用户 2026-09-07 批准的人工触发单标签删除例外：仅删除该笔记
-  frontmatter ``tags`` 里的「待确认」一项，其他字段与正文一概不动；
+确认/归档回调（用户点卡片按钮；系统内唯二机器改写笔记文件的路径）：
+- 经用户 2026-09-07 批准的人工触发例外（两项）：
+  1. 单标签删除——仅删除该笔记 frontmatter ``tags`` 里的「待确认」
+     一项，其他字段与正文一概不动；
+  2. 按钮触发归档移动——把笔记文件移进按平台/分类推导的归档子目录
+     （见 scripts/dispatch/archive.py；与通知「建议归档」行同规则），
+     随后执行第 1 项的删标签；sidecar 条目按 id 即时迁移（不等
+     watcher 班次）；目标目录已有同名文件绝不覆盖，报冲突提示。
 - 回调只带纯文件名（含目录分量视为非法，绝不写文件）；笔记可能已被
   手动归档进子目录（如 抖音/），按文件名在整个归档树查找（排除
   trash/ 等特殊目录），0 个报不存在、多个报歧义（同名冲突请到
   Obsidian 处理）；
-- 幂等：无「待确认」标签不改写；异常只记日志 + toast，不中断守护。
+- 幂等：已在目标目录只删标签，无「待确认」标签不改写；移动成功但
+  删标签失败只 log + toast 提示手动摘除，绝不回滚；任何异常只记
+  日志 + toast，不中断守护。
 
 凭证全部走环境变量（``~/.config/atelierr/env`` 注入，绝不入库）：
 - ``FEISHU_APP_ID`` / ``FEISHU_APP_SECRET``（自建应用凭证，收发都要）；
@@ -48,6 +57,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import frontmatter
 
+from scripts.dispatch.archive import derive_archive_dir
 from scripts.dispatch.media import ATTACHMENTS_DIR
 from scripts.memory.core import MemoryTree
 
@@ -59,10 +69,15 @@ ENV_CONSOLE_URL = "FEISHU_CONSOLE_URL"
 
 DEFAULT_CONSOLE_URL = "obsidian://"
 
-#: 卡片确认按钮 action 值里的动作名与「确认」标签（后者与
+#: 卡片按钮 action 值里的动作名与「确认」标签（后者与
 #: dispatch/links.py、dispatch/media.py 的 REVIEW_TAG 同值）
 CONFIRM_ACTION = "confirm_note"
+ARCHIVE_ACTION = "archive_note"
 CONFIRM_TAG = "待确认"
+
+#: 平台推不出时归档按钮的兜底一级目录（与建议归档行的"省略"不同：
+#: 按钮必须给一个去处）
+FALLBACK_ARCHIVE_DIR = "媒体"
 
 #: 已处理 message_id 登记表上限（超出裁掉最旧的，防无限膨胀）
 _SEEN_CAP = 2000
@@ -175,18 +190,12 @@ class FeishuBridge:
             self._mark_seen(message_id)
 
     def handle_card_action(self, data: Any) -> Dict[str, Any]:
-        """处理卡片按钮回调（用户点「✅ 确认」）；任何异常只 toast，不中断。
+        """处理卡片按钮回调（确认 / 确认并归档）；任何异常只 toast，不中断。
 
         回调负载结构（lark-oapi P2CardActionTrigger）：
-        ``data.event.action.value`` = {"action": "confirm_note",
-        "note": "<相对 memory/ 的文件名>"}。非 confirm_note 动作原样忽略。
-
-        这是系统内唯一机器改写笔记的路径：经用户 2026-09-07 批准的人工
-        触发单标签删除例外——仅删除笔记 frontmatter tags 里的「待确认」
-        一项，其他字段与正文一概不动；路径不合法绝不写文件。笔记可能
-        已被用户手动归档进子目录（如 抖音/），查找覆盖整个归档树
-        （排除 trash/ 等特殊目录）；0 个匹配报"笔记不存在"，多个匹配
-        报歧义（同名冲突需人到 Obsidian 处理）。
+        ``data.event.action.value`` = {"action": "confirm_note" |
+        "archive_note", "note": "<文件名>"}。未知动作原样忽略。两个
+        动作都经用户 2026-09-07 批准的人工触发例外（见模块 docstring）。
 
         Args:
             data: 卡片回调事件对象（SDK 模型或鸭子类型）。
@@ -200,9 +209,16 @@ class FeishuBridge:
             value = dict(getattr(action, "value", None) or {})
         except AttributeError:
             return {"toast": {"type": "error", "content": "回调解析失败"}}
-        if str(value.get("action") or "") != CONFIRM_ACTION:
-            return {}
+        action_name = str(value.get("action") or "")
         filename = str(value.get("note") or "").strip()
+        if action_name == CONFIRM_ACTION:
+            return self._handle_confirm(filename)
+        if action_name == ARCHIVE_ACTION:
+            return self._handle_archive(filename)
+        return {}
+
+    def _handle_confirm(self, filename: str) -> Dict[str, Any]:
+        """「✅ 确认」：只删待确认标签；失败只 toast，不中断守护。"""
         try:
             ok, detail = self._confirm_note(filename)
         except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
@@ -210,36 +226,77 @@ class FeishuBridge:
             return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
         print(f"[feishu] confirm note={filename} {'ok' if ok else 'fail'}", flush=True)
         if not ok:
-            if detail == "歧义":
-                return {
-                    "toast": {
-                        "type": "error",
-                        "content": "存在多篇同名笔记，请到 Obsidian 处理",
-                    }
-                }
-            return {"toast": {"type": "error", "content": "笔记不存在或路径非法"}}
+            return self._error_toast(detail)
         return {
             "toast": {"type": "success", "content": "已确认"},
             "card": {"type": "raw", "data": self._confirmed_card(filename)},
         }
 
-    def _confirm_note(self, filename: str) -> Tuple[bool, str]:
-        """移除单篇笔记的「待确认」标签（经用户 2026-09-07 批准的例外）。
+    def _handle_archive(self, filename: str) -> Dict[str, Any]:
+        """「📁 确认并归档」：归档移动 + 删待确认标签；失败只 toast。"""
+        try:
+            ok, detail = self._archive_note(filename)
+        except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
+            print(f"[feishu] archive note={filename} fail: {exc}", flush=True)
+            return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
+        print(f"[feishu] archive note={filename} {'ok' if ok else 'fail'}", flush=True)
+        if not ok:
+            return self._error_toast(detail)
+        if detail == "tag_fail":
+            # 移动成功但删标签失败：不回滚，卡片提示手动摘除
+            return {
+                "toast": {
+                    "type": "warning",
+                    "content": "已归档，标签请到 Obsidian 手动摘除",
+                },
+                "card": {
+                    "type": "raw",
+                    "data": self._confirmed_card(
+                        filename, note_line="已归档；「待确认」标签请手动摘除"
+                    ),
+                },
+            }
+        card = {
+            "type": "raw",
+            "data": self._confirmed_card(
+                filename, note_line=f"已归档到 {detail}/ 并移除「待确认」标签"
+            ),
+        }
+        return {
+            "toast": {"type": "success", "content": f"已确认并归档到 {detail}/"},
+            "card": card,
+        }
 
-        校验：value 里的文件名须为纯文件名（无路径分隔、无 ``..``，
+    @staticmethod
+    def _error_toast(detail: str) -> Dict[str, Any]:
+        """把失败详情串映射成 error toast（歧义/目标重名有专属文案）。"""
+        if detail == "歧义":
+            return {
+                "toast": {
+                    "type": "error",
+                    "content": "存在多篇同名笔记，请到 Obsidian 处理",
+                }
+            }
+        if detail == "目标重名":
+            return {
+                "toast": {
+                    "type": "error",
+                    "content": "目标文件夹已有同名笔记，请到 Obsidian 处理",
+                }
+            }
+        if detail == "移动失败":
+            return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
+        return {"toast": {"type": "error", "content": "笔记不存在或路径非法"}}
+
+    def _locate_note(self, filename: str) -> Tuple[Optional[Path], Optional[str]]:
+        """校验并按文件名定位笔记：返回 (path, None) 或 (None, 错误详情)。
+
+        校验：value 里的文件名须为纯文件名（无路径分隔、无 ``..``、
         ``*.md``）——用户手拖归档后位置未知，故用文件名在整个归档树
         里查找（排除 wiki/attachments/trash 等特殊目录）。恰好一个
-        匹配才操作：0 个返回"笔记不存在"，多个返回"歧义"（同名笔记
-        冲突，卡片给不出文件级精确操作，请人到 Obsidian 处理）。仅当
-        tags 含「待确认」才改写（幂等：没有不改写）。改写只删该标签
-        一项，frontmatter 其余字段与正文经 round-trip 原样保留。
-
-        Args:
-            filename: 笔记文件名（不含目录分量）。
-
-        Returns:
-            Tuple[bool, str]: (是否成功, 详情串 ok / noop / 歧义 /
-            非法路径 / 笔记不存在)。
+        匹配才操作：0 个返回 "笔记不存在"，多个返回 "歧义"（同名
+        冲突，卡片给不出文件级精确操作，请人到 Obsidian 处理）。
+        确认与归档两个回调共用此定位。
         """
         if (
             not filename
@@ -248,7 +305,7 @@ class FeishuBridge:
             or ".." in filename
             or not filename.endswith(".md")
         ):
-            return False, "非法路径"
+            return None, "非法路径"
         from scripts.memory.core import iter_note_files
 
         matches = [
@@ -257,22 +314,101 @@ class FeishuBridge:
             if path.name == filename
         ]
         if not matches:
-            return False, "笔记不存在"
+            return None, "笔记不存在"
         if len(matches) > 1:
-            return False, "歧义"
-        note_path = matches[0]
+            return None, "歧义"
+        return matches[0], None
+
+    def _strip_review_tag(self, note_path: Path) -> bool:
+        """移除单篇笔记的「待确认」标签（2026-09-07 批准的人工例外之一）。
+
+        仅当 tags 含「待确认」才改写（幂等：没有不改写）；改写只删该
+        标签一项，frontmatter 其余字段与正文经 round-trip 原样保留。
+
+        Returns:
+            bool: 实际改写了返回 True；无标签（noop）返回 False。
+        """
         text = note_path.read_text(encoding="utf-8")
         post = frontmatter.loads(text)
         tags = post.metadata.get("tags")
         if not isinstance(tags, list) or CONFIRM_TAG not in tags:
-            return True, "noop"
+            return False
         post.metadata["tags"] = [tag for tag in tags if tag != CONFIRM_TAG]
         self._atomic_write(note_path, frontmatter.dumps(post).encode("utf-8"))
-        return True, "ok"
+        return True
+
+    def _confirm_note(self, filename: str) -> Tuple[bool, str]:
+        """「✅ 确认」核心：定位笔记 + 移除待确认标签。
+
+        Returns:
+            Tuple[bool, str]: (是否成功, 详情串 ok / noop / 歧义 /
+            非法路径 / 笔记不存在)。
+        """
+        note_path, err = self._locate_note(filename)
+        if err:
+            return False, err
+        stripped = self._strip_review_tag(note_path)
+        return True, "ok" if stripped else "noop"
+
+    def _archive_note(self, filename: str) -> Tuple[bool, str]:
+        """「📁 确认并归档」核心（2026-09-07 批准的人工例外之二）。
+
+        定位（与确认同）→ 推导目标目录（平台[/分类]，规则见
+        scripts/dispatch/archive.py；平台推不出落 媒体/）→ 已在目标
+        目录则只删标签（幂等，不移动）→ 否则：目标重名检查（绝不
+        覆盖）→ mkdir → rename → sidecar 按 id 即时迁移 path
+        （MemoryTree.relocate_entry，动态状态原样保留，不等 watcher
+        班次）→ 删「待确认」标签。移动成功但删标签失败：log 警告并
+        返回 (True, "tag_fail")（提示手动摘除，绝不回滚）。
+
+        Returns:
+            Tuple[bool, str]: 成功返回 (True, 目标相对目录) 或
+                (True, "tag_fail")；失败返回 (False, 错误详情串)。
+        """
+        note_path, err = self._locate_note(filename)
+        if err:
+            return False, err
+        post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
+        platform, category = derive_archive_dir(post)
+        platform = platform or FALLBACK_ARCHIVE_DIR
+        target_dir = platform if not category else f"{platform}/{category}"
+        current_rel = self.tree._rel_key(note_path)
+        if "/" in current_rel and current_rel.rsplit("/", 1)[0] == target_dir:
+            # 已在目标目录：幂等，只删标签不移动
+            self._strip_review_tag(note_path)
+            return True, target_dir
+        target = Path(self.tree.notes_dir) / target_dir / filename
+        if target.exists():
+            return False, "目标重名"
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            note_path.rename(target)
+        except OSError as exc:
+            print(f"[feishu] archive note={filename} move fail: {exc}", flush=True)
+            return False, "移动失败"
+        note_id = self.tree._read_note_id(target)
+        if note_id is not None:
+            self.tree.relocate_entry(note_id, self.tree._rel_key(target))
+        try:
+            self._strip_review_tag(target)
+        except Exception as exc:  # noqa: BLE001 - 半截状态提示手动摘除
+            print(
+                f"[feishu] archive note={filename} moved but tag strip fail: {exc}",
+                flush=True,
+            )
+            return True, "tag_fail"
+        return True, target_dir
 
     @staticmethod
-    def _confirmed_card(filename: str) -> Dict[str, Any]:
-        """确认后的替换卡片：按钮区已由「✅ 已确认」文本取代（无操作区）。"""
+    def _confirmed_card(
+        filename: str, note_line: str = "已移除「待确认」标签"
+    ) -> Dict[str, Any]:
+        """确认后的替换卡片：按钮区已由「✅ 已确认」文本取代（无操作区）。
+
+        Args:
+            filename: 笔记文件名（展示用）。
+            note_line: 卡片正文第二行（归档成功/半截时传场景文案）。
+        """
         return {
             "config": {"wide_screen_mode": True},
             "header": {
@@ -284,7 +420,7 @@ class FeishuBridge:
                     "tag": "div",
                     "text": {
                         "tag": "plain_text",
-                        "content": f"{filename}\n已移除「待确认」标签",
+                        "content": f"{filename}\n{note_line}",
                     },
                 }
             ],
@@ -412,16 +548,16 @@ def send_feishu(
     """发一条飞书卡片推送；未配置或失败返回 False（绝不抛异常）。
 
     卡片带「在 Obsidian 中打开」URI 按钮（纯客户端跳转，无回调）；
-    ``confirm_note`` 给定时追加「✅ 确认」callback 按钮（value 携带
-    {"action": "confirm_note", "note": <文件名>}，点击回调
-    ``card.action.trigger``，由 FeishuBridge.handle_card_action 移除该
-    笔记的「待确认」标签）；卡片发送失败时降级为纯文本消息再试一次。
+    ``confirm_note`` 给定时追加两个 callback 按钮（value 均为 dict）：
+    「✅ 确认」（confirm_note：只删「待确认」标签）与「📁 确认并归档」
+    （archive_note：归档移动 + 删标签，见 FeishuBridge.handle_card_action）；
+    卡片发送失败时降级为纯文本消息再试一次。
 
     Args:
         title: 通知标题。
         message: 通知正文（只放数量等非敏感信息）。
         chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID`` 环境变量。
-        confirm_note: 待确认笔记相对 memory/ 的文件名；None 不加确认按钮。
+        confirm_note: 待确认笔记文件名；None 不加确认/归档按钮。
 
     Returns:
         bool: 发送成功且服务端 success 返回 True。
@@ -464,6 +600,21 @@ def send_feishu(
                         {
                             "type": "callback",
                             "value": {"action": CONFIRM_ACTION, "note": confirm_note},
+                        }
+                    ],
+                }
+            )
+            actions.append(
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "📁 确认并归档"},
+                    "type": "primary",
+                    # 同上：value 必须是 dict（回调进 handle_card_action 的
+                    # archive_note 分支：归档移动 + 删「待确认」标签）
+                    "behaviors": [
+                        {
+                            "type": "callback",
+                            "value": {"action": ARCHIVE_ACTION, "note": confirm_note},
                         }
                     ],
                 }

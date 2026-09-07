@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import fcntl
 import os
-import re
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -33,6 +32,7 @@ import click
 import frontmatter
 
 from scripts.cli.memory_cli import resolve_config_path
+from scripts.dispatch.archive import derive_archive_dir
 from scripts.dispatch.digest import DigestDispatcher
 from scripts.dispatch.highlights import HighlightsDispatcher
 from scripts.dispatch.links import LinkDispatcher
@@ -44,16 +44,6 @@ from scripts.memory.resurface import ResurfaceManager
 
 DEFAULT_ROOT = "~/atelierr-data/memory"
 DEFAULT_STATE_DIR = "~/atelierr-data/state"
-
-#: 待确认标签（与 dispatch/links.py、dispatch/media.py 的 REVIEW_TAG、
-#: dispatch/feishu.py 的 CONFIRM_TAG 同值）；建议归档行里不算平台标签
-_REVIEW_TAG = "待确认"
-
-#: 中图法分类标签（如 B84-心理学 / TP311.5-软件测试）→ 归档二级目录名
-_CCLASS_RE = re.compile(r"^[A-Z]{1,3}\d*-")
-
-#: source → 归档一级目录（平台）名
-_ARCHIVE_PLATFORM_BY_SOURCE = {"lark": "飞书", "media": "媒体"}
 
 
 def _notify_failures(failures: List[Dict[str, Any]]) -> None:
@@ -96,11 +86,12 @@ def _feishu_ready() -> bool:
 def _archive_hint(note_path: Path) -> Optional[str]:
     """产出「建议归档：<平台>/[<中图法标签>/]」提示行；取不到返回 None。
 
-    平台按 source 推：lark → 飞书，media → 媒体；source=link 时取
-    tags 里第一个非「待确认」、非中图法类目的标签（即平台标签，如
-    抖音/小红书）。中图法类目取 tags 里第一个匹配 ``^[A-Z]{1,3}\\d*-``
-    的标签（如 B84-心理学），没有就只写平台。frontmatter 缺失或读
-    取失败一律返回 None——建议行只是可选项，绝不影响通知发送。
+    目录推导与飞书卡片「📁 确认并归档」按钮共用
+    ``scripts.dispatch.archive.derive_archive_dir``（单一规则源，防止
+    两处漂移）：lark → 飞书，media → 媒体，其它 source 取 tags 里
+    第一个平台标签（如 抖音/小红书）；中图法类目（``^[A-Z]{1,3}\\d*-``，
+    如 B84-心理学）有则进二级。平台推不出（提示行场景）返回 None——
+    建议行只是可选项，绝不影响通知发送；归档按钮场景则兜底 媒体/。
 
     Args:
         note_path: 笔记文件路径（通常刚产出在 memory/ 根层）。
@@ -112,25 +103,9 @@ def _archive_hint(note_path: Path) -> Optional[str]:
         post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 - 提示行失败静默省略
         return None
-    metadata = post.metadata
-    source = str(metadata.get("source") or "")
-    tags = [str(tag) for tag in (metadata.get("tags") or [])]
-    if source in _ARCHIVE_PLATFORM_BY_SOURCE:
-        platform = _ARCHIVE_PLATFORM_BY_SOURCE[source]
-    elif source == "link":
-        platform = next(
-            (
-                tag
-                for tag in tags
-                if tag != _REVIEW_TAG and not _CCLASS_RE.match(tag)
-            ),
-            None,
-        )
-    else:
-        platform = None
+    platform, category = derive_archive_dir(post)
     if not platform:
         return None
-    category = next((tag for tag in tags if _CCLASS_RE.match(tag)), None)
     hint = f"建议归档：{platform}/"
     if category:
         hint += f"{category}/"

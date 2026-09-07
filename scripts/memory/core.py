@@ -396,6 +396,29 @@ class MemoryTree:
         self._save_index()
         return path
 
+    def relocate_entry(self, note_id: str, new_rel: str) -> bool:
+        """按 id 迁移 sidecar 条目 path（笔记文件移动后立即调用）。
+
+        用于飞书卡片归档等"移动后即时迁移"路径：只改 path 字段，
+        其余动态状态（last_accessed/confidence/references 等）原样
+        保留；与 watcher 全量对齐的迁移逻辑同源（都是"id 不变 →
+        条目跟着文件走"）。
+
+        Args:
+            note_id: frontmatter id（或已登记的索引 key）。
+            new_rel: 新相对 notes_dir 的 POSIX 路径（含子目录前缀）。
+
+        Returns:
+            bool: 找到并迁移返回 True；索引里没有该 id 返回 False
+                （调用方可忽略——watcher 下一班全量对齐会补登记）。
+        """
+        entry = self._load_index().get(str(note_id))
+        if entry is None:
+            return False
+        entry["path"] = new_rel
+        self._save_index()
+        return True
+
     def list_notes(self, layer: str) -> List[Path]:
         """按 sidecar 中的 layer 列出笔记（仅返回仍存在的文件）。
 
