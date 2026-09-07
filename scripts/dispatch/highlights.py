@@ -18,9 +18,11 @@
   （键 = 清单文件名 + 条目标题 + 页码），同一条只建一次；
 - 勾了又取消：摘录卡已建不追回（机器绝不删除；wiki 无 purge，
   不要了由人手动删）；
-- 清单笔记本身 ``source: highlights`` 留在 memory/ 正常 decay；
-  若清单日后被 purge，WikiManager.validate 会报摘录卡 from 悬空
-  （只报告，不阻止）。
+- 清单笔记本身 ``source: highlights`` 落在 ``系统/`` 机器产物区
+  （NOTE_EXCLUDED_DIRS 成员，记忆机制不扫描、不衰减；本模块直接
+  读目录定位清单，不走 sidecar 索引）；根层遗留清单仍兼容扫描。
+  若清单日后被人手动删除，WikiManager.validate 会报摘录卡 from
+  悬空（只报告，不阻止）。
 
 触发：systemd 定时器（docker/systemd/atelierr-links.*，接在 todos 之后）
 或人工 ``dispatch_cli highlights``。
@@ -35,10 +37,11 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import frontmatter
 
+from scripts.dispatch.sysdir import SYSTEM_DIRNAME
 from scripts.memory.core import MemoryTree
 from scripts.wiki.manager import EXCERPT_TYPE, WIKI_DIRNAME
 
@@ -98,16 +101,31 @@ class HighlightsDispatcher:
             "created": [],
             "skipped": 0,
         }
-        for layer in _LAYERS:
-            for note_path in self.tree.list_notes(layer):
-                post = self._load_post(note_path)
-                if post is None or post.get("source") != CHECKLIST_SOURCE:
-                    continue
-                report["scanned"] += 1
-                self._process_checklist(note_path, post, state, report, dry_run)
+        for note_path in self._checklist_paths():
+            post = self._load_post(note_path)
+            if post is None or post.get("source") != CHECKLIST_SOURCE:
+                continue
+            report["scanned"] += 1
+            self._process_checklist(note_path, post, state, report, dry_run)
         if not dry_run:
             self._save_state(state)
         return report
+
+    def _checklist_paths(self) -> List[Path]:
+        """定位全部清单笔记：系统/ 目录直读 + 根层遗留（走索引）。"""
+        seen: Set[Path] = set()
+        paths: List[Path] = []
+        system_dir = Path(self.tree.notes_dir) / SYSTEM_DIRNAME
+        if system_dir.is_dir():
+            for path in sorted(system_dir.glob("*.md")):
+                seen.add(path)
+                paths.append(path)
+        for layer in _LAYERS:
+            for note_path in self.tree.list_notes(layer):
+                if note_path not in seen:
+                    seen.add(note_path)
+                    paths.append(note_path)
+        return paths
 
     def _process_checklist(
         self,

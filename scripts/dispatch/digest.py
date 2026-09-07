@@ -37,7 +37,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -46,13 +45,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import frontmatter
 
 from scripts.dispatch.response_probe import ResponseProbe
-from scripts.memory.core import (
-    LAYERS,
-    SYNC_CONFLICT_RE,
-    MemoryTree,
-    _now_iso,
-    generate_id,
-)
+from scripts.dispatch.sysdir import SYSTEM_DIRNAME, write_machine_note
+from scripts.memory.core import LAYERS, SYNC_CONFLICT_RE, MemoryTree
 from scripts.memory.resurface import ResurfaceManager
 from scripts.memory.watcher import MemoryWatcher
 from scripts.wiki.manager import WikiManager
@@ -62,7 +56,7 @@ DISTILL_MIN_AGE_DAYS = 3  # 已确认笔记创建满此天数即可提炼（沉�
 MAX_DISTILL_CANDIDATES = 5  # 候选节最多列几条（防长列表制造压力）
 
 #: 摘要落盘目录（NOTE_EXCLUDED_DIRS 成员，记忆机制不扫描的机器产物区）
-DIGEST_DIRNAME = "系统"
+DIGEST_DIRNAME = SYSTEM_DIRNAME
 
 DAILY_NOTE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")  # 日记不算知识候选
 DASHBOARD_STEMS = frozenset({"主页", "控制台"})  # 门面文件不算候选
@@ -123,7 +117,10 @@ class DigestDispatcher:
         )
         created = None
         if not dry_run:
-            self._write_digest(target, filename, markdown)
+            write_machine_note(
+                Path(self.tree.notes_dir), filename, markdown,
+                source="digest", tags=["摘要"],
+            )
             self.resurface.mark_pushed([item["id"] for item in review])
             self.probe.register(review)
             self.probe.check_pending()
@@ -140,25 +137,6 @@ class DigestDispatcher:
             },
             "markdown": markdown,
         }
-
-    @staticmethod
-    def _write_digest(target: Path, filename: str, markdown: str) -> None:
-        """写摘要笔记到 系统/（原子写；不登记 sidecar——该目录不扫描）。
-
-        frontmatter 必需字段（id/title/created/source/tags）在此补齐
-        （默认值与 MemoryTree.create_note 同源），undistilled 已由
-        _build 写进 markdown 自带的 frontmatter。
-        """
-        post = frontmatter.loads(markdown)
-        post.metadata.setdefault("id", generate_id())
-        post.metadata.setdefault("title", Path(filename).stem)
-        post.metadata.setdefault("created", _now_iso())
-        post.metadata.setdefault("source", "digest")
-        post.metadata.setdefault("tags", ["摘要"])
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(target.name + ".tmp")
-        tmp.write_text(frontmatter.dumps(post), encoding="utf-8")
-        os.replace(tmp, target)
 
     def _distill_candidates(self, wiki: WikiManager, today: str) -> List[str]:
         """提炼候选：从未进 wiki 且值得动笔的笔记 stem（截断到上限）。

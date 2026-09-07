@@ -195,3 +195,24 @@ def test_state_records_promoted(memory_tree):
     promoted = state["划重点-测试书-abc123.md"]["promoted"]
     assert "概念乙#7" in promoted
     assert promoted["概念乙#7"].startswith("摘录-概念乙-")
+
+
+def test_checklist_in_system_dir_processed(memory_tree):
+    """清单在 系统/（机器产物区，不进索引）：直接读目录也能找到并转记。"""
+    from scripts.dispatch.sysdir import write_machine_note
+
+    write_machine_note(
+        memory_tree.notes_dir, "划重点-新书-def456.md", _CHECKLIST,
+        source="highlights", tags=["划重点"],
+    )
+    path = memory_tree.notes_dir / "系统" / "划重点-新书-def456.md"
+    _tick(memory_tree, path, "概念甲")
+
+    report = HighlightsDispatcher(memory_tree).run()
+
+    assert report["scanned"] == 1
+    assert report["ticked"] == 1
+    assert len(report["created"]) == 1
+    card = _wiki_dir(memory_tree) / report["created"][0]
+    assert card.exists()
+    assert frontmatter.loads(card.read_text(encoding="utf-8"))["source"] == "highlight"

@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Set
 
 import frontmatter
 
-from scripts.memory.core import MemoryTree
+from scripts.memory.core import SYSTEM_DIRNAME, MemoryTree
 
 WIKI_DIRNAME = "wiki"  # 库根下的沉淀层子目录名（memory.yaml 可覆盖）
 
@@ -117,9 +117,13 @@ class WikiManager:
         """
         entries = self.entries()
         wiki_stems = {entry["stem"] for entry in entries}
+        # 根层笔记 + 系统/ 机器产物（划重点清单等；摘录卡 from 指向它们）
         memory_stems = {
             path.stem for path in Path(self.tree.notes_dir).glob("*.md")
         }
+        system_dir = Path(self.tree.notes_dir) / SYSTEM_DIRNAME
+        if system_dir.is_dir():
+            memory_stems.update(path.stem for path in system_dir.glob("*.md"))
         problems: List[Dict[str, Any]] = []
         for entry in entries:
             issues: List[str] = []

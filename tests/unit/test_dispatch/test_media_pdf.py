@@ -64,7 +64,7 @@ def test_pdf_routes_to_highlights(memory_tree):
     assert report["found"] == 1
     assert len(report["created"]) == 1
     filename = report["created"][0]
-    assert filename.startswith("划重点-测试书-")
+    assert filename.startswith("系统/划重点-测试书-")  # 清单进机器产物区
     post = frontmatter.loads(
         (memory_tree.notes_dir / filename).read_text(encoding="utf-8")
     )
@@ -85,7 +85,7 @@ def test_pdf_failure_circuit_breaks(memory_tree):
         report = dispatcher.run()
         assert len(report["failed"]) == 1
 
-    assert not list(Path(memory_tree.notes_dir).glob("划重点-*.md"))
+    assert not list(Path(memory_tree.notes_dir).rglob("划重点-*.md"))  # 根层与系统/ 都无
     dispatcher.run()
     assert len(_FakeHighlightsProcessor.calls) == 3
 

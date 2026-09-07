@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from scripts.dispatch.highlights import CHECKLIST_SOURCE, ITEM_TAG
+from scripts.dispatch.sysdir import SYSTEM_DIRNAME, write_machine_note
 from scripts.memory.core import MemoryTree
 from scripts.processors.audio import SUPPORTED_EXTENSIONS as AUDIO_EXTS
 from scripts.processors.audio import AudioProcessor
@@ -167,15 +168,26 @@ class MediaDispatcher:
         entry["last_attempt"] = datetime.now(timezone.utc).isoformat()
         if result.success:
             if is_pdf:
-                # PDF → 划重点清单（不带"待确认"：清单本身无需确认，
-                # 确认动作在"勾中条目转 wiki 摘录卡"的人工勾选上）
+                # PDF → 划重点清单，写进 系统/ 机器产物区（不占记忆扫描域；
+                # 清单本身无需确认，确认动作在"勾中条目转 wiki 摘录卡"的
+                # 人工勾选上；dispatch/highlights 直接读目录，不走索引）
                 filename = self._pdf_note_filename(path)
-                body, source, tags = result.markdown, CHECKLIST_SOURCE, [ITEM_TAG]
-            else:
-                kind = _KIND_BY_EXT[path.suffix.lower()]
-                filename = self._note_filename(path)
-                body = self._build_note(path, kind, result.text)
-                source, tags = "media", [REVIEW_TAG, kind]
+                try:
+                    rel = write_machine_note(
+                        Path(self.tree.notes_dir), filename, result.markdown,
+                        source=CHECKLIST_SOURCE, tags=[ITEM_TAG],
+                    )
+                except (ValueError, FileExistsError):
+                    # 同名清单已存在（状态丢失后的重跑）：视为已处理
+                    rel = f"{SYSTEM_DIRNAME}/{filename}"
+                entry["status"] = "done"
+                entry["note"] = rel
+                report["created"].append(rel)
+                return
+            kind = _KIND_BY_EXT[path.suffix.lower()]
+            filename = self._note_filename(path)
+            body = self._build_note(path, kind, result.text)
+            source, tags = "media", [REVIEW_TAG, kind]
             try:
                 self.tree.create_note(filename, body, source=source, tags=tags)
             except (ValueError, FileExistsError):

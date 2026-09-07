@@ -38,8 +38,11 @@ if TYPE_CHECKING:
 LAYERS: Tuple[str, str, str] = ("short-term", "mid-term", "long-term")
 
 #: 永不参与笔记扫描的特殊子目录名（机器专用资产 + Obsidian 模板目录）
+#: 机器产物目录名（摘要/控制台/划重点清单；NOTE_EXCLUDED_DIRS 成员）
+SYSTEM_DIRNAME = "系统"
+
 NOTE_EXCLUDED_DIRS: frozenset[str] = frozenset(
-    {"wiki", "attachments", "trash", "templates", "系统"}
+    {"wiki", "attachments", "trash", "templates", SYSTEM_DIRNAME}
 )
 
 #: Syncthing 冲突副本文件名模式（name.sync-conflict-YYYYMMDD-HHMMSS-XXX.md）：
