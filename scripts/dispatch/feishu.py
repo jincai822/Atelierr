@@ -194,8 +194,13 @@ class FeishuBridge:
 
         回调负载结构（lark-oapi P2CardActionTrigger）：
         ``data.event.action.value`` = {"action": "confirm_note" |
-        "archive_note", "note": "<文件名>"}。未知动作原样忽略。两个
-        动作都经用户 2026-09-07 批准的人工触发例外（见模块 docstring）。
+        "archive_note", "note": "<文件名>"}，``data.event.context`` 的
+        ``open_chat_id`` 是卡片所在会话。两个动作都经用户 2026-09-07
+        批准的人工触发例外（见模块 docstring）。未知动作原样忽略。
+
+        处理完后额外向会话主动发一条纯文字反馈（ws 长连接下回调响应
+        会被平台吞掉，toast/卡片更新不可见；发送失败只 log，绝不影响
+        回调返回值与守护）。
 
         Args:
             data: 卡片回调事件对象（SDK 模型或鸭子类型）。
@@ -211,39 +216,75 @@ class FeishuBridge:
             return {"toast": {"type": "error", "content": "回调解析失败"}}
         action_name = str(value.get("action") or "")
         filename = str(value.get("note") or "").strip()
+        chat_id = self._event_chat_id(data)
         if action_name == CONFIRM_ACTION:
-            return self._handle_confirm(filename)
+            return self._handle_confirm(filename, chat_id)
         if action_name == ARCHIVE_ACTION:
-            return self._handle_archive(filename)
+            return self._handle_archive(filename, chat_id)
         return {}
 
-    def _handle_confirm(self, filename: str) -> Dict[str, Any]:
+    @staticmethod
+    def _event_chat_id(data: Any) -> Optional[str]:
+        """从回调事件 context 取会话 id（SDK CallBackContext.open_chat_id）。
+
+        兼容 dict 与鸭子对象（测试/旧版负载）；取不到返回 None
+        （调用方回退 FEISHU_CHAT_ID 环境变量）。
+        """
+        try:
+            context = getattr(data.event, "context", None)
+        except AttributeError:
+            return None
+        if context is None:
+            return None
+        if isinstance(context, dict):
+            value = context.get("open_chat_id") or context.get("chat_id")
+            return str(value) if value else None
+        for attr in ("open_chat_id", "chat_id"):
+            try:
+                value = getattr(context, attr)
+            except AttributeError:
+                continue
+            if value:
+                return str(value)
+        return None
+
+    def _handle_confirm(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
         """「✅ 确认」：只删待确认标签；失败只 toast，不中断守护。"""
         try:
             ok, detail = self._confirm_note(filename)
         except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
             print(f"[feishu] confirm note={filename} fail: {exc}", flush=True)
+            self._send_feedback(chat_id, f"⚠️ 处理失败，请稍后重试：{filename}")
             return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
         print(f"[feishu] confirm note={filename} {'ok' if ok else 'fail'}", flush=True)
         if not ok:
-            return self._error_toast(detail)
+            reason = self._error_reason(detail)
+            self._send_feedback(chat_id, f"⚠️ {reason}：{filename}")
+            return {"toast": {"type": "error", "content": reason}}
+        title = self._feedback_title(filename)
+        self._send_feedback(chat_id, f"✅ 已确认：{title}")
         return {
             "toast": {"type": "success", "content": "已确认"},
             "card": {"type": "raw", "data": self._confirmed_card(filename)},
         }
 
-    def _handle_archive(self, filename: str) -> Dict[str, Any]:
+    def _handle_archive(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
         """「📁 确认并归档」：归档移动 + 删待确认标签；失败只 toast。"""
         try:
             ok, detail = self._archive_note(filename)
         except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
             print(f"[feishu] archive note={filename} fail: {exc}", flush=True)
+            self._send_feedback(chat_id, f"⚠️ 处理失败，请稍后重试：{filename}")
             return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
         print(f"[feishu] archive note={filename} {'ok' if ok else 'fail'}", flush=True)
         if not ok:
-            return self._error_toast(detail)
+            reason = self._error_reason(detail)
+            self._send_feedback(chat_id, f"⚠️ {reason}：{filename}")
+            return {"toast": {"type": "error", "content": reason}}
         if detail == "tag_fail":
             # 移动成功但删标签失败：不回滚，卡片提示手动摘除
+            title = self._feedback_title(filename)
+            self._send_feedback(chat_id, f"⚠️ 已归档，标签请到 Obsidian 手动摘除：{title}")
             return {
                 "toast": {
                     "type": "warning",
@@ -256,6 +297,8 @@ class FeishuBridge:
                     ),
                 },
             }
+        title = self._feedback_title(filename)
+        self._send_feedback(chat_id, f"📁 已确认并归档到 {detail}/：{title}")
         card = {
             "type": "raw",
             "data": self._confirmed_card(
@@ -268,25 +311,60 @@ class FeishuBridge:
         }
 
     @staticmethod
-    def _error_toast(detail: str) -> Dict[str, Any]:
-        """把失败详情串映射成 error toast（歧义/目标重名有专属文案）。"""
+    def _error_reason(detail: str) -> str:
+        """把失败详情串映射成给用户看的原因短语（toast 与反馈消息共用）。"""
         if detail == "歧义":
-            return {
-                "toast": {
-                    "type": "error",
-                    "content": "存在多篇同名笔记，请到 Obsidian 处理",
-                }
-            }
+            return "存在多篇同名笔记，请到 Obsidian 处理"
         if detail == "目标重名":
-            return {
-                "toast": {
-                    "type": "error",
-                    "content": "目标文件夹已有同名笔记，请到 Obsidian 处理",
-                }
-            }
+            return "目标文件夹已有同名笔记，请到 Obsidian 处理"
         if detail == "移动失败":
-            return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
-        return {"toast": {"type": "error", "content": "笔记不存在或路径非法"}}
+            return "处理失败，请稍后重试"
+        return "笔记不存在或路径非法"
+
+    def _feedback_title(self, filename: str) -> str:
+        """反馈文案的标题：frontmatter title 优先，取不到用文件名。
+
+        成功路径上文件必然存在（可能在归档子目录），按名定位读取；
+        任何读取失败都退回文件名，绝不让反馈文案组装抛异常。
+        """
+        path, _ = self._locate_note(filename)
+        if path is None:
+            return filename
+        try:
+            post = frontmatter.loads(path.read_text(encoding="utf-8"))
+            title = post.metadata.get("title")
+        except Exception:  # noqa: BLE001 - 标题取不到用文件名
+            return filename
+        return str(title).strip() if title else filename
+
+    def _send_feedback(self, chat_id: Optional[str], text: str) -> None:
+        """向卡片所在会话主动发一条纯文本反馈；失败只 log warning。
+
+        ws 长连接下卡片回调响应（toast/卡片更新）平台会吞掉，用户点完
+        按钮看不到结果——用与发卡片相同的 send API 主动补一条文字消息。
+        目标会话：回调 context 的 open_chat_id 优先，缺省
+        ``FEISHU_CHAT_ID`` 环境变量；都没有则静默跳过（未配置环境）。
+
+        Args:
+            chat_id: 回调事件 context 里的会话 id（可为 None）。
+            text: 纯文本反馈内容。
+        """
+        target = (chat_id or os.environ.get(ENV_CHAT_ID, "")).strip()
+        if not target:
+            return
+        try:
+            lark = _import_lark()
+            client = (
+                lark.Client.builder()
+                .app_id(self.app_id)
+                .app_secret(self.app_secret)
+                .build()
+            )
+            ok = _send(client, target, "text", json.dumps({"text": text}))
+            if not ok:
+                print(f"[feishu] feedback send fail: {text!r}", flush=True)
+        except Exception as exc:  # noqa: BLE001 - 反馈失败不影响回调处理
+            print(f"[feishu] feedback fail: {exc}", flush=True)
 
     def _locate_note(self, filename: str) -> Tuple[Optional[Path], Optional[str]]:
         """校验并按文件名定位笔记：返回 (path, None) 或 (None, 错误详情)。

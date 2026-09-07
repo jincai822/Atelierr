@@ -638,3 +638,169 @@ def test_card_archive_missing_and_ambiguous(memory_tree):
     assert not (memory_tree.notes_dir / "小红书").exists() or sorted(
         (memory_tree.notes_dir / "小红书").iterdir()
     ) == [other]
+
+
+def _card_action_ctx(value: dict, open_chat_id: str):
+    """构造带 context（含 open_chat_id）的卡片回调事件。"""
+    return SimpleNamespace(
+        event=SimpleNamespace(
+            action=SimpleNamespace(value=value),
+            context=SimpleNamespace(open_chat_id=open_chat_id),
+        )
+    )
+
+
+def _record_send(monkeypatch, sent):
+    """把模块级 _send 换成记录 (chat_id, msg_type, content) 的成功实现。"""
+    monkeypatch.setattr(
+        feishu_module,
+        "_send",
+        lambda client, chat_id, msg_type, content: sent.append(
+            (chat_id, msg_type, content)
+        )
+        or True,
+    )
+    _fake_lark(monkeypatch, MagicMock())
+
+
+def _sent_text(sent, index=0):
+    """第 index 条反馈消息的纯文本内容。"""
+    return json.loads(sent[index][2])["text"]
+
+
+def test_card_feedback_confirm_success_title_from_frontmatter(memory_tree, monkeypatch):
+    """确认成功：向会话主动补一条文字反馈，标题用 frontmatter title。"""
+    monkeypatch.setenv("FEISHU_CHAT_ID", "oc_env")
+    sent = []
+    _record_send(monkeypatch, sent)
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note(
+        "douyin-x.md",
+        "---\ntitle: 跑步教学合集\nsource: link\ntags: [待确认, 抖音]\n---\n正文\n",
+    )
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "confirm_note", "note": "douyin-x.md"})
+    )
+
+    # 反馈文字与 toast/卡片更新并存，互不替代
+    assert resp["toast"] == {"type": "success", "content": "已确认"}
+    assert resp["card"]["type"] == "raw"
+    assert len(sent) == 1
+    chat_id, msg_type, content = sent[0]
+    assert chat_id == "oc_env"  # 事件无 context → 回退 FEISHU_CHAT_ID
+    assert msg_type == "text"
+    assert json.loads(content) == {"text": "✅ 已确认：跑步教学合集"}
+
+
+def test_card_feedback_archive_success_uses_filename_without_title(memory_tree, monkeypatch):
+    """归档成功：文字反馈带目标目录；frontmatter 无 title 时退回文件名。"""
+    monkeypatch.setenv("FEISHU_CHAT_ID", "oc_env")
+    sent = []
+    _record_send(monkeypatch, sent)
+    bridge = _bridge(memory_tree)
+    # 直接手写（无 title、无 id 的 frontmatter）：_feedback_title 须退回文件名
+    (memory_tree.notes_dir / "plain-x.md").write_text(
+        "---\nsource: link\ntags: [待确认, 抖音]\n---\n正文", encoding="utf-8"
+    )
+
+    resp = bridge.handle_card_action(_card_action({"action": "archive_note", "note": "plain-x.md"}))
+
+    assert resp["toast"]["content"] == "已确认并归档到 抖音/"
+    target = memory_tree.notes_dir / "抖音" / "plain-x.md"
+    assert target.exists()
+    assert len(sent) == 1
+    assert sent[0][1] == "text"
+    assert _sent_text(sent) == "📁 已确认并归档到 抖音/：plain-x.md"
+
+
+def test_card_feedback_confirm_failure_reason_and_toast(memory_tree, monkeypatch):
+    """确认失败：文字反馈带原因与文件名，error toast 原样保留。"""
+    monkeypatch.setenv("FEISHU_CHAT_ID", "oc_env")
+    sent = []
+    _record_send(monkeypatch, sent)
+    bridge = _bridge(memory_tree)
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "confirm_note", "note": "nope.md"})
+    )
+
+    assert resp["toast"] == {"type": "error", "content": "笔记不存在或路径非法"}
+    assert "card" not in resp
+    assert len(sent) == 1
+    assert _sent_text(sent) == "⚠️ 笔记不存在或路径非法：nope.md"
+
+
+def test_card_feedback_send_exception_swallowed(memory_tree, monkeypatch):
+    """反馈发送抛异常：只 log，回调照常返回成功结果，不中断守护。"""
+    monkeypatch.setenv("FEISHU_CHAT_ID", "oc_env")
+    _fake_lark(monkeypatch, MagicMock())
+
+    def boom(client, chat_id, msg_type, content):
+        raise RuntimeError("net down")
+
+    monkeypatch.setattr(feishu_module, "_send", boom)
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("ok-x.md", "正文\n", source="link", tags=["待确认"])
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "confirm_note", "note": "ok-x.md"})
+    )
+
+    assert resp["toast"] == {"type": "success", "content": "已确认"}
+    assert resp["card"]["type"] == "raw"
+
+
+def test_card_feedback_context_chat_id_preferred_over_env(memory_tree, monkeypatch):
+    """反馈目标：回调 context 的 open_chat_id 优先，其次 FEISHU_CHAT_ID。"""
+    monkeypatch.setenv("FEISHU_CHAT_ID", "oc_env")
+    sent = []
+    _record_send(monkeypatch, sent)
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("x.md", "正文\n", source="link", tags=["待确认"])
+
+    bridge.handle_card_action(
+        _card_action_ctx({"action": "confirm_note", "note": "x.md"}, "oc_ctx")
+    )
+    bridge.handle_card_action(_card_action({"action": "confirm_note", "note": "x.md"}))
+
+    assert [record[0] for record in sent] == ["oc_ctx", "oc_env"]
+
+
+def test_card_feedback_no_target_skipped_silently(memory_tree, monkeypatch):
+    """无 context 且未配 FEISHU_CHAT_ID：不发反馈，其余行为不受影响。"""
+    monkeypatch.delenv("FEISHU_CHAT_ID", raising=False)
+    sent = []
+    _record_send(monkeypatch, sent)
+    bridge = _bridge(memory_tree)
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "confirm_note", "note": "nope.md"})
+    )
+
+    assert resp["toast"] == {"type": "error", "content": "笔记不存在或路径非法"}
+    assert sent == []
+
+
+def test_card_feedback_archive_tag_fail_hint(memory_tree, monkeypatch):
+    """归档移动成功但删标签失败：文字反馈提示手动摘除，warning toast 原样。"""
+    monkeypatch.setenv("FEISHU_CHAT_ID", "oc_env")
+    sent = []
+    _record_send(monkeypatch, sent)
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note(
+        "douyin-x.md",
+        "---\ntitle: 跑步教学合集\nsource: link\ntags: [待确认, 抖音]\n---\n正文\n",
+    )
+
+    def tag_strip_boom(note_path):
+        raise RuntimeError("write fail")
+
+    monkeypatch.setattr(bridge, "_strip_review_tag", tag_strip_boom)
+    resp = bridge.handle_card_action(_card_action({"action": "archive_note", "note": "douyin-x.md"}))
+
+    assert resp["toast"]["type"] == "warning"
+    assert "已归档" in resp["toast"]["content"]
+    assert (memory_tree.notes_dir / "抖音" / "douyin-x.md").exists()  # 移动不回滚
+    assert len(sent) == 1
+    assert _sent_text(sent) == "⚠️ 已归档，标签请到 Obsidian 手动摘除：跑步教学合集"
