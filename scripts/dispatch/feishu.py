@@ -20,7 +20,10 @@
 确认回调（用户点「✅ 确认」，系统内唯一机器改写笔记的路径）：
 - 经用户 2026-09-07 批准的人工触发单标签删除例外：仅删除该笔记
   frontmatter ``tags`` 里的「待确认」一项，其他字段与正文一概不动；
-- 校验笔记路径（memory/ 顶层、*.md、无 ``..``），不合法绝不写文件；
+- 回调只带纯文件名（含目录分量视为非法，绝不写文件）；笔记可能已被
+  手动归档进子目录（如 抖音/），按文件名在整个归档树查找（排除
+  trash/ 等特殊目录），0 个报不存在、多个报歧义（同名冲突请到
+  Obsidian 处理）；
 - 幂等：无「待确认」标签不改写；异常只记日志 + toast，不中断守护。
 
 凭证全部走环境变量（``~/.config/atelierr/env`` 注入，绝不入库）：
@@ -180,7 +183,10 @@ class FeishuBridge:
 
         这是系统内唯一机器改写笔记的路径：经用户 2026-09-07 批准的人工
         触发单标签删除例外——仅删除笔记 frontmatter tags 里的「待确认」
-        一项，其他字段与正文一概不动；路径不合法绝不写文件。
+        一项，其他字段与正文一概不动；路径不合法绝不写文件。笔记可能
+        已被用户手动归档进子目录（如 抖音/），查找覆盖整个归档树
+        （排除 trash/ 等特殊目录）；0 个匹配报"笔记不存在"，多个匹配
+        报歧义（同名冲突需人到 Obsidian 处理）。
 
         Args:
             data: 卡片回调事件对象（SDK 模型或鸭子类型）。
@@ -204,6 +210,13 @@ class FeishuBridge:
             return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
         print(f"[feishu] confirm note={filename} {'ok' if ok else 'fail'}", flush=True)
         if not ok:
+            if detail == "歧义":
+                return {
+                    "toast": {
+                        "type": "error",
+                        "content": "存在多篇同名笔记，请到 Obsidian 处理",
+                    }
+                }
             return {"toast": {"type": "error", "content": "笔记不存在或路径非法"}}
         return {
             "toast": {"type": "success", "content": "已确认"},
@@ -213,16 +226,20 @@ class FeishuBridge:
     def _confirm_note(self, filename: str) -> Tuple[bool, str]:
         """移除单篇笔记的「待确认」标签（经用户 2026-09-07 批准的例外）。
 
-        校验：文件名须为 memory/ 顶层 ``*.md``（无路径分隔、无 ``..``），
-        文件必须存在；仅当 tags 含「待确认」才改写（幂等：没有不改写）。
-        改写只删该标签一项，frontmatter 其余字段与正文经 round-trip 原样
-        保留。
+        校验：value 里的文件名须为纯文件名（无路径分隔、无 ``..``，
+        ``*.md``）——用户手拖归档后位置未知，故用文件名在整个归档树
+        里查找（排除 wiki/attachments/trash 等特殊目录）。恰好一个
+        匹配才操作：0 个返回"笔记不存在"，多个返回"歧义"（同名笔记
+        冲突，卡片给不出文件级精确操作，请人到 Obsidian 处理）。仅当
+        tags 含「待确认」才改写（幂等：没有不改写）。改写只删该标签
+        一项，frontmatter 其余字段与正文经 round-trip 原样保留。
 
         Args:
-            filename: 笔记相对 memory/ 的文件名。
+            filename: 笔记文件名（不含目录分量）。
 
         Returns:
-            Tuple[bool, str]: (是否成功, 详情串 ok / noop / 错误原因)。
+            Tuple[bool, str]: (是否成功, 详情串 ok / noop / 歧义 /
+            非法路径 / 笔记不存在)。
         """
         if (
             not filename
@@ -232,9 +249,18 @@ class FeishuBridge:
             or not filename.endswith(".md")
         ):
             return False, "非法路径"
-        note_path = Path(self.tree.notes_dir) / filename
-        if not note_path.is_file():
+        from scripts.memory.core import iter_note_files
+
+        matches = [
+            path
+            for path in iter_note_files(self.tree.notes_dir)
+            if path.name == filename
+        ]
+        if not matches:
             return False, "笔记不存在"
+        if len(matches) > 1:
+            return False, "歧义"
+        note_path = matches[0]
         text = note_path.read_text(encoding="utf-8")
         post = frontmatter.loads(text)
         tags = post.metadata.get("tags")

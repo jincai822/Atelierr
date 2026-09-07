@@ -1,10 +1,12 @@
 """记忆搜索：全文/标签/日期/层级过滤，按 confidence 降序。
 
-性能关键路径：os.scandir 枚举（DirEntry.stat 无 Path 构造开销）；
-query 过滤用缓存的小写副本做子串匹配（不解析 frontmatter）；
-confidence 用 live 重算（epoch 浮点快速路径）；只对前 limit 个
-结果物化 Memory 对象。增量索引按 (mtime_ns, size) 缓存原始文本，
-物化结果按 (文件名, mtime_ns, size) 缓存。
+覆盖顶层与用户手动归档的子目录（wiki/、attachments/、trash/ 等
+机器专用目录与隐藏目录除外）。性能关键路径：os.scandir 递归枚举
+（DirEntry.stat 无 Path 构造开销）；query 过滤用缓存的小写副本做
+子串匹配（不解析 frontmatter）；confidence 用 live 重算（epoch
+浮点快速路径）；只对前 limit 个结果物化 Memory 对象。增量索引按
+(mtime_ns, size) 缓存原始文本（key 为相对 notes_dir 的路径），
+物化结果按 (相对路径, mtime_ns, size) 缓存。
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 import frontmatter
 
 from scripts.memory.confidence import ConfidenceCalculator
+from scripts.memory.core import NOTE_EXCLUDED_DIRS
 from scripts.utils.date_utils import parse_date
 
 if TYPE_CHECKING:
@@ -67,9 +70,9 @@ class MemorySearcher:
             ref_coefficient=settings.ref_coefficient,
             ref_cap=settings.ref_cap,
         )
-        #: 文件名 -> (mtime_ns, size, raw_text, raw_text_lower)
+        #: 相对路径（notes_dir 下，POSIX / 分隔）-> (mtime_ns, size, raw_text, raw_text_lower)
         self._raw_cache: Dict[str, Tuple[int, int, str, str]] = {}
-        #: 文件名 -> (mtime_ns, size, 静态物化字段 dict)
+        #: 相对路径 -> (mtime_ns, size, 静态物化字段 dict)
         self._object_cache: Dict[str, Tuple[int, int, Dict[str, Any]]] = {}
 
     # ------------------------------------------------------------------
@@ -77,26 +80,33 @@ class MemorySearcher:
     # ------------------------------------------------------------------
 
     def _scan_candidates(self) -> Dict[str, Any]:
-        """os.scandir 枚举候选 .md 文件：返回 文件名 -> stat 结果。
+        """递归枚举候选 .md 文件：返回 相对路径 -> stat 结果。
 
         DirEntry.stat() 比 pathlib 轻量（避免逐文件构造 Path 对象）。
-        已消失文件的缓存条目在此处清理（仅当数量不一致时扫描缓存）。
+        跳过 wiki/attachments/trash 等特殊目录与隐藏目录/文件；不
+        跟随符号链接目录（防环）。已消失文件的缓存条目在此处清理
+        （仅当数量不一致时扫描缓存）。
         """
-        found: Dict[str, Any] = {}
-        try:
-            with os.scandir(self.tree.notes_dir) as entries:
-                for dent in entries:
-                    name = dent.name
-                    if name.startswith(".") or not name.endswith(".md"):
-                        continue
-                    try:
-                        if not dent.is_file():
+
+        def _walk(directory: Path, prefix: str) -> None:
+            try:
+                with os.scandir(directory) as entries:
+                    for dent in entries:
+                        if dent.name.startswith("."):
                             continue
-                        found[name] = dent.stat()
-                    except OSError:  # 枚举期间文件被删
-                        continue
-        except OSError:  # 笔记目录不可读
-            return {}
+                        try:
+                            if dent.is_dir(follow_symlinks=False):
+                                if dent.name not in NOTE_EXCLUDED_DIRS:
+                                    _walk(Path(dent.path), prefix + dent.name + "/")
+                            elif dent.name.endswith(".md"):
+                                found[prefix + dent.name] = dent.stat()
+                        except OSError:  # 枚举期间文件被删
+                            continue
+            except OSError:  # 目录不可读
+                pass
+
+        found: Dict[str, Any] = {}
+        _walk(self.tree.notes_dir, "")
         if len(found) != len(self._raw_cache):
             for name in list(self._raw_cache):
                 if name not in found:
@@ -293,7 +303,7 @@ class MemorySearcher:
             confidence = self._live_confidence(entry, references, stat)
             scored.append((confidence, name, text, note_layer))
 
-        # 平面目录下文件名排序等价于完整路径排序（同一前缀）
+        # 相对路径排序：同目录内按文件名，目录间按目录名（稳定可复现）
         scored.sort(key=lambda item: (-item[0], item[1]))
         results: List[Memory] = []
         for confidence, name, text, note_layer in scored[:limit]:

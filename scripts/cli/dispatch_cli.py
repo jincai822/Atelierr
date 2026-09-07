@@ -23,12 +23,14 @@ from __future__ import annotations
 
 import fcntl
 import os
+import re
 import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
 import click
+import frontmatter
 
 from scripts.cli.memory_cli import resolve_config_path
 from scripts.dispatch.digest import DigestDispatcher
@@ -42,6 +44,16 @@ from scripts.memory.resurface import ResurfaceManager
 
 DEFAULT_ROOT = "~/atelierr-data/memory"
 DEFAULT_STATE_DIR = "~/atelierr-data/state"
+
+#: 待确认标签（与 dispatch/links.py、dispatch/media.py 的 REVIEW_TAG、
+#: dispatch/feishu.py 的 CONFIRM_TAG 同值）；建议归档行里不算平台标签
+_REVIEW_TAG = "待确认"
+
+#: 中图法分类标签（如 B84-心理学 / TP311.5-软件测试）→ 归档二级目录名
+_CCLASS_RE = re.compile(r"^[A-Z]{1,3}\d*-")
+
+#: source → 归档一级目录（平台）名
+_ARCHIVE_PLATFORM_BY_SOURCE = {"lark": "飞书", "media": "媒体"}
 
 
 def _notify_failures(failures: List[Dict[str, Any]]) -> None:
@@ -81,24 +93,82 @@ def _feishu_ready() -> bool:
     )
 
 
+def _archive_hint(note_path: Path) -> Optional[str]:
+    """产出「建议归档：<平台>/[<中图法标签>/]」提示行；取不到返回 None。
+
+    平台按 source 推：lark → 飞书，media → 媒体；source=link 时取
+    tags 里第一个非「待确认」、非中图法类目的标签（即平台标签，如
+    抖音/小红书）。中图法类目取 tags 里第一个匹配 ``^[A-Z]{1,3}\\d*-``
+    的标签（如 B84-心理学），没有就只写平台。frontmatter 缺失或读
+    取失败一律返回 None——建议行只是可选项，绝不影响通知发送。
+
+    Args:
+        note_path: 笔记文件路径（通常刚产出在 memory/ 根层）。
+
+    Returns:
+        Optional[str]: 如 ``建议归档：抖音/B84-心理学/`` 或 None。
+    """
+    try:
+        post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - 提示行失败静默省略
+        return None
+    metadata = post.metadata
+    source = str(metadata.get("source") or "")
+    tags = [str(tag) for tag in (metadata.get("tags") or [])]
+    if source in _ARCHIVE_PLATFORM_BY_SOURCE:
+        platform = _ARCHIVE_PLATFORM_BY_SOURCE[source]
+    elif source == "link":
+        platform = next(
+            (
+                tag
+                for tag in tags
+                if tag != _REVIEW_TAG and not _CCLASS_RE.match(tag)
+            ),
+            None,
+        )
+    else:
+        platform = None
+    if not platform:
+        return None
+    category = next((tag for tag in tags if _CCLASS_RE.match(tag)), None)
+    hint = f"建议归档：{platform}/"
+    if category:
+        hint += f"{category}/"
+    return hint
+
+
 def _notify_created_notes(
     title: str,
     message: str,
     created: List[str],
     *,
+    notes_dir: Path,
     skip_prefix: str = "",
 ) -> None:
     """新产出笔记逐条推送带「✅ 确认」按钮的卡片（confirm_note=文件名）。
 
     仅当飞书通道可用时推送；skip_prefix 命中的文件名（如划重点清单，
-    不带「待确认」标签）不推。todos/dochealth 等汇总通知不走此路径。
+    不带「待确认」标签）不推。正文末尾附「建议归档」提示行（读笔记
+    取平台/中图法标签，取不到就省略，绝不影响推送）。todos/dochealth
+    等汇总通知不走此路径。
+
+    Args:
+        title: 通知标题。
+        message: 通知正文前缀。
+        created: 新产出笔记文件名列表。
+        notes_dir: 笔记根目录（读 frontmatter 建议归档提示用）。
+        skip_prefix: 命中该前缀的文件名不推送（如 划重点-）。
     """
     if not _feishu_ready():
         return
     for filename in created:
         if skip_prefix and filename.startswith(skip_prefix):
             continue
-        send_dispatch_notice(title, f"{message}：{filename}", confirm_note=filename)
+        body = f"{message}：{filename}"
+        hint = _archive_hint(notes_dir / filename)
+        if hint:
+            body = f"{body}\n{hint}"
+        send_dispatch_notice(title, body, confirm_note=filename)
 
 
 def _notify_digest(counts: Dict[str, int]) -> None:
@@ -190,6 +260,7 @@ class DispatchCLI:
                             "Atelierr 链接笔记待确认",
                             "链接笔记已转写入库",
                             report["created"],
+                            notes_dir=tree.notes_dir,
                         )
                 if dry_run:
                     click.echo("（dry-run：未做处理）")
@@ -254,6 +325,7 @@ class DispatchCLI:
                             "Atelierr OCR 笔记待确认",
                             "已识别入库",
                             report["created"],
+                            notes_dir=tree.notes_dir,
                             skip_prefix="划重点-",
                         )
                 if dry_run:

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 import frontmatter
 
 from scripts.memory.confidence import ConfidenceCalculator
+from scripts.memory.core import iter_note_files
 from scripts.utils.date_utils import local_timezone, parse_date
 
 if TYPE_CHECKING:
@@ -54,12 +55,8 @@ class DecayManager:
     # ------------------------------------------------------------------
 
     def _list_md_files(self) -> List[Path]:
-        """列出笔记目录根层的 .md 文件（跳过点开头的隐藏文件）。"""
-        return [
-            path
-            for path in sorted(self.tree.notes_dir.glob("*.md"))
-            if not path.name.startswith(".")
-        ]
+        """递归列出全部笔记 .md（排除 wiki/attachments/trash 与隐藏项）。"""
+        return list(iter_note_files(self.tree.notes_dir))
 
     @staticmethod
     def _note_source(path: Path) -> Optional[str]:
@@ -206,6 +203,24 @@ class DecayManager:
                 system_notes.append(path)
                 continue
             entry = self.tree._entry(path)
+            if entry is None:
+                # 文件可能已被用户手动移进归档子目录而 watcher 尚未跑：
+                # 按 frontmatter id 找回旧条目（避免当新文件重登记——
+                # _register 会重置 last_accessed 等动态状态）
+                entry = next(
+                    (
+                        candidate
+                        for nid, candidate in self.tree._load_index().items()
+                        if nid == str(note_id)
+                    ),
+                    None,
+                )
+                if (
+                    entry is not None
+                    and entry.get("path") != self.tree._rel_key(path)
+                    and not dry_run
+                ):
+                    entry["path"] = self.tree._rel_key(path)  # 顺带迁移
             refs = references.get(path, 0)
             confidence, layer, pending = self._recompute(path, entry, references=refs)
             total += 1
@@ -257,6 +272,13 @@ class DecayManager:
             result["report_path"] = str(report_path)
         return result
 
+    def _short(self, path: Path) -> str:
+        """报告用短路径：notes_dir 内显示相对路径（含子目录前缀）。"""
+        try:
+            return str(Path(path).relative_to(self.tree.notes_dir))
+        except ValueError:
+            return Path(path).name
+
     def _write_report(
         self,
         counts: Dict[str, int],
@@ -281,14 +303,14 @@ class DecayManager:
         ]
         if transitions:
             lines.extend(
-                f"- {Path(item['path']).name}: {item['from_layer']} → {item['to_layer']}"
+                f"- {self._short(Path(item['path']))}: {item['from_layer']} → {item['to_layer']}"
                 for item in transitions
             )
         else:
             lines.append("- （无迁移）")
         lines += ["", "## 待删除（pending_delete）"]
         if pending_paths:
-            lines.extend(f"- {path.name}" for path in pending_paths)
+            lines.extend(f"- {self._short(path)}" for path in pending_paths)
         else:
             lines.append("- （无）")
         report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")

@@ -331,6 +331,97 @@ def test_card_action_missing_note_returns_error(memory_tree):
     assert resp["toast"] == {"type": "error", "content": "笔记不存在或路径非法"}
 
 
+def _archive_note(memory_tree, filename, subdir):
+    """创建顶层笔记后模拟 Obsidian 手动拖进归档子目录，返回新路径。"""
+    note = memory_tree.create_note(
+        filename, "正文行\n", source="link", tags=["待确认", "抖音"]
+    )
+    target_dir = memory_tree.notes_dir / subdir
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / filename
+    note.replace(target)
+    return target
+
+
+def test_card_action_confirm_note_in_subdir(memory_tree):
+    """笔记已归档进子目录（用户先拖再点确认）：全树查找命中并删标签。"""
+    bridge = _bridge(memory_tree)
+    target = _archive_note(memory_tree, "douyin-x.md", "抖音")
+    before = frontmatter.loads(target.read_text(encoding="utf-8"))
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "confirm_note", "note": "douyin-x.md"})
+    )
+
+    assert resp["toast"] == {"type": "success", "content": "已确认"}
+    after = frontmatter.loads(target.read_text(encoding="utf-8"))
+    assert after.metadata == {**before.metadata, "tags": ["抖音"]}
+    assert after.content == before.content
+
+
+def test_card_action_same_name_in_trash_ignored(memory_tree):
+    """trash/ 里的同名文件不算：唯一匹配归档树内的那份。"""
+    bridge = _bridge(memory_tree)
+    target = _archive_note(memory_tree, "douyin-x.md", "抖音")
+    trash = memory_tree.notes_dir / "trash"
+    trash.mkdir(parents=True, exist_ok=True)
+    (trash / "douyin-x.md").write_text(
+        "---\ntags: [待确认]\n---\n回收站内容", encoding="utf-8"
+    )
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "confirm_note", "note": "douyin-x.md"})
+    )
+
+    assert resp["toast"] == {"type": "success", "content": "已确认"}
+    assert "待确认" not in frontmatter.loads(
+        target.read_text(encoding="utf-8")
+    ).metadata.get("tags", [])
+    assert "待确认" in frontmatter.loads(
+        (trash / "douyin-x.md").read_text(encoding="utf-8")
+    ).metadata["tags"]  # 回收站那份不动
+
+
+def test_card_action_duplicate_name_ambiguous(memory_tree):
+    """不同归档目录出现同名笔记：歧义 error toast，两份都不改写。"""
+    bridge = _bridge(memory_tree)
+    first = _archive_note(memory_tree, "douyin-x.md", "抖音")
+    second = _archive_note(memory_tree, "douyin-x.md", "小红书")
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "confirm_note", "note": "douyin-x.md"})
+    )
+
+    assert resp["toast"] == {
+        "type": "error",
+        "content": "存在多篇同名笔记，请到 Obsidian 处理",
+    }
+    assert "card" not in resp
+    for path in (first, second):
+        assert "待确认" in frontmatter.loads(
+            path.read_text(encoding="utf-8")
+        ).metadata["tags"]
+
+
+def test_card_action_file_only_in_trash_not_found(memory_tree):
+    """文件只存在于 trash/：按"笔记不存在"处理，绝不触碰回收站。"""
+    bridge = _bridge(memory_tree)
+    trash = memory_tree.notes_dir / "trash"
+    trash.mkdir(parents=True, exist_ok=True)
+    (trash / "gone.md").write_text(
+        "---\ntags: [待确认]\n---\n内容", encoding="utf-8"
+    )
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "confirm_note", "note": "gone.md"})
+    )
+
+    assert resp["toast"] == {"type": "error", "content": "笔记不存在或路径非法"}
+    assert "待确认" in frontmatter.loads(
+        (trash / "gone.md").read_text(encoding="utf-8")
+    ).metadata["tags"]
+
+
 def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
     """带 confirm_note 的卡片：追加「✅ 确认」callback 按钮（JSON 编码 value）。"""
     monkeypatch.setenv("FEISHU_APP_ID", "cli_x")

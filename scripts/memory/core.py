@@ -1,7 +1,13 @@
 """记忆模块核心：MemoryTree 与 MemorySettings（架构 v1.2）。
 
-平面存储（$OV/memory 根层，无子目录）+ sidecar 索引（<state_dir>/index.json）。
-动态状态（confidence/layer/last_accessed/references/pending_delete）只写
+笔记存储：memory/ 根层 + 用户手动归档子目录（一级平台目录如
+抖音/，二级中图法分类如 抖音/B84-心理学/）。机器创建/改写的文件
+一律在根层；用户可在 Obsidian 里手动移动（机器永不移动笔记）。
+特殊子目录 wiki/、attachments/、trash/ 与隐藏目录（. 开头）是
+机器专用资产，永不参与笔记扫描/搜索/衰减/确认回调。sidecar 索引
+（<state_dir>/index.json）里的 path 是相对 notes_dir 的 POSIX 路径
+（含子目录前缀，如 ``抖音/x.md``）。动态状态
+（confidence/layer/last_accessed/references/pending_delete）只写
 sidecar；笔记文件创建后机器绝不改写。id 为 26 字符 ULID。
 """
 
@@ -13,7 +19,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple
 
 import frontmatter
 
@@ -26,6 +32,9 @@ if TYPE_CHECKING:
 
 #: 合法逻辑层级（存于 sidecar，不是物理目录）
 LAYERS: Tuple[str, str, str] = ("short-term", "mid-term", "long-term")
+
+#: 永不参与笔记扫描的特殊子目录名（机器专用资产）
+NOTE_EXCLUDED_DIRS: frozenset[str] = frozenset({"wiki", "attachments", "trash"})
 
 #: Crockford base32 字母表（ULID 用，去除 I/L/O/U）
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -52,6 +61,31 @@ def _str_list(value: object) -> List[str]:
     if isinstance(value, (list, tuple)):
         return [str(item) for item in value]
     return []
+
+
+def iter_note_files(notes_dir: Path) -> Iterator[Path]:
+    """递归列出笔记 .md 文件（search/decay/watcher/确认回调共用）。
+
+    排除：wiki/、attachments/、trash/ 等机器专用目录与隐藏目录
+    （. 开头）、隐藏文件（. 开头）；不跟随符号链接目录（防环与
+    目录逃逸）。产出按目录/文件名排序，稳定可复现。
+
+    Args:
+        notes_dir: 笔记根目录。
+
+    Returns:
+        Iterator[Path]: 每个 .md 笔记的绝对路径。
+    """
+    for dirpath, dirnames, filenames in os.walk(notes_dir):
+        dirnames[:] = sorted(
+            name
+            for name in dirnames
+            if not name.startswith(".") and name not in NOTE_EXCLUDED_DIRS
+        )
+        for filename in sorted(filenames):
+            if filename.startswith(".") or not filename.endswith(".md"):
+                continue
+            yield Path(dirpath) / filename
 
 
 @dataclass
@@ -157,19 +191,32 @@ class MemoryTree:
         )
         os.replace(tmp, self.index_path)
 
+    def _rel_key(self, note_path: Path) -> str:
+        """notes_dir 内路径 → 索引相对 key（POSIX / 分隔，含子目录前缀）。
+
+        notes_dir 之外的路径退回纯文件名（维持旧顶层行为）；索引里
+        存的 path 一律由此产生，保证 ``notes_dir / entry["path"]``
+        可还原出原文件。
+        """
+        path = Path(note_path)
+        try:
+            return path.relative_to(self.notes_dir).as_posix()
+        except ValueError:
+            return path.name
+
     def _entry(self, note_path: Path) -> Optional[dict]:
-        """按路径（文件名）反查 sidecar 条目，未登记返回 None。"""
-        name = Path(note_path).name
+        """按相对路径反查 sidecar 条目，未登记返回 None。"""
+        key = self._rel_key(note_path)
         for entry in self._load_index().values():
-            if entry.get("path") == name:
+            if entry.get("path") == key:
                 return entry
         return None
 
     def _find_entry_id(self, note_path: Path) -> Optional[str]:
-        """按路径反查 sidecar 条目 id。"""
-        name = Path(note_path).name
+        """按相对路径反查 sidecar 条目 id。"""
+        key = self._rel_key(note_path)
         for nid, entry in self._load_index().items():
-            if entry.get("path") == name:
+            if entry.get("path") == key:
                 return nid
         return None
 
@@ -197,7 +244,7 @@ class MemoryTree:
         """登记/更新一条 sidecar 条目并原子写盘。"""
         index = self._load_index()
         index[str(note_id)] = {
-            "path": Path(note_path).name,
+            "path": self._rel_key(note_path),
             "confidence": confidence,
             "layer": layer,
             "last_accessed": last_accessed,
@@ -207,11 +254,11 @@ class MemoryTree:
         self._save_index()
 
     def _remove_entry(self, note_path: Path) -> None:
-        """按路径移除 sidecar 条目。"""
-        name = Path(note_path).name
+        """按相对路径移除 sidecar 条目。"""
+        key = self._rel_key(note_path)
         index = self._load_index()
         for nid, entry in list(index.items()):
-            if entry.get("path") == name:
+            if entry.get("path") == key:
                 del index[nid]
                 self._save_index()
                 return
