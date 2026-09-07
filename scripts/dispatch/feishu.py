@@ -62,7 +62,7 @@ from scripts.dispatch.prompt import CLOSE_WORDS, PromptStore
 
 from scripts.dispatch.archive import derive_archive_dir
 from scripts.dispatch.media import ATTACHMENTS_DIR
-from scripts.memory.core import MemoryTree
+from scripts.memory.core import SYSTEM_DIRNAME, MemoryTree
 
 #: 环境变量名（凭证与推送目标）
 ENV_APP_ID = "FEISHU_APP_ID"
@@ -655,19 +655,22 @@ def _console_url(confirm_note: Optional[str]) -> str:
     ``FEISHU_VAULT_NAME`` 覆盖（缺省 atelierr-data=桌面端库）；路径
     前缀用 ``FEISHU_NOTE_PREFIX`` 覆盖，缺省跟随库名：库根是
     atelierr-data 时为 ``memory/``，自定义库名（手机端库根即 memory/
-    文件夹本身）时为空。bare ``obsidian://`` 只开应用不定位，手机端
-    落到空白启动页，属反人机交互；无笔记名时才退回 bare scheme。
+    文件夹本身）时为空。无目标笔记（digest 等汇总通知）时落到
+    控制台门面页（库内 系统/控制台）——bare ``obsidian://`` 只开应用
+    不定位，手机端落到空白启动页，属反人机交互，任何按钮都不再用
+    裸 scheme。
     """
     console_url = os.environ.get(ENV_CONSOLE_URL, "").strip()
     if console_url:
         return console_url
-    if not confirm_note:
-        return DEFAULT_CONSOLE_URL
     vault = os.environ.get(ENV_VAULT_NAME, DEFAULT_VAULT_NAME)
     prefix = os.environ.get(ENV_NOTE_PREFIX)
     if prefix is None:
         prefix = "memory/" if vault == DEFAULT_VAULT_NAME else ""
-    stem = confirm_note[:-3] if confirm_note.endswith(".md") else confirm_note
+    if confirm_note:
+        stem = confirm_note[:-3] if confirm_note.endswith(".md") else confirm_note
+    else:
+        stem = f"{SYSTEM_DIRNAME}/控制台"
     return f"obsidian://open?vault={quote(vault)}&file={quote(prefix + stem)}"
 
 

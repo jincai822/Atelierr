@@ -826,7 +826,12 @@ def test_console_url_env_override_and_fallback(monkeypatch):
     assert feishu_module._console_url("x.md") == "https://example.com/console"
 
     monkeypatch.delenv("FEISHU_CONSOLE_URL")
-    assert feishu_module._console_url(None) == "obsidian://"
+    monkeypatch.delenv("FEISHU_VAULT_NAME", raising=False)
+    monkeypatch.delenv("FEISHU_NOTE_PREFIX", raising=False)
+    # 无目标笔记（汇总通知）：落控制台门面页，绝不用裸 scheme
+    fallback = feishu_module._console_url(None)
+    assert fallback.startswith("obsidian://open?vault=")
+    assert "%E6%8E%A7%E5%88%B6%E5%8F%B0" in fallback  # 控制台（编码后）
 
 
 def test_console_url_custom_vault_drops_memory_prefix(monkeypatch):
