@@ -367,7 +367,8 @@ def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
     ]
     behavior = actions[1]["behaviors"][0]
     assert behavior["type"] == "callback"
-    assert json.loads(behavior["value"]) == {
+    # value 必须是 dict 而非 JSON 字符串：平台回传字符串会被 SDK 校验丢弃
+    assert behavior["value"] == {
         "action": feishu_module.CONFIRM_ACTION,
         "note": "douyin-x.md",
     }

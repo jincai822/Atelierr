@@ -431,15 +431,13 @@ def send_feishu(
                     "tag": "button",
                     "text": {"tag": "plain_text", "content": "✅ 确认"},
                     "type": "primary",
-                    # 新版卡片 callback：value 是 JSON 编码字符串，回调时
-                    # 平台把它解析成对象放进 action.value
+                    # 新版卡片 callback：value 直接放 JSON 对象（若放字符串，
+                    # 回调时平台原样回传，SDK 校验 action.value 必须是 dict
+                    # 会直接报错丢弃，回调永远到不了处理器）
                     "behaviors": [
                         {
                             "type": "callback",
-                            "value": json.dumps(
-                                {"action": CONFIRM_ACTION, "note": confirm_note},
-                                ensure_ascii=False,
-                            ),
+                            "value": {"action": CONFIRM_ACTION, "note": confirm_note},
                         }
                     ],
                 }
