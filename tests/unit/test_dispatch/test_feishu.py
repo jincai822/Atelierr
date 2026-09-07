@@ -827,3 +827,24 @@ def test_console_url_env_override_and_fallback(monkeypatch):
 
     monkeypatch.delenv("FEISHU_CONSOLE_URL")
     assert feishu_module._console_url(None) == "obsidian://"
+
+
+def test_console_url_custom_vault_drops_memory_prefix(monkeypatch):
+    """自定义库名（手机端库根=memory/ 文件夹）：不带 memory/ 前缀。"""
+    monkeypatch.delenv("FEISHU_CONSOLE_URL", raising=False)
+    monkeypatch.delenv("FEISHU_NOTE_PREFIX", raising=False)
+    monkeypatch.setenv("FEISHU_VAULT_NAME", "memory")
+
+    url = feishu_module._console_url("抖音-x.md")
+
+    assert "vault=memory" in url
+    assert "file=%E6%8A%96" in url  # file 直接是笔记名（编码后），无前缀
+    assert "memory%2F" not in url and "file=memory/" not in url
+
+
+def test_console_url_note_prefix_env_override(monkeypatch):
+    """FEISHU_NOTE_PREFIX 显式覆盖前缀（含覆盖为空串）。"""
+    monkeypatch.delenv("FEISHU_CONSOLE_URL", raising=False)
+    monkeypatch.delenv("FEISHU_VAULT_NAME", raising=False)
+    monkeypatch.setenv("FEISHU_NOTE_PREFIX", "notes/")
+    assert feishu_module._console_url("x.md").endswith("file=notes/x")

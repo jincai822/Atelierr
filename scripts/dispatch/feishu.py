@@ -72,6 +72,9 @@ ENV_CONSOLE_URL = "FEISHU_CONSOLE_URL"
 #: Obsidian 库名（obsidian://open?vault=…；可用 FEISHU_VAULT_NAME 覆盖）
 ENV_VAULT_NAME = "FEISHU_VAULT_NAME"
 DEFAULT_VAULT_NAME = "atelierr-data"
+#: 库内笔记路径前缀（FEISHU_NOTE_PREFIX 覆盖；库根=atelierr-data 时
+#: 缺省 "memory/"，自定义库名（如手机端库根即 memory/ 文件夹）缺省空）
+ENV_NOTE_PREFIX = "FEISHU_NOTE_PREFIX"
 
 DEFAULT_CONSOLE_URL = "obsidian://"
 
@@ -647,10 +650,13 @@ def _console_url(confirm_note: Optional[str]) -> str:
     """「在 Obsidian 中打开」按钮 URL。
 
     ``FEISHU_CONSOLE_URL`` 环境变量优先（自定义控制台地址）；否则
-    生成 ``obsidian://open?vault=<库名>&file=memory/<笔记去后缀>``
-    直达本条笔记（percent-encode 防中文/井号/空格截断；库名可用
-    ``FEISHU_VAULT_NAME`` 覆盖）。bare ``obsidian://`` 只开应用不定位，
-    手机端落到空白启动页，属反人机交互；无笔记名时才退回 bare scheme。
+    生成 ``obsidian://open?vault=<库名>&file=<前缀><笔记去后缀>``
+    直达本条笔记（percent-encode 防中文/井号/空格截断）。库名用
+    ``FEISHU_VAULT_NAME`` 覆盖（缺省 atelierr-data=桌面端库）；路径
+    前缀用 ``FEISHU_NOTE_PREFIX`` 覆盖，缺省跟随库名：库根是
+    atelierr-data 时为 ``memory/``，自定义库名（手机端库根即 memory/
+    文件夹本身）时为空。bare ``obsidian://`` 只开应用不定位，手机端
+    落到空白启动页，属反人机交互；无笔记名时才退回 bare scheme。
     """
     console_url = os.environ.get(ENV_CONSOLE_URL, "").strip()
     if console_url:
@@ -658,8 +664,11 @@ def _console_url(confirm_note: Optional[str]) -> str:
     if not confirm_note:
         return DEFAULT_CONSOLE_URL
     vault = os.environ.get(ENV_VAULT_NAME, DEFAULT_VAULT_NAME)
+    prefix = os.environ.get(ENV_NOTE_PREFIX)
+    if prefix is None:
+        prefix = "memory/" if vault == DEFAULT_VAULT_NAME else ""
     stem = confirm_note[:-3] if confirm_note.endswith(".md") else confirm_note
-    return f"obsidian://open?vault={quote(vault)}&file={quote(f'memory/{stem}')}"
+    return f"obsidian://open?vault={quote(vault)}&file={quote(prefix + stem)}"
 
 
 def send_feishu(
