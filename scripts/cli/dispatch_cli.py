@@ -35,6 +35,7 @@ import frontmatter
 from scripts.cli.memory_cli import resolve_config_path
 from scripts.dispatch.archive import derive_archive_dir
 from scripts.dispatch.digest import DigestDispatcher
+from scripts.dispatch.feishu import send_resurface_feishu, send_todo_feishu
 from scripts.dispatch.highlights import HighlightsDispatcher
 from scripts.dispatch.links import LinkDispatcher
 from scripts.dispatch.media import MediaDispatcher
@@ -147,6 +148,12 @@ def _notify_created_notes(
         if hint:
             body = f"{body}\n{hint}"
         send_dispatch_notice(title, body, confirm_note=filename)
+
+
+def _notify_todos(created: List[str], limit: int = 5) -> None:
+    """新建待办逐条推「✅ 已完成」卡片（未配置/失败静默；上限防刷屏）。"""
+    for filename in created[:limit]:
+        send_todo_feishu(filename)
 
 
 def _notify_digest(
@@ -275,6 +282,8 @@ class DispatchCLI:
                     click.echo(f"  已创建待办: {filename}")
                 for failure in report["failed"]:
                     click.echo(f"  失败: {failure['note']} — {failure['error']}")
+                if not dry_run:
+                    _notify_todos(report["created"])
                 if dry_run:
                     click.echo("（dry-run：未做处理）")
 
@@ -434,6 +443,8 @@ class DispatchCLI:
                     report["counts"],
                     pin_state=Path(tree.state_dir) / "feishu_pins.json",
                 )
+                # 今日复习卡：只给标题（先想），按钮才打开原文（再看）
+                send_resurface_feishu(report["review"])
 
         @cli.command(name="feishu")
         def feishu_command() -> None:

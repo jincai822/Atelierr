@@ -95,8 +95,9 @@ class DigestDispatcher:
             today: 覆盖"今天"（YYYY-MM-DD，测试用）。
 
         Returns:
-            Dict[str, Any]: {created, skipped, counts, markdown}；
-                counts 含 pending/todos/resurface/undistilled/yesterday_new。
+            Dict[str, Any]: {created, skipped, counts, review, markdown}；
+                counts 含 pending/todos/resurface/undistilled/yesterday_new；
+                review 是今日复习候选（含 title/relpath，供复习卡按钮定位）。
         """
         MemoryWatcher(self.tree, source="sync").process_pending()
         today = today or datetime.now().strftime("%Y-%m-%d")
@@ -104,7 +105,13 @@ class DigestDispatcher:
         digest_dir = Path(self.tree.notes_dir) / DIGEST_DIRNAME
         target = digest_dir / filename
         if target.exists():
-            return {"created": None, "skipped": True, "counts": {}, "markdown": ""}
+            return {
+                "created": None,
+                "skipped": True,
+                "counts": {},
+                "review": [],
+                "markdown": "",
+            }
         pending, todos, yesterday_new = self._collect(today)
         review = self.resurface.candidates()
         review_stems = [Path(item["filename"]).stem for item in review]
@@ -135,6 +142,7 @@ class DigestDispatcher:
                 "undistilled": len(undistilled),
                 "yesterday_new": len(yesterday_new),
             },
+            "review": review,
             "markdown": markdown,
         }
 

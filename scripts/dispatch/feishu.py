@@ -89,6 +89,10 @@ DEFAULT_CONSOLE_URL = "obsidian://"
 CONFIRM_ACTION = "confirm_note"
 ARCHIVE_ACTION = "archive_note"
 CONFIRM_TAG = "待确认"
+#: 「✅ 已完成」待办按钮动作名与「待办」标签（后者与
+#: dispatch/todos.py 的 TODO_TAG 同值）
+TODO_DONE_ACTION = "todo_done"
+TODO_TAG = "待办"
 
 #: 平台推不出时归档按钮的兜底一级目录（与建议归档行的"省略"不同：
 #: 按钮必须给一个去处）
@@ -246,6 +250,8 @@ class FeishuBridge:
             return self._handle_confirm(filename, chat_id)
         if action_name == ARCHIVE_ACTION:
             return self._handle_archive(filename, chat_id)
+        if action_name == TODO_DONE_ACTION:
+            return self._handle_todo_done(filename, chat_id)
         return {}
 
     @staticmethod
@@ -335,6 +341,41 @@ class FeishuBridge:
             "card": card,
         }
 
+    def _handle_todo_done(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
+        """「✅ 已完成」待办：只删待办标签；失败只 toast，不中断守护。"""
+        try:
+            ok, detail = self._todo_done(filename)
+        except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
+            print(f"[feishu] todo done note={filename} fail: {exc}", flush=True)
+            self._send_feedback(chat_id, f"⚠️ 处理失败，请稍后重试：{filename}")
+            return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
+        print(f"[feishu] todo done note={filename} {'ok' if ok else 'fail'}", flush=True)
+        if not ok:
+            reason = self._error_reason(detail)
+            self._send_feedback(chat_id, f"⚠️ {reason}：{filename}")
+            return {"toast": {"type": "error", "content": reason}}
+        title = self._feedback_title(filename)
+        self._send_feedback(chat_id, f"✅ 待办已完成：{title}")
+        return {
+            "toast": {"type": "success", "content": "已完成"},
+            "card": {
+                "type": "raw",
+                "data": self._confirmed_card(
+                    filename,
+                    note_line="已移除「待办」标签",
+                    header="✅ 已完成",
+                ),
+            },
+        }
+
+    def _todo_done(self, filename: str) -> Tuple[bool, str]:
+        """「✅ 已完成」核心：定位笔记 + 移除待办标签（与确认同构）。"""
+        note_path, err = self._locate_note(filename)
+        if err:
+            return False, err
+        stripped = self._strip_tag(note_path, TODO_TAG)
+        return True, "ok" if stripped else "noop"
+
     @staticmethod
     def _error_reason(detail: str) -> str:
         """把失败详情串映射成给用户看的原因短语（toast 与反馈消息共用）。"""
@@ -392,29 +433,10 @@ class FeishuBridge:
             print(f"[feishu] feedback fail: {exc}", flush=True)
 
     def _send_card(self, chat_id: Optional[str], card: Dict[str, Any]) -> bool:
-        """向会话发一张交互卡片；失败降级纯文本（标题+首条 div），再败只 log。
-
-        目标会话：chat_id 优先，缺省 ``FEISHU_CHAT_ID``；都没有静默 False。
-        """
-        target = (chat_id or os.environ.get(ENV_CHAT_ID, "")).strip()
-        if not target:
-            return False
-        try:
-            lark = _import_lark()
-            client = (
-                lark.Client.builder()
-                .app_id(self.app_id)
-                .app_secret(self.app_secret)
-                .build()
-            )
-            if _send(client, target, "interactive", json.dumps(card)) is not None:
-                return True
-            title = card.get("header", {}).get("title", {}).get("content", "")
-            text = title or "（卡片发送失败）"
-            return _send(client, target, "text", json.dumps({"text": text})) is not None
-        except Exception as exc:  # noqa: BLE001 - 发卡失败不影响主流程
-            print(f"[feishu] card send fail: {exc}", flush=True)
-            return False
+        """向会话发一张交互卡片（模块级 send_feishu_card 的实例凭据版）。"""
+        return send_feishu_card(
+            card, chat_id, app_id=self.app_id, app_secret=self.app_secret
+        )
 
     def _answer_search(self, chat_id: Optional[str], query: str) -> None:
         """「搜 xxx」指令：回前 5 条匹配卡（标题+confidence+打开按钮）。
@@ -543,9 +565,13 @@ class FeishuBridge:
         return matches[0], None
 
     def _strip_review_tag(self, note_path: Path) -> bool:
-        """移除单篇笔记的「待确认」标签（2026-09-07 批准的人工例外之一）。
+        """移除单篇笔记的「待确认」标签（2026-09-07 批准的人工例外之一）。"""
+        return self._strip_tag(note_path, CONFIRM_TAG)
 
-        仅当 tags 含「待确认」才改写（幂等：没有不改写）；改写只删该
+    def _strip_tag(self, note_path: Path, tag: str) -> bool:
+        """移除单篇笔记 frontmatter tags 里的指定一项（其余一概不动）。
+
+        仅当 tags 含该标签才改写（幂等：没有不改写）；改写只删该
         标签一项，frontmatter 其余字段与正文经 round-trip 原样保留。
 
         Returns:
@@ -554,9 +580,9 @@ class FeishuBridge:
         text = note_path.read_text(encoding="utf-8")
         post = frontmatter.loads(text)
         tags = post.metadata.get("tags")
-        if not isinstance(tags, list) or CONFIRM_TAG not in tags:
+        if not isinstance(tags, list) or tag not in tags:
             return False
-        post.metadata["tags"] = [tag for tag in tags if tag != CONFIRM_TAG]
+        post.metadata["tags"] = [item for item in tags if item != tag]
         self._atomic_write(note_path, frontmatter.dumps(post).encode("utf-8"))
         return True
 
@@ -624,18 +650,21 @@ class FeishuBridge:
 
     @staticmethod
     def _confirmed_card(
-        filename: str, note_line: str = "已移除「待确认」标签"
+        filename: str,
+        note_line: str = "已移除「待确认」标签",
+        header: str = "✅ 已确认",
     ) -> Dict[str, Any]:
-        """确认后的替换卡片：按钮区已由「✅ 已确认」文本取代（无操作区）。
+        """操作完成后的替换卡片：按钮区已由完成文本取代（无操作区）。
 
         Args:
             filename: 笔记文件名（展示用）。
-            note_line: 卡片正文第二行（归档成功/半截时传场景文案）。
+            note_line: 卡片正文第二行（归档成功/半截/待办完成时传场景文案）。
+            header: 卡片头文案（确认=✅ 已确认；待办完成=✅ 已完成）。
         """
         return {
             "config": {"wide_screen_mode": True},
             "header": {
-                "title": {"tag": "plain_text", "content": "✅ 已确认"},
+                "title": {"tag": "plain_text", "content": header},
                 "template": "green",
             },
             "elements": [
@@ -934,6 +963,169 @@ def send_feishu(
         ) is not None
     except Exception:  # noqa: BLE001 - 推送失败不影响主流程
         return False
+
+
+def send_feishu_card(
+    card: Dict[str, Any],
+    chat_id: Optional[str] = None,
+    app_id: Optional[str] = None,
+    app_secret: Optional[str] = None,
+) -> bool:
+    """发一张自定义交互卡片；未配置或失败返回 False（绝不抛异常）。
+
+    卡片发送失败时降级为纯文本（取卡片头标题）再试一次。
+
+    Args:
+        card: 卡片 JSON（legacy schema：header + elements）。
+        chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID`` 环境变量。
+        app_id / app_secret: 凭据覆盖；缺省读环境变量（桥实例传入自身凭据）。
+
+    Returns:
+        bool: 发送成功且服务端 success 返回 True。
+    """
+    app_id = (app_id or os.environ.get(ENV_APP_ID, "")).strip()
+    app_secret = (app_secret or os.environ.get(ENV_APP_SECRET, "")).strip()
+    target = (chat_id or os.environ.get(ENV_CHAT_ID, "")).strip()
+    if not app_id or not app_secret or not target:
+        return False
+    try:
+        lark = _import_lark()
+        client = (
+            lark.Client.builder()
+            .app_id(app_id)
+            .app_secret(app_secret)
+            .build()
+        )
+        if _send(client, target, "interactive", json.dumps(card)) is not None:
+            return True
+        title = card.get("header", {}).get("title", {}).get("content", "")
+        text = str(title) if title else "（卡片发送失败）"
+        return _send(client, target, "text", json.dumps({"text": text})) is not None
+    except Exception:  # noqa: BLE001 - 发卡失败不影响主流程
+        return False
+
+
+def send_todo_feishu(filename: str, chat_id: Optional[str] = None) -> bool:
+    """新待办提醒卡：「打开」（URI）+「✅ 已完成」（callback 删待办标签）。
+
+    待办笔记来自 TodoDispatcher 的行动项判定；点「已完成」回调
+    FeishuBridge._handle_todo_done（与「确认」同构的人工触发例外：
+    只删 frontmatter tags 里的「待办」一项，其余一概不动）。
+
+    Args:
+        filename: 待办笔记文件名（相对 memory/ 根）。
+        chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID``。
+
+    Returns:
+        bool: 发送成功返回 True（未配置静默 False）。
+    """
+    card = {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "Atelierr 新待办"},
+            "template": "orange",
+        },
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"行动项判定产出：{filename}",
+                },
+            },
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "在 Obsidian 中打开"},
+                        "type": "primary",
+                        "url": _console_url(filename),
+                    },
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "✅ 已完成"},
+                        "type": "primary",
+                        "behaviors": [
+                            {
+                                "type": "callback",
+                                "value": {
+                                    "action": TODO_DONE_ACTION,
+                                    "note": filename,
+                                },
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    return send_feishu_card(card, chat_id)
+
+
+def send_resurface_feishu(
+    items: List[Dict[str, Any]], chat_id: Optional[str] = None
+) -> bool:
+    """今日复习卡：只给标题（先想），按钮才打开原文（再看）。
+
+    卡片刻意不含笔记内容——「先在心里回想，再点开核对」是间隔重复
+    的关键动作；想不起来的：值得就提炼进 wiki，不值得留给
+    review→purge。
+
+    Args:
+        items: 复习候选（ResurfaceManager.candidates() 的 dict：
+            title/relpath/idle_days）；逐条一个「打开」按钮，最多 5 条。
+        chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID``。
+
+    Returns:
+        bool: 发送成功返回 True；空队列/未配置静默 False。
+    """
+    if not items:
+        return False
+    elements: List[Dict[str, Any]] = [
+        {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": "先在心里回想内容，再点「打开」核对。",
+            },
+        }
+    ]
+    for item in items[:5]:
+        elements.append(
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": (
+                        f"**{item.get('title') or item['relpath']}**"
+                        f"（闲置 {item.get('idle_days', '?')} 天）"
+                    ),
+                },
+            }
+        )
+        elements.append(
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "打开"},
+                        "type": "primary",
+                        "url": _console_url(item["relpath"]),
+                    }
+                ],
+            }
+        )
+    card = {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": f"🔁 今日复习（{len(items[:5])}）"},
+            "template": "blue",
+        },
+        "elements": elements,
+    }
+    return send_feishu_card(card, chat_id)
 
 
 def _pin_card(

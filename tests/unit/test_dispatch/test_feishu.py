@@ -1168,3 +1168,125 @@ def test_search_prefix_counts_as_answer_when_prompt_open(
 
     assert cards == []
     assert sent == ["已收到（第 1 条回答）"]
+
+
+# ----------------------------------------------------------------------
+# 「✅ 已完成」待办按钮（回调删待办标签）与复习卡
+# ----------------------------------------------------------------------
+
+
+def _card_todo_done(filename):
+    """构造一条 todo_done 回调事件。"""
+    return _card_action({"action": "todo_done", "note": filename})
+
+
+def test_card_todo_done_strips_only_todo_tag(memory_tree):
+    """「✅ 已完成」：tags 里只删「待办」，其他标签原样保留。"""
+    memory_tree.create_note(
+        "todo-1.md", "行动项\n", source="todo", tags=["待办", "工作"]
+    )
+    bridge = _bridge(memory_tree)
+
+    result = bridge.handle_card_action(_card_todo_done("todo-1.md"))
+
+    assert result["toast"]["type"] == "success"
+    path = memory_tree.notes_dir / "todo-1.md"
+    post = frontmatter.loads(path.read_text(encoding="utf-8"))
+    assert post.metadata["tags"] == ["工作"]
+    assert (
+        result["card"]["data"]["header"]["title"]["content"] == "✅ 已完成"
+    )
+
+
+def test_card_todo_done_feedback_and_idempotent(memory_tree, monkeypatch):
+    """完成反馈带 frontmatter 标题；无「待办」标签再点也成功（幂等）。"""
+    memory_tree.create_note(
+        "todo-2.md", "---\ntitle: 打电话\n---\n行动\n", source="todo",
+        tags=["待办"],
+    )
+    bridge = _bridge(memory_tree)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+
+    bridge.handle_card_action(_card_todo_done("todo-2.md"))
+    assert sent == ["✅ 待办已完成：打电话"]
+
+    result = bridge.handle_card_action(_card_todo_done("todo-2.md"))
+    assert result["toast"]["type"] == "success"
+
+
+def test_card_todo_done_missing_note(memory_tree, monkeypatch):
+    """笔记不存在 → error toast + 文字反馈（不中断守护）。"""
+    bridge = _bridge(memory_tree)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+
+    result = bridge.handle_card_action(_card_todo_done("ghost.md"))
+
+    assert result["toast"]["type"] == "error"
+    assert sent and "不存在" in sent[0]
+
+
+def test_send_todo_feishu_card_buttons(monkeypatch):
+    """新待办卡：打开（URI）+ ✅ 已完成（callback todo_done）。"""
+    cards = []
+    monkeypatch.setattr(
+        feishu_module,
+        "send_feishu_card",
+        lambda card, chat_id=None, **kw: cards.append(card) or True,
+    )
+
+    assert feishu_module.send_todo_feishu("todo-x.md") is True
+
+    actions = cards[0]["elements"][1]["actions"]
+    assert [a["text"]["content"] for a in actions] == [
+        "在 Obsidian 中打开",
+        "✅ 已完成",
+    ]
+    behavior = actions[1]["behaviors"][0]
+    assert behavior["type"] == "callback"
+    assert behavior["value"] == {
+        "action": feishu_module.TODO_DONE_ACTION,
+        "note": "todo-x.md",
+    }
+
+
+def test_send_resurface_feishu_card_layout(monkeypatch):
+    """复习卡：提示语 + 逐条标题/打开按钮；空队列不发。"""
+    assert feishu_module.send_resurface_feishu([]) is False
+    cards = []
+    monkeypatch.setattr(
+        feishu_module,
+        "send_feishu_card",
+        lambda card, chat_id=None, **kw: cards.append(card) or True,
+    )
+    items = [
+        {"title": "旧文A", "relpath": "a.md", "idle_days": 20},
+        {"title": "旧文B", "relpath": "sub/b.md", "idle_days": 30},
+    ]
+
+    assert feishu_module.send_resurface_feishu(items) is True
+
+    card = cards[0]
+    assert "今日复习（2）" in card["header"]["title"]["content"]
+    buttons = [
+        a
+        for e in card["elements"]
+        if e["tag"] == "action"
+        for a in e["actions"]
+    ]
+    assert len(buttons) == 2
+    assert all(
+        b["url"].startswith("obsidian://open?vault=") for b in buttons
+    )
+    texts = " ".join(
+        e.get("text", {}).get("content", "")
+        for e in card["elements"]
+        if e["tag"] == "div"
+    )
+    assert "旧文A" in texts
+    assert "闲置 20 天" in texts

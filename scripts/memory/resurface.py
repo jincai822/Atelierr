@@ -148,6 +148,7 @@ class ResurfaceManager:
                         "id": note_id,
                         "title": info.get("title") or path.stem,
                         "filename": path.name,
+                        "relpath": self.tree._rel_key(path),
                         "confidence": confidence,
                         "idle_days": self._idle_days(info, path, now),
                         "layer": info["layer"],

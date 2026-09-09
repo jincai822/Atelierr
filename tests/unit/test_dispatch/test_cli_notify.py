@@ -94,13 +94,60 @@ def test_links_success_no_push(cli, memory_tree, pushes, monkeypatch):
     assert pushes == []
 
 
-def test_todos_no_push(cli, memory_tree, pushes):
-    """待办分发（显式通道直转，无需 LLM）→ 一律不推。"""
+def test_todos_created_pushes_done_card(cli, memory_tree, pushes, monkeypatch):
+    """待办分发（显式通道直转）→ 不走双通道摘要，逐条推「✅ 已完成」卡。"""
     memory_tree.create_note("plan.md", "- [ ] 明天交报告", source="test")
+    sent = []
+    monkeypatch.setattr(
+        cli_module, "send_todo_feishu", lambda fn: sent.append(fn) or True
+    )
 
     assert cli.main(["todos"]) == 0
-    assert list(memory_tree.notes_dir.glob("todo-*.md"))
-    assert pushes == []
+    created = list(memory_tree.notes_dir.glob("todo-*.md"))
+    assert created
+    assert pushes == []  # 双通道摘要仍不推（防马后炮噪音）
+    assert sent == [created[0].name]
+
+
+class _FakeResurface:
+    """假复习队列：固定返回一条候选（验证复习卡接线）。"""
+
+    def candidates(self):
+        return [
+            {
+                "id": "x",
+                "title": "旧笔记",
+                "filename": "old.md",
+                "relpath": "old.md",
+                "confidence": 0.3,
+                "idle_days": 20,
+                "layer": "short-term",
+            }
+        ]
+
+    def mark_pushed(self, ids):
+        pass
+
+
+def test_digest_sends_resurface_card(cli, memory_tree, monkeypatch, pushes):
+    """摘要后有复习候选 → 追加发今日复习卡（只给标题，按钮打开原文）。"""
+    monkeypatch.setattr(
+        cli_module.ResurfaceManager,
+        "from_config",
+        lambda *a, **kw: _FakeResurface(),
+    )
+    cards = []
+    monkeypatch.setattr(
+        cli_module,
+        "send_resurface_feishu",
+        lambda items, **kw: cards.append(items) or True,
+    )
+
+    assert cli.main(["digest"]) == 0
+
+    assert len(cards) == 1
+    assert cards[0][0]["title"] == "旧笔记"
+    assert cards[0][0]["relpath"] == "old.md"
 
 
 def _backdate_created(tree, filename: str, day: str) -> None:
