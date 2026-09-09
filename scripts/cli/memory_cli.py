@@ -141,6 +141,18 @@ def _monthly_purge_reminder(
         ],
     }
     send_feishu_card(card)
+    # 月度清理日上「Atelierr」日历（全天事件；失败只 log，不影响提醒）
+    try:
+        from scripts.dispatch.feishu_calendar import create_all_day_event
+
+        create_all_day_event(
+            tree.state_dir,
+            f"Atelierr 月度清理（{len(pending)} 条待删）",
+            today.strftime("%Y-%m-%d"),
+            description="运行 memory_cli review 查看，memory_cli purge 点头",
+        )
+    except Exception as exc:  # noqa: BLE001 - 日历失败绝不影响提醒
+        print(f"[feishu] purge event fail: {exc}", flush=True)
     return True
 
 

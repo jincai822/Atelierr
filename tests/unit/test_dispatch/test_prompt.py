@@ -113,3 +113,40 @@ def test_cli_prompt_open_no_send_and_collect(cli, memory_tree):
     PromptStore(memory_tree.state_dir).append("回答一")
     assert cli.main(["prompt-collect"]) == 0
     assert PromptStore(memory_tree.state_dir).is_open() is False
+
+
+def test_cli_prompt_open_form_sends_form_card(cli, memory_tree, monkeypatch):
+    """prompt-open --form：推 schema 2.0 表单卡并登记问题列表。"""
+    for var in ("FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_CHAT_ID"):
+        monkeypatch.setenv(var, "x")
+    cards = []
+    monkeypatch.setattr(
+        "scripts.dispatch.feishu.send_feishu_card",
+        lambda card, chat_id=None: cards.append(card) or True,
+    )
+
+    code = cli.main(
+        ["prompt-open", "weekly", "周回顾四问", "--form", "Q1", "--form", "Q2"]
+    )
+
+    assert code == 0
+    assert cards and cards[0]["schema"] == "2.0"
+    data = PromptStore(memory_tree.state_dir).load()
+    assert data["status"] == "open"
+    assert data["questions"] == ["Q1", "Q2"]
+
+
+def test_cli_prompt_open_form_send_failure_keeps_closed(
+    cli, memory_tree, monkeypatch
+):
+    """表单卡推送失败：不登记会话。"""
+    for var in ("FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_CHAT_ID"):
+        monkeypatch.setenv(var, "x")
+    monkeypatch.setattr(
+        "scripts.dispatch.feishu.send_feishu_card", lambda card, chat_id=None: False
+    )
+
+    code = cli.main(["prompt-open", "weekly", "周回顾四问", "--form", "Q1"])
+
+    assert code == 0
+    assert PromptStore(memory_tree.state_dir).is_open() is False

@@ -101,6 +101,11 @@ TODO_TAG = "待办"
 #: 「取消」还原确认卡
 ARCHIVE_PICK_ACTION = "archive_pick"
 ARCHIVE_CANCEL_ACTION = "archive_cancel"
+#: 问答表单卡「提交回答」（schema 2.0 form 容器；答案在回调 form_value）
+PROMPT_SUBMIT_ACTION = "prompt_submit"
+
+#: 问答表单卡的问题数上限（卡片长度护栏；周回顾四问远未触及）
+PROMPT_FORM_MAX_QUESTIONS = 8
 
 #: 平台推不出时归档按钮的兜底一级目录（与建议归档行的"省略"不同：
 #: 按钮必须给一个去处）
@@ -117,7 +122,7 @@ SEARCH_LIMIT = 5
 
 #: 快捷菜单指令（机器人聊天菜单在飞书开放平台后台配置同款文本，
 #: 见 docs/FEISHU-BOT.md；直接手打这些词同样生效）
-MENU_COMMANDS = ("摘要", "今日摘要", "待办", "提炼候选", "周回顾", "菜单", "帮助")
+MENU_COMMANDS = ("摘要", "今日摘要", "待办", "提炼候选", "周回顾", "同步看板", "菜单", "帮助")
 
 #: 文件名非法字符（半角）转 -
 _ILLEGAL_RE = re.compile(r'[\\/:*?"<>|]')
@@ -210,6 +215,12 @@ class FeishuBridge:
             content = json.loads(message.content or "{}")
         except (AttributeError, json.JSONDecodeError, TypeError):
             return
+        # 顺带识别用户 open_id（任务/日历等 API 需要；零额外权限）
+        from scripts.dispatch.task_sync import record_user_open_id, sender_open_id
+
+        open_id = sender_open_id(getattr(data.event, "sender", None))
+        if open_id:
+            record_user_open_id(self.tree.state_dir, open_id)
         if self._seen(message_id):
             return
         # 日志带 chat_id：往机器人发一条消息即可从 feishu.log 读到推送目标
@@ -258,6 +269,12 @@ class FeishuBridge:
         action_name = str(value.get("action") or "")
         filename = str(value.get("note") or "").strip()
         chat_id = self._event_chat_id(data)
+        # 顺带识别用户 open_id（回调 operator 带身份，零额外权限）
+        from scripts.dispatch.task_sync import record_user_open_id, sender_open_id
+
+        open_id = sender_open_id(getattr(data.event, "operator", None))
+        if open_id:
+            record_user_open_id(self.tree.state_dir, open_id)
         if action_name == CONFIRM_ACTION:
             return self._handle_confirm(filename, chat_id)
         if action_name == ARCHIVE_PICK_ACTION:
@@ -269,6 +286,8 @@ class FeishuBridge:
             return self._handle_archive(filename, chat_id, target_dir)
         if action_name == TODO_DONE_ACTION:
             return self._handle_todo_done(filename, chat_id)
+        if action_name == PROMPT_SUBMIT_ACTION:
+            return self._handle_prompt_submit(action, chat_id)
         return {}
 
     @staticmethod
@@ -470,6 +489,13 @@ class FeishuBridge:
             reason = self._error_reason(detail)
             self._send_feedback(chat_id, f"⚠️ {reason}：{filename}")
             return {"toast": {"type": "error", "content": reason}}
+        # 回写飞书任务完成（单向同步；失败只 log，绝不影响标签操作）
+        try:
+            from scripts.dispatch.task_sync import complete_task_for_todo
+
+            complete_task_for_todo(self.tree.state_dir, filename)
+        except Exception as exc:  # noqa: BLE001 - 回写失败不影响回调
+            print(f"[feishu] task complete hook fail: {exc}", flush=True)
         title = self._feedback_title(filename)
         self._send_feedback(chat_id, f"✅ 待办已完成：{title}")
         return {
@@ -491,6 +517,54 @@ class FeishuBridge:
             return False, err
         stripped = self._strip_tag(note_path, TODO_TAG)
         return True, "ok" if stripped else "noop"
+
+    def _handle_prompt_submit(self, action: Any, chat_id: Optional[str]) -> Dict[str, Any]:
+        """问答表单卡「提交回答」：form_value 按问题序收进会话并关闭。
+
+        表单答案在回调 ``action.form_value``（dict，键 ``q1..qN``，序 =
+        会话 questions 序；兼容 JSON 字符串负载）。空项视为跳过该问；
+        全部为空则不动会话（用户可继续文字作答或回「跳过」）；收到至少
+        一条即追加并**关闭会话**（表单是一次性作答仪式；prompt-collect
+        对已关闭会话照常可读）。
+        """
+        form_value = getattr(action, "form_value", None)
+        if isinstance(form_value, str):
+            try:
+                form_value = json.loads(form_value)
+            except ValueError:
+                form_value = None
+        if not isinstance(form_value, dict):
+            form_value = {}
+        store = PromptStore(Path(self.tree.state_dir))
+        data = store.load() if store.is_open() else None
+        if not data:
+            self._send_feedback(chat_id, "当前没有进行中的问答会话")
+            return {"toast": {"type": "warning", "content": "没有进行中的问答"}}
+        questions = [str(q) for q in (data.get("questions") or [])]
+        answers: List[str] = []
+        for index, _question in enumerate(questions):
+            value = str(form_value.get(f"q{index + 1}") or "").strip()
+            if value:
+                answers.append(value)
+        if not answers:
+            self._send_feedback(chat_id, "表单是空的，问答仍在进行（回「跳过」结束）")
+            return {"toast": {"type": "info", "content": "未收到内容，问答仍在进行"}}
+        for text in answers:
+            store.append(text)
+        store.close()
+        print(f"[feishu] prompt form submit: {len(answers)} answers", flush=True)
+        self._send_feedback(chat_id, f"已收到全部 {len(answers)} 条回答，问答结束 ✅")
+        return {
+            "toast": {"type": "success", "content": f"已提交 {len(answers)} 条回答"},
+            "card": {
+                "type": "raw",
+                "data": self._confirmed_card(
+                    "问答表单",
+                    note_line=f"已收到 {len(answers)} 条回答，会话已结束",
+                    header="✅ 问答已提交",
+                ),
+            },
+        }
 
     @staticmethod
     def _valid_archive_dir(target_dir: str) -> bool:
@@ -647,6 +721,7 @@ class FeishuBridge:
                 "· 待办 — 进行中的待办（带打开按钮）\n"
                 "· 提炼候选 — 今日待提炼清单\n"
                 "· 周回顾 — 问答进度/发起指引\n"
+                "· 同步看板 — 笔记元数据同步进多维表格（手机看板视图）\n"
                 "· 搜 关键词 — 搜笔记（前 5 条带打开按钮）\n"
                 "直接发文字=捕获笔记；发链接=转写；发语音=Whisper；发图=OCR",
             )
@@ -660,8 +735,31 @@ class FeishuBridge:
         if command == "提炼候选":
             self._menu_undistilled(chat_id)
             return
+        if command == "同步看板":
+            self._menu_board(chat_id)
+            return
         if command == "周回顾":
             self._menu_weekly(chat_id)
+
+    def _menu_board(self, chat_id: Optional[str]) -> None:
+        """「同步看板」：手动触发一轮多维表格同步（拉取式，可能耗时数秒）。"""
+        from scripts.dispatch.board import sync_board
+
+        try:
+            report = sync_board(self.tree)
+        except Exception as exc:  # noqa: BLE001 - 同步失败文字告知
+            print(f"[feishu] board sync fail: {exc}", flush=True)
+            report = None
+        if not report:
+            self._send_feedback(
+                chat_id, "⚠️ 看板同步失败（bitable/drive 权限未开？见 feishu.log）"
+            )
+            return
+        self._send_feedback(
+            chat_id,
+            f"📊 看板已同步：新增 {report['created']}，更新 {report['updated']}，"
+            f"共 {report['total']} 条\n看板地址：{report['url']}",
+        )
 
     def _today_digest_path(self) -> Path:
         """今日摘要机器产物路径（系统/今日摘要-YYYY-MM-DD.md）。"""
@@ -1347,6 +1445,70 @@ def _confirm_action_card(
             {"tag": "div", "text": {"tag": "lark_md", "content": message}},
             {"tag": "action", "actions": actions},
         ],
+    }
+
+
+def prompt_form_card(title: str, intro: str, questions: List[str]) -> Dict[str, Any]:
+    """问答表单卡（schema 2.0 form 容器：逐问输入框，一次提交收齐）。
+
+    旧版卡片 schema 没有表单容器，故本卡用 ``"schema": "2.0"``；input
+    组件必须嵌在 form 内（卡片 2.0 约束）。提交按钮
+    ``action_type=form_submit``，回调进
+    ``FeishuBridge._handle_prompt_submit``：value 固定
+    ``{"action": "prompt_submit"}``，各问答案在 ``action.form_value``
+    的 ``q1..qN`` 键位（序 = questions 序）。发送与降级走通用的
+    send_feishu_card（header 结构与旧版一致，降级取标题不受影响）。
+
+    Args:
+        title: 卡片头标题。
+        intro: 表单前的说明文字（markdown）。
+        questions: 问题列表（最多 PROMPT_FORM_MAX_QUESTIONS 条，超出截断）。
+
+    Returns:
+        Dict[str, Any]: 卡片 JSON（schema 2.0）。
+    """
+    picked = [str(q) for q in questions[:PROMPT_FORM_MAX_QUESTIONS]]
+    inputs: List[Dict[str, Any]] = [
+        {
+            "tag": "input",
+            "name": f"q{index + 1}",
+            "required": False,
+            "width": "default",
+            "label": {"tag": "plain_text", "content": f"{index + 1}. {question}"},
+            "placeholder": {"tag": "plain_text", "content": "不想答可留空"},
+        }
+        for index, question in enumerate(picked)
+    ]
+    inputs.append(
+        {
+            "tag": "button",
+            "name": "submit",
+            "text": {"tag": "plain_text", "content": "提交回答"},
+            "type": "primary",
+            "action_type": "form_submit",
+            "behaviors": [
+                {"type": "callback", "value": {"action": PROMPT_SUBMIT_ACTION}}
+            ],
+        }
+    )
+    elements: List[Dict[str, Any]] = []
+    if intro:
+        elements.append({"tag": "markdown", "content": intro})
+    elements.append(
+        {
+            "tag": "form",
+            "name": "prompt_form",
+            "elements": inputs,
+        }
+    )
+    return {
+        "schema": "2.0",
+        "config": {"update_multi": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": title},
+            "template": "blue",
+        },
+        "body": {"elements": elements},
     }
 
 

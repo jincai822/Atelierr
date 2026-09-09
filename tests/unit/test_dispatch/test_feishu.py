@@ -1594,3 +1594,184 @@ def test_menu_help_lists_commands(memory_tree, monkeypatch):
 
     assert "搜 关键词" in sent[0]
     assert "语音" in sent[0]
+
+
+def _card_form_action(form_value):
+    """构造一条表单提交回调（action.value 带 prompt_submit，答案在 form_value）。"""
+    return SimpleNamespace(
+        event=SimpleNamespace(
+            action=SimpleNamespace(
+                value={"action": "prompt_submit"}, form_value=form_value
+            )
+        )
+    )
+
+
+def test_prompt_form_card_shape():
+    """表单卡：schema 2.0、form 容器内 q1..qN 输入框 + form_submit 提交钮。"""
+    from scripts.dispatch.feishu import prompt_form_card
+
+    card = prompt_form_card("Atelierr 问答（weekly）", "说明", ["问题一", "问题二"])
+
+    assert card["schema"] == "2.0"
+    form = card["body"]["elements"][-1]
+    assert form["tag"] == "form"
+    inputs = form["elements"]
+    assert [item["name"] for item in inputs[:2]] == ["q1", "q2"]
+    assert "1. 问题一" in inputs[0]["label"]["content"]
+    submit = inputs[-1]
+    assert submit["action_type"] == "form_submit"
+    assert submit["behaviors"][0]["value"] == {"action": "prompt_submit"}
+    # 降级取标题兼容（header 结构与旧版一致）
+    assert card["header"]["title"]["content"] == "Atelierr 问答（weekly）"
+
+
+def test_prompt_form_card_caps_questions():
+    """问题数超上限截断（卡片长度护栏）。"""
+    from scripts.dispatch.feishu import PROMPT_FORM_MAX_QUESTIONS, prompt_form_card
+
+    card = prompt_form_card("t", "", [f"q{i}" for i in range(20)])
+    form = card["body"]["elements"][-1]
+    assert len(form["elements"]) == PROMPT_FORM_MAX_QUESTIONS + 1  # 含提交钮
+
+
+def test_prompt_submit_collects_answers_and_closes(memory_tree, monkeypatch):
+    """表单提交：非空答案按序追加进会话并关闭；空项跳过。"""
+    from scripts.dispatch.prompt import PromptStore
+
+    store = PromptStore(memory_tree.state_dir)
+    store.open("weekly", ["问题一", "问题二", "问题三"])
+    bridge = _bridge(memory_tree)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+
+    resp = bridge.handle_card_action(
+        _card_form_action({"q1": "答一", "q2": "", "q3": "答三"})
+    )
+
+    assert resp["toast"]["type"] == "success"
+    assert resp["card"]["data"]["header"]["template"] == "green"
+    data = store.load()
+    assert data["status"] == "closed"
+    assert [a["text"] for a in data["answers"]] == ["答一", "答三"]
+    assert "2 条回答" in sent[-1]
+
+
+def test_prompt_submit_all_blank_keeps_open(memory_tree, monkeypatch):
+    """全空表单：不动会话，提示仍在进行（用户可文字作答或「跳过」）。"""
+    from scripts.dispatch.prompt import PromptStore
+
+    store = PromptStore(memory_tree.state_dir)
+    store.open("weekly", ["问题一"])
+    bridge = _bridge(memory_tree)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+
+    resp = bridge.handle_card_action(_card_form_action({"q1": "  "}))
+
+    assert resp["toast"]["type"] == "info"
+    assert store.is_open() is True
+    assert store.load()["answers"] == []
+    assert "仍在进行" in sent[-1]
+
+
+def test_prompt_submit_without_session(memory_tree, monkeypatch):
+    """无 open 会话点提交：只提示，不写状态。"""
+    bridge = _bridge(memory_tree)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+
+    resp = bridge.handle_card_action(_card_form_action({"q1": "答一"}))
+
+    assert resp["toast"]["type"] == "warning"
+    assert "没有进行中的问答" in sent[-1]
+
+
+def test_prompt_submit_form_value_as_json_string(memory_tree, monkeypatch):
+    """form_value 兼容 JSON 字符串负载。"""
+    import json as _json
+
+    from scripts.dispatch.prompt import PromptStore
+
+    store = PromptStore(memory_tree.state_dir)
+    store.open("daily", ["问题一"])
+    bridge = _bridge(memory_tree)
+    monkeypatch.setattr(bridge, "_send_feedback", lambda chat, text: None)
+
+    resp = bridge.handle_card_action(_card_form_action(_json.dumps({"q1": "答"})))
+
+    assert resp["toast"]["type"] == "success"
+    assert [a["text"] for a in store.load()["answers"]] == ["答"]
+
+
+def test_message_event_records_sender_open_id(memory_tree):
+    """消息事件 sender 里的 open_id 被缓存（供任务/日历 API 用）。"""
+    import json as _json
+
+    bridge = _bridge(memory_tree)
+    event = _event("m-sender", "text", {"text": "hi"})
+    event.event.sender = SimpleNamespace(
+        sender_id=SimpleNamespace(open_id="ou_from_msg")
+    )
+    bridge.handle_event(event)
+
+    account = _json.loads(
+        (memory_tree.state_dir / "feishu_account.json").read_text(encoding="utf-8")
+    )
+    assert account["user_open_id"] == "ou_from_msg"
+
+
+def test_card_action_records_operator_open_id(memory_tree):
+    """卡片回调 operator 里的 open_id 被缓存。"""
+    import json as _json
+
+    bridge = _bridge(memory_tree)
+    event = _card_action({"action": "other"})
+    event.event.operator = SimpleNamespace(open_id="ou_from_card")
+    bridge.handle_card_action(event)
+
+    account = _json.loads(
+        (memory_tree.state_dir / "feishu_account.json").read_text(encoding="utf-8")
+    )
+    assert account["user_open_id"] == "ou_from_card"
+
+
+def test_todo_done_completes_feishu_task(memory_tree, monkeypatch):
+    """点「✅ 已完成」：删标签之外回写飞书任务完成（钩子打桩）。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("todo-x.md", "# t\n\n- [ ] 做事\n", source="todo", tags=["待办"])
+    calls = []
+    monkeypatch.setattr(
+        "scripts.dispatch.task_sync.complete_task_for_todo",
+        lambda state_dir, filename: calls.append(filename) or True,
+    )
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "todo_done", "note": "todo-x.md"})
+    )
+
+    assert resp["toast"]["type"] == "success"
+    assert calls == ["todo-x.md"]
+
+
+def test_todo_done_task_hook_failure_still_succeeds(memory_tree, monkeypatch):
+    """任务回写抛异常不影响回调成功（只 log）。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("todo-y.md", "# t\n\n- [ ] 做事\n", source="todo", tags=["待办"])
+
+    def _boom(state_dir, filename):
+        raise RuntimeError("api down")
+
+    monkeypatch.setattr(
+        "scripts.dispatch.task_sync.complete_task_for_todo", _boom
+    )
+    resp = bridge.handle_card_action(
+        _card_action({"action": "todo_done", "note": "todo-y.md"})
+    )
+    assert resp["toast"]["type"] == "success"

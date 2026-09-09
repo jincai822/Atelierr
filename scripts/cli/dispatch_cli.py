@@ -150,10 +150,60 @@ def _notify_created_notes(
         send_dispatch_notice(title, body, confirm_note=filename)
 
 
-def _notify_todos(created: List[str], limit: int = 5) -> None:
-    """新建待办逐条推「✅ 已完成」卡片（未配置/失败静默；上限防刷屏）。"""
+def _notify_todos(created: List[str], tree: MemoryTree, limit: int = 5) -> None:
+    """新建待办：逐条推「✅ 已完成」卡片 + 同步建飞书任务（失败均静默）。
+
+    任务同步是单向的（Obsidian → 飞书）：标题/截止取自待办笔记的
+    ``- [ ]`` 任务行；点卡片「✅ 已完成」时回写任务完成
+    （FeishuBridge._handle_todo_done）。上限防刷屏。
+    """
+    from scripts.dispatch.task_sync import create_task_for_todo
+
     for filename in created[:limit]:
         send_todo_feishu(filename)
+        title, due = _parse_todo_task(tree.notes_dir / filename)
+        if not title:
+            continue
+        create_task_for_todo(tree.state_dir, filename, title, due)
+        if due:
+            _add_todo_due_event(tree, title, due)
+
+
+def _add_todo_due_event(tree: MemoryTree, title: str, due: str) -> None:
+    """带截止的待办上「Atelierr」日历（全天事件；失败只 log）。"""
+    try:
+        from scripts.dispatch.feishu_calendar import create_all_day_event
+
+        create_all_day_event(
+            tree.state_dir, f"待办截止：{title}", due,
+            description="Atelierr 待办（单向同步，完成请在飞书卡片点 ✅）",
+        )
+    except Exception as exc:  # noqa: BLE001 - 日历失败绝不影响待办主流程
+        print(f"[feishu] todo due event fail: {exc}", flush=True)
+
+
+def _parse_todo_task(note_path: Path) -> tuple:
+    """从待办笔记提取任务文本与截止日（``- [ ] 文本 📅 YYYY-MM-DD``）。
+
+    Returns:
+        tuple: (title, due)；文件缺失/无任务行返回 (None, None)。
+    """
+    import re
+
+    try:
+        body = frontmatter.loads(note_path.read_text(encoding="utf-8")).content
+    except Exception:  # noqa: BLE001 - 读不到就没有任务可建
+        return None, None
+    match = re.search(r"^\s*- \[ \] (?P<text>.+?)\s*$", body, re.M)
+    if not match:
+        return None, None
+    text = match.group("text")
+    due = None
+    due_match = re.search(r"📅\s*(\d{4}-\d{2}-\d{2})\s*$", text)
+    if due_match:
+        due = due_match.group(1)
+        text = text[: due_match.start()].strip()
+    return text.strip() or None, due
 
 
 def _notify_digest(
@@ -283,7 +333,7 @@ class DispatchCLI:
                 for failure in report["failed"]:
                     click.echo(f"  失败: {failure['note']} — {failure['error']}")
                 if not dry_run:
-                    _notify_todos(report["created"])
+                    _notify_todos(report["created"], tree)
                 if dry_run:
                     click.echo("（dry-run：未做处理）")
 
@@ -356,33 +406,53 @@ class DispatchCLI:
         @click.argument("kind")
         @click.argument("message")
         @click.option(
+            "--form",
+            "form_questions",
+            multiple=True,
+            help="表单模式：每个 --form 是一个问题，推送为可填写的表单卡"
+            "（卡片内逐问作答、一次提交收齐）；不传则推送纯文本卡",
+        )
+        @click.option(
             "--no-send",
             "no_send",
             is_flag=True,
             help="只登记会话，不推送（问题已另行发出时用）",
         )
-        def prompt_open_command(kind: str, message: str, no_send: bool) -> None:
+        def prompt_open_command(kind: str, message: str, no_send: bool, form_questions: tuple) -> None:
             """开启飞书问答会话：推送问题并登记待答状态。
 
             会话 open 期间，用户在飞书里的文本回复计入答案（不捕获为
             笔记），回「跳过」/「完成」结束。供周回顾等反思仪式使用。
+            --form 模式推表单卡（schema 2.0），提交后答案一次收齐并
+            自动关闭会话；文本作答路径始终可用。
             """
             tree = self._build_tree()
             store = PromptStore(tree.state_dir)
             if store.is_open():
                 click.echo("已有进行中的问答会话，先 prompt-collect 或等用户结束")
                 return
+            questions = list(form_questions) if form_questions else [message]
             if not no_send:
                 if not _feishu_ready():
                     click.echo("飞书未配置，无法推送问题")
                     return
-                from scripts.dispatch.feishu import send_feishu
+                if form_questions:
+                    from scripts.dispatch.feishu import prompt_form_card, send_feishu_card
 
-                if not send_feishu(f"Atelierr 问答（{kind}）", message):
+                    card = prompt_form_card(
+                        f"Atelierr 问答（{kind}）", message, questions
+                    )
+                    sent = send_feishu_card(card)
+                else:
+                    from scripts.dispatch.feishu import send_feishu
+
+                    sent = send_feishu(f"Atelierr 问答（{kind}）", message)
+                if not sent:
                     click.echo("飞书推送失败，会话未登记")
                     return
-            store.open(kind, [message])
-            click.echo(f"问答会话已开启（kind={kind}），等待飞书回复")
+            store.open(kind, questions)
+            mode = "表单卡" if form_questions else "文本卡"
+            click.echo(f"问答会话已开启（kind={kind}，{mode}），等待飞书回复")
 
         @cli.command(name="prompt-collect")
         def prompt_collect_command() -> None:
@@ -445,6 +515,22 @@ class DispatchCLI:
                 )
                 # 今日复习卡：只给标题（先想），按钮才打开原文（再看）
                 send_resurface_feishu(report["review"])
+
+        @cli.command(name="board")
+        def board_command() -> None:
+            """同步知识库看板（飞书多维表格）一轮：全量笔记元数据单向上行。"""
+            tree = self._build_tree()
+            from scripts.dispatch.board import sync_board
+
+            report = sync_board(tree)
+            if not report:
+                click.echo("看板同步失败（飞书未配置或 bitable/drive 权限未开，见日志）")
+                return
+            click.echo(
+                f"看板已同步：新增 {report['created']}，"
+                f"更新 {report['updated']}，共 {report['total']} 条"
+            )
+            click.echo(f"看板地址: {report['url']}")
 
         @cli.command(name="feishu")
         def feishu_command() -> None:
