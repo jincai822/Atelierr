@@ -3,7 +3,7 @@
   "diagram_type": "dataflow",
   "meta": {
     "title": "信息流细化 ②：回响 · 沉淀 · 删除 · 会话",
-    "subtitle": "decay/晨报/todos 三个定时器围着库转；你的动作只有复习、提炼、点头删除 · 2026-09-07",
+    "subtitle": "decay/晨报/todos 围着库转；你的动作只有复习、提炼、飞书作答、点头删除 · 2026-09-09",
     "output": "atelierr-flow-loop.html",
     "viewBox": [
       1280,
@@ -32,7 +32,7 @@
       "id": "notes",
       "type": "database",
       "label": "memory/ 笔记",
-      "sublabel": "已确认 · 已归一化 · 机器不再改",
+      "sublabel": "已确认归一化 · 机器产物隔离在 系统/ 间",
       "stage": 0,
       "row": 0
     },
@@ -56,7 +56,7 @@
       "id": "digest",
       "type": "backend",
       "label": "晨报 07:53",
-      "sublabel": "五节：待确认/提炼候选/待办/今日复习/昨日新入库",
+      "sublabel": "五节：待确认/提炼候选/待办/复习/新入库 · 落 系统/",
       "stage": 1,
       "row": 3
     },
@@ -75,6 +75,14 @@
       "sublabel": "晨报五节计数推手机 · 异常才推",
       "stage": 2,
       "row": 0
+    },
+    {
+      "id": "feishu",
+      "type": "cloud",
+      "label": "飞书卡片",
+      "sublabel": "确认/归档按钮 · 摘要推送 · 四问作答",
+      "stage": 2,
+      "row": 1
     },
     {
       "id": "you",
@@ -96,7 +104,7 @@
       "id": "atelier",
       "type": "external",
       "label": "Atelier 会话",
-      "sublabel": "$weekly 只读桥读全库 · 周报/决策写 wiki",
+      "sublabel": "$weekly 只读桥 · 周报+决策写 reflections/",
       "stage": 3,
       "row": 3
     },
@@ -307,17 +315,17 @@
       "toSide": "left",
       "via": [
         [
-          620,
+          400,
           271
         ],
         [
-          620,
+          400,
           499
         ]
       ],
       "labelAt": [
-        700,
-        360
+        500,
+        487
       ]
     },
     {
@@ -341,6 +349,72 @@
       "labelAt": [
         905,
         390
+      ]
+    },
+    {
+      "from": "digest",
+      "to": "feishu",
+      "label": "摘要卡",
+      "variant": "default",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          315,
+          556
+        ],
+        [
+          452,
+          556
+        ],
+        [
+          452,
+          271
+        ]
+      ],
+      "labelAt": [
+        430,
+        330
+      ]
+    },
+    {
+      "from": "you",
+      "to": "feishu",
+      "label": "作答 · 点按钮",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "route": "straight",
+      "labelAt": [
+        560,
+        328
+      ]
+    },
+    {
+      "from": "atelier",
+      "to": "feishu",
+      "label": "周回顾四问",
+      "classification": "作答回填定稿",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "right",
+      "via": [
+        [
+          745,
+          328
+        ],
+        [
+          600,
+          328
+        ],
+        [
+          600,
+          271
+        ]
+      ],
+      "labelAt": [
+        665,
+        318
       ]
     },
     {
@@ -377,16 +451,18 @@
       "items": [
         "decay（03:00）：全量反链统计 → 无状态重算 confidence → 分层；<0.1 标 pending_delete",
         "晨报（07:53）：扫全库出五节摘要；复习推送写冷却（3 天不重复）；响应观测实验 0",
-        "todos（15min）：已确认笔记 → LLM 判行动项 → todo 笔记；提炼候选=推送≥2 或确认满 3 天"
+        "todos（15min）：已确认笔记 → LLM 判行动项 → todo 笔记；提炼候选=推送≥2 或确认满 3 天",
+        "机器产物隔离（09-08）：摘要/清单/控制台落 系统/ 间——渲染可见，不进 decay、不进反链统计"
       ]
     },
     {
       "dot": "emerald",
-      "title": "③ 触达：笔记 + 推送 + 控制台",
+      "title": "③ 触达：笔记 + 推送 + 飞书",
       "items": [
-        "晨报是 memory/ 里的普通笔记：Obsidian 直接看，五节都是可点开的 wikilink",
-        "ntfy+飞书双通道推计数摘要（待确认 N/提炼候选 N/复习 N），点开手机 Obsidian 看全文",
-        "飞书卡片与 ntfy 双通道（09-06 起，可选）：卡片带「在 Obsidian 中打开」按钮",
+        "晨报是 系统/ 里的普通笔记：Obsidian 直接看，五节都是可点开的 wikilink",
+        "ntfy + 飞书双通道推计数摘要；飞书卡带「在 Obsidian 中打开」按钮（库名已修复）",
+        "处理完成卡三按钮：看全文 / ✅确认 / 📁确认并归档——点头机器才动笔记（人工触发例外）",
+        "周回顾四问（09-08）：飞书直接文字作答，按条计数收进答案库；回「跳过」直接定稿",
         "控制台.md 用 Dataview 读摘要 frontmatter 的 undistilled 桥，提炼候选常年可见"
       ]
     },
@@ -396,7 +472,8 @@
       "items": [
         "QuickAdd 提炼（60 秒）：点开候选 → 模板 → 写自己的话 → from 指回来源 + ≥1 互链",
         "划重点勾选：勾中条目 15min 内自动成摘录卡（type: Excerpt，from 回指清单+页码）",
-        "Atelier 会话：你发起 $weekly → 只读桥读全库 → 周报/决策日志写 reflections/ 间",
+        "Atelier 会话：$weekly 只读桥读全库 → 周报草稿 → 飞书四问作答 → 回填定稿进 reflections/",
+        "—— 09-09 首次全环闭环：四问经飞书回填，周报 2026-09-07 转正定稿",
         "wiki 条目纪律：人写、只增不改、无 decay 无 purge；WikiManager 只校验不改写",
         "根层已含 legacy 542 张卡（方案 C 09-06）：Cognitive OS 卡 type+title 即合法"
       ]
