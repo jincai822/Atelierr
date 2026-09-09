@@ -4,11 +4,15 @@
 - 链接抓取失败 → "Atelierr 抓取失败"（不推用户无从知晓）；
 - 链接/OCR 笔记转写完成且飞书通道可用 → 逐笔记推送带「✅ 确认」按钮
   的卡片（confirm_note 携带笔记文件名；ntfy 通道文本照发不受影响）；
-- 晨间摘要创建成功 → "Atelierr 今日摘要"（附五节计数）；
+- 晨间摘要创建成功 → "Atelierr 今日摘要"（附五节计数；飞书侧置顶
+  该卡片并自动替换昨日置顶）；
 - 其余常规处理成功不推送（用户自己贴的链接，无需马后炮）。
 
 双通道（``send_dispatch_notice``，各自失败隔离）：
-- ntfy：配置节 ``dispatch.notify``（config/processors.yaml 或 .example）：
+- ntfy：配置节 ``dispatch.notify``（config/processors.yaml 或 .example）。
+  **2026-09-09 起配置层停用**（全部推送走飞书，ntfy 代码保留作
+  看门狗备胎——桥/飞书通道全挂时的独立告警路径；恢复只需把
+  ntfy_url/topic 加回配置）：
 
       dispatch:
         notify:
@@ -83,7 +87,8 @@ def send_ntfy(
 
 
 def send_dispatch_notice(
-    title: str, message: str, confirm_note: Optional[str] = None
+    title: str, message: str, confirm_note: Optional[str] = None,
+    pin: bool = False, pin_state: Optional[Path] = None,
 ) -> Dict[str, bool]:
     """双通道推送：ntfy + 飞书卡片，各自独立失败隔离（不抛异常）。
 
@@ -94,13 +99,15 @@ def send_dispatch_notice(
         message: 通知正文（只放数量等非敏感信息）。
         confirm_note: 待确认笔记相对 memory/ 的文件名；给飞书卡片加
             「✅ 确认」callback 按钮，ntfy 通道不受影响；None 不加按钮。
+        pin: 飞书卡片发送成功后置顶（晨报用；ntfy 无此概念）。
+        pin_state: 置顶登记表路径（存上一条 message_id，发送前先摘下）。
 
     Returns:
         Dict[str, bool]: {"ntfy": ..., "feishu": ...} 各通道结果。
     """
     from scripts.dispatch.feishu import send_feishu
 
-    feishu_kwargs: Dict[str, str] = {}
+    feishu_kwargs: Dict[str, Any] = {"pin": pin, "pin_state": pin_state}
     if confirm_note:
         feishu_kwargs["confirm_note"] = confirm_note
     return {

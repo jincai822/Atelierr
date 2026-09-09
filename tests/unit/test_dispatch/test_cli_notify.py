@@ -53,7 +53,8 @@ def pushes(monkeypatch):
     calls = []
     monkeypatch.setattr(
         cli_module, "send_dispatch_notice",
-        lambda title, msg: calls.append((title, msg)) or {"ntfy": True, "feishu": True},
+        lambda title, msg, **kwargs: calls.append((title, msg))
+        or {"ntfy": True, "feishu": True},
     )
     return calls
 
@@ -128,6 +129,25 @@ def test_digest_pushes_counts(cli, memory_tree, pushes):
     assert "待确认 1" in message
     assert "待办 1" in message
     assert "昨日新入库 1" in message
+
+
+def test_digest_push_requests_pin(cli, memory_tree, monkeypatch):
+    """摘要推送带置顶请求：pin=True + pin_state 指向 state_dir 登记表。"""
+    calls = []
+    monkeypatch.setattr(
+        cli_module,
+        "send_dispatch_notice",
+        lambda title, msg, **kwargs: calls.append(kwargs)
+        or {"ntfy": True, "feishu": True},
+    )
+
+    assert cli.main(["digest"]) == 0
+
+    assert len(calls) == 1
+    assert calls[0]["pin"] is True
+    assert calls[0]["pin_state"] == (
+        memory_tree.state_dir / "feishu_pins.json"
+    )
 
 
 def test_digest_skipped_no_push(cli, memory_tree, pushes):

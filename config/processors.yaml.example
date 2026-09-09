@@ -86,10 +86,10 @@ processors:
 #       api_key_env: DEEPSEEK_API_KEY
 #       max_tokens: 800
 #       timeout: 60
-#   notify:             # ntfy 推送：新增待确认内容时通知（只报数量）
-#     ntfy_url: https://ntfy.sh   # 或自托管实例
-#     topic: ""           # 主题名即口令：用随机长串，写在 config/processors.yaml
-#                         # （已 gitignore），不要写进此 example
+#   notify:             # ntfy 推送（2026-09-09 起停用，全部推送走飞书卡片；
+#     ntfy_url: https://ntfy.sh   # 此配置节仅留作看门狗备胎：飞书桥全挂时
+#     topic: ""           # 的独立告警通道。主题名即口令：用随机长串，写在
+#                         # config/processors.yaml（已 gitignore），勿写进此 example
 
   wechat:                 # backlog：导出格式不稳定，不在 MVP/完整版验收范围
     input_format: txt     # 微信导出格式

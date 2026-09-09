@@ -149,13 +149,21 @@ def _notify_created_notes(
         send_dispatch_notice(title, body, confirm_note=filename)
 
 
-def _notify_digest(counts: Dict[str, int]) -> None:
-    """今日摘要创建成功后推送五节计数（未配置/失败静默）。"""
+def _notify_digest(
+    counts: Dict[str, int], pin_state: Optional[Path] = None
+) -> None:
+    """今日摘要创建成功后推送五节计数（未配置/失败静默）。
+
+    飞书侧置顶该摘要卡并自动替换昨日置顶（pin_state 登记表）——
+    进会话第一眼就是今天盘面。
+    """
     send_dispatch_notice(
         "Atelierr 今日摘要",
         f"待确认 {counts['pending']}，提炼候选 {counts['undistilled']}，"
         f"待办 {counts['todos']}，今日复习 {counts['resurface']}，"
         f"昨日新入库 {counts['yesterday_new']}",
+        pin=True,
+        pin_state=pin_state,
     )
 
 
@@ -422,7 +430,10 @@ class DispatchCLI:
                 click.echo("（dry-run：未建笔记）")
             else:
                 click.echo(f"  已创建: {report['created']}")
-                _notify_digest(report["counts"])
+                _notify_digest(
+                    report["counts"],
+                    pin_state=Path(tree.state_dir) / "feishu_pins.json",
+                )
 
         @cli.command(name="feishu")
         def feishu_command() -> None:

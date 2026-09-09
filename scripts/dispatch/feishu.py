@@ -7,16 +7,21 @@
   分发下一轮自动捡起，与 Obsidian 贴链接同路）；
 - 图片/文件消息 → 下载存入 attachments/（media 分发自动捡起
   OCR/转写）；
+- 捕获成功给原消息加 ✅ 表情回执（不占气泡的轻确认；回执失败只
+  log，绝不影响捕获）；捕获失败才发文字反馈；
 - 幂等：message_id 登记 ``<state_dir>/feishu_messages.json``。
 
 发送（系统 → 飞书）：
-- 推送规则与 ntfy 一致：只在"用户不知道的事"发生时提醒（链接/OCR
-  笔记完成待确认、抓取失败、今日摘要），常规成功不推；
+- 推送规则：只在"用户不知道的事"发生时提醒（链接/OCR
+  笔记完成待确认、抓取失败、今日摘要），常规成功不推
+  （ntfy 通道 2026-09-09 起配置层停用，全部推送走飞书）；
 - 发交互卡片（标题 + 正文 + 「在 Obsidian 中打开」URI 按钮——
   纯客户端跳转，无回调、零写入；带 ``confirm_note`` 时追加
   「✅ 确认」与「📁 确认并归档」两个 callback 按钮，点击回调
   ``card.action.trigger``，value 为 dict：{"action": confirm_note |
   archive_note, "note": <文件名>}）；
+- ``pin=True`` 时把卡片置顶到会话顶部（晨报盘面第一眼可见），
+  置顶前先摘下 ``pin_state`` 登记表里的上一条（每日替换不堆积）；
 - 卡片失败降级纯文本。
 
 确认/归档回调（用户点卡片按钮；系统内唯二机器改写笔记文件的路径）：
@@ -379,6 +384,41 @@ class FeishuBridge:
         except Exception as exc:  # noqa: BLE001 - 反馈失败不影响回调处理
             print(f"[feishu] feedback fail: {exc}", flush=True)
 
+    def _add_reaction(self, message_id: str, emoji_type: str = "DONE") -> None:
+        """给原消息加表情回执（捕获成功的轻确认，不占气泡）；失败只 log。
+
+        Args:
+            message_id: 被回执的消息 id。
+            emoji_type: 飞书表情 key（DONE=✅；THUMBSUP=👍 等）。
+        """
+        try:
+            lark = _import_lark()
+            client = (
+                lark.Client.builder()
+                .app_id(self.app_id)
+                .app_secret(self.app_secret)
+                .build()
+            )
+            body = (
+                lark.api.im.v1.CreateMessageReactionRequestBody.builder()
+                .reaction_type(
+                    lark.api.im.v1.Emoji.builder()
+                    .emoji_type(emoji_type)
+                    .build()
+                )
+                .build()
+            )
+            request = (
+                lark.api.im.v1.CreateMessageReactionRequest.builder()
+                .message_id(message_id)
+                .request_body(body)
+                .build()
+            )
+            if not client.im.v1.message_reaction.create(request).success():
+                print(f"[feishu] reaction fail: {message_id}", flush=True)
+        except Exception as exc:  # noqa: BLE001 - 回执失败绝不影响捕获
+            print(f"[feishu] reaction fail: {exc}", flush=True)
+
     def _locate_note(self, filename: str) -> Tuple[Optional[Path], Optional[str]]:
         """校验并按文件名定位笔记：返回 (path, None) 或 (None, 错误详情)。
 
@@ -525,6 +565,7 @@ class FeishuBridge:
         待答问题会话 open 期间（scripts/dispatch/prompt.py），文本视为
         周回顾等仪式的**回答**：追加进会话状态、回执条数，不捕获为
         笔记；回答「跳过」/「完成」关闭会话。会话关闭后恢复捕获。
+        捕获成功给原消息加 ✅ 表情回执；失败发文字反馈。
         """
         text = text.strip()
         if not text:
@@ -540,9 +581,16 @@ class FeishuBridge:
             return None
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         suffix = hashlib.sha1(message_id.encode("utf-8")).hexdigest()[:6]
-        return self.tree.create_note(
-            f"feishu-{stamp}-{suffix}.md", text + "\n", source="lark"
-        )
+        try:
+            note = self.tree.create_note(
+                f"feishu-{stamp}-{suffix}.md", text + "\n", source="lark"
+            )
+        except Exception as exc:  # noqa: BLE001 - 捕获失败文字回执，不中断守护
+            print(f"[feishu] capture fail: {exc}", flush=True)
+            self._send_feedback(chat_id, "⚠️ 捕获失败，请稍后重发")
+            return None
+        self._add_reaction(message_id)
+        return note
 
     def _receive_resource(
         self, message_id: str, msg_type: str, content: Dict[str, Any]
@@ -567,6 +615,7 @@ class FeishuBridge:
         attach_dir.mkdir(parents=True, exist_ok=True)
         target = attach_dir / filename
         self._atomic_write(target, blob)
+        self._add_reaction(message_id)
         return target
 
     def _download_resource(
@@ -682,6 +731,8 @@ def send_feishu(
     message: str,
     chat_id: Optional[str] = None,
     confirm_note: Optional[str] = None,
+    pin: bool = False,
+    pin_state: Optional[Path] = None,
 ) -> bool:
     """发一条飞书卡片推送；未配置或失败返回 False（绝不抛异常）。
 
@@ -690,12 +741,17 @@ def send_feishu(
     「✅ 确认」（confirm_note：只删「待确认」标签）与「📁 确认并归档」
     （archive_note：归档移动 + 删标签，见 FeishuBridge.handle_card_action）；
     卡片发送失败时降级为纯文本消息再试一次。
+    ``pin=True`` 时发送成功把卡片置顶（晨报盘面第一眼可见），并先摘下
+    ``pin_state`` 登记表里的上一条（每日替换不堆积）；置顶失败只 log，
+    不影响发送结果。
 
     Args:
         title: 通知标题。
         message: 通知正文（只放数量等非敏感信息）。
         chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID`` 环境变量。
         confirm_note: 待确认笔记文件名；None 不加确认/归档按钮。
+        pin: 发送成功后是否置顶该卡片。
+        pin_state: 置顶登记表（存上一条 message_id）；None 只置顶不替换。
 
     Returns:
         bool: 发送成功且服务端 success 返回 True。
@@ -768,15 +824,71 @@ def send_feishu(
                 {"tag": "action", "actions": actions},
             ],
         }
-        if _send(client, target, "interactive", json.dumps(card)):
+        message_id = _send(client, target, "interactive", json.dumps(card))
+        if message_id is not None:
+            if pin and message_id:
+                _pin_card(client, message_id, pin_state)
             return True
-        return _send(client, target, "text", json.dumps({"text": f"{title}\n{message}"}))
+        return _send(
+            client, target, "text", json.dumps({"text": f"{title}\n{message}"})
+        ) is not None
     except Exception:  # noqa: BLE001 - 推送失败不影响主流程
         return False
 
 
-def _send(client: Any, chat_id: str, msg_type: str, content: str) -> bool:
-    """单发一条消息；服务端非 success 返回 False。"""
+def _pin_card(
+    client: Any, message_id: str, pin_state: Optional[Path]
+) -> None:
+    """置顶一条卡片消息；先摘下登记表里的上一条。任何失败只 log。
+
+    登记表 JSON：{"message_id": <上一条置顶>}，用来每日替换不堆积。
+    """
+    lark = _import_lark()
+    previous = ""
+    if pin_state is not None and pin_state.exists():
+        try:
+            data = json.loads(pin_state.read_text(encoding="utf-8"))
+            previous = str(data.get("message_id") or "")
+        except (json.JSONDecodeError, OSError):
+            previous = ""
+    if previous:
+        try:
+            request = (
+                lark.api.im.v1.DeletePinRequest.builder()
+                .message_id(previous)
+                .build()
+            )
+            client.im.v1.pin.delete(request)
+        except Exception as exc:  # noqa: BLE001 - 摘旧置顶失败不阻塞新置顶
+            print(f"[feishu] unpin {previous} fail: {exc}", flush=True)
+    try:
+        body = (
+            lark.api.im.v1.CreatePinRequestBody.builder()
+            .message_id(message_id)
+            .build()
+        )
+        request = (
+            lark.api.im.v1.CreatePinRequest.builder().request_body(body).build()
+        )
+        if not client.im.v1.pin.create(request).success():
+            print(f"[feishu] pin {message_id} fail", flush=True)
+            return
+    except Exception as exc:  # noqa: BLE001 - 置顶失败不影响发送结果
+        print(f"[feishu] pin fail: {exc}", flush=True)
+        return
+    if pin_state is not None:
+        try:
+            pin_state.parent.mkdir(parents=True, exist_ok=True)
+            pin_state.write_text(
+                json.dumps({"message_id": message_id}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            print(f"[feishu] pin state write fail: {exc}", flush=True)
+
+
+def _send(client: Any, chat_id: str, msg_type: str, content: str) -> Optional[str]:
+    """单发一条消息；成功返回 message_id（取不到返回 ""），失败返回 None。"""
     lark = _import_lark()
     body = (
         lark.api.im.v1.CreateMessageRequestBody.builder()
@@ -791,4 +903,9 @@ def _send(client: Any, chat_id: str, msg_type: str, content: str) -> bool:
         .request_body(body)
         .build()
     )
-    return bool(client.im.v1.message.create(request).success())
+    response = client.im.v1.message.create(request)
+    if not response.success():
+        return None
+    data = getattr(response, "data", None)
+    message_id = getattr(data, "message_id", None) if data is not None else None
+    return str(message_id) if message_id else ""

@@ -67,7 +67,8 @@ def pushes(monkeypatch):
     calls = []
     monkeypatch.setattr(
         cli_module, "send_dispatch_notice",
-        lambda title, msg: calls.append((title, msg)) or {"ntfy": True, "feishu": True},
+        lambda title, msg, **kwargs: calls.append((title, msg))
+        or {"ntfy": True, "feishu": True},
     )
     return calls
 

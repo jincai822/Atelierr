@@ -222,7 +222,7 @@ def test_dispatch_notice_fires_both_channels(monkeypatch):
     monkeypatch.setattr(
         feishu_module,
         "send_feishu",
-        lambda t, m: calls.append(("feishu", t)) or False,
+        lambda t, m, **kwargs: calls.append(("feishu", t)) or False,
     )
 
     result = notify_module.send_dispatch_notice("Atelierr 今日摘要", "待确认 1")
@@ -492,8 +492,32 @@ def test_dispatch_notice_passes_confirm_note_to_feishu(monkeypatch):
 
     assert result == {"ntfy": True, "feishu": False}
     assert calls == [
-        ("Atelierr 链接笔记待确认", {"confirm_note": "douyin-x.md"})
+        (
+            "Atelierr 链接笔记待确认",
+            {"confirm_note": "douyin-x.md", "pin": False, "pin_state": None},
+        )
     ]
+
+
+def test_dispatch_notice_passes_pin_to_feishu(monkeypatch, tmp_path):
+    """pin/pin_state 只透传给飞书通道（晨报置顶；ntfy 无置顶概念）。"""
+    import scripts.dispatch.notify as notify_module
+
+    calls = []
+    monkeypatch.setattr(notify_module, "send_ntfy", lambda t, m: True)
+    monkeypatch.setattr(
+        feishu_module,
+        "send_feishu",
+        lambda t, m, **kwargs: calls.append(kwargs) or True,
+    )
+    state = tmp_path / "feishu_pins.json"
+
+    result = notify_module.send_dispatch_notice(
+        "Atelierr 今日摘要", "待确认 1", pin=True, pin_state=state
+    )
+
+    assert result == {"ntfy": True, "feishu": True}
+    assert calls == [{"pin": True, "pin_state": state}]
 
 
 def _card_archive(filename):
@@ -853,3 +877,187 @@ def test_console_url_note_prefix_env_override(monkeypatch):
     monkeypatch.delenv("FEISHU_VAULT_NAME", raising=False)
     monkeypatch.setenv("FEISHU_NOTE_PREFIX", "notes/")
     assert feishu_module._console_url("x.md").endswith("file=notes/x")
+
+
+# ----------------------------------------------------------------------
+# 表情回执（捕获成功 ✅ 不占气泡；捕获失败才文字反馈）
+# ----------------------------------------------------------------------
+
+
+def test_capture_text_adds_done_reaction(memory_tree, monkeypatch):
+    """文本捕获成功 → 原消息加 ✅ 表情回执。"""
+    bridge = _bridge(memory_tree)
+    reactions = []
+    monkeypatch.setattr(
+        bridge, "_add_reaction", lambda mid, **kw: reactions.append(mid)
+    )
+    event = _event("m-react-1", "text", {"text": "一条想法"})
+    event.event.message.chat_id = "oc_demo"
+    bridge.handle_event(event)
+
+    assert reactions == ["m-react-1"]
+    assert len(list(memory_tree.notes_dir.glob("feishu-*.md"))) == 1
+
+
+def test_capture_resource_adds_done_reaction(memory_tree, monkeypatch):
+    """图片/文件捕获成功 → 同样加 ✅ 表情回执。"""
+    bridge = _bridge(memory_tree)
+    monkeypatch.setattr(bridge, "_download_resource", lambda *a: b"\x89PNG")
+    reactions = []
+    monkeypatch.setattr(
+        bridge, "_add_reaction", lambda mid, **kw: reactions.append(mid)
+    )
+    bridge.handle_event(_event("m-react-2", "image", {"image_key": "img_x"}))
+
+    assert reactions == ["m-react-2"]
+
+
+def test_reaction_calls_api_with_done_emoji(memory_tree, monkeypatch):
+    """真实 _add_reaction：调 message_reaction.create，emoji_type=DONE。"""
+    bridge = _bridge(memory_tree)
+    client = MagicMock()
+    fake = _fake_lark(monkeypatch, client)
+
+    bridge._add_reaction("m-x")
+
+    client.im.v1.message_reaction.create.assert_called_once()
+    fake.api.im.v1.Emoji.builder.return_value.emoji_type.assert_called_with(
+        "DONE"
+    )
+
+
+def test_reaction_api_failure_still_captures(memory_tree, monkeypatch):
+    """reaction API 异常被吞掉：捕获照常建成笔记。"""
+    bridge = _bridge(memory_tree)
+    client = MagicMock()
+    client.im.v1.message_reaction.create.side_effect = RuntimeError("down")
+    _fake_lark(monkeypatch, client)
+
+    bridge.handle_event(_event("m-react-3", "text", {"text": "照进"}))
+
+    assert len(list(memory_tree.notes_dir.glob("feishu-*.md"))) == 1
+    client.im.v1.message_reaction.create.assert_called_once()
+
+
+def test_prompt_answer_no_reaction(memory_tree, monkeypatch):
+    """问答会话 open 期间：文本是回答（文字回执条数），不加表情。"""
+    from scripts.dispatch.prompt import PromptStore
+
+    PromptStore(memory_tree.state_dir).open("weekly", ["Q1"])
+    bridge = _bridge(memory_tree)
+    reactions = []
+    monkeypatch.setattr(
+        bridge, "_add_reaction", lambda mid, **kw: reactions.append(mid)
+    )
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+    event = _event("m-react-4", "text", {"text": "答案一"})
+    event.event.message.chat_id = "oc_demo"
+    bridge.handle_event(event)
+
+    assert reactions == []
+    assert sent == ["已收到（第 1 条回答）"]
+
+
+def test_capture_failure_sends_text_feedback(memory_tree, monkeypatch):
+    """建笔记异常 → 文字反馈，不加表情（失败必须让人知道）。"""
+    bridge = _bridge(memory_tree)
+
+    def _boom(*a, **kw):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(bridge.tree, "create_note", _boom)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+    reactions = []
+    monkeypatch.setattr(
+        bridge, "_add_reaction", lambda mid, **kw: reactions.append(mid)
+    )
+    event = _event("m-react-5", "text", {"text": "会失败"})
+    event.event.message.chat_id = "oc_demo"
+    bridge.handle_event(event)
+
+    assert sent == ["⚠️ 捕获失败，请稍后重发"]
+    assert reactions == []
+
+
+# ----------------------------------------------------------------------
+# 摘要卡置顶（pin=True：置新卡、摘旧卡、登记表每日替换）
+# ----------------------------------------------------------------------
+
+
+def _send_ok(message_id):
+    """生成返回指定 message_id 的假 _send。"""
+    return lambda client, chat_id, msg_type, content: message_id
+
+
+def _pin_env(monkeypatch, client):
+    monkeypatch.setenv("FEISHU_APP_ID", "cli_x")
+    monkeypatch.setenv("FEISHU_APP_SECRET", "secret")
+    monkeypatch.setenv("FEISHU_CHAT_ID", "oc_chat")
+    _fake_lark(monkeypatch, client)
+
+
+def test_send_returns_message_id_on_success(monkeypatch):
+    """_send：success 响应返回 message_id；失败响应返回 None。"""
+    client = MagicMock()
+    response = client.im.v1.message.create.return_value
+    response.success.return_value = True
+    response.data.message_id = "om_123"
+    _fake_lark(monkeypatch, client)
+
+    assert feishu_module._send(client, "oc", "text", "{}") == "om_123"
+    response.success.return_value = False
+    assert feishu_module._send(client, "oc", "text", "{}") is None
+
+
+def test_send_feishu_pin_creates_pin_and_state(monkeypatch, tmp_path):
+    """pin=True：发送成功后置顶卡片，message_id 写进登记表。"""
+    client = MagicMock()
+    _pin_env(monkeypatch, client)
+    monkeypatch.setattr(feishu_module, "_send", _send_ok("om_new"))
+    state = tmp_path / "feishu_pins.json"
+
+    assert send_feishu("t", "m", pin=True, pin_state=state) is True
+
+    client.im.v1.pin.create.assert_called_once()
+    client.im.v1.pin.delete.assert_not_called()  # 无旧置顶可摘
+    assert json.loads(state.read_text(encoding="utf-8")) == {
+        "message_id": "om_new"
+    }
+
+
+def test_send_feishu_pin_replaces_previous(monkeypatch, tmp_path):
+    """已有旧置顶：先 DeletePin 摘下再置新，登记表更新为新的。"""
+    client = MagicMock()
+    _pin_env(monkeypatch, client)
+    monkeypatch.setattr(feishu_module, "_send", _send_ok("om_new"))
+    state = tmp_path / "feishu_pins.json"
+    state.write_text(
+        json.dumps({"message_id": "om_old"}), encoding="utf-8"
+    )
+
+    assert send_feishu("t", "m", pin=True, pin_state=state) is True
+
+    client.im.v1.pin.delete.assert_called_once()
+    client.im.v1.pin.create.assert_called_once()
+    assert json.loads(state.read_text(encoding="utf-8")) == {
+        "message_id": "om_new"
+    }
+
+
+def test_send_feishu_pin_failure_keeps_send_result(monkeypatch, tmp_path):
+    """置顶 API 抛异常：只 log，发送结果仍 True，登记表不写。"""
+    client = MagicMock()
+    client.im.v1.pin.create.side_effect = RuntimeError("pin down")
+    _pin_env(monkeypatch, client)
+    monkeypatch.setattr(feishu_module, "_send", _send_ok("om_new"))
+    state = tmp_path / "feishu_pins.json"
+
+    assert send_feishu("t", "m", pin=True, pin_state=state) is True
+
+    assert not state.exists()
