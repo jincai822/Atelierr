@@ -4,7 +4,8 @@
 - 消息事件经 lark-oapi websocket 长连接送达（家里电脑主动连云，
   免公网暴露，与 ntfy 同等安全模型）；
 - 文本消息 → memory/ 笔记（``source: lark``；正文含 URL 时由 links
-  分发下一轮自动捡起，与 Obsidian 贴链接同路）；
+  分发下一轮自动捡起，与 Obsidian 贴链接同路）；``搜 xxx``/``搜索 xxx``
+  是搜索指令：查库回前 5 条结果卡（带「打开」按钮），不捕获为笔记；
 - 图片/文件消息 → 下载存入 attachments/（media 分发自动捡起
   OCR/转写）；
 - 捕获成功给原消息加 ✅ 表情回执（不占气泡的轻确认；回执失败只
@@ -95,6 +96,12 @@ FALLBACK_ARCHIVE_DIR = "媒体"
 
 #: 已处理 message_id 登记表上限（超出裁掉最旧的，防无限膨胀）
 _SEEN_CAP = 2000
+
+#: 搜索指令前缀（发「搜 xxx」/「搜索 xxx」直接查库回卡，不捕获为笔记）
+SEARCH_PREFIXES = ("搜索 ", "搜 ")
+
+#: 搜索结果卡条数上限（卡片长度与打开按钮个数权衡）
+SEARCH_LIMIT = 5
 
 #: 文件名非法字符（半角）转 -
 _ILLEGAL_RE = re.compile(r'[\\/:*?"<>|]')
@@ -384,6 +391,91 @@ class FeishuBridge:
         except Exception as exc:  # noqa: BLE001 - 反馈失败不影响回调处理
             print(f"[feishu] feedback fail: {exc}", flush=True)
 
+    def _send_card(self, chat_id: Optional[str], card: Dict[str, Any]) -> bool:
+        """向会话发一张交互卡片；失败降级纯文本（标题+首条 div），再败只 log。
+
+        目标会话：chat_id 优先，缺省 ``FEISHU_CHAT_ID``；都没有静默 False。
+        """
+        target = (chat_id or os.environ.get(ENV_CHAT_ID, "")).strip()
+        if not target:
+            return False
+        try:
+            lark = _import_lark()
+            client = (
+                lark.Client.builder()
+                .app_id(self.app_id)
+                .app_secret(self.app_secret)
+                .build()
+            )
+            if _send(client, target, "interactive", json.dumps(card)) is not None:
+                return True
+            title = card.get("header", {}).get("title", {}).get("content", "")
+            text = title or "（卡片发送失败）"
+            return _send(client, target, "text", json.dumps({"text": text})) is not None
+        except Exception as exc:  # noqa: BLE001 - 发卡失败不影响主流程
+            print(f"[feishu] card send fail: {exc}", flush=True)
+            return False
+
+    def _answer_search(self, chat_id: Optional[str], query: str) -> None:
+        """「搜 xxx」指令：回前 5 条匹配卡（标题+confidence+打开按钮）。
+
+        全程只读；无结果/失败用文字反馈（不占用卡片通道）。
+        """
+        if not query:
+            self._send_feedback(chat_id, "用法：发「搜 关键词」，我回前 5 条匹配")
+            return
+        from scripts.memory.search import MemorySearcher
+
+        try:
+            results = MemorySearcher(self.tree).search(query, limit=SEARCH_LIMIT)
+        except Exception as exc:  # noqa: BLE001 - 搜索失败文字告知，不中断守护
+            print(f"[feishu] search fail: {exc}", flush=True)
+            self._send_feedback(chat_id, "⚠️ 搜索失败，请稍后重试")
+            return
+        print(f"[feishu] search q={query!r} hits={len(results)}", flush=True)
+        if not results:
+            self._send_feedback(chat_id, f"没有找到匹配「{query}」的笔记")
+            return
+        elements: List[Dict[str, Any]] = []
+        for item in results:
+            created = (
+                item.created.strftime("%Y-%m-%d") if item.created else "日期未知"
+            )
+            elements.append(
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": (
+                            f"**{item.title}**\n"
+                            f"confidence {item.confidence:.2f} · {created}"
+                        ),
+                    },
+                }
+            )
+            elements.append(
+                {
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "打开"},
+                            "type": "primary",
+                            "url": _console_url(self.tree._rel_key(item.path)),
+                        }
+                    ],
+                }
+            )
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": f"🔍 搜索：{query}"},
+                "template": "blue",
+            },
+            "elements": elements,
+        }
+        self._send_card(chat_id, card)
+
     def _add_reaction(self, message_id: str, emoji_type: str = "DONE") -> None:
         """给原消息加表情回执（捕获成功的轻确认，不占气泡）；失败只 log。
 
@@ -565,6 +657,7 @@ class FeishuBridge:
         待答问题会话 open 期间（scripts/dispatch/prompt.py），文本视为
         周回顾等仪式的**回答**：追加进会话状态、回执条数，不捕获为
         笔记；回答「跳过」/「完成」关闭会话。会话关闭后恢复捕获。
+        「搜 xxx」/「搜索 xxx」是搜索指令：查库回结果卡，不捕获。
         捕获成功给原消息加 ✅ 表情回执；失败发文字反馈。
         """
         text = text.strip()
@@ -578,6 +671,13 @@ class FeishuBridge:
             else:
                 count = store.append(text)
                 self._send_feedback(chat_id, f"已收到（第 {count} 条回答）")
+            return None
+        for prefix in SEARCH_PREFIXES:
+            if text.startswith(prefix):
+                self._answer_search(chat_id, text[len(prefix):].strip())
+                return None
+        if text in ("搜", "搜索"):
+            self._send_feedback(chat_id, "用法：发「搜 关键词」，我回前 5 条匹配")
             return None
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         suffix = hashlib.sha1(message_id.encode("utf-8")).hexdigest()[:6]

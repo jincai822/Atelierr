@@ -1061,3 +1061,110 @@ def test_send_feishu_pin_failure_keeps_send_result(monkeypatch, tmp_path):
     assert send_feishu("t", "m", pin=True, pin_state=state) is True
 
     assert not state.exists()
+
+
+# ----------------------------------------------------------------------
+# 搜索指令（「搜 xxx」/「搜索 xxx」→ 结果卡；不捕获为笔记）
+# ----------------------------------------------------------------------
+
+
+def test_search_command_returns_result_card(memory_tree, monkeypatch):
+    """「搜 内核」→ 结果卡（标题+confidence+打开按钮），不建笔记不加表情。"""
+    memory_tree.create_note(
+        "n1.md",
+        "---\ntitle: 内核稳定\n---\n内核稳定是一种能力\n",
+        source="test",
+        tags=["内核稳定"],
+    )
+    bridge = _bridge(memory_tree)
+    cards = []
+    monkeypatch.setattr(
+        bridge, "_send_card", lambda chat, card: cards.append(card) or True
+    )
+    reactions = []
+    monkeypatch.setattr(
+        bridge, "_add_reaction", lambda mid, **kw: reactions.append(mid)
+    )
+    event = _event("m-search-1", "text", {"text": "搜 内核"})
+    event.event.message.chat_id = "oc_demo"
+    bridge.handle_event(event)
+
+    assert len(cards) == 1
+    card = cards[0]
+    assert card["header"]["title"]["content"] == "🔍 搜索：内核"
+    divs = [e for e in card["elements"] if e["tag"] == "div"]
+    actions = [e for e in card["elements"] if e["tag"] == "action"]
+    assert len(divs) == 1
+    assert "内核稳定" in divs[0]["text"]["content"]
+    assert len(actions) == 1
+    assert actions[0]["actions"][0]["url"].startswith("obsidian://open?vault=")
+    # 搜索不捕获、不加表情回执
+    assert reactions == []
+    assert list(memory_tree.notes_dir.glob("feishu-*.md")) == []
+
+
+def test_search_prefix_sousuo_variant(memory_tree, monkeypatch):
+    """「搜索 xxx」与「搜 xxx」同效。"""
+    memory_tree.create_note("n1.md", "睡眠很重要", source="test")
+    bridge = _bridge(memory_tree)
+    cards = []
+    monkeypatch.setattr(
+        bridge, "_send_card", lambda chat, card: cards.append(card) or True
+    )
+    event = _event("m-search-2", "text", {"text": "搜索 睡眠"})
+    event.event.message.chat_id = "oc_demo"
+    bridge.handle_event(event)
+
+    assert cards[0]["header"]["title"]["content"] == "🔍 搜索：睡眠"
+
+
+def test_search_no_results_text_feedback(memory_tree, monkeypatch):
+    """无匹配 → 文字反馈（不占卡片通道）。"""
+    bridge = _bridge(memory_tree)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+    event = _event("m-search-3", "text", {"text": "搜 不存在的东西xyz"})
+    event.event.message.chat_id = "oc_demo"
+    bridge.handle_event(event)
+
+    assert sent == ["没有找到匹配「不存在的东西xyz」的笔记"]
+
+
+def test_search_bare_prefix_usage_hint(memory_tree, monkeypatch):
+    """只发「搜」→ 用法提示，不查库。"""
+    bridge = _bridge(memory_tree)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+    event = _event("m-search-4", "text", {"text": "搜"})
+    event.event.message.chat_id = "oc_demo"
+    bridge.handle_event(event)
+
+    assert sent == ["用法：发「搜 关键词」，我回前 5 条匹配"]
+
+
+def test_search_prefix_counts_as_answer_when_prompt_open(
+    memory_tree, monkeypatch
+):
+    """问答会话 open 期间：「搜 xxx」计为回答（仪式优先于指令）。"""
+    from scripts.dispatch.prompt import PromptStore
+
+    PromptStore(memory_tree.state_dir).open("weekly", ["Q1"])
+    bridge = _bridge(memory_tree)
+    cards = []
+    monkeypatch.setattr(
+        bridge, "_send_card", lambda chat, card: cards.append(card) or True
+    )
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+    event = _event("m-search-5", "text", {"text": "搜 内核"})
+    event.event.message.chat_id = "oc_demo"
+    bridge.handle_event(event)
+
+    assert cards == []
+    assert sent == ["已收到（第 1 条回答）"]
