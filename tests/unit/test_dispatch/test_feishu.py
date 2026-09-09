@@ -1290,3 +1290,52 @@ def test_send_resurface_feishu_card_layout(monkeypatch):
     )
     assert "旧文A" in texts
     assert "闲置 20 天" in texts
+
+
+# ----------------------------------------------------------------------
+# 语音消息捕获（按住说话 → .ogg 进 attachments/，media 分发走 Whisper）
+# ----------------------------------------------------------------------
+
+
+def test_audio_message_saved_as_ogg(memory_tree, monkeypatch):
+    """语音消息：下载（资源 type=file）→ 存 .ogg → 加 ✅ 表情回执。"""
+    bridge = _bridge(memory_tree)
+    downloads = []
+    monkeypatch.setattr(
+        bridge,
+        "_download_resource",
+        lambda mid, key, rtype: downloads.append((key, rtype)) or b"OggS",
+    )
+    reactions = []
+    monkeypatch.setattr(
+        bridge, "_add_reaction", lambda mid, **kw: reactions.append(mid)
+    )
+
+    bridge.handle_event(
+        _event("m-audio-1", "audio", {"file_key": "voice_key", "duration": 3})
+    )
+
+    assert downloads == [("voice_key", "file")]
+    attach_dir = memory_tree.notes_dir / "attachments"
+    saved = list(attach_dir.glob("feishu-*.ogg"))
+    assert len(saved) == 1
+    assert saved[0].read_bytes() == b"OggS"
+    assert reactions == ["m-audio-1"]
+
+
+def test_audio_message_without_key_skipped(memory_tree, monkeypatch):
+    """语音负载缺 file_key：静默跳过（不建文件、不下载）。"""
+    bridge = _bridge(memory_tree)
+    downloads = []
+    monkeypatch.setattr(
+        bridge,
+        "_download_resource",
+        lambda mid, key, rtype: downloads.append(key) or b"x",
+    )
+
+    bridge.handle_event(_event("m-audio-2", "audio", {"duration": 3}))
+
+    assert downloads == []
+    assert not (memory_tree.notes_dir / "attachments").exists() or not list(
+        (memory_tree.notes_dir / "attachments").glob("feishu-*.ogg")
+    )

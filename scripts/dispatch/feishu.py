@@ -6,8 +6,8 @@
 - 文本消息 → memory/ 笔记（``source: lark``；正文含 URL 时由 links
   分发下一轮自动捡起，与 Obsidian 贴链接同路）；``搜 xxx``/``搜索 xxx``
   是搜索指令：查库回前 5 条结果卡（带「打开」按钮），不捕获为笔记；
-- 图片/文件消息 → 下载存入 attachments/（media 分发自动捡起
-  OCR/转写）；
+- 图片/文件/语音消息 → 下载存入 attachments/（media 分发自动捡起
+  OCR/转写；语音存 .ogg 走 Whisper，与截图同路）；
 - 捕获成功给原消息加 ✅ 表情回执（不占气泡的轻确认；回执失败只
   log，绝不影响捕获）；捕获失败才发文字反馈；
 - 幂等：message_id 登记 ``<state_dir>/feishu_messages.json``。
@@ -213,7 +213,7 @@ class FeishuBridge:
                     str(content.get("text") or ""),
                     chat_id=str(getattr(message, "chat_id", "") or "") or None,
                 )
-            elif msg_type in ("image", "file"):
+            elif msg_type in ("image", "file", "audio"):
                 self._receive_resource(message_id, msg_type, content)
         finally:
             self._mark_seen(message_id)
@@ -724,17 +724,25 @@ class FeishuBridge:
     def _receive_resource(
         self, message_id: str, msg_type: str, content: Dict[str, Any]
     ) -> Optional[Path]:
-        """图片/文件消息 → 下载进 attachments/（media 分发自动接手）。"""
+        """图片/文件/语音消息 → 下载进 attachments/（media 分发自动接手）。
+
+        语音（msg_type=audio）是飞书按住说话入口：存 .ogg（AudioProcessor
+        支持），下一轮 media 分发走 Whisper 转写 → 转写确认卡，与截图
+        同路。资源 API 的 type 只有 image/file 两类：语音按 file 拉取。
+        """
         key = content.get("image_key") or content.get("file_key")
         if not key:
             return None
-        blob = self._download_resource(message_id, str(key), msg_type)
+        resource_type = "image" if msg_type == "image" else "file"
+        blob = self._download_resource(message_id, str(key), resource_type)
         if blob is None:
             return None
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         suffix = hashlib.sha1(message_id.encode("utf-8")).hexdigest()[:6]
         if msg_type == "image":
             filename = f"feishu-{stamp}-{suffix}.png"
+        elif msg_type == "audio":
+            filename = f"feishu-{stamp}-{suffix}.ogg"
         else:
             original = _ILLEGAL_RE.sub(
                 "-", str(content.get("file_name") or "file")
