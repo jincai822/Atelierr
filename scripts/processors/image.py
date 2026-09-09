@@ -1,12 +1,14 @@
-"""图片 OCR 处理器（PaddleOCR / RapidOCR 双引擎）。
+"""图片 OCR 处理器（PaddleOCR / RapidOCR / 飞书云端 OCR 三引擎）。
 
 支持 JPG/JPEG/PNG/WEBP；生成含原始图片链接与识别文字的 Markdown。
 引擎实例在构造期懒加载（模型下载/初始化发生在构造时），
 ``process()`` 的计时只含单张推理。配置中的 ``timeout_s`` 是文档化的
 验收性能目标（截图类 < 5s，由性能测试验证），不强制中断推理。
 
-引擎通过 ``config["engine"]`` 选择：``paddleocr``（默认）或
-``rapidocr``（onnxruntime，体积小、整页扫描更快）。
+引擎通过 ``config["engine"]`` 选择：``paddleocr``（默认）、
+``rapidocr``（onnxruntime，体积小、整页扫描更快）或 ``feishu``
+（飞书云端 OCR，不占本机算力；**图片会上传飞书云端**，敏感截图
+勿用——见 scripts/processors/feishu_ocr.py）。
 """
 
 from __future__ import annotations
@@ -118,7 +120,7 @@ class ImageProcessor(BaseProcessor):
         """
         super().__init__(config)
         self.engine = str(self.config.get("engine", "paddleocr")).lower()
-        if self.engine not in ("paddleocr", "rapidocr"):
+        if self.engine not in ("paddleocr", "rapidocr", "feishu"):
             raise ValueError(f"未知 OCR 引擎: {self.engine}")
         self.lang = str(self.config.get("lang", "ch"))
         self.use_gpu = bool(self.config.get("use_gpu", False))
@@ -129,10 +131,13 @@ class ImageProcessor(BaseProcessor):
     def _load_engine(self) -> None:
         """构造期懒加载 OCR 引擎实例（按引擎/版本适配参数）。
 
+        feishu：云端引擎无本地模型可加载（凭证在识别时才读取）；
         rapidocr: onnxruntime 推理，无需 paddlepaddle；
         paddleocr 3.x：后端用 ``device`` 指定，无 ``use_gpu``/``show_log``；
         paddleocr 2.x：接受 ``use_gpu``/``show_log``。
         """
+        if self.engine == "feishu":
+            return
         if self.engine == "rapidocr":
             from rapidocr_onnxruntime import RapidOCR
 
@@ -167,8 +172,15 @@ class ImageProcessor(BaseProcessor):
         if invalid is not None:
             return invalid
         try:
-            raw = self._run_ocr(str(path))
-            texts, scores = parse_ocr_output(raw)
+            if self.engine == "feishu":
+                # 云端 OCR 无逐行置信度，统一按 1.0 计（metadata 标引擎）
+                from scripts.processors.feishu_ocr import recognize_texts
+
+                texts = recognize_texts(path)
+                scores = [1.0] * len(texts)
+            else:
+                raw = self._run_ocr(str(path))
+                texts, scores = parse_ocr_output(raw)
         except Exception as exc:  # noqa: BLE001 - 引擎失败转为失败结果
             return self._fail(f"OCR 失败: {exc}")
 

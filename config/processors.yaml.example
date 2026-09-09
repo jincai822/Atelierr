@@ -5,6 +5,9 @@ processors:
     engine: paddleocr     # paddleocr（默认）/ rapidocr（onnxruntime，已实现：
                           # 安装体积小一个数量级、无需 paddlepaddle；整页扫描
                           # CPU 实测 ~0.8s/页 vs paddle 12-14s，扫描件多时用 rapidocr）
+                          # / feishu（飞书云端 OCR，不占本机算力；注意：图片会
+                          # 上传到飞书云端识别，敏感截图勿用此引擎——凭证走
+                          # FEISHU_APP_ID/SECRET 环境变量）
     lang: ch              # ch / en
     use_gpu: false
     timeout_s: 5          # 软目标：截图类 < 5s；paddle 整页扫描图 CPU 实测 12-14s
