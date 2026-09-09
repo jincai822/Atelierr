@@ -62,6 +62,88 @@ def _cognition_dependencies(tree: MemoryTree, note_id: str) -> List:
     return manager.memory_dependencies(note_id)
 
 
+def _monthly_purge_reminder(
+    tree: MemoryTree, pending: List[str], today=None
+) -> bool:
+    """每月 1 日 decay 后有待删笔记时：出 系统/ 清单 + 飞书提醒卡。
+
+    删除红线：卡片只**提醒**，purge 点头永远留在 CLI
+    （``memory_cli review`` → ``memory_cli purge``，移入回收站可恢复）。
+    清单是机器产物（系统/ 间，不进 decay/搜索）；同月重跑幂等
+    （清单已存在不重建，提醒卡照发）。
+
+    Args:
+        tree: MemoryTree 实例。
+        pending: decay 报告的待删路径列表（字符串）。
+        today: 判定"是否每月 1 日"的基准（测试注入用）。
+
+    Returns:
+        bool: 实际发出了提醒返回 True。
+    """
+    from datetime import datetime
+
+    today = today or datetime.now()
+    if today.day != 1 or not pending:
+        return False
+    from scripts.dispatch.sysdir import write_machine_note
+
+    filename = f"待清理清单-{today.strftime('%Y-%m')}.md"
+    lines = [
+        f"# 待清理清单（{today.strftime('%Y-%m')}）",
+        "",
+        f"> decay 冷却到期 {len(pending)} 条。机器绝不自动删除——",
+        "> 请运行 `memory_cli review` 逐条查看，`memory_cli purge` 点头",
+        "> （移入回收站，可恢复）。本月处理后本清单可手动删除。",
+        "",
+    ]
+    lines += [f"- [[{Path(path).stem}]]" for path in pending]
+    markdown = "\n".join(lines) + "\n"
+    try:
+        write_machine_note(
+            Path(tree.notes_dir), filename, markdown,
+            source="system", tags=["系统"],
+        )
+    except FileExistsError:
+        pass  # 同月重跑幂等：清单不重建，提醒卡照发
+
+    from scripts.dispatch.feishu import _console_url, send_feishu_card
+
+    card = {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "Atelierr 月度清理提醒"},
+            "template": "red",
+        },
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": (
+                        f"{len(pending)} 条笔记冷却到期（confidence 低于阈值）。\n"
+                        "删除红线：机器绝不自动删——请在 CLI 跑 "
+                        "`memory_cli review` 查看、`memory_cli purge` 点头"
+                        "（移入回收站，可恢复）。"
+                    ),
+                },
+            },
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "查看待清理清单"},
+                        "type": "primary",
+                        "url": _console_url(f"系统/{filename}"),
+                    }
+                ],
+            },
+        ],
+    }
+    send_feishu_card(card)
+    return True
+
+
 class MemoryCLI:
     """记忆模块 CLI（点击组）。"""
 
@@ -229,6 +311,8 @@ class MemoryCLI:
                     click.echo(f"  - {path}")
             if report.get("report_path"):
                 click.echo(f"报告: {report['report_path']}")
+            if not dry_run:
+                _monthly_purge_reminder(tree, report["pending"])
 
         @cli.command()
         @click.pass_context

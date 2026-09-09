@@ -142,3 +142,120 @@ def test_cli_resurface_stats_with_data(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert "响应率 100%" in result.output
+
+
+# ----------------------------------------------------------------------
+# decay 月度清理提醒（每月 1 日 + 有待删 → 系统/ 清单 + 飞书卡；purge 留 CLI）
+# ----------------------------------------------------------------------
+
+
+def _reminder_setup(tmp_path):
+    """构造 MemoryTree + 两条真实笔记（清单 wikilink 指向它们）。"""
+    notes_dir = tmp_path / "memory"
+    state_dir = tmp_path / "state"
+    notes_dir.mkdir(parents=True)
+    tree = MemoryTree(str(notes_dir), state_dir=str(state_dir))
+    tree.create_note("old-a.md", "旧笔记 A", source="test")
+    tree.create_note("old-b.md", "旧笔记 B", source="test")
+    return tree, notes_dir
+
+
+def test_monthly_reminder_first_day_sends_card(tmp_path, monkeypatch):
+    """每月 1 日 + 有待删 → 清单进 系统/，提醒卡带「查看待清理清单」按钮。"""
+    from datetime import datetime
+
+    import scripts.cli.memory_cli as cli_module
+    import scripts.dispatch.feishu as feishu_module
+
+    tree, notes_dir = _reminder_setup(tmp_path)
+    cards = []
+    monkeypatch.setattr(
+        feishu_module,
+        "send_feishu_card",
+        lambda card, chat_id=None, **kw: cards.append(card) or True,
+    )
+    pending = [str(notes_dir / "old-a.md"), str(notes_dir / "old-b.md")]
+
+    assert cli_module._monthly_purge_reminder(
+        tree, pending, today=datetime(2026, 9, 1)
+    ) is True
+
+    listing = notes_dir / "系统" / "待清理清单-2026-09.md"
+    assert listing.exists()
+    text = listing.read_text(encoding="utf-8")
+    assert "[[old-a]]" in text and "[[old-b]]" in text
+    assert "memory_cli purge" in text  # 卡片与清单都只提醒，purge 留 CLI
+    assert len(cards) == 1
+    card = cards[0]
+    assert "2 条笔记冷却到期" in card["elements"][0]["text"]["content"]
+    button = card["elements"][1]["actions"][0]
+    assert button["text"]["content"] == "查看待清理清单"
+    assert button["url"].startswith("obsidian://open?vault=")
+
+
+def test_monthly_reminder_other_days_silent(tmp_path, monkeypatch):
+    """非 1 日：不出清单不推卡。"""
+    from datetime import datetime
+
+    import scripts.cli.memory_cli as cli_module
+    import scripts.dispatch.feishu as feishu_module
+
+    tree, notes_dir = _reminder_setup(tmp_path)
+    cards = []
+    monkeypatch.setattr(
+        feishu_module,
+        "send_feishu_card",
+        lambda card, chat_id=None, **kw: cards.append(card) or True,
+    )
+
+    assert cli_module._monthly_purge_reminder(
+        tree, ["x.md"], today=datetime(2026, 9, 2)
+    ) is False
+    assert cards == []
+    assert not (notes_dir / "系统").exists()
+
+
+def test_monthly_reminder_empty_pending_silent(tmp_path, monkeypatch):
+    """1 日但无待删：不打扰（零打扰原则）。"""
+    from datetime import datetime
+
+    import scripts.cli.memory_cli as cli_module
+    import scripts.dispatch.feishu as feishu_module
+
+    tree, notes_dir = _reminder_setup(tmp_path)
+    cards = []
+    monkeypatch.setattr(
+        feishu_module,
+        "send_feishu_card",
+        lambda card, chat_id=None, **kw: cards.append(card) or True,
+    )
+
+    assert cli_module._monthly_purge_reminder(
+        tree, [], today=datetime(2026, 9, 1)
+    ) is False
+    assert cards == []
+    assert not (notes_dir / "系统").exists()
+
+
+def test_monthly_reminder_rerun_idempotent(tmp_path, monkeypatch):
+    """同月重跑：清单不重建（FileExistsError 吞掉），提醒卡照发不崩。"""
+    from datetime import datetime
+
+    import scripts.cli.memory_cli as cli_module
+    import scripts.dispatch.feishu as feishu_module
+
+    tree, notes_dir = _reminder_setup(tmp_path)
+    cards = []
+    monkeypatch.setattr(
+        feishu_module,
+        "send_feishu_card",
+        lambda card, chat_id=None, **kw: cards.append(card) or True,
+    )
+    pending = [str(notes_dir / "old-a.md")]
+    day = datetime(2026, 9, 1)
+
+    assert cli_module._monthly_purge_reminder(tree, pending, today=day) is True
+    assert cli_module._monthly_purge_reminder(tree, pending, today=day) is True
+
+    assert len(list((notes_dir / "系统").glob("待清理清单-*.md"))) == 1
+    assert len(cards) == 2
