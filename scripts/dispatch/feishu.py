@@ -18,21 +18,25 @@
   （ntfy 通道 2026-09-09 起配置层停用，全部推送走飞书）；
 - 发交互卡片（标题 + 正文 + 「在 Obsidian 中打开」URI 按钮——
   纯客户端跳转，无回调、零写入；带 ``confirm_note`` 时追加
-  「✅ 确认」与「📁 确认并归档」两个 callback 按钮，点击回调
+  「✅ 确认」与「📁 归档…」两个 callback 按钮，点击回调
   ``card.action.trigger``，value 为 dict：{"action": confirm_note |
-  archive_note, "note": <文件名>}）；
+  archive_pick, "note": <文件名>}）；归档是两步：先弹目录选择卡
+  （机器推导只作推荐），点定目录才移动（archive_note 带 dir）；
 - ``pin=True`` 时把卡片置顶到会话顶部（晨报盘面第一眼可见），
   置顶前先摘下 ``pin_state`` 登记表里的上一条（每日替换不堆积）；
 - 卡片失败降级纯文本。
 
 确认/归档回调（用户点卡片按钮；系统内唯二机器改写笔记文件的路径）：
-- 经用户 2026-09-07 批准的人工触发例外（两项）：
+- 经用户 2026-09-07 批准的人工触发例外（两项；归档选目录交互
+  2026-09-09 批准）：
   1. 单标签删除——仅删除该笔记 frontmatter ``tags`` 里的「待确认」
      一项，其他字段与正文一概不动；
-  2. 按钮触发归档移动——把笔记文件移进按平台/分类推导的归档子目录
-     （见 scripts/dispatch/archive.py；与通知「建议归档」行同规则），
-     随后执行第 1 项的删标签；sidecar 条目按 id 即时迁移（不等
-     watcher 班次）；目标目录已有同名文件绝不覆盖，报冲突提示。
+  2. 按钮触发归档移动——「📁 归档…」先弹目录选择卡（机器推导仅作
+     推荐项），人点定目录后把笔记文件移进该目录（推导规则见
+     scripts/dispatch/archive.py；目录经合法性校验，机器专用目录
+     不可选），随后执行第 1 项的删标签；sidecar 条目按 id 即时迁移
+     （不等 watcher 班次）；目标目录已有同名文件绝不覆盖，报冲突
+     提示；「取消」还原确认卡。
 - 回调只带纯文件名（含目录分量视为非法，绝不写文件）；笔记可能已被
   手动归档进子目录（如 抖音/），按文件名在整个归档树查找（排除
   trash/ 等特殊目录），0 个报不存在、多个报歧义（同名冲突请到
@@ -68,7 +72,7 @@ from scripts.dispatch.prompt import CLOSE_WORDS, PromptStore
 
 from scripts.dispatch.archive import derive_archive_dir
 from scripts.dispatch.media import ATTACHMENTS_DIR
-from scripts.memory.core import SYSTEM_DIRNAME, MemoryTree
+from scripts.memory.core import NOTE_EXCLUDED_DIRS, SYSTEM_DIRNAME, MemoryTree
 
 #: 环境变量名（凭证与推送目标）
 ENV_APP_ID = "FEISHU_APP_ID"
@@ -93,6 +97,10 @@ CONFIRM_TAG = "待确认"
 #: dispatch/todos.py 的 TODO_TAG 同值）
 TODO_DONE_ACTION = "todo_done"
 TODO_TAG = "待办"
+#: 「📁 归档…」先弹目录选择卡（人工确认去处再移，机器推导只作推荐）；
+#: 「取消」还原确认卡
+ARCHIVE_PICK_ACTION = "archive_pick"
+ARCHIVE_CANCEL_ACTION = "archive_cancel"
 
 #: 平台推不出时归档按钮的兜底一级目录（与建议归档行的"省略"不同：
 #: 按钮必须给一个去处）
@@ -106,6 +114,10 @@ SEARCH_PREFIXES = ("搜索 ", "搜 ")
 
 #: 搜索结果卡条数上限（卡片长度与打开按钮个数权衡）
 SEARCH_LIMIT = 5
+
+#: 快捷菜单指令（机器人聊天菜单在飞书开放平台后台配置同款文本，
+#: 见 docs/FEISHU-BOT.md；直接手打这些词同样生效）
+MENU_COMMANDS = ("摘要", "今日摘要", "待办", "提炼候选", "周回顾", "菜单", "帮助")
 
 #: 文件名非法字符（半角）转 -
 _ILLEGAL_RE = re.compile(r'[\\/:*?"<>|]')
@@ -248,8 +260,13 @@ class FeishuBridge:
         chat_id = self._event_chat_id(data)
         if action_name == CONFIRM_ACTION:
             return self._handle_confirm(filename, chat_id)
+        if action_name == ARCHIVE_PICK_ACTION:
+            return self._handle_archive_pick(filename, chat_id)
+        if action_name == ARCHIVE_CANCEL_ACTION:
+            return self._handle_archive_cancel(filename, chat_id)
         if action_name == ARCHIVE_ACTION:
-            return self._handle_archive(filename, chat_id)
+            target_dir = str(value.get("dir") or "").strip() or None
+            return self._handle_archive(filename, chat_id, target_dir)
         if action_name == TODO_DONE_ACTION:
             return self._handle_todo_done(filename, chat_id)
         return {}
@@ -299,10 +316,109 @@ class FeishuBridge:
             "card": {"type": "raw", "data": self._confirmed_card(filename)},
         }
 
-    def _handle_archive(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
+    def _handle_archive_pick(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
+        """「📁 归档…」：弹目录选择卡（不移动文件；点定目录才移）。
+
+        候选 = 机器推导（标「推荐」）+ memory/ 现有一级目录（排除
+        wiki/系统/attachments 等机器目录），每目录一个按钮 +
+        「取消」还原确认卡。笔记不存在只 toast，不出选择卡。
+        """
+        note_path, err = self._locate_note(filename)
+        if err:
+            reason = self._error_reason(err)
+            self._send_feedback(chat_id, f"⚠️ {reason}：{filename}")
+            return {"toast": {"type": "error", "content": reason}}
+        derived = None
+        try:
+            post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
+            platform, category = derive_archive_dir(post)
+            platform = platform or FALLBACK_ARCHIVE_DIR
+            derived = platform if not category else f"{platform}/{category}"
+        except Exception:  # noqa: BLE001 - 推导失败只少一个推荐项
+            print(f"[feishu] archive pick derive fail: {filename}", flush=True)
+        try:
+            top_dirs = sorted(
+                path.name
+                for path in Path(self.tree.notes_dir).iterdir()
+                if path.is_dir()
+                and not path.name.startswith(".")
+                and path.name not in NOTE_EXCLUDED_DIRS
+            )
+        except OSError:
+            top_dirs = []
+        options: List[Tuple[str, str]] = []
+        if derived:
+            options.append((derived, f"{derived}（推荐）"))
+        for name in top_dirs:
+            if name != derived and len(options) < 7:
+                options.append((name, name))
+        buttons = [
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": label},
+                "type": "primary" if i == 0 else "default",
+                "behaviors": [
+                    {
+                        "type": "callback",
+                        "value": {
+                            "action": ARCHIVE_ACTION,
+                            "note": filename,
+                            "dir": target,
+                        },
+                    }
+                ],
+            }
+            for i, (target, label) in enumerate(options)
+        ]
+        buttons.append(
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": "取消"},
+                "type": "default",
+                "behaviors": [
+                    {
+                        "type": "callback",
+                        "value": {"action": ARCHIVE_CANCEL_ACTION, "note": filename},
+                    }
+                ],
+            }
+        )
+        rows = [
+            {"tag": "action", "actions": buttons[i : i + 4]}
+            for i in range(0, len(buttons), 4)
+        ]
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "📁 选择归档目录"},
+                "template": "blue",
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {"tag": "plain_text", "content": filename},
+                },
+                *rows,
+            ],
+        }
+        return {
+            "toast": {"type": "info", "content": "选择归档目录"},
+            "card": {"type": "raw", "data": card},
+        }
+
+    def _handle_archive_cancel(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
+        """「取消」：还原原始确认卡（不移动、不删标签）。"""
+        card = _confirm_action_card("Atelierr 笔记待确认", filename, filename)
+        return {
+            "toast": {"type": "info", "content": "已取消归档"},
+            "card": {"type": "raw", "data": card},
+        }
+
+    def _handle_archive(self, filename: str, chat_id: Optional[str] = None,
+                        target_dir: Optional[str] = None) -> Dict[str, Any]:
         """「📁 确认并归档」：归档移动 + 删待确认标签；失败只 toast。"""
         try:
-            ok, detail = self._archive_note(filename)
+            ok, detail = self._archive_note(filename, target_dir)
         except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
             print(f"[feishu] archive note={filename} fail: {exc}", flush=True)
             self._send_feedback(chat_id, f"⚠️ 处理失败，请稍后重试：{filename}")
@@ -377,6 +493,26 @@ class FeishuBridge:
         return True, "ok" if stripped else "noop"
 
     @staticmethod
+    def _valid_archive_dir(target_dir: str) -> bool:
+        """归档目标目录校验：1-2 级纯相对路径，一级目录非机器专用目录。
+
+        目录来自卡片回调（外部输入）：拒绝绝对路径、``..``、反斜杠、
+        非法字符、三级及以上、wiki/系统/attachments/trash/templates
+        （NOTE_EXCLUDED_DIRS 成员，归档进去等于藏进机器区）。
+        """
+        if (
+            not target_dir
+            or "\\" in target_dir
+            or target_dir.startswith("/")
+            or _ILLEGAL_RE.search(target_dir)
+        ):
+            return False
+        parts = target_dir.split("/")
+        if len(parts) > 2 or any(part in ("", ".", "..") for part in parts):
+            return False
+        return parts[0] not in NOTE_EXCLUDED_DIRS
+
+    @staticmethod
     def _error_reason(detail: str) -> str:
         """把失败详情串映射成给用户看的原因短语（toast 与反馈消息共用）。"""
         if detail == "歧义":
@@ -385,6 +521,8 @@ class FeishuBridge:
             return "目标文件夹已有同名笔记，请到 Obsidian 处理"
         if detail == "移动失败":
             return "处理失败，请稍后重试"
+        if detail == "非法目录":
+            return "归档目录非法"
         return "笔记不存在或路径非法"
 
     def _feedback_title(self, filename: str) -> str:
@@ -498,6 +636,220 @@ class FeishuBridge:
         }
         self._send_card(chat_id, card)
 
+    def _answer_menu(self, chat_id: Optional[str], command: str) -> None:
+        """快捷菜单指令分发（拉取式交互：你点菜，我回卡）。"""
+        print(f"[feishu] menu {command!r}", flush=True)
+        if command in ("菜单", "帮助") or command.lower() == "help":
+            self._send_feedback(
+                chat_id,
+                "可用指令：\n"
+                "· 摘要 — 今日摘要卡\n"
+                "· 待办 — 进行中的待办（带打开按钮）\n"
+                "· 提炼候选 — 今日待提炼清单\n"
+                "· 周回顾 — 问答进度/发起指引\n"
+                "· 搜 关键词 — 搜笔记（前 5 条带打开按钮）\n"
+                "直接发文字=捕获笔记；发链接=转写；发语音=Whisper；发图=OCR",
+            )
+            return
+        if command in ("摘要", "今日摘要"):
+            self._menu_digest(chat_id)
+            return
+        if command == "待办":
+            self._menu_todos(chat_id)
+            return
+        if command == "提炼候选":
+            self._menu_undistilled(chat_id)
+            return
+        if command == "周回顾":
+            self._menu_weekly(chat_id)
+
+    def _today_digest_path(self) -> Path:
+        """今日摘要机器产物路径（系统/今日摘要-YYYY-MM-DD.md）。"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        return (
+            Path(self.tree.notes_dir)
+            / SYSTEM_DIRNAME
+            / f"今日摘要-{today}.md"
+        )
+
+    def _menu_digest(self, chat_id: Optional[str]) -> None:
+        """「摘要」：今日摘要正文卡（截断 3000 字）+ 打开按钮。
+
+        拉取式内容推送：隐私纪律管的是**推**（不请自来上云），用户
+        主动点菜要内容属正常使用。
+        """
+        path = self._today_digest_path()
+        if not path.exists():
+            self._send_feedback(
+                chat_id, "今日摘要还没生成（07:53 定时器跑完才有）"
+            )
+            return
+        try:
+            body = frontmatter.loads(
+                path.read_text(encoding="utf-8")
+            ).content.strip()
+        except Exception as exc:  # noqa: BLE001 - 读失败文字告知
+            print(f"[feishu] menu digest read fail: {exc}", flush=True)
+            self._send_feedback(chat_id, "⚠️ 读取今日摘要失败")
+            return
+        if len(body) > 3000:
+            body = body[:3000] + "\n…（截断，全文点下方按钮）"
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": f"📋 今日摘要（{datetime.now().strftime('%m-%d')}）",
+                },
+                "template": "blue",
+            },
+            "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": body}},
+                {
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {
+                                "tag": "plain_text",
+                                "content": "在 Obsidian 中打开",
+                            },
+                            "type": "primary",
+                            "url": _console_url(f"{SYSTEM_DIRNAME}/{path.name}"),
+                        }
+                    ],
+                },
+            ],
+        }
+        self._send_card(chat_id, card)
+
+    def _menu_todos(self, chat_id: Optional[str]) -> None:
+        """「待办」：进行中待办卡（逐条打开按钮，最多 5 条）。"""
+        from scripts.memory.search import MemorySearcher
+
+        try:
+            results = MemorySearcher(self.tree).search(tags=[TODO_TAG], limit=5)
+        except Exception as exc:  # noqa: BLE001 - 查失败文字告知
+            print(f"[feishu] menu todos fail: {exc}", flush=True)
+            self._send_feedback(chat_id, "⚠️ 查询待办失败，请稍后重试")
+            return
+        if not results:
+            self._send_feedback(chat_id, "没有进行中的待办 ✅")
+            return
+        elements: List[Dict[str, Any]] = []
+        for item in results:
+            elements.append(
+                {
+                    "tag": "div",
+                    "text": {"tag": "lark_md", "content": f"**{item.title}**"},
+                }
+            )
+            elements.append(
+                {
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "打开"},
+                            "type": "primary",
+                            "url": _console_url(self.tree._rel_key(item.path)),
+                        }
+                    ],
+                }
+            )
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": f"✅ 待办进行中（{len(results)}）",
+                },
+                "template": "orange",
+            },
+            "elements": elements,
+        }
+        self._send_card(chat_id, card)
+
+    def _menu_undistilled(self, chat_id: Optional[str]) -> None:
+        """「提炼候选」：今日摘要 frontmatter 的 undistilled 清单卡。"""
+        path = self._today_digest_path()
+        if not path.exists():
+            self._send_feedback(
+                chat_id, "今日摘要还没生成（07:53 定时器跑完才有）"
+            )
+            return
+        try:
+            meta = frontmatter.loads(
+                path.read_text(encoding="utf-8")
+            ).metadata
+        except Exception as exc:  # noqa: BLE001 - 读失败文字告知
+            print(f"[feishu] menu undistilled read fail: {exc}", flush=True)
+            self._send_feedback(chat_id, "⚠️ 读取提炼候选失败")
+            return
+        items = [str(item) for item in (meta.get("undistilled") or [])]
+        if not items:
+            self._send_feedback(
+                chat_id, "今日没有提炼候选（周日提炼仪式见晨报 🧠 节）"
+            )
+            return
+        lines = "\n".join(f"· {item}" for item in items)
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": f"🧠 提炼候选（{len(items)}）",
+                },
+                "template": "blue",
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": (
+                            f"{lines}\n\n周日挑 1 条提炼进 wiki"
+                            "（QuickAdd，五分钟）。"
+                        ),
+                    },
+                },
+                {
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {
+                                "tag": "plain_text",
+                                "content": "打开今日摘要",
+                            },
+                            "type": "primary",
+                            "url": _console_url(f"{SYSTEM_DIRNAME}/{path.name}"),
+                        }
+                    ],
+                },
+            ],
+        }
+        self._send_card(chat_id, card)
+
+    def _menu_weekly(self, chat_id: Optional[str]) -> None:
+        """「周回顾」：问答进度或发起指引（模板在 Atelier $weekly 侧维护）。"""
+        store = PromptStore(Path(self.tree.state_dir))
+        data = store.load() if store.is_open() else None
+        if data:
+            count = len(data.get("answers") or [])
+            self._send_feedback(
+                chat_id,
+                f"周回顾问答进行中：已收到 {count} 条回答。"
+                "直接在飞书回复即可；回「跳过」结束并定稿。",
+            )
+            return
+        self._send_feedback(
+            chat_id,
+            "当前没有进行中的周回顾问答。\n"
+            "周回顾由控制台 $weekly 口令发起（双语模板在 Atelier 侧维护）；"
+            "发起后回到飞书直接作答即可。",
+        )
+
     def _add_reaction(self, message_id: str, emoji_type: str = "DONE") -> None:
         """给原消息加表情回执（捕获成功的轻确认，不占气泡）；失败只 log。
 
@@ -599,10 +951,11 @@ class FeishuBridge:
         stripped = self._strip_review_tag(note_path)
         return True, "ok" if stripped else "noop"
 
-    def _archive_note(self, filename: str) -> Tuple[bool, str]:
-        """「📁 确认并归档」核心（2026-09-07 批准的人工例外之二）。
+    def _archive_note(self, filename: str, target_dir: Optional[str] = None) -> Tuple[bool, str]:
+        """「📁 归档」核心（2026-09-07 批准的人工例外之二；09-09 起人点目录）。
 
-        定位（与确认同）→ 推导目标目录（平台[/分类]，规则见
+        定位（与确认同）→ 目标目录：显式给定（目录选择卡点定，先经
+        _valid_archive_dir 校验）或机器推导（平台[/分类]，规则见
         scripts/dispatch/archive.py；平台推不出落 媒体/）→ 已在目标
         目录则只删标签（幂等，不移动）→ 否则：目标重名检查（绝不
         覆盖）→ mkdir → rename → sidecar 按 id 即时迁移 path
@@ -617,10 +970,13 @@ class FeishuBridge:
         note_path, err = self._locate_note(filename)
         if err:
             return False, err
-        post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
-        platform, category = derive_archive_dir(post)
-        platform = platform or FALLBACK_ARCHIVE_DIR
-        target_dir = platform if not category else f"{platform}/{category}"
+        if target_dir is None:
+            post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
+            platform, category = derive_archive_dir(post)
+            platform = platform or FALLBACK_ARCHIVE_DIR
+            target_dir = platform if not category else f"{platform}/{category}"
+        elif not self._valid_archive_dir(target_dir):
+            return False, "非法目录"
         current_rel = self.tree._rel_key(note_path)
         if "/" in current_rel and current_rel.rsplit("/", 1)[0] == target_dir:
             # 已在目标目录：幂等，只删标签不移动
@@ -686,11 +1042,17 @@ class FeishuBridge:
         待答问题会话 open 期间（scripts/dispatch/prompt.py），文本视为
         周回顾等仪式的**回答**：追加进会话状态、回执条数，不捕获为
         笔记；回答「跳过」/「完成」关闭会话。会话关闭后恢复捕获。
-        「搜 xxx」/「搜索 xxx」是搜索指令：查库回结果卡，不捕获。
+        「摘要/待办/提炼候选/周回顾/菜单」是快捷菜单指令（拉取式交互；
+        整词精确匹配，会话期间也优先按指令处理——查进度不会被误计为
+        回答）；「搜 xxx」/「搜索 xxx」是搜索指令（会话期间让位仪式，
+        前缀匹配的内容仍计为回答）。
         捕获成功给原消息加 ✅ 表情回执；失败发文字反馈。
         """
         text = text.strip()
         if not text:
+            return None
+        if text in MENU_COMMANDS or text.lower() == "help":
+            self._answer_menu(chat_id, text)
             return None
         store = PromptStore(Path(self.tree.state_dir))
         if store.is_open():
@@ -875,8 +1237,9 @@ def send_feishu(
 
     卡片带「在 Obsidian 中打开」URI 按钮（纯客户端跳转，无回调）；
     ``confirm_note`` 给定时追加两个 callback 按钮（value 均为 dict）：
-    「✅ 确认」（confirm_note：只删「待确认」标签）与「📁 确认并归档」
-    （archive_note：归档移动 + 删标签，见 FeishuBridge.handle_card_action）；
+    「✅ 确认」（confirm_note：只删「待确认」标签）与「📁 归档…」
+    （archive_pick：先弹目录选择卡，点定后 archive_note 归档移动 +
+    删标签，见 FeishuBridge.handle_card_action）；
     卡片发送失败时降级为纯文本消息再试一次。
     ``pin=True`` 时发送成功把卡片置顶（晨报盘面第一眼可见），并先摘下
     ``pin_state`` 登记表里的上一条（每日替换不堆积）；置顶失败只 log，
@@ -906,61 +1269,7 @@ def send_feishu(
             .app_secret(app_secret)
             .build()
         )
-        console_url = _console_url(confirm_note)
-        actions = [
-            {
-                "tag": "button",
-                "text": {
-                    "tag": "plain_text",
-                    "content": "在 Obsidian 中打开",
-                },
-                "type": "primary",
-                "url": console_url,
-            }
-        ]
-        if confirm_note:
-            actions.append(
-                {
-                    "tag": "button",
-                    "text": {"tag": "plain_text", "content": "✅ 确认"},
-                    "type": "primary",
-                    # 新版卡片 callback：value 直接放 JSON 对象（若放字符串，
-                    # 回调时平台原样回传，SDK 校验 action.value 必须是 dict
-                    # 会直接报错丢弃，回调永远到不了处理器）
-                    "behaviors": [
-                        {
-                            "type": "callback",
-                            "value": {"action": CONFIRM_ACTION, "note": confirm_note},
-                        }
-                    ],
-                }
-            )
-            actions.append(
-                {
-                    "tag": "button",
-                    "text": {"tag": "plain_text", "content": "📁 确认并归档"},
-                    "type": "primary",
-                    # 同上：value 必须是 dict（回调进 handle_card_action 的
-                    # archive_note 分支：归档移动 + 删「待确认」标签）
-                    "behaviors": [
-                        {
-                            "type": "callback",
-                            "value": {"action": ARCHIVE_ACTION, "note": confirm_note},
-                        }
-                    ],
-                }
-            )
-        card = {
-            "config": {"wide_screen_mode": True},
-            "header": {
-                "title": {"tag": "plain_text", "content": title},
-                "template": "blue",
-            },
-            "elements": [
-                {"tag": "div", "text": {"tag": "lark_md", "content": message}},
-                {"tag": "action", "actions": actions},
-            ],
-        }
+        card = _confirm_action_card(title, message, confirm_note)
         message_id = _send(client, target, "interactive", json.dumps(card))
         if message_id is not None:
             if pin and message_id:
@@ -971,6 +1280,74 @@ def send_feishu(
         ) is not None
     except Exception:  # noqa: BLE001 - 推送失败不影响主流程
         return False
+
+
+def _confirm_action_card(
+    title: str, message: str, confirm_note: Optional[str]
+) -> Dict[str, Any]:
+    """确认卡 JSON：打开（URI）+ 可选「✅ 确认」「📁 归档…」callback 按钮。
+
+    「📁 归档…」先弹目录选择卡（archive_pick）——机器推导只作推荐项，
+    去处由人点定后才移动（archive_note 带 dir）；取消还原本卡。
+    send_feishu 推送与归档取消回调共用本组装器，避免两处卡片漂移。
+    """
+    actions = [
+        {
+            "tag": "button",
+            "text": {
+                "tag": "plain_text",
+                "content": "在 Obsidian 中打开",
+            },
+            "type": "primary",
+            "url": _console_url(confirm_note),
+        }
+    ]
+    if confirm_note:
+        actions.append(
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": "✅ 确认"},
+                "type": "primary",
+                # 新版卡片 callback：value 直接放 JSON 对象（若放字符串，
+                # 回调时平台原样回传，SDK 校验 action.value 必须是 dict
+                # 会直接报错丢弃，回调永远到不了处理器）
+                "behaviors": [
+                    {
+                        "type": "callback",
+                        "value": {"action": CONFIRM_ACTION, "note": confirm_note},
+                    }
+                ],
+            }
+        )
+        actions.append(
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": "📁 归档…"},
+                "type": "primary",
+                # 同上：value 必须是 dict（回调进 handle_card_action 的
+                # archive_pick 分支：先弹目录选择卡，点定才移动）
+                "behaviors": [
+                    {
+                        "type": "callback",
+                        "value": {
+                            "action": ARCHIVE_PICK_ACTION,
+                            "note": confirm_note,
+                        },
+                    }
+                ],
+            }
+        )
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": title},
+            "template": "blue",
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": message}},
+            {"tag": "action", "actions": actions},
+        ],
+    }
 
 
 def send_feishu_card(

@@ -455,7 +455,7 @@ def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
     assert [a["text"]["content"] for a in actions] == [
         "在 Obsidian 中打开",
         "✅ 确认",
-        "📁 确认并归档",
+        "📁 归档…",
     ]
     for button in actions[1:]:
         behavior = button["behaviors"][0]
@@ -466,8 +466,9 @@ def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
         "action": feishu_module.CONFIRM_ACTION,
         "note": "douyin-x.md",
     }
+    # 「📁 归档…」先弹目录选择卡（archive_pick），点定目录才移动
     assert actions[2]["behaviors"][0]["value"] == {
-        "action": feishu_module.ARCHIVE_ACTION,
+        "action": feishu_module.ARCHIVE_PICK_ACTION,
         "note": "douyin-x.md",
     }
 
@@ -1339,3 +1340,257 @@ def test_audio_message_without_key_skipped(memory_tree, monkeypatch):
     assert not (memory_tree.notes_dir / "attachments").exists() or not list(
         (memory_tree.notes_dir / "attachments").glob("feishu-*.ogg")
     )
+
+
+# ----------------------------------------------------------------------
+# 归档目录选择卡（📁 归档… → 点定目录才移动；取消还原）
+# ----------------------------------------------------------------------
+
+
+def _card_archive_pick(filename):
+    """构造一条 archive_pick 回调事件。"""
+    return _card_action({"action": "archive_pick", "note": filename})
+
+
+def _card_archive_to(filename, target_dir):
+    """构造一条带 dir 的 archive_note 回调事件（目录选择卡点定）。"""
+    return _card_action(
+        {"action": "archive_note", "note": filename, "dir": target_dir}
+    )
+
+
+def _card_archive_cancel(filename):
+    """构造一条 archive_cancel 回调事件。"""
+    return _card_action({"action": "archive_cancel", "note": filename})
+
+
+def test_archive_pick_shows_dirs_without_moving(memory_tree):
+    """「📁 归档…」：弹目录选择卡（推荐+现有目录+取消），文件不动。"""
+    memory_tree.create_note(
+        "douyin-x.md", "正文\n", source="link", tags=["待确认", "抖音"]
+    )
+    (memory_tree.notes_dir / "书籍").mkdir()
+    (memory_tree.notes_dir / "系统").mkdir()  # 机器目录不可选
+    bridge = _bridge(memory_tree)
+
+    result = bridge.handle_card_action(_card_archive_pick("douyin-x.md"))
+
+    card = result["card"]["data"]
+    assert card["header"]["title"]["content"] == "📁 选择归档目录"
+    buttons = [
+        a
+        for e in card["elements"]
+        if e["tag"] == "action"
+        for a in e["actions"]
+    ]
+    labels = [b["text"]["content"] for b in buttons]
+    assert labels[0] == "抖音（推荐）"
+    assert "书籍" in labels
+    assert "系统" not in labels
+    assert labels[-1] == "取消"
+    dir_values = [b["behaviors"][0]["value"] for b in buttons[:-1]]
+    assert dir_values[0] == {
+        "action": "archive_note",
+        "note": "douyin-x.md",
+        "dir": "抖音",
+    }
+    assert buttons[-1]["behaviors"][0]["value"] == {
+        "action": "archive_cancel",
+        "note": "douyin-x.md",
+    }
+    # 文件未移动、标签未删
+    assert (memory_tree.notes_dir / "douyin-x.md").exists()
+    post = frontmatter.loads(
+        (memory_tree.notes_dir / "douyin-x.md").read_text(encoding="utf-8")
+    )
+    assert "待确认" in post.metadata["tags"]
+
+
+def test_archive_to_explicit_dir_moves_note(memory_tree):
+    """点目录按钮：文件移进指定目录 + 删待确认标签。"""
+    memory_tree.create_note("x.md", "正文\n", source="link", tags=["待确认"])
+    bridge = _bridge(memory_tree)
+
+    result = bridge.handle_card_action(_card_archive_to("x.md", "书籍"))
+
+    assert result["toast"]["type"] == "success"
+    assert not (memory_tree.notes_dir / "x.md").exists()
+    moved = memory_tree.notes_dir / "书籍" / "x.md"
+    assert moved.exists()
+    post = frontmatter.loads(moved.read_text(encoding="utf-8"))
+    assert "待确认" not in (post.metadata.get("tags") or [])
+
+
+def test_archive_to_invalid_dir_rejected(memory_tree):
+    """非法目录（逃逸/机器目录/三级/绝对路径）：拒绝，文件原处不动。"""
+    memory_tree.create_note("x.md", "正文\n", source="link", tags=["待确认"])
+    bridge = _bridge(memory_tree)
+
+    for bad in ("../escape", "系统", "a/b/c", "/abs"):
+        result = bridge.handle_card_action(_card_archive_to("x.md", bad))
+        assert result["toast"]["type"] == "error", bad
+
+    assert (memory_tree.notes_dir / "x.md").exists()
+
+
+def test_archive_cancel_restores_confirm_card(memory_tree):
+    """「取消」：还原确认卡（打开/✅确认/📁归档…），无文件变动。"""
+    memory_tree.create_note("x.md", "正文\n", source="link", tags=["待确认"])
+    bridge = _bridge(memory_tree)
+
+    result = bridge.handle_card_action(_card_archive_cancel("x.md"))
+
+    actions = result["card"]["data"]["elements"][1]["actions"]
+    assert [a["text"]["content"] for a in actions] == [
+        "在 Obsidian 中打开",
+        "✅ 确认",
+        "📁 归档…",
+    ]
+    assert (memory_tree.notes_dir / "x.md").exists()
+
+
+def test_archive_pick_missing_note_errors(memory_tree, monkeypatch):
+    """笔记不存在：error toast + 文字反馈，不出选择卡。"""
+    bridge = _bridge(memory_tree)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+
+    result = bridge.handle_card_action(_card_archive_pick("ghost.md"))
+
+    assert result["toast"]["type"] == "error"
+    assert "card" not in result
+    assert sent and "不存在" in sent[0]
+
+
+# ----------------------------------------------------------------------
+# 快捷菜单指令（摘要/待办/提炼候选/周回顾/菜单）
+# ----------------------------------------------------------------------
+
+
+def _write_digest(memory_tree, undistilled=()):
+    """在 系统/ 写一篇今日摘要机器产物（含 undistilled frontmatter）。"""
+    from datetime import datetime
+
+    from scripts.dispatch.sysdir import write_machine_note
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    if undistilled:
+        fm = "---\nundistilled:\n"
+        fm += "\n".join(f'- "[[{stem}]]"' for stem in undistilled)
+        fm += "\n---\n\n"
+    else:
+        fm = "---\nundistilled: []\n---\n\n"
+    write_machine_note(
+        memory_tree.notes_dir,
+        f"今日摘要-{today}.md",
+        fm + f"# 今日摘要 {today}\n\n## ⏳ 待我确认（0）\n\n- 无\n",
+        source="digest",
+        tags=["摘要"],
+    )
+    return today
+
+
+def test_menu_digest_card(memory_tree, monkeypatch):
+    """「摘要」：回今日摘要正文卡 + 打开按钮（指令不捕获为笔记）。"""
+    _write_digest(memory_tree)
+    bridge = _bridge(memory_tree)
+    cards = []
+    monkeypatch.setattr(
+        bridge, "_send_card", lambda chat, card: cards.append(card) or True
+    )
+    event = _event("m-menu-1", "text", {"text": "摘要"})
+    event.event.message.chat_id = "oc_demo"
+    bridge.handle_event(event)
+
+    assert len(cards) == 1
+    card = cards[0]
+    assert "今日摘要" in card["header"]["title"]["content"]
+    assert "待我确认" in card["elements"][0]["text"]["content"]
+    assert card["elements"][1]["actions"][0]["url"].startswith(
+        "obsidian://open?vault="
+    )
+    assert list(memory_tree.notes_dir.glob("feishu-*.md")) == []
+
+
+def test_menu_digest_not_generated_yet(memory_tree, monkeypatch):
+    """今日摘要未生成 → 文字提示（不出卡）。"""
+    bridge = _bridge(memory_tree)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+    bridge.handle_event(_event("m-menu-2", "text", {"text": "摘要"}))
+
+    assert sent == ["今日摘要还没生成（07:53 定时器跑完才有）"]
+
+
+def test_menu_todos_card(memory_tree, monkeypatch):
+    """「待办」：无待办 → ✅ 提示；有待办 → 逐条打开按钮的卡。"""
+    bridge = _bridge(memory_tree)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+    bridge.handle_event(_event("m-menu-3", "text", {"text": "待办"}))
+    assert sent == ["没有进行中的待办 ✅"]
+
+    memory_tree.create_note(
+        "todo-x.md", "---\ntitle: 交报告\n---\n做事\n", source="todo",
+        tags=["待办"],
+    )
+    cards = []
+    monkeypatch.setattr(
+        bridge, "_send_card", lambda chat, card: cards.append(card) or True
+    )
+    bridge.handle_event(_event("m-menu-4", "text", {"text": "待办"}))
+    assert "待办进行中（1）" in cards[0]["header"]["title"]["content"]
+
+
+def test_menu_undistilled_card(memory_tree, monkeypatch):
+    """「提炼候选」：清单来自今日摘要 frontmatter 的 undistilled。"""
+    _write_digest(memory_tree, undistilled=["旧文A"])
+    bridge = _bridge(memory_tree)
+    cards = []
+    monkeypatch.setattr(
+        bridge, "_send_card", lambda chat, card: cards.append(card) or True
+    )
+    bridge.handle_event(_event("m-menu-5", "text", {"text": "提炼候选"}))
+
+    card = cards[0]
+    assert "提炼候选（1）" in card["header"]["title"]["content"]
+    assert "旧文A" in card["elements"][0]["text"]["content"]
+
+
+def test_menu_weekly_guides_when_no_session(memory_tree, monkeypatch):
+    """「周回顾」：无会话 → 发起指引；会话 open → 报进度。"""
+    bridge = _bridge(memory_tree)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+    bridge.handle_event(_event("m-menu-6", "text", {"text": "周回顾"}))
+    assert "$weekly" in sent[-1]
+
+    from scripts.dispatch.prompt import PromptStore
+
+    PromptStore(memory_tree.state_dir).open("weekly", ["Q1"])
+    bridge.handle_event(_event("m-menu-7", "text", {"text": "周回顾"}))
+    assert "已收到 0 条回答" in sent[-1]
+    # 菜单整词优先于回答收集：没被误计为回答
+    data = PromptStore(memory_tree.state_dir).load()
+    assert data["answers"] == []
+
+
+def test_menu_help_lists_commands(memory_tree, monkeypatch):
+    """「菜单」：回指令清单（含搜索与语音用法）。"""
+    bridge = _bridge(memory_tree)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+    bridge.handle_event(_event("m-menu-8", "text", {"text": "菜单"}))
+
+    assert "搜 关键词" in sent[0]
+    assert "语音" in sent[0]
