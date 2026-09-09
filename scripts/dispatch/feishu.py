@@ -62,7 +62,7 @@ from scripts.dispatch.prompt import CLOSE_WORDS, PromptStore
 
 from scripts.dispatch.archive import derive_archive_dir
 from scripts.dispatch.media import ATTACHMENTS_DIR
-from scripts.memory.core import MemoryTree
+from scripts.memory.core import SYSTEM_DIRNAME, MemoryTree
 
 #: 环境变量名（凭证与推送目标）
 ENV_APP_ID = "FEISHU_APP_ID"
@@ -654,11 +654,12 @@ def _console_url(confirm_note: Optional[str]) -> str:
     直达本条笔记（percent-encode 防中文/井号/空格截断）。库名用
     ``FEISHU_VAULT_NAME`` 覆盖（缺省 atelierr-data=桌面端库）；路径
     前缀用 ``FEISHU_NOTE_PREFIX`` 覆盖，缺省跟随库名：库根是
-    atelierr-data 时为 ``memory/``，自定义库名（手机端库根即 memory/
-    文件夹本身）时为空。无目标笔记（digest 等汇总通知）时落到
-    控制台门面页（按文件名全库解析）——bare ``obsidian://`` 只开应用
-    不定位，手机端落到空白启动页，属反人机交互，任何按钮都不再用
-    裸 scheme。
+    atelierr-data 时为 ``memory/``，自定义库名时为空。无目标笔记
+    （digest 等汇总通知）时落到控制台门面页（系统/控制台）——bare
+    ``obsidian://`` 只开应用不定位，属反人机交互，任何按钮都不再用
+    裸 scheme。注意库名必须与设备实际库名完全一致（本机手机端为
+    ``atelierr-memory``）：库名不匹配时 Obsidian 静默退回最近打开页，
+    表现为"链接指错笔记"。
     """
     console_url = os.environ.get(ENV_CONSOLE_URL, "").strip()
     if console_url:
@@ -670,10 +671,9 @@ def _console_url(confirm_note: Optional[str]) -> str:
     if confirm_note:
         stem = confirm_note[:-3] if confirm_note.endswith(".md") else confirm_note
     else:
-        # 汇总通知无对应笔记：落控制台门面。用纯文件名（不带 系统/
-        # 前缀）——Obsidian 按文件名全库兜底解析最可靠，子目录路径在
-        # 手机端实测解析不稳
-        stem = "控制台"
+        # 汇总通知无对应笔记：落控制台门面（精确子目录路径 系统/控制台；
+        # 库名必须与实际一致——库名错了 Obsidian 静默退回最近打开页）
+        stem = f"{SYSTEM_DIRNAME}/控制台"
     return f"obsidian://open?vault={quote(vault)}&file={quote(prefix + stem)}"
 
 
