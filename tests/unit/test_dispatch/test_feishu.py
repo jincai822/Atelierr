@@ -15,6 +15,8 @@ import frontmatter
 import pytest
 
 import scripts.dispatch.feishu as feishu_module
+import scripts.dispatch.feishu_cards as feishu_cards_module
+import scripts.dispatch.feishu_io as feishu_io_module
 from scripts.dispatch.feishu import FeishuBridge, send_feishu
 
 
@@ -36,12 +38,17 @@ def _bridge(memory_tree):
 
 
 def _fake_lark(monkeypatch, client):
-    """把 lark_oapi 换成假模块：所有 builder 链自动成立。"""
+    """把 lark_oapi 换成假模块：所有 builder 链自动成立。
+
+    桥（feishu 模块）与收发基元（feishu_io 模块）各自的 _import_lark
+    引用都要换——拆分后两处独立绑定。
+    """
     fake_lark = MagicMock()
     fake_lark.Client.builder.return_value.app_id.return_value.app_secret.return_value.build.return_value = (
         client
     )
     monkeypatch.setattr(feishu_module, "_import_lark", lambda: fake_lark)
+    monkeypatch.setattr(feishu_io_module, "_import_lark", lambda: fake_lark)
     return fake_lark
 
 
@@ -430,7 +437,7 @@ def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
     sent = []
     _fake_lark(monkeypatch, MagicMock())
     monkeypatch.setattr(
-        feishu_module,
+        feishu_io_module,
         "_send",
         lambda client, chat_id, msg_type, content: sent.append(
             (chat_id, msg_type, content)
@@ -1020,7 +1027,7 @@ def test_send_feishu_pin_creates_pin_and_state(monkeypatch, tmp_path):
     """pin=True：发送成功后置顶卡片，message_id 写进登记表。"""
     client = MagicMock()
     _pin_env(monkeypatch, client)
-    monkeypatch.setattr(feishu_module, "_send", _send_ok("om_new"))
+    monkeypatch.setattr(feishu_io_module, "_send", _send_ok("om_new"))
     state = tmp_path / "feishu_pins.json"
 
     assert send_feishu("t", "m", pin=True, pin_state=state) is True
@@ -1036,7 +1043,7 @@ def test_send_feishu_pin_replaces_previous(monkeypatch, tmp_path):
     """已有旧置顶：先 DeletePin 摘下再置新，登记表更新为新的。"""
     client = MagicMock()
     _pin_env(monkeypatch, client)
-    monkeypatch.setattr(feishu_module, "_send", _send_ok("om_new"))
+    monkeypatch.setattr(feishu_io_module, "_send", _send_ok("om_new"))
     state = tmp_path / "feishu_pins.json"
     state.write_text(
         json.dumps({"message_id": "om_old"}), encoding="utf-8"
@@ -1056,7 +1063,7 @@ def test_send_feishu_pin_failure_keeps_send_result(monkeypatch, tmp_path):
     client = MagicMock()
     client.im.v1.pin.create.side_effect = RuntimeError("pin down")
     _pin_env(monkeypatch, client)
-    monkeypatch.setattr(feishu_module, "_send", _send_ok("om_new"))
+    monkeypatch.setattr(feishu_io_module, "_send", _send_ok("om_new"))
     state = tmp_path / "feishu_pins.json"
 
     assert send_feishu("t", "m", pin=True, pin_state=state) is True
@@ -1236,7 +1243,7 @@ def test_send_todo_feishu_card_buttons(monkeypatch):
     """新待办卡：打开（URI）+ ✅ 已完成（callback todo_done）。"""
     cards = []
     monkeypatch.setattr(
-        feishu_module,
+        feishu_cards_module,
         "send_feishu_card",
         lambda card, chat_id=None, **kw: cards.append(card) or True,
     )
@@ -1261,7 +1268,7 @@ def test_send_resurface_feishu_card_layout(monkeypatch):
     assert feishu_module.send_resurface_feishu([]) is False
     cards = []
     monkeypatch.setattr(
-        feishu_module,
+        feishu_cards_module,
         "send_feishu_card",
         lambda card, chat_id=None, **kw: cards.append(card) or True,
     )

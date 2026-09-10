@@ -52,8 +52,12 @@
 
 触发：常驻守护（systemd ``atelierr-feishu.service``，Restart=always）
 或人工 ``dispatch_cli feishu``。
-"""
 
+模块拆分（2026-09-10）：收发基元与协议常量在 ``feishu_io.py``，卡片
+组装器在 ``feishu_cards.py``；本文件保留桥（接收+回调+菜单），并对旧
+导入路径全量 re-export（``from scripts.dispatch.feishu import ...``
+的既有调用方与测试打点一律不受影响）。
+"""
 from __future__ import annotations
 
 import hashlib
@@ -64,7 +68,6 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import quote
 
 import frontmatter
 
@@ -72,41 +75,75 @@ from scripts.dispatch.prompt import CLOSE_WORDS, PromptStore
 from scripts.utils.state_store import read_json, write_json
 
 from scripts.dispatch.archive import derive_archive_dir
+from scripts.dispatch.feishu_cards import (
+    prompt_form_card,
+    send_resurface_feishu,
+    send_todo_feishu,
+)
+from scripts.dispatch.feishu_io import (
+    ARCHIVE_ACTION,
+    ARCHIVE_CANCEL_ACTION,
+    ARCHIVE_PICK_ACTION,
+    CONFIRM_ACTION,
+    CONFIRM_TAG,
+    DEFAULT_CONSOLE_URL,
+    DEFAULT_VAULT_NAME,
+    ENV_APP_ID,
+    ENV_APP_SECRET,
+    ENV_CHAT_ID,
+    ENV_CONSOLE_URL,
+    ENV_NOTE_PREFIX,
+    ENV_VAULT_NAME,
+    PROMPT_FORM_MAX_QUESTIONS,
+    PROMPT_SUBMIT_ACTION,
+    TODO_DONE_ACTION,
+    TODO_TAG,
+    _confirm_action_card,
+    _console_url,
+    _import_lark,
+    _pin_card,
+    _send,
+    send_feishu,
+    send_feishu_card,
+)
 from scripts.dispatch.media import ATTACHMENTS_DIR
 from scripts.memory.core import NOTE_EXCLUDED_DIRS, SYSTEM_DIRNAME, MemoryTree
 
-#: 环境变量名（凭证与推送目标）
-ENV_APP_ID = "FEISHU_APP_ID"
-ENV_APP_SECRET = "FEISHU_APP_SECRET"
-ENV_CHAT_ID = "FEISHU_CHAT_ID"
-ENV_CONSOLE_URL = "FEISHU_CONSOLE_URL"
-#: Obsidian 库名（obsidian://open?vault=…；可用 FEISHU_VAULT_NAME 覆盖）
-ENV_VAULT_NAME = "FEISHU_VAULT_NAME"
-DEFAULT_VAULT_NAME = "atelierr-data"
-#: 库内笔记路径前缀（FEISHU_NOTE_PREFIX 覆盖；库根=atelierr-data 时
-#: 缺省 "memory/"，自定义库名（如手机端库根即 memory/ 文件夹）缺省空）
-ENV_NOTE_PREFIX = "FEISHU_NOTE_PREFIX"
-
-DEFAULT_CONSOLE_URL = "obsidian://"
-
-#: 卡片按钮 action 值里的动作名与「确认」标签（后者与
-#: dispatch/links.py、dispatch/media.py 的 REVIEW_TAG 同值）
-CONFIRM_ACTION = "confirm_note"
-ARCHIVE_ACTION = "archive_note"
-CONFIRM_TAG = "待确认"
-#: 「✅ 已完成」待办按钮动作名与「待办」标签（后者与
-#: dispatch/todos.py 的 TODO_TAG 同值）
-TODO_DONE_ACTION = "todo_done"
-TODO_TAG = "待办"
-#: 「📁 归档…」先弹目录选择卡（人工确认去处再移，机器推导只作推荐）；
-#: 「取消」还原确认卡
-ARCHIVE_PICK_ACTION = "archive_pick"
-ARCHIVE_CANCEL_ACTION = "archive_cancel"
-#: 问答表单卡「提交回答」（schema 2.0 form 容器；答案在回调 form_value）
-PROMPT_SUBMIT_ACTION = "prompt_submit"
-
-#: 问答表单卡的问题数上限（卡片长度护栏；周回顾四问远未触及）
-PROMPT_FORM_MAX_QUESTIONS = 8
+#: re-export 门脸（__all__ 声明即"有意再导出"，ruff F401 不误报）：
+#: 既有调用方与测试打点（from scripts.dispatch.feishu import ...）不变。
+__all__ = [
+    "FeishuBridge",
+    "ARCHIVE_ACTION",
+    "ARCHIVE_CANCEL_ACTION",
+    "ARCHIVE_PICK_ACTION",
+    "CONFIRM_ACTION",
+    "CONFIRM_TAG",
+    "DEFAULT_CONSOLE_URL",
+    "DEFAULT_VAULT_NAME",
+    "ENV_APP_ID",
+    "ENV_APP_SECRET",
+    "ENV_CHAT_ID",
+    "ENV_CONSOLE_URL",
+    "ENV_NOTE_PREFIX",
+    "ENV_VAULT_NAME",
+    "MENU_COMMANDS",
+    "PROMPT_FORM_MAX_QUESTIONS",
+    "PROMPT_SUBMIT_ACTION",
+    "SEARCH_LIMIT",
+    "SEARCH_PREFIXES",
+    "TODO_DONE_ACTION",
+    "TODO_TAG",
+    "_confirm_action_card",
+    "_console_url",
+    "_import_lark",
+    "_pin_card",
+    "_send",
+    "prompt_form_card",
+    "send_feishu",
+    "send_feishu_card",
+    "send_resurface_feishu",
+    "send_todo_feishu",
+]
 
 #: 平台推不出时归档按钮的兜底一级目录（与建议归档行的"省略"不同：
 #: 按钮必须给一个去处）
@@ -127,17 +164,6 @@ MENU_COMMANDS = ("摘要", "今日摘要", "待办", "提炼候选", "周回顾"
 
 #: 文件名非法字符（半角）转 -
 _ILLEGAL_RE = re.compile(r'[\\/:*?"<>|]')
-
-
-def _import_lark() -> Any:
-    """惰性导入 lark-oapi（可选依赖；缺失时报清晰错误）。"""
-    try:
-        import lark_oapi as lark  # type: ignore[import-not-found]
-    except ImportError as exc:  # pragma: no cover - 依赖缺失路径
-        raise RuntimeError(
-            "飞书桥需要 lark-oapi：pip install lark-oapi"
-        ) from exc
-    return lark
 
 
 class FeishuBridge:
@@ -1273,457 +1299,3 @@ class FeishuBridge:
             except OSError:
                 pass
             raise
-
-
-def _console_url(confirm_note: Optional[str]) -> str:
-    """「在 Obsidian 中打开」按钮 URL。
-
-    ``FEISHU_CONSOLE_URL`` 环境变量优先（自定义控制台地址）；否则
-    生成 ``obsidian://open?vault=<库名>&file=<前缀><笔记去后缀>``
-    直达本条笔记（percent-encode 防中文/井号/空格截断）。库名用
-    ``FEISHU_VAULT_NAME`` 覆盖（缺省 atelierr-data=桌面端库）；路径
-    前缀用 ``FEISHU_NOTE_PREFIX`` 覆盖，缺省跟随库名：库根是
-    atelierr-data 时为 ``memory/``，自定义库名时为空。无目标笔记
-    （digest 等汇总通知）时落到控制台门面页（系统/控制台）——bare
-    ``obsidian://`` 只开应用不定位，属反人机交互，任何按钮都不再用
-    裸 scheme。注意库名必须与设备实际库名完全一致（本机手机端为
-    ``atelierr-memory``）：库名不匹配时 Obsidian 静默退回最近打开页，
-    表现为"链接指错笔记"。
-    """
-    console_url = os.environ.get(ENV_CONSOLE_URL, "").strip()
-    if console_url:
-        return console_url
-    vault = os.environ.get(ENV_VAULT_NAME, DEFAULT_VAULT_NAME)
-    prefix = os.environ.get(ENV_NOTE_PREFIX)
-    if prefix is None:
-        prefix = "memory/" if vault == DEFAULT_VAULT_NAME else ""
-    if confirm_note:
-        stem = confirm_note[:-3] if confirm_note.endswith(".md") else confirm_note
-    else:
-        # 汇总通知无对应笔记：落控制台门面（精确子目录路径 系统/控制台；
-        # 库名必须与实际一致——库名错了 Obsidian 静默退回最近打开页）
-        stem = f"{SYSTEM_DIRNAME}/控制台"
-    return f"obsidian://open?vault={quote(vault)}&file={quote(prefix + stem)}"
-
-
-def send_feishu(
-    title: str,
-    message: str,
-    chat_id: Optional[str] = None,
-    confirm_note: Optional[str] = None,
-    pin: bool = False,
-    pin_state: Optional[Path] = None,
-) -> bool:
-    """发一条飞书卡片推送；未配置或失败返回 False（绝不抛异常）。
-
-    卡片带「在 Obsidian 中打开」URI 按钮（纯客户端跳转，无回调）；
-    ``confirm_note`` 给定时追加两个 callback 按钮（value 均为 dict）：
-    「✅ 确认」（confirm_note：只删「待确认」标签）与「📁 归档…」
-    （archive_pick：先弹目录选择卡，点定后 archive_note 归档移动 +
-    删标签，见 FeishuBridge.handle_card_action）；
-    卡片发送失败时降级为纯文本消息再试一次。
-    ``pin=True`` 时发送成功把卡片置顶（晨报盘面第一眼可见），并先摘下
-    ``pin_state`` 登记表里的上一条（每日替换不堆积）；置顶失败只 log，
-    不影响发送结果。
-
-    Args:
-        title: 通知标题。
-        message: 通知正文（只放数量等非敏感信息）。
-        chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID`` 环境变量。
-        confirm_note: 待确认笔记文件名；None 不加确认/归档按钮。
-        pin: 发送成功后是否置顶该卡片。
-        pin_state: 置顶登记表（存上一条 message_id）；None 只置顶不替换。
-
-    Returns:
-        bool: 发送成功且服务端 success 返回 True。
-    """
-    app_id = os.environ.get(ENV_APP_ID, "").strip()
-    app_secret = os.environ.get(ENV_APP_SECRET, "").strip()
-    target = (chat_id or os.environ.get(ENV_CHAT_ID, "")).strip()
-    if not app_id or not app_secret or not target:
-        return False
-    try:
-        lark = _import_lark()
-        client = (
-            lark.Client.builder()
-            .app_id(app_id)
-            .app_secret(app_secret)
-            .build()
-        )
-        card = _confirm_action_card(title, message, confirm_note)
-        message_id = _send(client, target, "interactive", json.dumps(card))
-        if message_id is not None:
-            if pin and message_id:
-                _pin_card(client, message_id, pin_state)
-            return True
-        return _send(
-            client, target, "text", json.dumps({"text": f"{title}\n{message}"})
-        ) is not None
-    except Exception:  # noqa: BLE001 - 推送失败不影响主流程
-        return False
-
-
-def _confirm_action_card(
-    title: str, message: str, confirm_note: Optional[str]
-) -> Dict[str, Any]:
-    """确认卡 JSON：打开（URI）+ 可选「✅ 确认」「📁 归档…」callback 按钮。
-
-    「📁 归档…」先弹目录选择卡（archive_pick）——机器推导只作推荐项，
-    去处由人点定后才移动（archive_note 带 dir）；取消还原本卡。
-    send_feishu 推送与归档取消回调共用本组装器，避免两处卡片漂移。
-    """
-    actions = [
-        {
-            "tag": "button",
-            "text": {
-                "tag": "plain_text",
-                "content": "在 Obsidian 中打开",
-            },
-            "type": "primary",
-            "url": _console_url(confirm_note),
-        }
-    ]
-    if confirm_note:
-        actions.append(
-            {
-                "tag": "button",
-                "text": {"tag": "plain_text", "content": "✅ 确认"},
-                "type": "primary",
-                # 新版卡片 callback：value 直接放 JSON 对象（若放字符串，
-                # 回调时平台原样回传，SDK 校验 action.value 必须是 dict
-                # 会直接报错丢弃，回调永远到不了处理器）
-                "behaviors": [
-                    {
-                        "type": "callback",
-                        "value": {"action": CONFIRM_ACTION, "note": confirm_note},
-                    }
-                ],
-            }
-        )
-        actions.append(
-            {
-                "tag": "button",
-                "text": {"tag": "plain_text", "content": "📁 归档…"},
-                "type": "primary",
-                # 同上：value 必须是 dict（回调进 handle_card_action 的
-                # archive_pick 分支：先弹目录选择卡，点定才移动）
-                "behaviors": [
-                    {
-                        "type": "callback",
-                        "value": {
-                            "action": ARCHIVE_PICK_ACTION,
-                            "note": confirm_note,
-                        },
-                    }
-                ],
-            }
-        )
-    return {
-        "config": {"wide_screen_mode": True},
-        "header": {
-            "title": {"tag": "plain_text", "content": title},
-            "template": "blue",
-        },
-        "elements": [
-            {"tag": "div", "text": {"tag": "lark_md", "content": message}},
-            {"tag": "action", "actions": actions},
-        ],
-    }
-
-
-def prompt_form_card(title: str, intro: str, questions: List[str]) -> Dict[str, Any]:
-    """问答表单卡（schema 2.0 form 容器：逐问输入框，一次提交收齐）。
-
-    旧版卡片 schema 没有表单容器，故本卡用 ``"schema": "2.0"``；input
-    组件必须嵌在 form 内（卡片 2.0 约束）。提交按钮
-    ``action_type=form_submit``，回调进
-    ``FeishuBridge._handle_prompt_submit``：value 固定
-    ``{"action": "prompt_submit"}``，各问答案在 ``action.form_value``
-    的 ``q1..qN`` 键位（序 = questions 序）。发送与降级走通用的
-    send_feishu_card（header 结构与旧版一致，降级取标题不受影响）。
-
-    Args:
-        title: 卡片头标题。
-        intro: 表单前的说明文字（markdown）。
-        questions: 问题列表（最多 PROMPT_FORM_MAX_QUESTIONS 条，超出截断）。
-
-    Returns:
-        Dict[str, Any]: 卡片 JSON（schema 2.0）。
-    """
-    picked = [str(q) for q in questions[:PROMPT_FORM_MAX_QUESTIONS]]
-    inputs: List[Dict[str, Any]] = [
-        {
-            "tag": "input",
-            "name": f"q{index + 1}",
-            "required": False,
-            "width": "default",
-            "label": {"tag": "plain_text", "content": f"{index + 1}. {question}"},
-            "placeholder": {"tag": "plain_text", "content": "不想答可留空"},
-        }
-        for index, question in enumerate(picked)
-    ]
-    inputs.append(
-        {
-            "tag": "button",
-            "name": "submit",
-            "text": {"tag": "plain_text", "content": "提交回答"},
-            "type": "primary",
-            "action_type": "form_submit",
-            "behaviors": [
-                {"type": "callback", "value": {"action": PROMPT_SUBMIT_ACTION}}
-            ],
-        }
-    )
-    elements: List[Dict[str, Any]] = []
-    if intro:
-        elements.append({"tag": "markdown", "content": intro})
-    elements.append(
-        {
-            "tag": "form",
-            "name": "prompt_form",
-            "elements": inputs,
-        }
-    )
-    return {
-        "schema": "2.0",
-        "config": {"update_multi": True},
-        "header": {
-            "title": {"tag": "plain_text", "content": title},
-            "template": "blue",
-        },
-        "body": {"elements": elements},
-    }
-
-
-def send_feishu_card(
-    card: Dict[str, Any],
-    chat_id: Optional[str] = None,
-    app_id: Optional[str] = None,
-    app_secret: Optional[str] = None,
-) -> bool:
-    """发一张自定义交互卡片；未配置或失败返回 False（绝不抛异常）。
-
-    卡片发送失败时降级为纯文本（取卡片头标题）再试一次。
-
-    Args:
-        card: 卡片 JSON（legacy schema：header + elements）。
-        chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID`` 环境变量。
-        app_id / app_secret: 凭据覆盖；缺省读环境变量（桥实例传入自身凭据）。
-
-    Returns:
-        bool: 发送成功且服务端 success 返回 True。
-    """
-    app_id = (app_id or os.environ.get(ENV_APP_ID, "")).strip()
-    app_secret = (app_secret or os.environ.get(ENV_APP_SECRET, "")).strip()
-    target = (chat_id or os.environ.get(ENV_CHAT_ID, "")).strip()
-    if not app_id or not app_secret or not target:
-        return False
-    try:
-        lark = _import_lark()
-        client = (
-            lark.Client.builder()
-            .app_id(app_id)
-            .app_secret(app_secret)
-            .build()
-        )
-        if _send(client, target, "interactive", json.dumps(card)) is not None:
-            return True
-        title = card.get("header", {}).get("title", {}).get("content", "")
-        text = str(title) if title else "（卡片发送失败）"
-        return _send(client, target, "text", json.dumps({"text": text})) is not None
-    except Exception:  # noqa: BLE001 - 发卡失败不影响主流程
-        return False
-
-
-def send_todo_feishu(filename: str, chat_id: Optional[str] = None) -> bool:
-    """新待办提醒卡：「打开」（URI）+「✅ 已完成」（callback 删待办标签）。
-
-    待办笔记来自 TodoDispatcher 的行动项判定；点「已完成」回调
-    FeishuBridge._handle_todo_done（与「确认」同构的人工触发例外：
-    只删 frontmatter tags 里的「待办」一项，其余一概不动）。
-
-    Args:
-        filename: 待办笔记文件名（相对 memory/ 根）。
-        chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID``。
-
-    Returns:
-        bool: 发送成功返回 True（未配置静默 False）。
-    """
-    card = {
-        "config": {"wide_screen_mode": True},
-        "header": {
-            "title": {"tag": "plain_text", "content": "Atelierr 新待办"},
-            "template": "orange",
-        },
-        "elements": [
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": f"行动项判定产出：{filename}",
-                },
-            },
-            {
-                "tag": "action",
-                "actions": [
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "在 Obsidian 中打开"},
-                        "type": "primary",
-                        "url": _console_url(filename),
-                    },
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "✅ 已完成"},
-                        "type": "primary",
-                        "behaviors": [
-                            {
-                                "type": "callback",
-                                "value": {
-                                    "action": TODO_DONE_ACTION,
-                                    "note": filename,
-                                },
-                            }
-                        ],
-                    },
-                ],
-            },
-        ],
-    }
-    return send_feishu_card(card, chat_id)
-
-
-def send_resurface_feishu(
-    items: List[Dict[str, Any]], chat_id: Optional[str] = None
-) -> bool:
-    """今日复习卡：只给标题（先想），按钮才打开原文（再看）。
-
-    卡片刻意不含笔记内容——「先在心里回想，再点开核对」是间隔重复
-    的关键动作；想不起来的：值得就提炼进 wiki，不值得留给
-    review→purge。
-
-    Args:
-        items: 复习候选（ResurfaceManager.candidates() 的 dict：
-            title/relpath/idle_days）；逐条一个「打开」按钮，最多 5 条。
-        chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID``。
-
-    Returns:
-        bool: 发送成功返回 True；空队列/未配置静默 False。
-    """
-    if not items:
-        return False
-    elements: List[Dict[str, Any]] = [
-        {
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": "先在心里回想内容，再点「打开」核对。",
-            },
-        }
-    ]
-    for item in items[:5]:
-        elements.append(
-            {
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": (
-                        f"**{item.get('title') or item['relpath']}**"
-                        f"（闲置 {item.get('idle_days', '?')} 天）"
-                    ),
-                },
-            }
-        )
-        elements.append(
-            {
-                "tag": "action",
-                "actions": [
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": "打开"},
-                        "type": "primary",
-                        "url": _console_url(item["relpath"]),
-                    }
-                ],
-            }
-        )
-    card = {
-        "config": {"wide_screen_mode": True},
-        "header": {
-            "title": {"tag": "plain_text", "content": f"🔁 今日复习（{len(items[:5])}）"},
-            "template": "blue",
-        },
-        "elements": elements,
-    }
-    return send_feishu_card(card, chat_id)
-
-
-def _pin_card(
-    client: Any, message_id: str, pin_state: Optional[Path]
-) -> None:
-    """置顶一条卡片消息；先摘下登记表里的上一条。任何失败只 log。
-
-    登记表 JSON：{"message_id": <上一条置顶>}，用来每日替换不堆积。
-    """
-    lark = _import_lark()
-    previous = ""
-    if pin_state is not None and pin_state.exists():
-        try:
-            data = json.loads(pin_state.read_text(encoding="utf-8"))
-            previous = str(data.get("message_id") or "")
-        except (json.JSONDecodeError, OSError):
-            previous = ""
-    if previous:
-        try:
-            request = (
-                lark.api.im.v1.DeletePinRequest.builder()
-                .message_id(previous)
-                .build()
-            )
-            client.im.v1.pin.delete(request)
-        except Exception as exc:  # noqa: BLE001 - 摘旧置顶失败不阻塞新置顶
-            print(f"[feishu] unpin {previous} fail: {exc}", flush=True)
-    try:
-        body = (
-            lark.api.im.v1.CreatePinRequestBody.builder()
-            .message_id(message_id)
-            .build()
-        )
-        request = (
-            lark.api.im.v1.CreatePinRequest.builder().request_body(body).build()
-        )
-        if not client.im.v1.pin.create(request).success():
-            print(f"[feishu] pin {message_id} fail", flush=True)
-            return
-    except Exception as exc:  # noqa: BLE001 - 置顶失败不影响发送结果
-        print(f"[feishu] pin fail: {exc}", flush=True)
-        return
-    if pin_state is not None:
-        try:
-            write_json(pin_state, {"message_id": message_id})
-        except OSError as exc:
-            print(f"[feishu] pin state write fail: {exc}", flush=True)
-
-
-def _send(client: Any, chat_id: str, msg_type: str, content: str) -> Optional[str]:
-    """单发一条消息；成功返回 message_id（取不到返回 ""），失败返回 None。"""
-    lark = _import_lark()
-    body = (
-        lark.api.im.v1.CreateMessageRequestBody.builder()
-        .receive_id(chat_id)
-        .msg_type(msg_type)
-        .content(content)
-        .build()
-    )
-    request = (
-        lark.api.im.v1.CreateMessageRequest.builder()
-        .receive_id_type("chat_id")
-        .request_body(body)
-        .build()
-    )
-    response = client.im.v1.message.create(request)
-    if not response.success():
-        return None
-    data = getattr(response, "data", None)
-    message_id = getattr(data, "message_id", None) if data is not None else None
-    return str(message_id) if message_id else ""
