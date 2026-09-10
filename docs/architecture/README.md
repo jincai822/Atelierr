@@ -45,7 +45,7 @@ cp /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
 Atelierr 应用（后台管线，定时器无人值守）。两平面代码零互调，交接只走
 `$OV` 数据面；只读桥当前仅 `/weekly` 启用。
 
-**后台管线**（横向）：捕获入口（速记/链接/截图/录音/PDF）→ dispatch 分发
+**后台管线**（横向）：捕获入口（速记/链接/截图/录音/PDF/网页剪藏）→ dispatch 分发
 （15 分钟轮询，links→media→todos→highlights）→ processors 引擎
 （OCR/Whisper/LLM 摘要/LLM 划重点代读）→ memory/ 工作记忆（平面 .md
 缓冲区，会遗忘）→ wiki/ 知识总库。memory/ 根=收件箱；确认后归子目录
