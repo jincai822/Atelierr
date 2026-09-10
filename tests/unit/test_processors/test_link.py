@@ -856,3 +856,98 @@ def test_compress_480p_command_and_failure(monkeypatch, tmp_path):
     )
     dst2 = tmp_path / "out2.mp4"
     assert LinkProcessor._compress_to_480p(src, dst2) is False
+
+
+# ----------------------------------------------------------------------
+# B站平台适配（2026-09-10 用户裁决：只做 B站；yt-dlp 通道 + 限高下载）
+# ----------------------------------------------------------------------
+
+BILIBILI_URL = "https://www.bilibili.com/video/BV1xx411c7mD"
+
+
+def test_detect_platform_bilibili():
+    """B站域名识别：视频页 / b23 短链。"""
+    assert detect_platform(BILIBILI_URL) == "bilibili"
+    assert detect_platform("https://b23.tv/abc123") == "bilibili"
+    assert detect_platform("https://www.youtube.com/watch?v=x") is None
+
+
+def test_bilibili_process_success(fake_pipeline, monkeypatch):
+    """B站链接走 yt-dlp 通道：平台标签 B站、限高 480、视频按平台目录保存。"""
+    captured = {}
+
+    class _OptsYT(_FakeYoutubeDL):
+        def __init__(self, opts):
+            super().__init__(opts)
+            captured["opts"] = opts
+
+    monkeypatch.setattr(link_module.yt_dlp, "YoutubeDL", _OptsYT)
+    monkeypatch.setattr(
+        LinkProcessor,
+        "_compress_to_480p",
+        staticmethod(lambda src, dst: dst.write_bytes(b"480p") or True),
+    )
+
+    result = LinkProcessor().process(f"看看这个 {BILIBILI_URL}")
+
+    assert result.success, result.error
+    assert result.metadata["platform"] == "bilibili"
+    assert "> 来源：B站" in result.markdown
+    assert captured["opts"]["format"] == (
+        "bestvideo[height<=480]+bestaudio/bestvideo+bestaudio/best"
+    )
+    assert result.metadata["video_rel"].startswith("attachments/B站/B站-")
+    assert result.metadata["video_blob"] == b"480p"
+
+
+def test_douyin_download_has_no_format_cap(fake_pipeline, monkeypatch):
+    """抖音路径不加 format 限高（片源小，行为不变）。"""
+    captured = {}
+
+    class _OptsYT(_FakeYoutubeDL):
+        def __init__(self, opts):
+            super().__init__(opts)
+            captured["opts"] = opts
+
+    monkeypatch.setattr(link_module.yt_dlp, "YoutubeDL", _OptsYT)
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "format" not in captured["opts"]
+
+
+def test_small_source_kept_original(fake_pipeline, monkeypatch):
+    """片源已 ≤480p：跳过重编码直接存原件（省一次有损转码+防胀大）。"""
+    monkeypatch.setattr(LinkProcessor, "_probe_height", staticmethod(lambda p: 360))
+    compress_calls = []
+    monkeypatch.setattr(
+        LinkProcessor,
+        "_compress_to_480p",
+        staticmethod(lambda s, d: compress_calls.append(1) or True),
+    )
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert compress_calls == []  # 未调压缩
+    assert result.metadata["video_blob"] == b"fake video bytes"  # 原件字节
+
+
+def test_probe_height_parses_video_stream(monkeypatch, tmp_path):
+    """_probe_height：从 ffprobe JSON 取 video 流高度；异常/无流返回 None。"""
+    import json as _json
+
+    class _Proc:
+        stdout = _json.dumps(
+            {"streams": [{"codec_type": "audio"}, {"codec_type": "video", "height": 1080}]}
+        )
+
+    monkeypatch.setattr(link_module.subprocess, "run", lambda *a, **k: _Proc())
+    assert LinkProcessor._probe_height(tmp_path / "x.mp4") == 1080
+
+    class _BadProc:
+        stdout = "not json"
+
+    monkeypatch.setattr(link_module.subprocess, "run", lambda *a, **k: _BadProc())
+    assert LinkProcessor._probe_height(tmp_path / "x.mp4") is None

@@ -1,9 +1,9 @@
-"""链接抓取处理器（抖音/小红书：分享文本 → 视频下载 → Whisper 转写）。
+"""链接抓取处理器（抖音/小红书/B站：分享文本 → 视频下载 → Whisper 转写）。
 
 与其他处理器不同，``process()`` 的 ``input_path`` 形参承载的是**一段
 分享文本或 URL**，不是文件路径。流程：提取 URL → 识别平台 →
-下载视频到临时目录 → 复用 :class:`VideoProcessor` 转写 →
-组装带来源行的 Markdown → 清理临时文件。
+下载视频到临时目录（B站长视频限高 480p 防大文件）→ 复用
+:class:`VideoProcessor` 转写 → 组装带来源行的 Markdown → 清理临时文件。
 
 输出格式（v4）：标题 + 来源行 +（视频笔记内嵌 480p 原视频）+ 观点总结 /
 分观点论述 / 金句摘录 / 提到的人·书·概念（LLM 生成，附中图法分类与主题词，
@@ -74,6 +74,15 @@ _XHS_HOSTS: Tuple[str, ...] = (
     "www.xiaohongshu.com",
     "xiaohongshu.com",
 )
+
+#: B站域名（视频页 / b23 短链；2026-09-10 用户裁决：只做 B站，YouTube 进 backlog）
+_BILIBILI_HOSTS: Tuple[str, ...] = (
+    "bilibili.com",
+    "b23.tv",
+)
+
+#: B站下载限高（长视频防大下载；480p 与保存规格一致，够 Whisper 用）
+_BILIBILI_MAX_HEIGHT = 480
 
 #: 小红书页面抓取用的手机 UA（桌面 UA 会被短链 404 / 详情页风控）
 _XHS_UA = (
@@ -236,7 +245,7 @@ def detect_platform(url: str) -> Optional[str]:
         url: 完整 URL。
 
     Returns:
-        Optional[str]: "douyin" / "xhs" 或 None（不支持的平台）。
+        Optional[str]: "douyin" / "xhs" / "bilibili" 或 None（不支持的平台）。
     """
     for host in _DOUYIN_HOSTS:
         if host in url:
@@ -244,6 +253,9 @@ def detect_platform(url: str) -> Optional[str]:
     for host in _XHS_HOSTS:
         if host in url:
             return "xhs"
+    for host in _BILIBILI_HOSTS:
+        if host in url:
+            return "bilibili"
     return None
 
 
@@ -346,15 +358,19 @@ class LinkProcessor(BaseProcessor):
         if url is None:
             return self._fail("未找到链接：请粘贴分享文本或 URL")
         platform = detect_platform(url)
-        if platform not in ("douyin", "xhs"):
-            return self._fail(f"暂不支持的平台（已支持: 抖音、小红书）: {url}")
+        if platform not in ("douyin", "xhs", "bilibili"):
+            return self._fail(f"暂不支持的平台（已支持: 抖音、小红书、B站）: {url}")
 
         share_title, share_author = _parse_share_text(text)
         download_dir = tempfile.mkdtemp(prefix="atelierr-link-")
         try:
             if platform == "xhs":
                 return self._process_xhs(url, download_dir)
-            video_path, info, error = self._download(url, download_dir)
+            # B站长视频限高下载（防大文件）；抖音按原路径（片源小）
+            max_height = _BILIBILI_MAX_HEIGHT if platform == "bilibili" else None
+            video_path, info, error = self._download(
+                url, download_dir, max_height=max_height
+            )
             if error is not None:
                 return self._fail(error)
             video_result = VideoProcessor({"model": self.model}).process(video_path)
@@ -362,12 +378,13 @@ class LinkProcessor(BaseProcessor):
                 return self._fail(video_result.error or "视频转写失败")
             title = str(info.get("title") or "").strip() or share_title
             author = str(info.get("uploader") or "").strip() or share_author
+            source_label = "B站" if platform == "bilibili" else "抖音"
             transcript_text = _T2S.convert(video_result.text).strip()
             summary, llm_status = self._summarize(transcript_text)
             formatted, fmt_status = self._format_transcript(transcript_text)
             doc_id = str(info.get("id") or "")
             video_rel, video_blob = self._preserve_video(
-                video_path, "抖音", title, doc_id
+                video_path, source_label, title, doc_id
             )
             markdown = self._build_markdown(
                 title or (video_path.stem if video_path else "link"),
@@ -375,6 +392,7 @@ class LinkProcessor(BaseProcessor):
                 url,
                 video_result.markdown,
                 summary,
+                source_label=source_label,
                 body_override=formatted,
                 video_rel=video_rel,
             )
@@ -566,7 +584,7 @@ class LinkProcessor(BaseProcessor):
         return None
 
     def _download(
-        self, url: str, download_dir: str
+        self, url: str, download_dir: str, max_height: Optional[int] = None
     ) -> Tuple[Optional[Path], Dict[str, Any], Optional[str]]:
         """用 yt-dlp 下载视频到临时目录，cookie 失效时自动刷新重试一次。
 
@@ -577,6 +595,7 @@ class LinkProcessor(BaseProcessor):
         Args:
             url: 视频 URL。
             download_dir: 临时目录路径。
+            max_height: 限高下载（如 B站长视频传 480 防大文件；None 不限制）。
 
         Returns:
             Tuple[Optional[Path], Dict[str, Any], Optional[str]]:
@@ -585,12 +604,14 @@ class LinkProcessor(BaseProcessor):
         cookies: Optional[Tuple[str, ...]] = (
             (self.cookies_browser,) if self.cookies_browser else None
         )
-        video_path, info, error = self._download_attempt(url, download_dir, cookies)
+        video_path, info, error = self._download_attempt(
+            url, download_dir, cookies, max_height=max_height
+        )
         if error and "cookie" in error.lower() and self._refresh_cookies(url):
             profile = str(self._profile_dir() / "Default")
             cookies = (self.cookies_browser or "chrome", profile)
             video_path, info, error = self._download_attempt(
-                url, download_dir, cookies
+                url, download_dir, cookies, max_height=max_height
             )
         if error:
             return None, {}, error
@@ -601,6 +622,7 @@ class LinkProcessor(BaseProcessor):
         url: str,
         download_dir: str,
         cookies: Optional[Tuple[str, ...]],
+        max_height: Optional[int] = None,
     ) -> Tuple[Optional[Path], Dict[str, Any], Optional[str]]:
         """单次下载尝试。
 
@@ -608,6 +630,8 @@ class LinkProcessor(BaseProcessor):
             url: 视频 URL。
             download_dir: 临时目录路径。
             cookies: yt-dlp cookiesfrombrowser 元组（None 表示不带）。
+            max_height: 限高（format 选择 best[height<=N]，片源无高度
+                元数据时回退 best）。
 
         Returns:
             Tuple[Optional[Path], Dict[str, Any], Optional[str]]:
@@ -618,7 +642,16 @@ class LinkProcessor(BaseProcessor):
             "quiet": True,
             "no_warnings": True,
             "socket_timeout": 30,
+            # B站多分 P 视频只取当前这一集（不整季打包）
+            "noplaylist": True,
         }
+        if max_height:
+            # B站音视频 DASH 分离（无合并的 best 单文件），须 video+audio
+            # 组合选择；片源无高度元数据时回退不限高组合（2026-09-10 实测）
+            options["format"] = (
+                f"bestvideo[height<={max_height}]+bestaudio"
+                "/bestvideo+bestaudio/best"
+            )
         if cookies:
             options["cookiesfrombrowser"] = cookies
         try:
@@ -946,12 +979,41 @@ class LinkProcessor(BaseProcessor):
         rel = self._video_rel(source_label, title, doc_id)
         payload = video_path
         compressed = video_path.with_name(f"{video_path.stem}-480p.mp4")
-        if self._compress_to_480p(video_path, compressed):
+        height = self._probe_height(video_path)
+        if height is not None and height <= 480:
+            # 片源已 ≤480p：保留原件（重编码既胀大文件又多一次有损，2026-09-10
+            # B站 480p 实测 10MB→15MB 的教训；G2 的意图是省磁盘不是为压而压）
+            payload = video_path
+        elif self._compress_to_480p(video_path, compressed):
             payload = compressed
         try:
             return rel, payload.read_bytes()
         except OSError:
             return None, None
+
+    @staticmethod
+    def _probe_height(video_path: Path) -> Optional[int]:
+        """ffprobe 取视频高度（px）；探测失败返回 None（调用方按未知处理）。"""
+        command = [
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_streams",
+            str(video_path),
+        ]
+        try:
+            proc = subprocess.run(
+                command, capture_output=True, timeout=30, check=False
+            )
+            streams = json.loads(proc.stdout or "{}").get("streams") or []
+            for stream in streams:
+                if stream.get("codec_type") == "video" and stream.get("height"):
+                    return int(stream["height"])
+        except Exception:  # noqa: BLE001 - 探测失败按未知高度处理
+            return None
+        return None
 
     @staticmethod
     def _video_rel(source_label: str, title: str, doc_id: str) -> str:

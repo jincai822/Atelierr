@@ -48,7 +48,7 @@ MAX_ATTEMPTS = 3
 REVIEW_TAG = "待确认"
 
 #: 分发支持的平台 → 产出笔记的平台标签
-_PLATFORM_TAGS = {"douyin": "抖音", "xhs": "小红书"}
+_PLATFORM_TAGS = {"douyin": "抖音", "xhs": "小红书", "bilibili": "B站"}
 
 #: 自动产出笔记的 source 值；这类笔记是"产出"不是"输入"，其中的来源行
 #: 链接不再回收（短链与落地页 URL 字符串不同，仅靠状态去重挡不住自我循环，

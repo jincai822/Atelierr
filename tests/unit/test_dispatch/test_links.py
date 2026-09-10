@@ -408,3 +408,30 @@ def test_extract_comment_helper():
     assert extract_comment("看看这个", "https://x.com") == ""
     long_body = f"评{'论' * 300}\n{DOUYIN_URL}"
     assert len(extract_comment(long_body, DOUYIN_URL)) == 200
+
+
+BILIBILI_URL = "https://www.bilibili.com/video/BV1xx411c7mD"
+
+
+def test_processes_bilibili_link(memory_tree):
+    """B站链接 → 产出笔记带「待确认/B站」标签，文件名 B站-标题.md。"""
+    memory_tree.create_note("daily.md", f"学习下 {BILIBILI_URL}", source="test")
+
+    class _BiliProcessor:
+        def process(self, url):
+            return ProcessResult(
+                success=True,
+                text="转写",
+                markdown="# t",
+                confidence=0.9,
+                metadata={"video_id": "BV1xx", "title": "认知科学入门"},
+            )
+
+    report = LinkDispatcher(memory_tree, processor_factory=_BiliProcessor).run()
+
+    assert report["created"] == ["B站-认知科学入门.md"]
+    created = memory_tree.notes_dir / "B站-认知科学入门.md"
+    assert created.exists()
+    post = frontmatter.loads(created.read_text(encoding="utf-8"))
+    assert post["tags"] == ["待确认", "B站"]
+    assert post["source"] == "link"
