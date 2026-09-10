@@ -10,7 +10,9 @@
   OCR/转写；语音存 .ogg 走 Whisper，与截图同路）；
 - 捕获成功给原消息加 ✅ 表情回执（不占气泡的轻确认；回执失败只
   log，绝不影响捕获）；捕获失败才发文字反馈；
-- 幂等：message_id 登记 ``<state_dir>/feishu_messages.json``。
+- 幂等：message_id 登记 ``<state_dir>/feishu_messages.json``；
+- 单租户加固：首个互动者（或 ``FEISHU_USER_ID``）即主人，已识别
+  主人后，其他人的消息与按钮点击一律忽略（先到先得，不换绑）。
 
 发送（系统 → 飞书）：
 - 推送规则：只在"用户不知道的事"发生时提醒（链接/OCR
@@ -242,14 +244,24 @@ class FeishuBridge:
             content = json.loads(message.content or "{}")
         except (AttributeError, json.JSONDecodeError, TypeError):
             return
-        # 顺带识别用户 open_id（任务/日历等 API 需要；零额外权限）
-        from scripts.dispatch.task_sync import record_user_open_id, sender_open_id
+        # 顺带识别用户 open_id（任务/日历等 API 需要；零额外权限）；
+        # 已识别主人后，其他人的消息一律忽略（单租户个人机器人加固）
+        from scripts.dispatch.task_sync import (
+            load_user_open_id,
+            record_user_open_id,
+            sender_open_id,
+        )
 
         open_id = sender_open_id(getattr(data.event, "sender", None))
-        if open_id:
-            record_user_open_id(self.tree.state_dir, open_id)
         if self._seen(message_id):
             return
+        known = load_user_open_id(self.tree.state_dir)
+        if known and open_id and open_id != known:
+            print(f"[feishu] ignore foreign sender {open_id}", flush=True)
+            self._mark_seen(message_id)
+            return
+        if open_id:
+            record_user_open_id(self.tree.state_dir, open_id)
         # 日志带 chat_id：往机器人发一条消息即可从 feishu.log 读到推送目标
         print(
             f"[feishu] {msg_type} chat={getattr(message, 'chat_id', '?')} "
@@ -296,10 +308,22 @@ class FeishuBridge:
         action_name = str(value.get("action") or "")
         filename = str(value.get("note") or "").strip()
         chat_id = self._event_chat_id(data)
-        # 顺带识别用户 open_id（回调 operator 带身份，零额外权限）
-        from scripts.dispatch.task_sync import record_user_open_id, sender_open_id
+        # 顺带识别用户 open_id（回调 operator 带身份，零额外权限）；
+        # 已识别主人后，其他人的按钮点击一律忽略（单租户加固）
+        from scripts.dispatch.task_sync import (
+            load_user_open_id,
+            record_user_open_id,
+            sender_open_id,
+        )
 
         open_id = sender_open_id(getattr(data.event, "operator", None))
+        known = load_user_open_id(self.tree.state_dir)
+        if known and open_id and open_id != known:
+            print(
+                f"[feishu] ignore action from foreign operator {open_id}",
+                flush=True,
+            )
+            return {}
         if open_id:
             record_user_open_id(self.tree.state_dir, open_id)
         if action_name == CONFIRM_ACTION:

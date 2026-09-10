@@ -228,3 +228,10 @@ def test_cli_todos_creates_feishu_task(memory_tree, tmp_path, monkeypatch):
     assert filename.startswith("todo-")
     assert title == "交周报"
     assert due == "2026-09-12"
+
+
+def test_record_open_id_first_writer_wins(state_dir):
+    """先到先得：已有主人后，其他身份不覆盖（单租户加固）。"""
+    record_user_open_id(state_dir, "ou_owner")
+    record_user_open_id(state_dir, "ou_stranger")
+    assert load_user_open_id(state_dir) == "ou_owner"

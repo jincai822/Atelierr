@@ -1782,3 +1782,67 @@ def test_todo_done_task_hook_failure_still_succeeds(memory_tree, monkeypatch):
         _card_action({"action": "todo_done", "note": "todo-y.md"})
     )
     assert resp["toast"]["type"] == "success"
+
+
+def test_foreign_sender_message_ignored(memory_tree):
+    """已识别主人后：其他人的消息不捕获（登记 seen 防重投）。"""
+    from scripts.dispatch.task_sync import record_user_open_id
+
+    record_user_open_id(memory_tree.state_dir, "ou_owner")
+    bridge = _bridge(memory_tree)
+    event = _event("m-foreign", "text", {"text": "陌生人的消息"})
+    event.event.sender = SimpleNamespace(
+        sender_id=SimpleNamespace(open_id="ou_stranger")
+    )
+    bridge.handle_event(event)
+
+    assert not list(memory_tree.notes_dir.glob("feishu-*.md"))
+
+
+def test_owner_sender_message_accepted(memory_tree):
+    """主人本人的消息照常捕获。"""
+    from scripts.dispatch.task_sync import record_user_open_id
+
+    record_user_open_id(memory_tree.state_dir, "ou_owner")
+    bridge = _bridge(memory_tree)
+    event = _event("m-owner", "text", {"text": "主人的消息"})
+    event.event.sender = SimpleNamespace(
+        sender_id=SimpleNamespace(open_id="ou_owner")
+    )
+    bridge.handle_event(event)
+
+    assert len(list(memory_tree.notes_dir.glob("feishu-*.md"))) == 1
+
+
+def test_foreign_operator_action_ignored(memory_tree):
+    """已识别主人后：其他人点按钮不生效（笔记标签原样保留）。"""
+    from scripts.dispatch.task_sync import record_user_open_id
+
+    record_user_open_id(memory_tree.state_dir, "ou_owner")
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("x.md", "正文\n", source="link", tags=["待确认"])
+    event = _card_action({"action": "confirm_note", "note": "x.md"})
+    event.event.operator = SimpleNamespace(open_id="ou_stranger")
+
+    resp = bridge.handle_card_action(event)
+
+    assert resp == {}
+    post = frontmatter.loads(
+        (memory_tree.notes_dir / "x.md").read_text(encoding="utf-8")
+    )
+    assert "待确认" in post.metadata["tags"]
+
+
+def test_owner_operator_action_accepted(memory_tree):
+    """主人本人点按钮照常生效。"""
+    from scripts.dispatch.task_sync import record_user_open_id
+
+    record_user_open_id(memory_tree.state_dir, "ou_owner")
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("y.md", "正文\n", source="link", tags=["待确认"])
+    event = _card_action({"action": "confirm_note", "note": "y.md"})
+    event.event.operator = SimpleNamespace(open_id="ou_owner")
+
+    resp = bridge.handle_card_action(event)
+
+    assert resp["toast"]["type"] == "success"

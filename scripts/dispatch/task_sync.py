@@ -42,13 +42,16 @@ TASKS_FILENAME = "feishu_tasks.json"
 def record_user_open_id(state_dir: Path, open_id: str) -> None:
     """缓存用户 open_id（事件 sender/operator 里带来，零额外权限）。
 
-    已缓存同值时不写盘（每条消息都触发，避免无意义 IO）；失败只 log。
+    **先到先得**：已有缓存值时不覆盖——单租户个人机器人，第一个互动者
+    即主人；之后的异常身份（群聊混入、误发）改不动主人归属。换绑只能
+    手工删 state 文件或配 ``FEISHU_USER_ID``（环境变量读取优先级更高）。
+    失败只 log。
     """
     open_id = str(open_id or "").strip()
     if not open_id:
         return
     path = Path(state_dir) / ACCOUNT_FILENAME
-    if load_user_open_id(state_dir, use_env=False) == open_id:
+    if load_user_open_id(state_dir, use_env=False) is not None:
         return
     try:
         write_json(path, {"user_open_id": open_id})
