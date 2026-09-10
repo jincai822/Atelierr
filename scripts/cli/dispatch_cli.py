@@ -45,6 +45,7 @@ from scripts.dispatch.prompt import PromptStore
 from scripts.dispatch.todos import TodoDispatcher
 from scripts.memory.core import MemoryTree
 from scripts.memory.resurface import ResurfaceManager
+from scripts.processors.base import load_processor_config
 
 DEFAULT_ROOT = "~/atelierr-data/memory"
 DEFAULT_STATE_DIR = "~/atelierr-data/state"
@@ -369,12 +370,17 @@ class DispatchCLI:
                 if not locked:
                     click.echo("已有分发任务在运行，本次跳过")
                     return
-                report = MediaDispatcher(tree).run(dry_run=dry_run)
+                inbox = load_processor_config("media").get("screenshot_inbox") or None
+                report = MediaDispatcher(tree, screenshot_inbox=inbox).run(
+                    dry_run=dry_run
+                )
                 click.echo(
                     f"扫描 {report['scanned']} 个附件，"
                     f"新发现 {report['found']} 个，"
                     f"跳过已处理 {report['skipped']} 个"
                 )
+                if report.get("imported"):
+                    click.echo(f"  截图专用夹导入: {report['imported']} 张")
                 for filename in report["created"]:
                     # 划重点清单不带"待确认"（确认动作在勾中项转出的笔记上）；
                     # 清单在 系统/ 下（created 带前缀），按文件名判断

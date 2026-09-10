@@ -34,7 +34,9 @@ Obsidian 里图片直接显示、录音直接可播）→ 正文同时进入 tod
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
+import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,6 +51,8 @@ from scripts.processors.audio import AudioProcessor
 from scripts.processors.highlights import HighlightsProcessor
 from scripts.processors.image import SUPPORTED_EXTENSIONS as IMAGE_EXTS
 from scripts.processors.image import ImageProcessor
+
+logger = logging.getLogger(__name__)
 
 #: 单个附件的最大处理尝试次数（超限标记 failed）
 MAX_ATTEMPTS = 3
@@ -152,6 +156,39 @@ class MediaDispatcher:
         if not dry_run:
             self._save_state(state)
         return report
+
+    def _import_inbox(self, report: Dict[str, Any], dry_run: bool) -> None:
+        """截图专用文件夹导入：把里面的图片**复制**进 attachments/媒体/。
+
+        用户裁决 E4（2026-09-10）：系统只认这个专用文件夹——用户拖进来
+        （或 flameshot 直接存进来）的截图才进系统，其他截图一概不碰。
+        复制不移动（原图留原地）；copy2 保留 mtime（刚截的图 mtime 太新
+        会被 30s 防半文件守卫推到下一轮，与同步来的文件同一语义）；
+        同名已存在跳过（绝不覆盖原件）；只认图片扩展名。
+        """
+        if not self._inbox:
+            return
+        inbox = Path(self._inbox).expanduser()
+        if not inbox.is_dir():
+            return
+        dest_dir = Path(self.tree.notes_dir) / ATTACHMENTS_DIR / MEDIA_SUBDIR
+        for path in sorted(inbox.iterdir()):
+            if not path.is_file() or path.name.startswith("."):
+                continue
+            if path.suffix.lower() not in IMAGE_EXTS:
+                continue
+            dest = dest_dir / path.name
+            if dest.exists():
+                continue
+            report["imported"] += 1
+            if dry_run:
+                continue
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.copy2(path, dest)
+            except OSError as exc:
+                logger.warning("截图导入失败 %s: %s", path, exc)
+                report["imported"] -= 1
 
     def _collect_files(self, report: Dict[str, Any]) -> List[Path]:
         """列出 attachments/ 顶层与一层子目录下全部可处理附件（按 mtime 升序）。

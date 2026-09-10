@@ -166,6 +166,7 @@ def test_missing_attachments_dir_noop(memory_tree):
 
     assert report == {
         "scanned": 0, "found": 0, "created": [], "failed": [], "skipped": 0,
+        "imported": 0,
     }
 
 
@@ -275,3 +276,101 @@ def test_video_in_platform_dir_ignored(memory_tree):
     assert report["found"] == 0
     assert _FakeImageProcessor.calls == []
     assert _FakeAudioProcessor.calls == []
+
+
+# ----------------------------------------------------------------------
+# 截图专用文件夹导入（2026-09-10 用户裁决 E4：只认专用夹，复制不移动）
+# ----------------------------------------------------------------------
+
+
+def _make_inbox(tmp_path, files=("shot_a.png",)):
+    """造一个截图专用文件夹，放入指定文件并回拨 mtime。"""
+    inbox = tmp_path / "进系统"
+    inbox.mkdir()
+    for name in files:
+        path = inbox / name
+        path.write_bytes(b"\x89PNG inbox-bytes")
+        old = time.time() - 120
+        os.utime(path, (old, old))
+    return inbox
+
+
+def test_inbox_imports_images(memory_tree, tmp_path):
+    """专用夹里的截图：复制进 attachments/媒体/ 并同轮 OCR；原图留原地。"""
+    inbox = _make_inbox(tmp_path)
+    dispatcher = MediaDispatcher(
+        memory_tree,
+        image_factory=_FakeImageProcessor,
+        audio_factory=_FakeAudioProcessor,
+        screenshot_inbox=str(inbox),
+    )
+
+    report = dispatcher.run()
+
+    assert report["imported"] == 1
+    assert report["found"] == 1
+    copied = memory_tree.notes_dir / "attachments" / "媒体" / "shot_a.png"
+    assert copied.read_bytes() == b"\x89PNG inbox-bytes"
+    assert (inbox / "shot_a.png").exists()  # 复制不移动
+    note = _created_note(memory_tree)
+    post = frontmatter.loads(note.read_text(encoding="utf-8"))
+    assert "![[attachments/媒体/shot_a.png]]" in post.content
+
+
+def test_inbox_only_images_and_no_overwrite(memory_tree, tmp_path):
+    """非图片不导入；目标已存在绝不覆盖（同内容重跑幂等）。"""
+    inbox = _make_inbox(tmp_path, files=("shot_b.png", "notes.txt", ".hidden.png"))
+    dest = memory_tree.notes_dir / "attachments" / "媒体" / "shot_b.png"
+    dest.parent.mkdir(parents=True)
+    dest.write_bytes(b"existing")
+    dispatcher = MediaDispatcher(
+        memory_tree,
+        image_factory=_FakeImageProcessor,
+        audio_factory=_FakeAudioProcessor,
+        screenshot_inbox=str(inbox),
+    )
+
+    report = dispatcher.run()
+
+    assert report["imported"] == 0
+    assert dest.read_bytes() == b"existing"
+
+
+def test_inbox_missing_dir_noop(memory_tree):
+    """专用夹不存在：静默跳过（不报错、不导入）。"""
+    dispatcher = MediaDispatcher(
+        memory_tree,
+        image_factory=_FakeImageProcessor,
+        audio_factory=_FakeAudioProcessor,
+        screenshot_inbox="/nonexistent/进系统",
+    )
+
+    report = dispatcher.run()
+
+    assert report["imported"] == 0
+    assert report["found"] == 0
+
+
+def test_inbox_dry_run_no_copy(memory_tree, tmp_path):
+    """dry-run：报告将导入的数量但不复制、不处理。"""
+    inbox = _make_inbox(tmp_path)
+    dispatcher = MediaDispatcher(
+        memory_tree,
+        image_factory=_FakeImageProcessor,
+        audio_factory=_FakeAudioProcessor,
+        screenshot_inbox=str(inbox),
+    )
+
+    report = dispatcher.run(dry_run=True)
+
+    assert report["imported"] == 1
+    assert not (memory_tree.notes_dir / "attachments" / "媒体").exists()
+
+
+def test_inbox_disabled_by_default(memory_tree, tmp_path):
+    """未配置专用夹：不导入（默认行为不变）。"""
+    _make_inbox(tmp_path)  # 与 memory_tree 无关的目录，不应被读到
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["imported"] == 0

@@ -55,6 +55,9 @@ DEFAULT_CONFIGS: Dict[str, Dict[str, Any]] = {
     "wechat": {
         "input_format": "txt",
     },
+    "media": {
+        "screenshot_inbox": "",
+    },
     "batch": {
         "workers": 4,
     },

@@ -97,5 +97,11 @@ processors:
   wechat:                 # backlog：导出格式不稳定，不在 MVP/完整版验收范围
     input_format: txt     # 微信导出格式
 
+  media:
+    screenshot_inbox: ""  # 截图专用文件夹（2026-09-10 用户裁决）：只把该
+                          # 文件夹里的图片复制进 attachments/媒体/（复制不
+                          # 移动，其他截图一概不碰）；空串=不启用。
+                          # 启用示例：~/图片/进系统/
+
   batch:
     workers: 4            # 批量处理并行数
