@@ -545,6 +545,22 @@ class DispatchCLI:
                 # 今日复习卡：只给标题（先想），按钮才打开原文（再看）
                 send_resurface_feishu(report["review"])
 
+        @cli.command(name="stats")
+        @click.option(
+            "--days",
+            default=7,
+            show_default=True,
+            help="统计窗口天数（含今天）",
+        )
+        def stats_command(days: int) -> None:
+            """打印捕获统计（各入口条数/确认率/wiki 沉淀数；只读）。"""
+            from scripts.dispatch.stats import capture_stats, render_weekly_stats
+
+            tree = self._build_tree()
+            stats = capture_stats(tree, days=days)
+            for line in render_weekly_stats(stats):
+                click.echo(line)
+
         @cli.command(name="board")
         def board_command() -> None:
             """同步知识库看板（飞书多维表格）一轮：全量笔记元数据单向上行。"""

@@ -19,7 +19,10 @@
 - 今日复习：遗忘临界区内的笔记（ResurfaceManager，decay 的反面；
   检索式推送——只列标题，提示"先回忆再点开"，点开看一眼即重置时钟，
   确认无价值的留给 review→purge，值得留存的提炼进 wiki/）；
-- 昨日新入库：frontmatter created 日期为昨天的笔记；
+- 昨日新入库：frontmatter created 日期为昨天的笔记（附入口分布一行，
+  捕获统计见 scripts/dispatch/stats.py）；
+- 本周捕获统计（仅周日）：近 7 天各入口捕获条数、确认率、wiki 沉淀数
+  （2026-09-10 用户裁决 D1「都放」；只读聚合，不新增写入面）；
 - 系统自检：各定时器活性——它们全是"跑了就写 state"的模型，
   状态文件 mtime 新鲜 = 班次活着；沉默超阈值 = 定时器疑似停了
   （systemd 不会主动来告诉你），异常项数同步进推送文案。
@@ -48,6 +51,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import frontmatter
 
 from scripts.dispatch.response_probe import ResponseProbe
+from scripts.dispatch.stats import (
+    capture_stats,
+    render_capture_line,
+    render_weekly_stats,
+)
 from scripts.dispatch.sysdir import SYSTEM_DIRNAME, write_machine_note
 from scripts.memory.core import LAYERS, SYNC_CONFLICT_RE, MemoryTree
 from scripts.memory.resurface import ResurfaceManager
@@ -182,9 +190,23 @@ class DigestDispatcher:
         undistilled = self._distill_candidates(wiki, today)
         wiki_issues = wiki.validate()
         health, health_stale = _health_lines(Path(self.tree.state_dir))
+        # 捕获统计（裁决 D1）：昨日入口分布一行；周日加本周详细节
+        yesterday = (
+            datetime.strptime(today, "%Y-%m-%d") - timedelta(days=1)
+        ).strftime("%Y-%m-%d")
+        capture_line = render_capture_line(
+            capture_stats(self.tree, days=1, today=yesterday)
+        )
+        is_sunday = datetime.strptime(today, "%Y-%m-%d").weekday() == 6
+        weekly_lines = (
+            render_weekly_stats(capture_stats(self.tree, days=7, today=today))
+            if is_sunday
+            else None
+        )
         markdown = self._build(
             today, pending, todos, review_stems, yesterday_new,
             undistilled, wiki_issues, health, health_stale,
+            capture_line=capture_line, weekly_lines=weekly_lines,
         )
         created = None
         if not dry_run:
@@ -306,11 +328,14 @@ class DigestDispatcher:
         wiki_issues: List[Dict[str, Any]],
         health: List[str],
         health_stale: int,
+        capture_line: Optional[str] = None,
+        weekly_lines: Optional[List[str]] = None,
     ) -> str:
         """组装摘要 Markdown（空节显示"无"）。
 
         undistilled 同时写进 frontmatter（控制台 Dataview 桥接——
-        sidecar 里的推送观测数据 Dataview 看不见）。
+        sidecar 里的推送观测数据 Dataview 看不见）。capture_line 是昨日
+        捕获入口分布一行；weekly_lines 仅周日传入（本周捕获统计详细节）。
         """
 
         def _lines(items: List[str]) -> List[str]:
@@ -353,9 +378,17 @@ class DigestDispatcher:
         sections += [
             f"## 📥 昨日新入库（{len(yesterday_new)}）",
             "",
+        ]
+        if capture_line:
+            sections += [f"> {capture_line}", ""]
+        sections += [
             *_lines(yesterday_new),
             "",
         ]
+        if weekly_lines:
+            sections += ["## 📊 本周捕获统计", ""]
+            sections += weekly_lines
+            sections += [""]
         header = (
             f"## 🩺 系统自检（{health_stale} 项异常）"
             if health_stale
