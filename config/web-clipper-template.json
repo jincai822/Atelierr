@@ -1,0 +1,36 @@
+{
+	"schemaVersion": "0.1.0",
+	"name": "Atelierr 剪藏",
+	"behavior": "create",
+	"noteContentFormat": "> 原文：{{url}}\n> 站点：{{site}} · 作者：{{author}}\n\n## 正文\n\n{{content}}\n",
+	"properties": [
+		{
+			"name": "title",
+			"value": "{{title}}",
+			"type": "text"
+		},
+		{
+			"name": "source",
+			"value": "webclip",
+			"type": "text"
+		},
+		{
+			"name": "tags",
+			"value": "剪藏, 待确认",
+			"type": "multitext"
+		},
+		{
+			"name": "url",
+			"value": "{{url}}",
+			"type": "text"
+		},
+		{
+			"name": "created",
+			"value": "{{date|date:\\\"YYYY-MM-DDTHH:mm:ssZ\\\"}}",
+			"type": "date"
+		}
+	],
+	"triggers": [],
+	"noteNameFormat": "clip-{{date|date:\"YYYY-MM-DD\"}}-{{title|safe_name}}",
+	"path": "memory/"
+}
