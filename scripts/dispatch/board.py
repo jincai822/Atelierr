@@ -104,6 +104,11 @@ class BoardSync:
         app_token = state.get("app_token") or self._ensure_app(lark, client, state)
         if not app_token:
             return None
+        if not state.get("shared"):
+            # 建应用时没认出你（未共享）；现在认出就补共享，不用手工重建
+            if self._share_app(lark, client, str(app_token)):
+                state["shared"] = True
+                self._save_state(state)
         table_id = state.get("table_id") or self._ensure_table(
             lark, client, state, app_token
         )
@@ -152,20 +157,24 @@ class BoardSync:
             if not app_token:
                 return None
             state["app_token"] = str(app_token)
+            state["shared"] = self._share_app(lark, client, str(app_token))
             self._save_state(state)
-            self._share_app(lark, client, str(app_token))
             print(f"[board] app created: {app_token}", flush=True)
             return str(app_token)
         except Exception as exc:  # noqa: BLE001 - 建应用失败只 log
             print(f"[board] app create fail: {exc}", flush=True)
             return None
 
-    def _share_app(self, lark: Any, client: Any, app_token: str) -> None:
-        """把你的 open_id 加成看板协作者；身份未知/失败只 log。"""
+    def _share_app(self, lark: Any, client: Any, app_token: str) -> bool:
+        """把你的 open_id 加成看板协作者；身份未知或失败返回 False。"""
         open_id = load_user_open_id(self.tree.state_dir)
         if not open_id:
-            print("[board] 未识别你的 open_id，看板未共享（发条消息给机器人）", flush=True)
-            return
+            print(
+                "[board] 未识别你的 open_id，看板暂未共享"
+                "（发条消息给机器人，下次同步自动补共享）",
+                flush=True,
+            )
+            return False
         try:
             member = (
                 lark.api.drive.v1.BaseMember.builder()
@@ -184,8 +193,11 @@ class BoardSync:
             )
             if not client.drive.v1.permission_member.create(request).success():
                 print("[board] share fail（权限 drive:drive 未开？）", flush=True)
+                return False
+            return True
         except Exception as exc:  # noqa: BLE001 - 共享失败不阻塞同步
             print(f"[board] share fail: {exc}", flush=True)
+            return False
 
     def _ensure_table(
         self, lark: Any, client: Any, state: Dict[str, Any], app_token: str

@@ -204,3 +204,21 @@ def test_menu_board_command(memory_tree, monkeypatch):
 
     assert sent and "共 5 条" in sent[-1] and "https://x" in sent[-1]
 EOF_MARKER_NOT_USED = None
+
+
+def test_sync_reshares_when_identity_appears(memory_tree, monkeypatch):
+    """建看板时没认出你（未共享）；后来认出 → 下次同步自动补共享。"""
+    _creds(monkeypatch)
+    monkeypatch.delenv("FEISHU_USER_ID", raising=False)
+    memory_tree.create_note("a.md", "# A\n")
+    client = _client_ok(["rec-a"])
+    _fake_lark(monkeypatch, client)
+
+    assert BoardSync(memory_tree).sync()["created"] == 1
+    client.drive.v1.permission_member.create.assert_not_called()
+    assert BoardSync(memory_tree)._load_state()["shared"] is False
+
+    monkeypatch.setenv("FEISHU_USER_ID", "ou_me")
+    assert BoardSync(memory_tree).sync() is not None
+    client.drive.v1.permission_member.create.assert_called_once()
+    assert BoardSync(memory_tree)._load_state()["shared"] is True

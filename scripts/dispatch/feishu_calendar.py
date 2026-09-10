@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from scripts.dispatch.feishu import _import_lark
 from scripts.dispatch.task_sync import _client, load_user_open_id
@@ -29,35 +29,42 @@ def _state_path(state_dir: Path) -> Path:
     return Path(state_dir) / CALENDAR_FILENAME
 
 
-def _load_calendar_id(state_dir: Path) -> Optional[str]:
-    """读取登记的 calendar_id；缺失/损坏返回 None。"""
+def _load_state(state_dir: Path) -> Dict[str, Any]:
+    """读取日历状态（calendar_id/shared）；缺失/损坏返回空表。"""
     try:
         data = json.loads(_state_path(state_dir).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    value = data.get("calendar_id") if isinstance(data, dict) else None
-    return str(value) if value else None
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
-def _save_calendar_id(state_dir: Path, calendar_id: str) -> None:
+def _save_state(state_dir: Path, state: Dict[str, Any]) -> None:
     path = _state_path(state_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"calendar_id": calendar_id}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
 
 def ensure_calendar(state_dir: Path) -> Optional[str]:
     """确保「Atelierr」日历存在并对你可见；返回 calendar_id 或 None。
 
-    已登记直接返回；否则创建 → 把你的 open_id 加进 ACL（不知道你的
-    open_id 时日历只存在于应用侧，对你不可见——ACL 失败只 log，
-    calendar_id 仍登记，补上身份后删 state 文件重建即可）。
+    已登记直接返回；若登记时因不知道你的 open_id 没共享成
+    （``shared`` 标记为假），而现在已经认出你（你发过消息/点过按钮），
+    会**补做一次 ACL 共享**再返回——不需要手工删 state 文件重建。
+    否则创建日历 → 共享（身份未知则只建不共享，标记待补）。
     """
-    existing = _load_calendar_id(state_dir)
-    if existing:
-        return existing
+    state = _load_state(state_dir)
+    calendar_id = state.get("calendar_id")
+    if calendar_id:
+        if not state.get("shared"):
+            try:
+                lark = _import_lark()
+                client = _client()
+                if _share_calendar(lark, client, state_dir, str(calendar_id)):
+                    state["shared"] = True
+                    _save_state(state_dir, state)
+            except Exception as exc:  # noqa: BLE001 - 补共享失败下轮再试
+                print(f"[feishu] calendar re-share fail: {exc}", flush=True)
+        return str(calendar_id)
     try:
         lark = _import_lark()
         client = _client()
@@ -84,8 +91,11 @@ def ensure_calendar(state_dir: Path) -> Optional[str]:
         if not calendar_id:
             return None
         calendar_id = str(calendar_id)
-        _save_calendar_id(state_dir, calendar_id)
-        _share_calendar(lark, client, state_dir, calendar_id)
+        state = {
+            "calendar_id": calendar_id,
+            "shared": _share_calendar(lark, client, state_dir, calendar_id),
+        }
+        _save_state(state_dir, state)
         print(f"[feishu] calendar created: {calendar_id}", flush=True)
         return calendar_id
     except Exception as exc:  # noqa: BLE001 - 日历失败绝不影响主流程
@@ -93,16 +103,16 @@ def ensure_calendar(state_dir: Path) -> Optional[str]:
         return None
 
 
-def _share_calendar(lark: Any, client: Any, state_dir: Path, calendar_id: str) -> None:
-    """把你的 open_id 加进日历 ACL（writer）；身份未知或失败只 log。"""
+def _share_calendar(lark: Any, client: Any, state_dir: Path, calendar_id: str) -> bool:
+    """把你的 open_id 加进日历 ACL（writer）；身份未知或失败返回 False。"""
     open_id = load_user_open_id(Path(state_dir))
     if not open_id:
         print(
-            "[feishu] 未识别你的 open_id，日历未共享（发条消息给机器人后"
-            "删除 state/feishu_calendar.json 重建即可）",
+            "[feishu] 未识别你的 open_id，日历暂未共享"
+            "（发条消息给机器人，下次调用自动补共享）",
             flush=True,
         )
-        return
+        return False
     try:
         acl = (
             lark.api.calendar.v4.CalendarAcl.builder()
@@ -124,8 +134,11 @@ def _share_calendar(lark: Any, client: Any, state_dir: Path, calendar_id: str) -
         )
         if not client.calendar.v4.calendar_acl.create(request).success():
             print(f"[feishu] calendar acl fail: {calendar_id}", flush=True)
+            return False
+        return True
     except Exception as exc:  # noqa: BLE001 - 共享失败不阻塞日历使用
         print(f"[feishu] calendar acl fail: {exc}", flush=True)
+        return False
 
 
 def create_all_day_event(

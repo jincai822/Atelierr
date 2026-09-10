@@ -139,3 +139,29 @@ def test_monthly_purge_reminder_creates_calendar_event(memory_tree, monkeypatch)
 
     assert ok is True
     assert events == [("Atelierr 月度清理（2 条待删）", "2026-10-01")]
+
+
+def test_ensure_calendar_reshares_when_identity_appears(state_dir, monkeypatch):
+    """建日历时没认出你（未共享）；后来认出 → 下次调用自动补共享。"""
+    _creds(monkeypatch)
+    monkeypatch.delenv("FEISHU_USER_ID", raising=False)
+    client = MagicMock()
+    client.calendar.v4.calendar.create.return_value.success.return_value = True
+    client.calendar.v4.calendar.create.return_value.data.calendar.calendar_id = "cal-9"
+    client.calendar.v4.calendar_acl.create.return_value.success.return_value = True
+    _fake_lark(monkeypatch, client)
+
+    assert ensure_calendar(state_dir) == "cal-9"
+    client.calendar.v4.calendar_acl.create.assert_not_called()
+    saved = json.loads(
+        (state_dir / "feishu_calendar.json").read_text(encoding="utf-8")
+    )
+    assert saved["shared"] is False
+
+    monkeypatch.setenv("FEISHU_USER_ID", "ou_me")
+    assert ensure_calendar(state_dir) == "cal-9"
+    client.calendar.v4.calendar_acl.create.assert_called_once()
+    saved = json.loads(
+        (state_dir / "feishu_calendar.json").read_text(encoding="utf-8")
+    )
+    assert saved["shared"] is True
