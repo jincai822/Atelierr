@@ -212,13 +212,19 @@ def _notify_digest(
     """今日摘要创建成功后推送五节计数（未配置/失败静默）。
 
     飞书侧置顶该摘要卡并自动替换昨日置顶（pin_state 登记表）——
-    进会话第一眼就是今天盘面。
+    进会话第一眼就是今天盘面。自检有异常项时追加提醒（定时器
+    沉默是你不知道的事，符合推送纪律）。
     """
-    send_dispatch_notice(
-        "Atelierr 今日摘要",
+    message = (
         f"待确认 {counts['pending']}，提炼候选 {counts['undistilled']}，"
         f"待办 {counts['todos']}，今日复习 {counts['resurface']}，"
-        f"昨日新入库 {counts['yesterday_new']}",
+        f"昨日新入库 {counts['yesterday_new']}"
+    )
+    if counts.get("health_stale"):
+        message += f"；⚠️ 自检异常 {counts['health_stale']} 项"
+    send_dispatch_notice(
+        "Atelierr 今日摘要",
+        message,
         pin=True,
         pin_state=pin_state,
     )

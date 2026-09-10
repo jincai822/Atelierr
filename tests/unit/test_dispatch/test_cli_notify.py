@@ -371,3 +371,10 @@ def test_skip_prefix_matches_basename(memory_tree, feishu_sends):
         skip_prefix="划重点-",
     )
     assert feishu_sends == []
+
+
+def test_digest_push_appends_health_warning(cli, memory_tree, pushes, feishu_sends):
+    """自检有异常项：摘要推送文案追加「⚠️ 自检异常 N 项」。"""
+    assert cli.main(["digest"]) == 0
+    _, message, _ = feishu_sends[0]
+    assert "⚠️ 自检异常" in message

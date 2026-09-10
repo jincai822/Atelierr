@@ -19,7 +19,10 @@
 - 今日复习：遗忘临界区内的笔记（ResurfaceManager，decay 的反面；
   检索式推送——只列标题，提示"先回忆再点开"，点开看一眼即重置时钟，
   确认无价值的留给 review→purge，值得留存的提炼进 wiki/）；
-- 昨日新入库：frontmatter created 日期为昨天的笔记。
+- 昨日新入库：frontmatter created 日期为昨天的笔记；
+- 系统自检：各定时器活性——它们全是"跑了就写 state"的模型，
+  状态文件 mtime 新鲜 = 班次活着；沉默超阈值 = 定时器疑似停了
+  （systemd 不会主动来告诉你），异常项数同步进推送文案。
 
 纪律（与 dispatch 模块同源）：
 - 幂等：文件名 ``系统/今日摘要-YYYY-MM-DD.md``，当天已存在则跳过；
@@ -55,12 +58,72 @@ MIN_PUSH_COUNT = 2  # 推送达到此次数仍未提炼，进"提炼候选"节
 DISTILL_MIN_AGE_DAYS = 3  # 已确认笔记创建满此天数即可提炼（沉一沉再动笔）
 MAX_DISTILL_CANDIDATES = 5  # 候选节最多列几条（防长列表制造压力）
 
+#: 系统自检探测点（名称, state_dir 内相对路径, 允许的最大沉默秒数）：
+#: 15 分钟班次给 2 小时余量；decay 每日 03:00 给 30 小时
+_HEALTH_PROBES = (
+    ("links 分发", "processed_links.json", 2 * 3600),
+    ("media 分发", "processed_media.json", 2 * 3600),
+    ("todos 分发", "processed_todos.json", 2 * 3600),
+    ("highlights 分发", "processed_highlights.json", 2 * 3600),
+    ("decay 分层", "reports", 30 * 3600),
+)
+
 #: 摘要落盘目录（NOTE_EXCLUDED_DIRS 成员，记忆机制不扫描的机器产物区）
 DIGEST_DIRNAME = SYSTEM_DIRNAME
 
 DAILY_NOTE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")  # 日记不算知识候选
 DASHBOARD_STEMS = frozenset({"主页", "控制台"})  # 门面文件不算候选
 DISTILL_EXCLUDED_SOURCES = frozenset({"digest", "highlights"})  # 摘要/清单容器
+
+
+def _health_lines(state_dir: Path, now: Optional[datetime] = None) -> Tuple[List[str], int]:
+    """系统自检行（定时器活性）与异常项数。
+
+    定时器全是"跑了就写 state"的模型：状态文件 mtime 新鲜 = 班次
+    活着；沉默超阈值或文件缺失 = 疑似停了（systemd 不会来告诉你）。
+    decay 探测的是 reports/ 目录里最新一份 decay-*.md。
+
+    Args:
+        state_dir: 机器状态目录。
+        now: 判定基准（测试注入用；缺省当前时间）。
+
+    Returns:
+        Tuple[List[str], int]: (自检行列表, 异常项数)。
+    """
+    now = now or datetime.now()
+    lines: List[str] = []
+    stale = 0
+    for name, rel, max_silence in _HEALTH_PROBES:
+        path = Path(state_dir) / rel
+        if path.is_dir():
+            reports = sorted(path.glob("decay-*.md"))
+            probe = reports[-1] if reports else None
+        else:
+            probe = path if path.exists() else None
+        if probe is None:
+            lines.append(f"- {name}：⚠️ 无状态文件（从未运行或被清理）")
+            stale += 1
+            continue
+        age_s = max(int(now.timestamp() - probe.stat().st_mtime), 0)
+        age = _age_text(age_s)
+        if age_s > max_silence:
+            lines.append(
+                f"- {name}：⚠️ 沉默 {age}（定时器疑似停了："
+                "systemctl --user list-timers 查一下）"
+            )
+            stale += 1
+        else:
+            lines.append(f"- {name}：{age} ✅")
+    return lines, stale
+
+
+def _age_text(age_s: int) -> str:
+    """沉默时长的人性化文本（分钟/小时/天）。"""
+    if age_s < 3600:
+        return f"{age_s // 60} 分钟前"
+    if age_s < 48 * 3600:
+        return f"{age_s // 3600} 小时前"
+    return f"{age_s // 86400} 天前"
 
 
 class DigestDispatcher:
@@ -118,9 +181,10 @@ class DigestDispatcher:
         wiki = WikiManager(self.tree)
         undistilled = self._distill_candidates(wiki, today)
         wiki_issues = wiki.validate()
+        health, health_stale = _health_lines(Path(self.tree.state_dir))
         markdown = self._build(
             today, pending, todos, review_stems, yesterday_new,
-            undistilled, wiki_issues,
+            undistilled, wiki_issues, health, health_stale,
         )
         created = None
         if not dry_run:
@@ -141,6 +205,7 @@ class DigestDispatcher:
                 "resurface": len(review),
                 "undistilled": len(undistilled),
                 "yesterday_new": len(yesterday_new),
+                "health_stale": health_stale,
             },
             "review": review,
             "markdown": markdown,
@@ -239,6 +304,8 @@ class DigestDispatcher:
         yesterday_new: List[str],
         undistilled: List[str],
         wiki_issues: List[Dict[str, Any]],
+        health: List[str],
+        health_stale: int,
     ) -> str:
         """组装摘要 Markdown（空节显示"无"）。
 
@@ -287,5 +354,12 @@ class DigestDispatcher:
             f"## 📥 昨日新入库（{len(yesterday_new)}）",
             "",
             *_lines(yesterday_new),
+            "",
         ]
+        header = (
+            f"## 🩺 系统自检（{health_stale} 项异常）"
+            if health_stale
+            else "## 🩺 系统自检"
+        )
+        sections += [header, "", *health]
         return fm + "\n".join(sections) + "\n"

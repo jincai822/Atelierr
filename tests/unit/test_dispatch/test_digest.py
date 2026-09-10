@@ -307,3 +307,67 @@ def test_digest_distill_candidates_capped_oldest_first(memory_tree):
     assert "[[n4]]" in section
     assert "[[n5]]" not in section  # 超出上限被截掉
     assert "[[n6]]" not in section
+
+
+def _touch(path, age_s):
+    """写入文件并把 mtime 拨到 age_s 秒前。"""
+    import os
+    import time
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("x", encoding="utf-8")
+    old = time.time() - age_s
+    os.utime(path, (old, old))
+
+
+def test_health_lines_all_fresh(memory_tree):
+    """状态文件新鲜：全 ✅，异常 0。"""
+    from scripts.dispatch.digest import _health_lines
+
+    sd = memory_tree.state_dir
+    for name in ("links", "media", "todos", "highlights"):
+        _touch(sd / f"processed_{name}.json", 60)
+    _touch(sd / "reports" / "decay-2026-09-10.md", 3600)
+
+    lines, stale = _health_lines(sd)
+
+    assert stale == 0
+    assert len(lines) == 5
+    assert all("✅" in line for line in lines)
+
+
+def test_health_lines_missing_and_silent(memory_tree):
+    """缺文件 / 沉默超阈值：记 ⚠️ 并计数；decay 看 reports/ 最新一份。"""
+    from scripts.dispatch.digest import _health_lines
+
+    sd = memory_tree.state_dir
+    _touch(sd / "processed_links.json", 60)  # 新鲜
+    _touch(sd / "processed_media.json", 3 * 3600)  # 沉默 > 2h
+    # todos/highlights 缺文件；decay reports 目录为空
+    (sd / "reports").mkdir(exist_ok=True)
+
+    lines, stale = _health_lines(sd)
+
+    assert stale == 4
+    assert any("1 分钟前 ✅" in line for line in lines)
+    assert any("沉默 3 小时前" in line for line in lines)
+    assert sum("无状态文件" in line for line in lines) == 3
+
+
+def test_age_text_boundaries():
+    """沉默时长分档：分钟/小时/天。"""
+    from scripts.dispatch.digest import _age_text
+
+    assert _age_text(59) == "0 分钟前"
+    assert _age_text(3600) == "1 小时前"
+    assert _age_text(47 * 3600) == "47 小时前"
+    assert _age_text(48 * 3600) == "2 天前"
+
+
+def test_digest_markdown_has_health_section(memory_tree):
+    """摘要 Markdown 含系统自检节；counts 带 health_stale。"""
+    report = DigestDispatcher(memory_tree).run(today="2026-09-10")
+
+    assert "## 🩺 系统自检" in report["markdown"]
+    assert "health_stale" in report["counts"]
+    assert report["counts"]["health_stale"] == 5  # 临时库全是缺文件
