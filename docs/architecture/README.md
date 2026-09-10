@@ -1,10 +1,11 @@
-# Atelierr 当前架构（2026-09-02 落盘记录）
+# Atelierr 当前架构（2026-09-10 落盘记录）
 
 > 唯一维护的架构图：`atelierr-plan.architecture.json`（archify IR，同目录）。
-> 信息流图（dataflow IR，同目录）按粒度三层：
+> 信息流图（dataflow IR，同目录）按粒度四层：
 > - 总览：`atelierr-plan.dataflow.json` → `atelierr-flow.html`
 > - 细化①捕获→加工→入库：`atelierr-flow-pipeline.dataflow.json`
 > - 细化②回响·沉淀·删除·会话：`atelierr-flow-loop.dataflow.json`
+> - 细化③飞书中枢（双向通道全颗粒）：`atelierr-flow-feishu.dataflow.json`
 > 渲染产物（可点开看的 HTML/PNG）在 `~/atelierr-data/exports/`。
 > 纪律（2026-09-02 用户裁决）：架构图只维护这一份计划版，不再出现状图；
 > 架构有变化就更新这份 IR 并重渲染。
@@ -22,14 +23,19 @@ node $ARCH/renderers/dataflow/render-dataflow.mjs \
   docs/architecture/atelierr-flow-pipeline.dataflow.json /tmp/atelierr-flow-pipeline.html
 node $ARCH/renderers/dataflow/render-dataflow.mjs \
   docs/architecture/atelierr-flow-loop.dataflow.json /tmp/atelierr-flow-loop.html
+node $ARCH/renderers/dataflow/render-dataflow.mjs \
+  docs/architecture/atelierr-flow-feishu.dataflow.json /tmp/atelierr-flow-feishu.html
 # 注入流线动画（archify 无动画能力，渲染后加 CSS）：
 .venv-atelierr/bin/python tools/archify_animate.py \
   /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
-  /tmp/atelierr-flow-pipeline.html /tmp/atelierr-flow-loop.html
+  /tmp/atelierr-flow-pipeline.html /tmp/atelierr-flow-loop.html \
+  /tmp/atelierr-flow-feishu.html
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-plan.html  # 全 ok:true
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-flow.html
+node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-flow-feishu.html
 cp /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
    /tmp/atelierr-flow-pipeline.html /tmp/atelierr-flow-loop.html \
+   /tmp/atelierr-flow-feishu.html \
    ~/atelierr-data/exports/
 ```
 
@@ -74,11 +80,14 @@ Cognitive OS 卡（type+title）豁免 from/互链。② wiki 格式升级随
 
 **入口**：控制台.md 是总入口（Obsidian 内 Dataview 全 vault 渲染 +
 车间口令 + 桌面 ▶ 快捷按钮经 Shell Commands/Advanced URI 拉起 Codex 会话）。
-手机端口令卡（Codex 只跑桌面）。Flatnotes 降为兜底入口。飞书机器人桥
-（09-06，可选）：长连接收消息进库（文本 → memory/、图片文件 →
-attachments/），抓取失败/今日摘要推飞书卡片（与 ntfy 双通道）；
-09-07 起处理完成卡片带三按钮（看全文/✅确认/📁确认并归档，附文字回复），
-点确认或归档属人工触发例外：机器才删单标签 / 移单篇进子目录。
+手机端口令卡（Codex 只跑桌面）。Flatnotes 降为兜底入口。**飞书中枢**
+（09-10 实测全通，ntfy 已停用）：长连接收消息进库（文字→笔记、语音/图/
+文件→attachments/、菜单指令拉取摘要/待办/搜索/看板）；卡片回推（待确认/
+待办/晨报置顶/复习/清理提醒），按钮回调三人工例外（删「待确认」/删「待办」/
+归档移动单篇）；问答会话（表单卡 schema 2.0 一次收齐或文字按条计）；
+**单向同步三件套**（Obsidian→飞书，不回写）：待办→飞书任务（点✅回写完成）、
+截止/清理日→「Atelierr」日历、全库元数据→多维表格看板（09-10 新增，
+后台已配 task/calendar/bitable/drive 权限）。
 
 **冻结/待办**：wechat 处理器等真实导出样本；回路三（决策校准）等预测；
 Codex 侧 paths.toml 三 tier 已对齐（`memory/wiki`、`memory/wiki/cognition`、

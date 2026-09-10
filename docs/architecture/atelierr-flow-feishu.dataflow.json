@@ -1,0 +1,370 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "信息流细化 ③：飞书中枢（双向通道全颗粒）",
+    "subtitle": "你发消息/点按钮 → 桥接处理 → 入库加工 → 卡片回推 + 任务/日历/看板单向同步 · 2026-09-10 实测全通",
+    "output": "atelierr-flow-feishu.html",
+    "viewBox": [
+      1440,
+      920
+    ]
+  },
+  "stages": [
+    {
+      "label": "① 你在飞书里"
+    },
+    {
+      "label": "② 飞书桥（长连接 · 回调）"
+    },
+    {
+      "label": "③ 入库与加工（既有管线）"
+    },
+    {
+      "label": "④ 回到飞书（推送 · 同步）"
+    },
+    {
+      "label": "⑤ 飞书各表面（你看到的）"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "you-send",
+      "type": "external",
+      "label": "你发消息",
+      "sublabel": "文字=笔记 · 链接=转写 · 语音=Whisper · 图=OCR · 菜单指令",
+      "stage": 0,
+      "row": 0
+    },
+    {
+      "id": "you-tap",
+      "type": "external",
+      "label": "你点卡片按钮",
+      "sublabel": "✅确认 · 📁归档 · ✅已完成 · 表单提交 · 目录选择",
+      "stage": 0,
+      "row": 1
+    },
+    {
+      "id": "bridge-in",
+      "type": "backend",
+      "label": "消息事件接收",
+      "sublabel": "handle_event · websocket 长连接 · 幂等登记 · open_id 识别",
+      "stage": 1,
+      "row": 0,
+      "tag": "免公网暴露 · 断线自动重连"
+    },
+    {
+      "id": "bridge-cb",
+      "type": "backend",
+      "label": "按钮回调分发",
+      "sublabel": "handle_card_action · 6 种 action · 失败只 toast 不中断",
+      "stage": 1,
+      "row": 1,
+      "tag": "唯三机器改写笔记的路径（人工例外）"
+    },
+    {
+      "id": "capture",
+      "type": "database",
+      "label": "直接捕获",
+      "sublabel": "文字→笔记（source:lark）· 语音/图/文件→attachments/",
+      "stage": 2,
+      "row": 0
+    },
+    {
+      "id": "dispatch",
+      "type": "backend",
+      "label": "15min 分发",
+      "sublabel": "links 转写 · media OCR/Whisper · todos 判行动项",
+      "stage": 2,
+      "row": 1
+    },
+    {
+      "id": "notes",
+      "type": "database",
+      "label": "memory/ 笔记",
+      "sublabel": "待确认/待办标签 · 机器状态全在 sidecar",
+      "stage": 2,
+      "row": 2
+    },
+    {
+      "id": "prompt-open",
+      "type": "backend",
+      "label": "prompt-open",
+      "sublabel": "$weekly 发起 · 登记会话 · --form 推表单卡",
+      "stage": 2,
+      "row": 4
+    },
+    {
+      "id": "cards",
+      "type": "cloud",
+      "label": "推送卡片",
+      "sublabel": "待确认/待办/晨报置顶/复习/清理提醒/搜索结果",
+      "stage": 3,
+      "row": 0,
+      "tag": "只推你不知道的事 · 失败降级纯文本"
+    },
+    {
+      "id": "prompt",
+      "type": "backend",
+      "label": "问答会话",
+      "sublabel": "PromptStore · 表单收齐自动关 · 文字按条计 · 只写 state",
+      "stage": 3,
+      "row": 1
+    },
+    {
+      "id": "ftask",
+      "type": "backend",
+      "label": "task_sync 任务同步",
+      "sublabel": "待办建任务（assignee=你）· 点✅已完成回写完成",
+      "stage": 3,
+      "row": 2,
+      "tag": "单向：飞书侧完成不回写笔记"
+    },
+    {
+      "id": "fcal",
+      "type": "backend",
+      "label": "日历事件",
+      "sublabel": "待办截止 · 月度清理日 · 首次建「Atelierr」历并共享",
+      "stage": 3,
+      "row": 3
+    },
+    {
+      "id": "fboard",
+      "type": "backend",
+      "label": "board 看板同步",
+      "sublabel": "全库元数据上行 · 首次建应用并共享 · 增量幂等",
+      "stage": 3,
+      "row": 4,
+      "tag": "单向：表格里改不回写笔记"
+    },
+    {
+      "id": "chat",
+      "type": "cloud",
+      "label": "单聊会话",
+      "sublabel": "卡片 · ✅表情回执 · 文字反馈",
+      "stage": 4,
+      "row": 0
+    },
+    {
+      "id": "tasks",
+      "type": "cloud",
+      "label": "任务面板",
+      "sublabel": "带截止的到点飞书原生提醒",
+      "stage": 4,
+      "row": 2
+    },
+    {
+      "id": "cal",
+      "type": "cloud",
+      "label": "「Atelierr」日历",
+      "sublabel": "全天事件：截止日 · 每月 1 日清理",
+      "stage": 4,
+      "row": 3
+    },
+    {
+      "id": "base",
+      "type": "cloud",
+      "label": "多维表格看板",
+      "sublabel": "手机表格/看板/日历视图翻库 · 仪表盘手工配一次",
+      "stage": 4,
+      "row": 4
+    }
+  ],
+  "flows": [
+    {
+      "from": "you-send",
+      "to": "bridge-in",
+      "label": "im.message.receive_v1",
+      "variant": "emphasis",
+      "labelAt": [207, 110]
+    },
+    {
+      "from": "you-tap",
+      "to": "bridge-cb",
+      "label": "card.action.trigger",
+      "variant": "emphasis",
+      "labelAt": [207, 224]
+    },
+    {
+      "from": "bridge-in",
+      "to": "capture",
+      "label": "文字建笔记 · 附件落盘",
+      "variant": "emphasis",
+      "labelAt": [422, 110]
+    },
+    {
+      "from": "bridge-in",
+      "to": "chat",
+      "label": "✅ 回执（失败才发文字）",
+      "variant": "dashed",
+      "via": [[371, 110], [904, 110]],
+      "labelAt": [637, 102]
+    },
+    {
+      "from": "bridge-cb",
+      "to": "notes",
+      "label": "删单标签 · 归档移动",
+      "variant": "dashed",
+      "classification": "人工触发例外",
+      "labelAt": [400, 328]
+    },
+    {
+      "from": "bridge-cb",
+      "to": "prompt",
+      "label": "表单提交收答案",
+      "variant": "default",
+      "via": [[371, 222], [689, 222]],
+      "labelAt": [500, 214]
+    },
+    {
+      "from": "bridge-cb",
+      "to": "ftask",
+      "label": "点✅已完成 → 回写任务完成",
+      "variant": "default",
+      "via": [[400, 271], [400, 442], [689, 442]],
+      "labelAt": [544, 434]
+    },
+    {
+      "from": "bridge-cb",
+      "to": "chat",
+      "label": "toast + 文字反馈",
+      "variant": "dashed",
+      "via": [[371, 96], [904, 96]],
+      "labelAt": [400, 88]
+    },
+    {
+      "from": "capture",
+      "to": "dispatch",
+      "label": "待扫描",
+      "variant": "default",
+      "labelAt": [530, 120]
+    },
+    {
+      "from": "dispatch",
+      "to": "notes",
+      "label": "转写/OCR/待办 入库",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [595, 328]
+    },
+    {
+      "from": "dispatch",
+      "to": "cards",
+      "label": "待确认卡 · 待办卡",
+      "variant": "emphasis",
+      "labelAt": [650, 214]
+    },
+    {
+      "from": "dispatch",
+      "to": "ftask",
+      "label": "建飞书任务",
+      "variant": "default",
+      "via": [[660, 271], [660, 385]],
+      "labelAt": [700, 328]
+    },
+    {
+      "from": "dispatch",
+      "to": "fcal",
+      "label": "截止日全天事件",
+      "variant": "default",
+      "via": [[620, 271], [620, 455], [689, 455]],
+      "labelAt": [680, 447]
+    },
+    {
+      "from": "prompt-open",
+      "to": "prompt",
+      "label": "登记会话 + 推表单卡",
+      "variant": "default",
+      "via": [[608, 613], [608, 271]],
+      "labelAt": [608, 470]
+    },
+    {
+      "from": "notes",
+      "to": "fboard",
+      "label": "元数据（单向）",
+      "variant": "default",
+      "via": [[637, 385], [637, 613]],
+      "labelAt": [630, 499]
+    },
+    {
+      "from": "cards",
+      "to": "chat",
+      "label": "发送",
+      "variant": "emphasis",
+      "labelAt": [852, 138]
+    },
+    {
+      "from": "prompt",
+      "to": "chat",
+      "label": "表单卡 / 按条回执",
+      "variant": "default",
+      "labelAt": [852, 214]
+    },
+    {
+      "from": "ftask",
+      "to": "tasks",
+      "label": "task:task:write",
+      "variant": "default",
+      "classification": "建/完成",
+      "labelAt": [852, 385]
+    },
+    {
+      "from": "fcal",
+      "to": "cal",
+      "label": "calendar:calendar",
+      "variant": "default",
+      "labelAt": [852, 499]
+    },
+    {
+      "from": "fboard",
+      "to": "base",
+      "label": "bitable/drive 共享",
+      "variant": "default",
+      "labelAt": [852, 613]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "权限与身份（09-10 后台已配齐）",
+      "items": [
+        "收发消息：im:message / im:message:send_as_bot / im:resource（附件下载）",
+        "新能力：task:task:write（任务）· calendar:calendar（日历）· bitable:app + drive:drive（看板）",
+        "云端 OCR 引擎（可选）：「图片识别」权限；engine: feishu 才需要，默认本地引擎不用",
+        "加权限后必须发布新版本才生效；你的 open_id 零权限识别（发消息/点按钮即缓存）"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "红线与例外（架构纪律原样适用）",
+      "items": [
+        "笔记机器绝不改写/移动——回调三例外全部人工触发：删「待确认」· 删「待办」· 归档移动单篇",
+        "任务/日历/看板全部单向（Obsidian → 飞书）：飞书侧的完成/改动不回写笔记",
+        "purge 永远留 CLI；飞书侧只有提醒卡与日历事件，没有删除按钮",
+        "任何 API 失败只 log + toast，绝不中断长连接守护"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "推送与交互纪律",
+      "items": [
+        "只推你不知道的事：待确认/待办/晨报/复习/清理提醒/失败告警；常规成功只有 ✅ 表情回执",
+        "晨报卡每日置顶并替换昨日；复习卡只给标题先想、按钮才打开原文",
+        "表单卡用 schema 2.0（旧版卡没有 form 容器）：逐问填空一次提交，答案收齐自动关会话",
+        "菜单指令整词优先于问答收集：会话中查进度不会被误计为回答"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "实测状态（2026-09-10 真机验证）",
+      "items": [
+        "任务：建删测试任务 code=0；端到端：发消息→待办→建任务+日历事件→点✅→标签摘除+任务完成",
+        "日历：「Atelierr」历已建并 ACL 共享；测试事件建删 code=0",
+        "看板：应用+表已建，10 条笔记已同步并共享；快捷菜单 6 项后台手工配（无 API）",
+        "待观察：语音消息真实负载（按文档推断，全 mock 单测）；pin/reaction 真机权限"
+      ]
+    }
+  ]
+}
