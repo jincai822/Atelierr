@@ -361,3 +361,50 @@ def test_video_blob_existing_not_overwritten(memory_tree):
     LinkDispatcher(memory_tree, processor_factory=_VideoProcessor).run()
 
     assert saved.read_bytes() == b"original"
+
+
+# ----------------------------------------------------------------------
+# 用户评论提取（2026-09-10 裁决 C2：链接评论显示在确认卡）
+# ----------------------------------------------------------------------
+
+
+def test_comment_extracted_to_state_and_report(memory_tree):
+    """链接旁的用户评论 → report['comments'] 与 state 双登记；指路词不算。"""
+    memory_tree.create_note(
+        "daily.md",
+        f"这个讲得真好，回头细看\n链接 {DOUYIN_URL}",
+        source="test",
+    )
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["comments"] == {"douyin-vid123.md": "这个讲得真好，回头细看"}
+    state = json.loads((memory_tree.state_dir / "processed_links.json").read_text())
+    assert state[DOUYIN_URL]["comment"] == "这个讲得真好，回头细看"
+
+
+def test_boilerplate_only_no_comment(memory_tree):
+    """纯分享文本（抖音样板行）→ 无评论，不硬凑。"""
+    memory_tree.create_note(
+        "daily.md",
+        f"1.58 复制打开抖音，看看【张三的作品】不错 {DOUYIN_URL} :1pm TLW:/",
+        source="test",
+    )
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["comments"] == {}
+    state = json.loads((memory_tree.state_dir / "processed_links.json").read_text())
+    assert "comment" not in state[DOUYIN_URL]
+
+
+def test_extract_comment_helper():
+    """extract_comment 单元：剥 URL、丢样板行、丢指路词、多行拼接、截断。"""
+    from scripts.dispatch.links import extract_comment
+
+    body = f"值得二刷\n链接 {DOUYIN_URL}\n复制打开抖音，看看【某人的作品】xx"
+    assert extract_comment(body, DOUYIN_URL) == "值得二刷"
+    assert extract_comment(f"链接 {DOUYIN_URL}", DOUYIN_URL) == ""
+    assert extract_comment("看看这个", "https://x.com") == ""
+    long_body = f"评{'论' * 300}\n{DOUYIN_URL}"
+    assert len(extract_comment(long_body, DOUYIN_URL)) == 200

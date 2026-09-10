@@ -124,6 +124,7 @@ def _notify_created_notes(
     *,
     notes_dir: Path,
     skip_prefix: str = "",
+    extras: Optional[Dict[str, str]] = None,
 ) -> None:
     """新产出笔记逐条推送带「✅ 确认」按钮的卡片（confirm_note=文件名）。
 
@@ -139,6 +140,7 @@ def _notify_created_notes(
         created: 新产出笔记相对路径列表（可能含 ``系统/`` 前缀）。
         notes_dir: 笔记根目录（读 frontmatter 建议归档提示用）。
         skip_prefix: 按 basename 命中该前缀的不推送（如 划重点-）。
+        extras: 按文件名附加的正文行（如链接笔记的「你的评论：…」，2026-09-10 裁决 C2）。
     """
     if not _feishu_ready():
         return
@@ -146,6 +148,8 @@ def _notify_created_notes(
         if skip_prefix and Path(filename).name.startswith(skip_prefix):
             continue
         body = f"{message}：{filename}"
+        if extras and extras.get(filename):
+            body = f"{body}\n你的评论：{extras[filename]}"
         hint = _archive_hint(notes_dir / filename)
         if hint:
             body = f"{body}\n{hint}"
@@ -312,6 +316,7 @@ class DispatchCLI:
                             "链接笔记已转写入库",
                             report["created"],
                             notes_dir=tree.notes_dir,
+                            extras=report.get("comments"),
                         )
                 # 同班次扫网页剪藏：新剪藏推 LLM 摘要确认卡，同 url
                 # 重复剪藏标 pending_delete（详见 dispatch/clips.py）

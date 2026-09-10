@@ -55,6 +55,48 @@ _PLATFORM_TAGS = {"douyin": "抖音", "xhs": "小红书"}
 #: 2026-09-02 小红书真实样本踩坑）
 _AUTO_NOTE_SOURCE = "link"
 
+#: 分享文本样板行（整行视为平台样板，不算用户评论）：抖音「复制打开抖音」、
+#: 小红书「【小红书】里的笔记已备好/复制本条信息」等真实样本（2026-09-10）
+_BOILERPLATE_RE = re.compile(r"复制打开抖音|【小红书】|复制后快来|复制本条信息")
+
+#: 剥掉 URL 后只剩这类"指路词"的行不算评论（「链接」「看看这个」之类；
+#: 精确匹配的白名单式启发——宁可漏掉一句短评论，不把样板当评论）
+_POINTER_WORDS = frozenset(
+    {
+        "链接", "视频", "笔记", "这个", "看看", "看一看", "看看这个",
+        "看这个", "🔗", "分享一下", "分享", "mark", "Mark", "MARK",
+        "马住", "收藏", "存档",
+    }
+)
+
+#: 用户评论展示上限（卡片正文里截断）
+_COMMENT_MAX_CHARS = 200
+
+
+def extract_comment(body: str, url: str) -> str:
+    """从含链接的源笔记正文提取用户随手评论（裁决 C2：确认卡上展示意图）。
+
+    规则：整行命中平台分享样板的丢弃；其余行剥掉 URL 后保留非空片段
+    （只剩「链接」「看看」这类指路词的不算）。全无用户文字（纯分享文本）
+    返回空串——确认卡就不带评论行，绝不硬凑。
+
+    Args:
+        body: 源笔记正文。
+        url: 被处理的链接（从文本中剥除）。
+
+    Returns:
+        str: 用户评论（≤200 字）；无则空串。
+    """
+    fragments: List[str] = []
+    for line in body.splitlines():
+        if _BOILERPLATE_RE.search(line):
+            continue
+        text = URL_RE.sub("", line).strip(" \t，。：:;；")
+        if len(text) >= 2 and text not in _POINTER_WORDS:
+            fragments.append(text)
+    comment = "；".join(fragments).strip()
+    return comment[:_COMMENT_MAX_CHARS]
+
 
 class LinkDispatcher:
     """扫描全部笔记，把未处理的抖音链接分发给 LinkProcessor。
@@ -78,6 +120,7 @@ class LinkDispatcher:
         """
         self.tree = tree
         self._factory = processor_factory or LinkProcessor
+        self._sources: Dict[str, Path] = {}
         self.state_path = Path(tree.state_dir) / "processed_links.json"
 
     def run(self, dry_run: bool = False) -> Dict[str, Any]:
@@ -87,7 +130,8 @@ class LinkDispatcher:
             dry_run: 只报告不处理（不建笔记、不写状态）。
 
         Returns:
-            Dict[str, Any]: 运行报告（scanned/found/created/failed/skipped）。
+            Dict[str, Any]: 运行报告（scanned/found/created/failed/
+            skipped/comments）。
         """
         MemoryWatcher(self.tree, source="sync").process_pending()
         state = self._load_state()
@@ -97,6 +141,7 @@ class LinkDispatcher:
             "created": [],
             "failed": [],
             "skipped": 0,
+            "comments": {},
         }
         for url in self._collect_urls(report):
             entry = state.get(url)
@@ -116,10 +161,12 @@ class LinkDispatcher:
 
         跳过 pending_delete 笔记与自动产出笔记（source: link）——后者是
         产出而非输入，其来源行里的链接（落地页 URL 与原短链字符串不同）
-        不回收，杜绝自我循环。
+        不回收，杜绝自我循环。顺带记录每个 URL 首次出现的源笔记路径
+        （``self._sources``，供提取用户评论用）。
         """
         urls: List[str] = []
         seen = set()
+        self._sources: Dict[str, Path] = {}
         for layer in LAYERS:
             for note_path in self.tree.list_notes(layer):
                 if self.tree.is_pending_delete(note_path):
@@ -133,6 +180,7 @@ class LinkDispatcher:
                     if detect_platform(url) in _PLATFORM_TAGS and url not in seen:
                         seen.add(url)
                         urls.append(url)
+                        self._sources[url] = note_path
         return urls
 
     @staticmethod
@@ -193,12 +241,26 @@ class LinkDispatcher:
                 pass
             entry["status"] = "done"
             entry["note"] = filename
+            comment = self._comment_for(url)
+            if comment:
+                entry["comment"] = comment
+                report["comments"][filename] = comment
             report["created"].append(filename)
             return
         entry["last_error"] = (result.error or "")[:300]
         if entry["attempts"] >= MAX_ATTEMPTS:
             entry["status"] = "failed"
         report["failed"].append({"url": url, "error": result.error})
+
+    def _comment_for(self, url: str) -> str:
+        """提取该 URL 源笔记里的用户随手评论（无源笔记或无评论返回空串）。"""
+        src = self._sources.get(url)
+        if src is None:
+            return ""
+        try:
+            return extract_comment(self.tree.read_note(src), url)
+        except Exception:  # noqa: BLE001 - 评论提取失败不影响主流程
+            return ""
 
     def _save_video(self, rel: str, blob: bytes) -> None:
         """原视频原子写入 attachments 平台目录；同名已存在跳过（同内容重跑幂等）。

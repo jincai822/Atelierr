@@ -378,3 +378,30 @@ def test_digest_push_appends_health_warning(cli, memory_tree, pushes, feishu_sen
     assert cli.main(["digest"]) == 0
     _, message, _ = feishu_sends[0]
     assert "⚠️ 自检异常" in message
+
+
+def test_notify_created_notes_with_extras(memory_tree, feishu_sends):
+    """extras 附加行（链接评论）插在前缀与建议归档行之间。"""
+    memory_tree.create_note(
+        "抖音-如何戒掉短视频.md", "正文", source="link", tags=["待确认", "抖音"]
+    )
+    _, body, _ = _notify_created(
+        memory_tree,
+        feishu_sends,
+        "抖音-如何戒掉短视频.md",
+        extras={"抖音-如何戒掉短视频.md": "这个讲得真好"},
+    )
+    assert body == (
+        "链接笔记已转写入库：抖音-如何戒掉短视频.md\n"
+        "你的评论：这个讲得真好\n"
+        "建议归档：抖音/"
+    )
+
+
+def test_notify_created_notes_extras_missing_key(memory_tree, feishu_sends):
+    """extras 没有该文件名：正文无评论行（向后兼容）。"""
+    memory_tree.create_note("杂记.md", "正文", source="agent", tags=["待确认"])
+    _, body, _ = _notify_created(
+        memory_tree, feishu_sends, "杂记.md", extras={"别的.md": "评论"}
+    )
+    assert "你的评论" not in body
