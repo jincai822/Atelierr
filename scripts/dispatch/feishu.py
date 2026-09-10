@@ -6,8 +6,9 @@
 - 文本消息 → memory/ 笔记（``source: lark``；正文含 URL 时由 links
   分发下一轮自动捡起，与 Obsidian 贴链接同路）；``搜 xxx``/``搜索 xxx``
   是搜索指令：查库回前 5 条结果卡（带「打开」按钮），不捕获为笔记；
-- 图片/文件/语音消息 → 下载存入 attachments/（media 分发自动捡起
-  OCR/转写；语音存 .ogg 走 Whisper，与截图同路）；
+- 图片/文件/语音消息 → 下载存入 attachments/ 平台子目录（图片/语音进
+  ``媒体/``，PDF 进 ``书籍/``；media 分发自动捡起 OCR/转写；语音存
+  .ogg 走 Whisper，与截图同路）；
 - 捕获成功给原消息加 ✅ 表情回执（不占气泡的轻确认；回执失败只
   log，绝不影响捕获）；捕获失败才发文字反馈；
 - 幂等：message_id 登记 ``<state_dir>/feishu_messages.json``；
@@ -108,7 +109,7 @@ from scripts.dispatch.feishu_io import (
     send_feishu,
     send_feishu_card,
 )
-from scripts.dispatch.media import ATTACHMENTS_DIR
+from scripts.dispatch.media import ATTACHMENTS_DIR, BOOK_SUBDIR, MEDIA_SUBDIR
 from scripts.memory.core import NOTE_EXCLUDED_DIRS, SYSTEM_DIRNAME, MemoryTree
 
 #: re-export 门脸（__all__ 声明即"有意再导出"，ruff F401 不误报）：
@@ -1235,11 +1236,14 @@ class FeishuBridge:
     def _receive_resource(
         self, message_id: str, msg_type: str, content: Dict[str, Any]
     ) -> Optional[Path]:
-        """图片/文件/语音消息 → 下载进 attachments/（media 分发自动接手）。
+        """图片/文件/语音消息 → 下载进 attachments/ 平台子目录（media 分发自动接手）。
 
-        语音（msg_type=audio）是飞书按住说话入口：存 .ogg（AudioProcessor
-        支持），下一轮 media 分发走 Whisper 转写 → 转写确认卡，与截图
-        同路。资源 API 的 type 只有 image/file 两类：语音按 file 拉取。
+        归位规则（2026-09-10 用户裁决 G1，与笔记归档同一套目录名）：
+        图片/语音与其它文件 → ``attachments/媒体/``；PDF →
+        ``attachments/书籍/``（划重点通道）。语音（msg_type=audio）是
+        飞书按住说话入口：存 .ogg（AudioProcessor 支持），下一轮 media
+        分发走 Whisper 转写 → 转写确认卡，与截图同路。资源 API 的
+        type 只有 image/file 两类：语音按 file 拉取。
         """
         key = content.get("image_key") or content.get("file_key")
         if not key:
@@ -1259,7 +1263,8 @@ class FeishuBridge:
                 "-", str(content.get("file_name") or "file")
             ).strip(". ")
             filename = f"feishu-{stamp}-{original}"
-        attach_dir = Path(self.tree.notes_dir) / ATTACHMENTS_DIR
+        subdir = BOOK_SUBDIR if filename.lower().endswith(".pdf") else MEDIA_SUBDIR
+        attach_dir = Path(self.tree.notes_dir) / ATTACHMENTS_DIR / subdir
         attach_dir.mkdir(parents=True, exist_ok=True)
         target = attach_dir / filename
         self._atomic_write(target, blob)

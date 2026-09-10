@@ -777,3 +777,82 @@ def test_clip_prompt_derives_from_v4():
     assert link_module._SUMMARIZE_CLIP_PROMPT.endswith("文章全文：")
     assert "B84-心理学" in link_module._SUMMARIZE_CLIP_PROMPT
     assert "视频转写" not in link_module._SUMMARIZE_CLIP_PROMPT
+
+
+# ----------------------------------------------------------------------
+# 原视频 480p 保存（2026-09-10 用户裁决 G2：只存压缩版，压失败原件保底）
+# ----------------------------------------------------------------------
+
+
+def test_video_preserved_compressed(fake_pipeline, monkeypatch):
+    """压缩成功：metadata 带 480p 字节与库内相对路径，markdown 内嵌同串。"""
+    monkeypatch.setattr(
+        LinkProcessor,
+        "_compress_to_480p",
+        staticmethod(lambda src, dst: dst.write_bytes(b"480p-bytes") or True),
+    )
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert result.metadata["video_blob"] == b"480p-bytes"
+    rel = result.metadata["video_rel"]
+    assert rel == "attachments/抖音/抖音-信息标题-vid123.mp4"
+    assert f"![[{rel}]]" in result.markdown
+    # 内嵌在来源行之后、摘要之前
+    assert result.markdown.index("> 来源：") < result.markdown.index(f"![[{rel}]]")
+
+
+def test_video_preserved_original_on_compress_failure(fake_pipeline, monkeypatch):
+    """压缩失败：保留原件字节保底（G2：绝不能压坏了还丢原件）。"""
+    monkeypatch.setattr(
+        LinkProcessor, "_compress_to_480p", staticmethod(lambda src, dst: False)
+    )
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert result.metadata["video_blob"] == b"fake video bytes"
+    assert result.metadata["video_rel"].endswith(".mp4")
+
+
+def test_video_rel_naming_rules():
+    """相对路径命名：平台目录 + 标题净化 + id 短码（防撞名/幂等）。"""
+    rel = LinkProcessor._video_rel("抖音", "健脑小课堂/运动篇", "vid123456789")
+    assert rel == "attachments/抖音/抖音-健脑小课堂-运动篇-vid123.mp4"
+    # 无标题回退平台+id；无 id 不带短码
+    assert LinkProcessor._video_rel("小红书", "", "n1") == "attachments/小红书/小红书-n1.mp4"
+    assert LinkProcessor._video_rel("抖音", "标题", "") == "attachments/抖音/抖音-标题.mp4"
+
+
+def test_compress_480p_command_and_failure(monkeypatch, tmp_path):
+    """ffmpeg 调用形态：480p 限高、faststart；非零返回/无产出 → False。"""
+    calls = []
+
+    class _Proc:
+        returncode = 0
+
+    def _fake_run(command, **kwargs):
+        calls.append(command)
+        Path(command[-1]).write_bytes(b"x")
+        return _Proc()
+
+    monkeypatch.setattr(link_module.subprocess, "run", _fake_run)
+    src = tmp_path / "in.mp4"
+    src.write_bytes(b"fake")
+    dst = tmp_path / "out.mp4"
+
+    assert LinkProcessor._compress_to_480p(src, dst) is True
+    command = calls[0]
+    assert command[0] == "ffmpeg"
+    assert "480" in command[command.index("-vf") + 1]
+    assert "+faststart" in command
+
+    class _BadProc:
+        returncode = 1
+
+    monkeypatch.setattr(
+        link_module.subprocess, "run", lambda *a, **k: _BadProc()
+    )
+    dst2 = tmp_path / "out2.mp4"
+    assert LinkProcessor._compress_to_480p(src, dst2) is False

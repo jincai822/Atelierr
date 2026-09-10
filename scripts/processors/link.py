@@ -5,14 +5,22 @@
 下载视频到临时目录 → 复用 :class:`VideoProcessor` 转写 →
 组装带来源行的 Markdown → 清理临时文件。
 
-输出格式（v4）：标题 + 来源行 + 观点总结 / 分观点论述 / 金句摘录 /
-提到的人·书·概念（LLM 生成，附中图法分类与主题词，经笔记 frontmatter
-``tags`` 追加到"待确认"与平台标签之后）+ ``## 转写全文``——转写优先经
-LLM 整理（按语义分段、补全标点、逐字不改写）；LLM 不可用/失败时降级
-为机械分段（去除逐句时间戳、按句界合并自然段、繁体转简体 OpenCC），
-不带分类标签。LLM 摘要与整理经配置 ``processors.link.llm`` 启用：
+输出格式（v4）：标题 + 来源行 +（视频笔记内嵌 480p 原视频）+ 观点总结 /
+分观点论述 / 金句摘录 / 提到的人·书·概念（LLM 生成，附中图法分类与主题词，
+经笔记 frontmatter ``tags`` 追加到"待确认"与平台标签之后）+ ``## 转写全文``——
+转写优先经 LLM 整理（按语义分段、补全标点、逐字不改写）；LLM 不可用/
+失败时降级为机械分段（去除逐句时间戳、按句界合并自然段、繁体转简体
+OpenCC），不带分类标签。LLM 摘要与整理经配置 ``processors.link.llm`` 启用：
 API key 从环境变量读取（默认 DEEPSEEK_API_KEY，不落盘到 config）；
 key 缺失、转写超长（成本护栏）或调用失败时自动降级，绝不阻塞入库管线。
+
+原视频保存（2026-09-10 用户裁决 G2）：转写完成后 ffmpeg 压成 480p
+（H.264 crf30 + AAC 96k，小片源不放大），以 bytes 经 ``metadata
+["video_blob"]`` 交回——本处理器不感知存储，由 dispatch/links.py 落盘
+``attachments/<平台>/`` 并嵌入笔记（``metadata["video_rel"]`` 为相对
+路径，markdown 里的 ``![[...]]`` 与之同串）；下载原件随临时目录删除。
+**压缩失败保留原件字节保底**（绝不能压坏了还丢原件）；读取也失败则
+不附带视频，笔记照出（来源行 URL 仍可回溯）。
 
 反爬约束（2026-08-31/09-01 真实样本实测）：抖音详情 API 对匿名请求
 403，yt-dlp 借浏览器 cookie（``cookiesfrombrowser``）可拿到视频流
@@ -357,6 +365,10 @@ class LinkProcessor(BaseProcessor):
             transcript_text = _T2S.convert(video_result.text).strip()
             summary, llm_status = self._summarize(transcript_text)
             formatted, fmt_status = self._format_transcript(transcript_text)
+            doc_id = str(info.get("id") or "")
+            video_rel, video_blob = self._preserve_video(
+                video_path, "抖音", title, doc_id
+            )
             markdown = self._build_markdown(
                 title or (video_path.stem if video_path else "link"),
                 author,
@@ -364,16 +376,19 @@ class LinkProcessor(BaseProcessor):
                 video_result.markdown,
                 summary,
                 body_override=formatted,
+                video_rel=video_rel,
             )
             metadata = {
                 "engine": "yt-dlp+whisper",
                 "platform": platform,
                 "model": self.model,
                 "url": url,
-                "video_id": str(info.get("id") or ""),
+                "video_id": doc_id,
                 "title": title,
                 "segments": video_result.metadata.get("segments", 0),
                 "llm": {"status": llm_status, "format": fmt_status, "model": self.llm_model},
+                "video_rel": video_rel,
+                "video_blob": video_blob,
             }
             return ProcessResult(
                 success=True,
@@ -445,6 +460,9 @@ class LinkProcessor(BaseProcessor):
         transcript_text = _T2S.convert(video_result.text).strip()
         summary, llm_status = self._summarize(transcript_text)
         formatted, fmt_status = self._format_transcript(transcript_text)
+        video_rel, video_blob = self._preserve_video(
+            video_path, "小红书", title, note_id
+        )
         markdown = self._build_markdown(
             title or note_id or "小红书笔记",
             author,
@@ -453,11 +471,14 @@ class LinkProcessor(BaseProcessor):
             summary,
             source_label="小红书",
             body_override=formatted,
+            video_rel=video_rel,
         )
         metadata["engine"] = "xhs-page+whisper"
         metadata["model"] = self.model
         metadata["segments"] = video_result.metadata.get("segments", 0)
         metadata["llm"] = {"status": llm_status, "format": fmt_status, "model": self.llm_model}
+        metadata["video_rel"] = video_rel
+        metadata["video_blob"] = video_blob
         return ProcessResult(
             success=True,
             text=video_result.text,
@@ -819,8 +840,9 @@ class LinkProcessor(BaseProcessor):
         body_label: str = "转写全文",
         raw_body: bool = False,
         body_override: Optional[str] = None,
+        video_rel: Optional[str] = None,
     ) -> str:
-        """组装最终 Markdown：标题 + 来源行 +（可选）摘要各节 + 正文。
+        """组装最终 Markdown：标题 + 来源行 +（可选）内嵌原视频 + 摘要各节 + 正文。
 
         LLM 给出中图法分类/主题词时，Markdown 顶部带 ``tags``
         frontmatter（[待确认, 平台标签] + category + topics）；无则
@@ -841,6 +863,8 @@ class LinkProcessor(BaseProcessor):
             时间戳剥离与句界分段；正文为空时不产出正文小节。
             body_override: LLM 整理后的正文（分段+补标点）；提供时
             优先于 transcript_markdown 的机械分段结果。
+            video_rel: 原视频（480p）的库内相对路径；提供时在来源行
+            下方内嵌 ``![[...]]``（Obsidian 内可直接播放）。
 
         Returns:
             str: 完整 Markdown。
@@ -872,6 +896,8 @@ class LinkProcessor(BaseProcessor):
                 "",
             ]
         sections += [f"# {_T2S.convert(title)}", "", source, ""]
+        if video_rel:
+            sections += [f"![[{video_rel}]]", ""]
         if summary:
             sections += ["## 观点总结", "", summary["summary"]]
             if summary.get("points"):
@@ -895,6 +921,94 @@ class LinkProcessor(BaseProcessor):
         if body:
             sections += [f"## {body_label}", "", body]
         return "\n".join(sections) + "\n"
+
+    def _preserve_video(
+        self, video_path: Path, source_label: str, title: str, doc_id: str
+    ) -> Tuple[Optional[str], Optional[bytes]]:
+        """把下载视频压成 480p 交回（rel 路径 + bytes），dispatch 层负责落盘。
+
+        本处理器不感知存储位置（分层纪律：processors 与 memory 互不
+        import）；``attachments/<平台>/<名>.mp4`` 只是与 dispatch 约定
+        的相对路径串，markdown 内嵌与之同串。**压缩失败保留原件字节
+        保底**（用户裁决 G2：绝不能压坏了还丢原件）；连读取都失败返回
+        (None, None)——笔记照出不带视频，来源行 URL 仍可回溯。
+
+        Args:
+            video_path: 下载原件（临时目录内，随 process() 清理）。
+            source_label: 平台中文名（抖音/小红书），兼作子目录名。
+            title: 视频标题（用于文件名，人读优先）。
+            doc_id: 平台内容 id（文件名短码，防撞名+同内容幂等）。
+
+        Returns:
+            Tuple[Optional[str], Optional[bytes]]: (库内相对路径, 文件
+            字节)；失败 (None, None)。
+        """
+        rel = self._video_rel(source_label, title, doc_id)
+        payload = video_path
+        compressed = video_path.with_name(f"{video_path.stem}-480p.mp4")
+        if self._compress_to_480p(video_path, compressed):
+            payload = compressed
+        try:
+            return rel, payload.read_bytes()
+        except OSError:
+            return None, None
+
+    @staticmethod
+    def _video_rel(source_label: str, title: str, doc_id: str) -> str:
+        """原视频库内相对路径：attachments/<平台>/<平台>-<标题>-<id前6>.mp4。
+
+        命名规则与 dispatch/links.py 的笔记命名同源（人读标题优先、
+        文件系统净化、60 字截断）；id 短码常驻——同名不同视频绝不互相
+        覆盖，同内容重跑（状态丢失重放）落盘时同名跳过即幂等。
+        attachments 根目录名与 dispatch/media.py ATTACHMENTS_DIR 是同一
+        约定（dispatch 层按此串原样落盘）。
+        """
+        safe = ""
+        if title:
+            safe = re.sub(r'[/\\:*?"<>|\x00-\x1f]', "-", title)
+            safe = re.sub(r"\s+", " ", safe).strip().strip(".")
+            if len(safe) > 60:
+                safe = safe[:60].rstrip()
+        stem = f"{source_label}-{safe}" if safe else source_label
+        if doc_id:
+            stem = f"{stem}-{doc_id[:6]}"
+        return f"attachments/{source_label}/{stem}.mp4"
+
+    @staticmethod
+    def _compress_to_480p(src: Path, dst: Path) -> bool:
+        """ffmpeg 压到 480p（H.264 crf30 + AAC 96k，约为原件 1/10）；失败 False。
+
+        高度大于 480 才缩（小片源不放大，避免越压越大）；faststart 便于
+        Obsidian/浏览器边下边播。
+        """
+        command = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(src),
+            "-vf",
+            "scale=w='if(gt(ih,480),-2,iw)':h='if(gt(ih,480),480,ih)'",
+            "-c:v",
+            "libx264",
+            "-crf",
+            "30",
+            "-preset",
+            "veryfast",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "96k",
+            "-movflags",
+            "+faststart",
+            str(dst),
+        ]
+        try:
+            proc = subprocess.run(
+                command, capture_output=True, timeout=300, check=False
+            )
+        except Exception:  # noqa: BLE001 - 压缩失败走原件保底
+            return False
+        return proc.returncode == 0 and dst.exists() and dst.stat().st_size > 0
 
     @staticmethod
     def _cleanup(download_dir: str) -> None:

@@ -307,3 +307,57 @@ def test_title_collision_appends_doc_id(memory_tree):
 
     assert report["created"] == ["抖音-撞名-v789.md"]
     assert (memory_tree.notes_dir / "抖音-撞名-v789.md").exists()
+
+
+def test_video_blob_saved_to_platform_dir(memory_tree):
+    """处理器交回 video_blob/video_rel：dispatch 原子落盘 attachments/抖音/。"""
+    memory_tree.create_note("daily.md", f"链接 {DOUYIN_URL}", source="test")
+
+    class _VideoProcessor:
+        def process(self, url):
+            return ProcessResult(
+                success=True,
+                text="转写",
+                markdown="# t\n\n![[attachments/抖音/抖音-t-v1.mp4]]\n",
+                confidence=0.9,
+                metadata={
+                    "video_id": "v1",
+                    "video_rel": "attachments/抖音/抖音-t-v1.mp4",
+                    "video_blob": b"480p-bytes",
+                },
+            )
+
+    report = LinkDispatcher(memory_tree, processor_factory=_VideoProcessor).run()
+
+    assert report["created"]
+    saved = memory_tree.notes_dir / "attachments" / "抖音" / "抖音-t-v1.mp4"
+    assert saved.read_bytes() == b"480p-bytes"
+    # metadata 里的 blob 不泄漏进状态文件（bytes 不可 JSON 序列化）
+    state = json.loads((memory_tree.state_dir / "processed_links.json").read_text())
+    assert state[DOUYIN_URL]["status"] == "done"
+
+
+def test_video_blob_existing_not_overwritten(memory_tree):
+    """同路径视频已存在：跳过写入（同内容重跑幂等，绝不覆盖原件）。"""
+    memory_tree.create_note("daily.md", f"链接 {DOUYIN_URL}", source="test")
+    saved = memory_tree.notes_dir / "attachments" / "抖音" / "抖音-t-v1.mp4"
+    saved.parent.mkdir(parents=True)
+    saved.write_bytes(b"original")
+
+    class _VideoProcessor:
+        def process(self, url):
+            return ProcessResult(
+                success=True,
+                text="t",
+                markdown="# t",
+                confidence=0.9,
+                metadata={
+                    "video_id": "v1",
+                    "video_rel": "attachments/抖音/抖音-t-v1.mp4",
+                    "video_blob": b"new-bytes",
+                },
+            )
+
+    LinkDispatcher(memory_tree, processor_factory=_VideoProcessor).run()
+
+    assert saved.read_bytes() == b"original"

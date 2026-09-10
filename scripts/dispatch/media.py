@@ -8,15 +8,22 @@ PDF（书籍/长文）→ 划重点清单笔记（机器代读出可勾选候选
 自动创建的笔记带 ``tags=["待确认"]``，人在 Obsidian 阅读后自行移除标签。
 
 典型路径：手机截图/录音 → Obsidian 附件目录 → Syncthing 同步到电脑
-→ 本模块识别 → 建笔记（内嵌原附件 ``![[attachments/xxx]]``，Obsidian
-里图片直接显示、录音直接可播）→ 正文同时进入 todos 分发的扫描范围
-（截图里有行动意图时自动抽取待办）。
+→ 本模块识别 → 建笔记（内嵌原附件 ``![[attachments/媒体/xxx]]``，
+Obsidian 里图片直接显示、录音直接可播）→ 正文同时进入 todos 分发的
+扫描范围（截图里有行动意图时自动抽取待办）。
+
+原资料归位（2026-09-10 用户裁决 G1）：附件按来源平台分子目录——
+``媒体/``（截图/图片/语音）、``书籍/``（PDF）、``抖音/`` ``小红书/``
+``B站/``（链接视频，由 links 管线写入，本模块不处理视频）；与笔记归档
+目录同一套名字。扫描覆盖 attachments/ 顶层与一层子目录（视频 .mp4 不在
+可处理扩展名内，天然跳过）。原件只增不减：本模块绝不删除/移动附件。
 
 纪律（与 links.py 一致）：
 - 只新增笔记，绝不改写/移动/删除既有笔记与附件本身；
 - 幂等：附件处理状态记录于 ``<state_dir>/processed_media.json``，
-  以附件相对路径为键，同一文件只成功处理一次（文件内容变化不重新
-  处理——手机附件一旦同步即不可变）；
+  以附件相对笔记根目录路径为键（如 ``attachments/媒体/IMG_001.jpg``），
+  同一文件只成功处理一次（文件内容变化不重新处理——手机附件一旦同步
+  即不可变）；
 - 失败最多重试 3 次，超限标记 failed 不再重试——避免 PaddleOCR/Whisper
   模型每 15 分钟为空转反复加载；
 - mtime 距今不足 30 秒的文件跳过（防人工拷贝中途读到半个文件；
@@ -52,6 +59,13 @@ REVIEW_TAG = "待确认"
 #: 附件目录名（相对笔记根目录）
 ATTACHMENTS_DIR = "attachments"
 
+#: 原资料平台子目录（2026-09-10 用户裁决 G1：与笔记归档同一套名字）。
+#: 截图/图片/语音原件的归位；feishu.py 收附件、截图专用夹导入按此写入
+MEDIA_SUBDIR = "媒体"
+
+#: PDF 原件的归位（书籍/长文，走划重点通道）
+BOOK_SUBDIR = "书籍"
+
 #: 跳过 mtime 距今不足该秒数的文件（防读到仍在写入的文件）
 MIN_AGE_SECONDS = 30
 
@@ -79,6 +93,7 @@ class MediaDispatcher:
         image_factory: Optional[Callable[[], ImageProcessor]] = None,
         audio_factory: Optional[Callable[[], AudioProcessor]] = None,
         highlights_factory: Optional[Callable[[], HighlightsProcessor]] = None,
+        screenshot_inbox: Optional[str] = None,
     ) -> None:
         """初始化。
 
@@ -89,24 +104,30 @@ class MediaDispatcher:
             audio_factory: 音频处理器工厂，缺省为 AudioProcessor。
             highlights_factory: PDF 划重点处理器工厂，缺省为
             HighlightsProcessor；每轮运行最多构造一次。
+            screenshot_inbox: 截图专用文件夹（2026-09-10 用户裁决 E4：
+            只把该文件夹里的图片**复制**进 attachments/媒体/，复制不
+            移动、其他截图一概不碰）；None 不启用（配置
+            ``processors.media.screenshot_inbox``，由 dispatch_cli 注入）。
         """
         self.tree = tree
         self._image_factory = image_factory or ImageProcessor
         self._audio_factory = audio_factory or AudioProcessor
         self._highlights_factory = highlights_factory or HighlightsProcessor
+        self._inbox = screenshot_inbox
         self._image: Optional[ImageProcessor] = None
         self._audio: Optional[AudioProcessor] = None
         self._highlights: Optional[HighlightsProcessor] = None
         self.state_path = Path(tree.state_dir) / "processed_media.json"
 
     def run(self, dry_run: bool = False) -> Dict[str, Any]:
-        """执行一轮扫描与分发。
+        """执行一轮扫描与分发（先导入截图专用夹，再扫 attachments/）。
 
         Args:
-            dry_run: 只报告不处理（不建笔记、不写状态、不加载引擎）。
+            dry_run: 只报告不处理（不复制、不建笔记、不写状态、不加载引擎）。
 
         Returns:
-            Dict[str, Any]: 运行报告（scanned/found/created/failed/skipped）。
+            Dict[str, Any]: 运行报告（scanned/found/created/failed/
+            skipped/imported）。
         """
         state = self._load_state()
         report: Dict[str, Any] = {
@@ -115,7 +136,9 @@ class MediaDispatcher:
             "created": [],
             "failed": [],
             "skipped": 0,
+            "imported": 0,
         }
+        self._import_inbox(report, dry_run)
         for path in self._collect_files(report):
             key = self._key(path)
             entry = state.get(key)
@@ -131,14 +154,23 @@ class MediaDispatcher:
         return report
 
     def _collect_files(self, report: Dict[str, Any]) -> List[Path]:
-        """列出 attachments/ 下全部可处理附件（按修改时间升序）。"""
+        """列出 attachments/ 顶层与一层子目录下全部可处理附件（按 mtime 升序）。
+
+        只认图片/录音/PDF 扩展名——``抖音/`` 等视频目录里的 .mp4 不在
+        可处理扩展名内（那是 links 管线保存的原视频，不是待 OCR/转写
+        的输入），天然跳过。
+        """
         attach_dir = Path(self.tree.notes_dir) / ATTACHMENTS_DIR
         if not attach_dir.is_dir():
             return []
         now = time.time()
+        candidates = [path for path in attach_dir.iterdir() if path.is_file()]
+        for subdir in sorted(attach_dir.iterdir()):
+            if subdir.is_dir() and not subdir.name.startswith("."):
+                candidates.extend(path for path in subdir.iterdir() if path.is_file())
         files: List[Path] = []
-        for path in sorted(attach_dir.iterdir()):
-            if not path.is_file() or path.name.startswith("."):
+        for path in sorted(candidates):
+            if path.name.startswith("."):
                 continue
             if path.suffix.lower() not in _KIND_BY_EXT and path.suffix.lower() not in _PDF_EXTS:
                 continue
@@ -222,28 +254,29 @@ class MediaDispatcher:
         digest = hashlib.sha1(path.name.encode("utf-8")).hexdigest()[:6]
         return f"划重点-{cleaned}-{digest}.md"
 
-    @staticmethod
-    def _key(path: Path) -> str:
-        """状态键：附件相对笔记根目录的路径（如 attachments/IMG_001.jpg）。"""
-        return f"{ATTACHMENTS_DIR}/{path.name}"
+    def _key(self, path: Path) -> str:
+        """状态键：附件相对笔记根目录的路径（如 attachments/媒体/IMG_001.jpg）。"""
+        return self.tree._rel_key(path)
 
-    @staticmethod
-    def _note_filename(path: Path) -> str:
-        """产出笔记文件名：media-<文件日期>-<路径哈希前6>.md。"""
+    def _note_filename(self, path: Path) -> str:
+        """产出笔记文件名：media-<文件日期>-<相对路径哈希前6>.md。
+
+        哈希输入用相对路径（含子目录）：不同子目录下的同名附件不会
+        撞出同一个笔记文件名。
+        """
         date = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y%m%d")
-        digest = hashlib.sha1(path.name.encode("utf-8")).hexdigest()[:6]
+        digest = hashlib.sha1(self._key(path).encode("utf-8")).hexdigest()[:6]
         return f"media-{date}-{digest}.md"
 
-    @staticmethod
-    def _build_note(path: Path, kind: str, text: str) -> str:
-        """组装笔记正文：内嵌原附件 + 提取全文（录音带书名号标点）。"""
+    def _build_note(self, path: Path, kind: str, text: str) -> str:
+        """组装笔记正文：内嵌原附件（相对路径）+ 提取全文（录音带书名号标点）。"""
         stamp = datetime.fromtimestamp(path.stat().st_mtime).strftime(
             "%Y-%m-%d %H:%M"
         )
         section = "OCR 全文" if kind == "截图" else "转写全文"
         return (
             f"# {kind} {stamp}\n\n"
-            f"![[{ATTACHMENTS_DIR}/{path.name}]]\n\n"
+            f"![[{self._key(path)}]]\n\n"
             f"## {section}\n\n"
             f"{(text or '').strip()}\n"
         )

@@ -62,9 +62,11 @@ def _dispatcher(tree):
     )
 
 
-def _add_attachment(tree, name="IMG_001.png", age_seconds=60):
+def _add_attachment(tree, name="IMG_001.png", age_seconds=60, subdir=""):
     """在 attachments/ 落一个假附件并回拨 mtime（避开 30s 防半文件守卫）。"""
     attach = Path(tree.notes_dir) / "attachments"
+    if subdir:
+        attach = attach / subdir
     attach.mkdir(parents=True, exist_ok=True)
     path = attach / name
     path.write_bytes(b"\x89PNG fake-bytes")
@@ -224,7 +226,7 @@ def test_duplicate_note_tolerated(memory_tree):
     path = _add_attachment(memory_tree, "IMG_001.png")
     from scripts.dispatch.media import MediaDispatcher as _md
 
-    filename = _md._note_filename(path)
+    filename = _md(memory_tree)._note_filename(path)
     memory_tree.create_note(filename, "已存在的产出", source="media")
 
     report = _dispatcher(memory_tree).run()
@@ -234,3 +236,42 @@ def test_duplicate_note_tolerated(memory_tree):
         (memory_tree.state_dir / "processed_media.json").read_text()
     )
     assert state["attachments/IMG_001.png"]["status"] == "done"
+
+
+def test_media_subdir_processed(memory_tree):
+    """平台子目录（媒体/）里的附件照常处理：状态键与内嵌用相对路径。"""
+    _add_attachment(memory_tree, "IMG_002.png", subdir="媒体")
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["found"] == 1
+    note = _created_note(memory_tree)
+    post = frontmatter.loads(note.read_text(encoding="utf-8"))
+    assert "![[attachments/媒体/IMG_002.png]]" in post.content
+    state = json.loads(
+        (memory_tree.state_dir / "processed_media.json").read_text()
+    )
+    assert state["attachments/媒体/IMG_002.png"]["status"] == "done"
+
+
+def test_same_name_in_two_subdirs_both_processed(memory_tree):
+    """不同子目录的同名附件不撞笔记名（状态键/笔记哈希都按相对路径）。"""
+    _add_attachment(memory_tree, "IMG_003.png", subdir="媒体")
+    _add_attachment(memory_tree, "IMG_003.png")
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["found"] == 2
+    assert len(report["created"]) == 2
+    assert len(list(Path(memory_tree.notes_dir).glob("media-*.md"))) == 2
+
+
+def test_video_in_platform_dir_ignored(memory_tree):
+    """抖音/ 里的 .mp4（links 管线保存的原视频）不被当作待处理附件。"""
+    _add_attachment(memory_tree, "抖音-健脑-vid123.mp4", subdir="抖音")
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["found"] == 0
+    assert _FakeImageProcessor.calls == []
+    assert _FakeAudioProcessor.calls == []

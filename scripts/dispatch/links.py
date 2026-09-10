@@ -7,7 +7,12 @@
 转写内容后自行移除标签，系统不做进一步状态机。
 
 纪律（与 DEVELOPMENT-PLAN-3MVP.md backlog 约定一致）：
-- 只新增笔记，绝不改写/移动/删除既有笔记（源笔记原样保留）；
+- 只新增笔记与附件，绝不改写/移动/删除既有笔记（源笔记原样保留）；
+- 原视频保存（2026-09-10 用户裁决 G2）：处理器转写后压 480p 经
+  metadata 交回 bytes，本模块原子写入 ``attachments/<平台>/``（抖音/
+  小红书/），笔记内嵌可播；下载原件由处理器随临时目录删除，压缩失败
+  时 bytes 为原件保底；同名已存在跳过（幂等），落盘失败只记日志不
+  阻断建笔记；
 - 幂等：URL 处理状态记录于 ``<state_dir>/processed_links.json``，
   同一链接只成功处理一次；自动产出笔记（source: link）不回收，
   其来源行链接（落地页 URL 与短链字符串不同）不会自我循环；
@@ -20,6 +25,8 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +38,8 @@ from scripts.memory.core import LAYERS, MemoryTree
 from scripts.utils.state_store import read_json, write_json
 from scripts.memory.watcher import MemoryWatcher
 from scripts.processors.link import LinkProcessor, URL_RE, detect_platform
+
+logger = logging.getLogger(__name__)
 
 #: 单个 URL 的最大处理尝试次数（超限标记 failed）
 MAX_ATTEMPTS = 3
@@ -149,6 +158,13 @@ class LinkDispatcher:
                 result.metadata.get("video_id") or result.metadata.get("note_id") or ""
             )
             title = str(result.metadata.get("title") or "")
+            # 原视频（480p，含原件保底）落盘 attachments/<平台>/——processors
+            # 不感知存储，bytes 经 metadata 交回，由本层写入；落盘失败只
+            # 记日志，不阻断笔记创建（笔记仍带来源行 URL 可回溯）
+            video_blob = result.metadata.pop("video_blob", None)
+            video_rel = result.metadata.get("video_rel")
+            if video_blob and video_rel:
+                self._save_video(str(video_rel), video_blob)
             filename = self._note_filename(url, platform, doc_id, title)
             try:
                 self.tree.create_note(
@@ -183,6 +199,28 @@ class LinkDispatcher:
         if entry["attempts"] >= MAX_ATTEMPTS:
             entry["status"] = "failed"
         report["failed"].append({"url": url, "error": result.error})
+
+    def _save_video(self, rel: str, blob: bytes) -> None:
+        """原视频原子写入 attachments 平台目录；同名已存在跳过（同内容重跑幂等）。
+
+        rel 由处理器按 ``attachments/<平台>/<名>.mp4`` 约定给出（笔记
+        markdown 里的 ``![[...]]`` 内嵌与之为同一字符串）；绝不覆盖既有
+        文件（同路径=同内容，跳过即幂等）。
+        """
+        target = self.tree.notes_dir / rel
+        if target.exists():
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        try:
+            tmp.write_bytes(blob)
+            os.replace(tmp, target)
+        except OSError as exc:
+            logger.warning("保存原视频失败 %s: %s", target, exc)
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
     @staticmethod
     def _note_filename(url: str, platform: str, doc_id: str, title: str = "") -> str:
