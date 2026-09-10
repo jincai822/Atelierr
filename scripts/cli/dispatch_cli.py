@@ -34,6 +34,7 @@ import frontmatter
 
 from scripts.cli.memory_cli import resolve_config_path
 from scripts.dispatch.archive import derive_archive_dir
+from scripts.dispatch.clips import ClipDispatcher
 from scripts.dispatch.digest import DigestDispatcher
 from scripts.dispatch.feishu import send_resurface_feishu, send_todo_feishu
 from scripts.dispatch.highlights import HighlightsDispatcher
@@ -286,7 +287,7 @@ class DispatchCLI:
             help="只扫描报告，不处理、不建笔记、不写状态",
         )
         def links_command(dry_run: bool) -> None:
-            """扫描笔记中的抖音链接并自动抓取转写。"""
+            """扫描笔记中的抖音链接并自动抓取转写；同班次处理新网页剪藏。"""
             tree = self._build_tree()
             with _dispatch_lock(tree.state_dir) as locked:
                 if not locked:
@@ -311,6 +312,17 @@ class DispatchCLI:
                             report["created"],
                             notes_dir=tree.notes_dir,
                         )
+                # 同班次扫网页剪藏：新剪藏推 LLM 摘要确认卡，同 url
+                # 重复剪藏标 pending_delete（详见 dispatch/clips.py）
+                clip_report = ClipDispatcher(
+                    tree, notify=send_dispatch_notice
+                ).run(dry_run=dry_run)
+                if clip_report["new"]:
+                    click.echo(
+                        f"剪藏：新 {clip_report['new']} 篇，"
+                        f"推卡 {len(clip_report['cards'])} 张，"
+                        f"重复 {len(clip_report['duplicates'])} 篇"
+                    )
                 if dry_run:
                     click.echo("（dry-run：未做处理）")
 

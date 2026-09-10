@@ -133,6 +133,15 @@ Z 综合：Z综合
 
 转写全文："""
 
+#: 网页剪藏摘要提示词：与 _SUMMARIZE_V4_PROMPT 逐字同源（replace 派生），
+#: 只换主语（视频转写 → 网页文章）。刻意不另抄一份——中图法分类表与
+#: 各节产出标准全库只有这一份（2026-09-10 用户裁决：统一国家图书分类
+#: 标准），改 V4 即同步改剪藏。供 dispatch/clips.py 复用同一
+#: _summarize 管道。
+_SUMMARIZE_CLIP_PROMPT = _SUMMARIZE_V4_PROMPT.replace(
+    "请阅读以下视频转写全文", "请阅读以下网页文章全文"
+).replace("转写全文：", "文章全文：")
+
 #: 视频处理器输出里的逐句时间戳行（"- [00:00] 文本"）
 _SEGMENT_LINE_RE = re.compile(r"^- \[\d{2}:\d{2}\]\s*", re.M)
 
@@ -693,7 +702,9 @@ class LinkProcessor(BaseProcessor):
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
 
-    def _summarize(self, transcript: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    def _summarize(
+        self, transcript: str, prompt: Optional[str] = None
+    ) -> Tuple[Optional[Dict[str, Any]], str]:
         """调 LLM 生成结构化笔记元数据；任何失败/跳过返回 (None, 状态)。
 
         跳过条件（不算错误）：API key 环境变量未设置、转写为空、
@@ -706,7 +717,9 @@ class LinkProcessor(BaseProcessor):
         替换为 ``-``），category 为空则不产出分类标签。
 
         Args:
-            transcript: 简体转写全文。
+            transcript: 简体转写全文（网页剪藏复用时为文章全文）。
+            prompt: 自定义提示词（缺省 _SUMMARIZE_V4_PROMPT；网页剪藏
+                传 _SUMMARIZE_CLIP_PROMPT，见 dispatch/clips.py）。
 
         Returns:
             Tuple[Optional[Dict[str, Any]], str]: (六键字典或 None,
@@ -718,7 +731,7 @@ class LinkProcessor(BaseProcessor):
             return None, "skipped:empty-transcript"
         if len(transcript) > self.llm_max_chars:
             return None, "skipped:too-long"
-        prompt = _SUMMARIZE_V4_PROMPT + "\n" + transcript
+        prompt = (prompt or _SUMMARIZE_V4_PROMPT) + "\n" + transcript
         try:
             content = self._llm_chat(prompt, self.llm_max_tokens, json_mode=True)
             data = json.loads(content)

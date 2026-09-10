@@ -748,3 +748,32 @@ def test_fetch_xhs_note_bad_structure(monkeypatch):
 
     assert note is None
     assert error is not None and "解析失败" in error
+
+
+def test_summarize_custom_prompt(monkeypatch):
+    """_summarize 接受自定义提示词（网页剪藏复用同一 LLM 管道）。"""
+    import json as _json
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    processor = LinkProcessor(config={})
+    captured = {}
+
+    def _fake_chat(prompt, max_tokens, json_mode=False):
+        captured["prompt"] = prompt
+        return _json.dumps({"summary": "摘要。", "points": []})
+
+    monkeypatch.setattr(processor, "_llm_chat", _fake_chat)
+
+    data, status = processor._summarize("文章全文", prompt="自定义提示词：")
+
+    assert status == "ok"
+    assert data["summary"] == "摘要。"
+    assert captured["prompt"] == "自定义提示词：\n文章全文"
+
+
+def test_clip_prompt_derives_from_v4():
+    """网页剪藏提示词与 V4 逐字同源：只换主语，中图法分类表保持一致。"""
+    assert link_module._SUMMARIZE_CLIP_PROMPT.startswith("请阅读以下网页文章全文")
+    assert link_module._SUMMARIZE_CLIP_PROMPT.endswith("文章全文：")
+    assert "B84-心理学" in link_module._SUMMARIZE_CLIP_PROMPT
+    assert "视频转写" not in link_module._SUMMARIZE_CLIP_PROMPT

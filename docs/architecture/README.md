@@ -46,7 +46,9 @@ Atelierr 应用（后台管线，定时器无人值守）。两平面代码零�
 `$OV` 数据面；只读桥当前仅 `/weekly` 启用。
 
 **后台管线**（横向）：捕获入口（速记/链接/截图/录音/PDF/网页剪藏）→ dispatch 分发
-（15 分钟轮询，links→media→todos→highlights）→ processors 引擎
+（15 分钟轮询，links→media→todos→highlights；links 同班次处理网页剪藏：
+新剪藏复用链接 LLM 摘要管道推飞书确认卡——摘要只进卡片不落笔记，
+同 url 重复剪藏由机器在 sidecar 标 pending_delete 待人工 purge，09-10）→ processors 引擎
 （OCR/Whisper/LLM 摘要/LLM 划重点代读）→ memory/ 工作记忆（平面 .md
 缓冲区，会遗忘）→ wiki/ 知识总库。memory/ 根=收件箱；确认后归子目录
 （平台/ · 书籍/分类/ · 日记/想法/目标/）：你手动拖或点飞书 📁 按钮，
