@@ -31,7 +31,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import tempfile
@@ -42,6 +41,7 @@ from typing import Any, Dict, List, Optional, Set
 import frontmatter
 
 from scripts.dispatch.sysdir import SYSTEM_DIRNAME
+from scripts.utils.state_store import read_json, write_json
 from scripts.memory.core import MemoryTree
 from scripts.wiki.manager import EXCERPT_TYPE, WIKI_DIRNAME
 
@@ -234,27 +234,9 @@ class HighlightsDispatcher:
 
     def _load_state(self) -> Dict[str, Any]:
         """加载转记状态；文件缺失/损坏返回空表（不抛异常）。"""
-        if not self.state_path.exists():
-            return {}
-        try:
-            data = json.loads(self.state_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return {}
+        data = read_json(self.state_path, {})
         return data if isinstance(data, dict) else {}
 
     def _save_state(self, state: Dict[str, Any]) -> None:
-        """原子写入状态文件（临时文件 + rename）。"""
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(
-            dir=str(self.state_path.parent), suffix=".tmp"
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(state, fh, ensure_ascii=False, indent=2)
-            os.replace(tmp_path, self.state_path)
-        except OSError:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        """原子写入状态文件（scripts/utils/state_store 统一实现）。"""
+        write_json(self.state_path, state, indent=2)

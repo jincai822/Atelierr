@@ -69,6 +69,7 @@ from urllib.parse import quote
 import frontmatter
 
 from scripts.dispatch.prompt import CLOSE_WORDS, PromptStore
+from scripts.utils.state_store import read_json, write_json
 
 from scripts.dispatch.archive import derive_archive_dir
 from scripts.dispatch.media import ATTACHMENTS_DIR
@@ -1248,29 +1249,11 @@ class FeishuBridge:
         seen = self._load_seen()
         seen.append(message_id)
         del seen[:-_SEEN_CAP]
-        fd, tmp_path = tempfile.mkstemp(
-            dir=str(self.state_path.parent), suffix=".tmp"
-        )
-        try:
-            self.state_path.parent.mkdir(parents=True, exist_ok=True)
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump({"seen": seen}, fh, ensure_ascii=False)
-            os.replace(tmp_path, self.state_path)
-        except OSError:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        write_json(self.state_path, {"seen": seen})
 
     def _load_seen(self) -> List[str]:
         """读取登记表；缺失/损坏返回空表（不抛异常）。"""
-        if not self.state_path.exists():
-            return []
-        try:
-            data = json.loads(self.state_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return []
+        data = read_json(self.state_path, {})
         seen = data.get("seen") if isinstance(data, dict) else None
         return list(seen) if isinstance(seen, list) else []
 
@@ -1717,11 +1700,7 @@ def _pin_card(
         return
     if pin_state is not None:
         try:
-            pin_state.parent.mkdir(parents=True, exist_ok=True)
-            pin_state.write_text(
-                json.dumps({"message_id": message_id}, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            write_json(pin_state, {"message_id": message_id})
         except OSError as exc:
             print(f"[feishu] pin state write fail: {exc}", flush=True)
 

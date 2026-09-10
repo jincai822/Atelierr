@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -28,6 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import frontmatter
 
 from scripts.dispatch.feishu import _import_lark
+from scripts.utils.state_store import read_json, write_json
 from scripts.dispatch.task_sync import _client, load_user_open_id
 
 BOARD_FILENAME = "feishu_board.json"
@@ -68,17 +68,11 @@ class BoardSync:
     # ---- 状态 ------------------------------------------------------------
 
     def _load_state(self) -> Dict[str, Any]:
-        try:
-            data = json.loads(self.state_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
+        data = read_json(self.state_path, {})
         return data if isinstance(data, dict) else {}
 
     def _save_state(self, state: Dict[str, Any]) -> None:
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        self.state_path.write_text(
-            json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        write_json(self.state_path, state, indent=2)
 
     @staticmethod
     def board_url(app_token: str) -> str:

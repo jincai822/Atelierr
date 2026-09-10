@@ -14,11 +14,11 @@ docs/FEISHU-BOT.md）。
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from scripts.dispatch.feishu import _import_lark
+from scripts.utils.state_store import read_json, write_json
 from scripts.dispatch.task_sync import _client, load_user_open_id
 
 CALENDAR_FILENAME = "feishu_calendar.json"
@@ -31,17 +31,12 @@ def _state_path(state_dir: Path) -> Path:
 
 def _load_state(state_dir: Path) -> Dict[str, Any]:
     """读取日历状态（calendar_id/shared）；缺失/损坏返回空表。"""
-    try:
-        data = json.loads(_state_path(state_dir).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+    data = read_json(_state_path(state_dir), {})
     return data if isinstance(data, dict) else {}
 
 
 def _save_state(state_dir: Path, state: Dict[str, Any]) -> None:
-    path = _state_path(state_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    write_json(_state_path(state_dir), state)
 
 
 def ensure_calendar(state_dir: Path) -> Optional[str]:

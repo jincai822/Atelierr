@@ -20,11 +20,11 @@
 
 from __future__ import annotations
 
-import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from scripts.utils.state_store import read_json, write_json
 
 #: 关闭会话的关键词（用户回复其一即结束问答，不计入答案）
 CLOSE_WORDS = frozenset({"跳过", "完成", "skip", "done"})
@@ -49,10 +49,7 @@ class PromptStore:
 
     def load(self) -> Optional[Dict[str, Any]]:
         """读状态；文件不存在或损坏返回 None（按无会话处理）。"""
-        try:
-            data = json.loads(self.state_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
+        data = read_json(self.state_path, None)
         return data if isinstance(data, dict) else None
 
     def is_open(self) -> bool:
@@ -103,10 +100,5 @@ class PromptStore:
         return data
 
     def _save(self, data: Dict[str, Any]) -> None:
-        """原子写状态文件。"""
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.state_path.with_name(self.state_path.name + ".tmp")
-        tmp.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        os.replace(tmp, self.state_path)
+        """原子写状态文件（scripts/utils/state_store 统一实现）。"""
+        write_json(self.state_path, data, indent=2)

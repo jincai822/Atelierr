@@ -16,12 +16,11 @@ Syncthing/Flatnotes 反映为服务器上的 mtime），或被用户 purge（文
 
 from __future__ import annotations
 
-import json
-import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from scripts.memory.core import MemoryTree
+from scripts.utils.state_store import read_json, write_json
 from scripts.utils.date_utils import parse_date
 
 RESPONSE_WINDOW = timedelta(hours=48)  # 推送后的响应观察窗
@@ -208,12 +207,7 @@ class ResponseProbe:
     def _load_state(self) -> Dict[str, Any]:
         """读取观测状态；缺失/损坏返回空态（观测丢了只影响统计）。"""
         empty: Dict[str, Any] = {"pending": {}, "resolved": []}
-        if not self.state_path.exists():
-            return dict(empty)
-        try:
-            data = json.loads(self.state_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, UnicodeDecodeError):
-            return dict(empty)
+        data = read_json(self.state_path, None)
         if not isinstance(data, dict):
             return dict(empty)
         data.setdefault("pending", {})
@@ -221,9 +215,5 @@ class ResponseProbe:
         return data
 
     def _save_state(self, state: Dict[str, Any]) -> None:
-        """原子写观测状态：先写临时文件再 rename。"""
-        tmp = self.state_path.with_name(self.state_path.name + ".tmp")
-        tmp.write_text(
-            json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        os.replace(tmp, self.state_path)
+        """原子写观测状态（scripts/utils/state_store 统一实现）。"""
+        write_json(self.state_path, state, indent=2)

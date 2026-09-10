@@ -20,15 +20,14 @@ docs/FEISHU-BOT.md）。凭证走环境变量（FEISHU_APP_ID/SECRET）。
 
 from __future__ import annotations
 
-import json
 import os
-import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from scripts.dispatch.feishu import ENV_APP_ID, ENV_APP_SECRET, _import_lark
+from scripts.utils.state_store import read_json, write_json
 
 #: 环境变量：直接指定用户 open_id（免事件捕获）
 ENV_USER_ID = "FEISHU_USER_ID"
@@ -52,11 +51,7 @@ def record_user_open_id(state_dir: Path, open_id: str) -> None:
     if load_user_open_id(state_dir, use_env=False) == open_id:
         return
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps({"user_open_id": open_id}, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        write_json(path, {"user_open_id": open_id})
     except OSError as exc:
         print(f"[feishu] record open_id fail: {exc}", flush=True)
 
@@ -68,10 +63,7 @@ def load_user_open_id(state_dir: Path, use_env: bool = True) -> Optional[str]:
         if env_value:
             return env_value
     path = Path(state_dir) / ACCOUNT_FILENAME
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    data = read_json(path, None)
     value = data.get("user_open_id") if isinstance(data, dict) else None
     return str(value) if value else None
 
@@ -100,30 +92,14 @@ def sender_open_id(sender: Any) -> Optional[str]:
 
 def _load_tasks(state_dir: Path) -> Dict[str, str]:
     """读取 文件名 → task_guid 映射；缺失/损坏返回空表。"""
-    path = Path(state_dir) / TASKS_FILENAME
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+    data = read_json(Path(state_dir) / TASKS_FILENAME, {})
     tasks = data.get("tasks") if isinstance(data, dict) else None
     return dict(tasks) if isinstance(tasks, dict) else {}
 
 
 def _save_tasks(state_dir: Path, tasks: Dict[str, str]) -> None:
-    """原子写登记表。"""
-    path = Path(state_dir) / TASKS_FILENAME
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump({"tasks": tasks}, fh, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, path)
-    except OSError:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    """原子写登记表（scripts/utils/state_store 统一实现）。"""
+    write_json(Path(state_dir) / TASKS_FILENAME, {"tasks": tasks}, indent=2)
 
 
 def _client() -> Any:
