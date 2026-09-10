@@ -414,3 +414,54 @@ def test_query_block_and_tag_syntax_not_extracted(memory_tree, monkeypatch):
     assert report["created"] == []
     assert called  # 无显式命中才走 LLM，且 LLM 也判无
     assert _state(memory_tree)["主页.md"]["status"] == "no-todo"
+
+
+def test_llm_item_overlapping_explicit_is_skipped(memory_tree, monkeypatch):
+    """同篇笔记：LLM 项与显式项互为子串 → 只建显式那一条（不重复）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        todos_module.httpx,
+        "post",
+        lambda *a, **k: _FakeLLMResponse(
+            _todos_payload([{"text": "给系统做体检", "due": None}])
+        ),
+    )
+    memory_tree.create_note(
+        "feishu-x.md", "- [ ] 测试任务：给系统做体检 📅 2026-09-12\n"
+    )
+
+    report = TodoDispatcher(memory_tree).run()
+
+    assert len(report["created"]) == 1
+    note = _read_note(memory_tree, report["created"][0])
+    assert "测试任务：给系统做体检" in note.content
+    assert "待确认" not in (note.metadata.get("tags") or [])
+
+
+def test_llm_item_not_overlapping_still_created(memory_tree, monkeypatch):
+    """LLM 项与显式项不重叠 → 两条都建（去重不误伤真实新意图）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        todos_module.httpx,
+        "post",
+        lambda *a, **k: _FakeLLMResponse(
+            _todos_payload([{"text": "顺便把报告打印了", "due": None}])
+        ),
+    )
+    memory_tree.create_note("feishu-y.md", "- [ ] 测试任务：给系统做体检\n")
+
+    report = TodoDispatcher(memory_tree).run()
+
+    assert len(report["created"]) == 2
+
+
+def test_overlap_helper_edge_cases():
+    """重叠判定：空串/标点差异/双向子串。"""
+    from scripts.dispatch.todos import _norm_task_text, _overlaps_explicit
+
+    assert _norm_task_text("给系统 做体检！") == "给系统做体检"
+    assert _overlaps_explicit("给系统做体检", ["测试任务给系统做体检"])
+    assert _overlaps_explicit("测试任务：给系统做体检", ["给系统做体检"])
+    assert not _overlaps_explicit("打印报告", ["给系统做体检"])
+    assert not _overlaps_explicit("", ["给系统做体检"])
+    assert not _overlaps_explicit("给系统做体检", [])

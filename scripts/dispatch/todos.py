@@ -9,8 +9,9 @@
      感慨不建；意愿词如"想看/打算"算行动意图，由"待确认"人工兜底），
      产出带"待确认"标签，人工在产出端确认；对链接产出笔记
      （source=link）只把"观点总结 + 分观点论述"两节喂给分类器
-     （省 token、信号干净）；两通道文本重叠时由待办笔记的
-     文件名哈希去重，不会重复建；
+     （省 token、信号干净）；LLM 项与同篇显式项文本重叠（归一化后
+     互为子串）时直接跳过，其余重叠由待办笔记的文件名哈希去重，
+     不会重复建；
 - 幂等：``<state_dir>/processed_todos.json`` 按笔记记内容哈希；内容未变
   不重判，变化后重判（日记会追加新内容），重复行动项由待办笔记的
   文件名哈希去重拦截，不会重复建；失败最多重试 3 次熔断；
@@ -112,6 +113,24 @@ def _extract_explicit(body: str) -> List[Dict[str, Any]]:
             if text:
                 items.append({"text": text, "due": None})
     return items
+
+
+def _norm_task_text(text: str) -> str:
+    """归一化任务文本（去空白与常见标点，供重叠判定；空归一化串无意义）。"""
+    return re.sub(r"[\s　，。：:；;、！!？?《》<>\"'“”‘’]+", "", str(text or ""))
+
+
+def _overlaps_explicit(llm_text: str, explicit_norms: List[str]) -> bool:
+    """LLM 项与显式项文本重叠判定：归一化后互为子串即视为同一行动项。
+
+    场景：你写了 ``- [ ] 测试任务：给系统做体检``，LLM 又抽出
+    "给系统做体检"——归一化后后者是前者的子串，跳过不重复建
+    （2026-09-10 真实样本：两条文本不同导致文件名哈希去重失效）。
+    """
+    norm = _norm_task_text(llm_text)
+    if not norm:
+        return False
+    return any(norm in other or other in norm for other in explicit_norms if other)
 
 
 def _summary_sections(body: str) -> str:
@@ -278,7 +297,11 @@ class TodoDispatcher:
             else:
                 llm_done = True
                 work.pop("last_error", None)  # 重试成功，清掉旧失败记录
+                explicit_norms = [_norm_task_text(i["text"]) for i in explicit_items]
                 for item in llm_items:
+                    # 与同篇显式项重叠（互为子串）的 LLM 项跳过，不重复建
+                    if _overlaps_explicit(item.get("text", ""), explicit_norms):
+                        continue
                     filename = self._create_todo_note(
                         item, note_path, review=True, dry_run=False
                     )
