@@ -25,6 +25,11 @@
 			"type": "text"
 		},
 		{
+			"name": "备注",
+			"value": "",
+			"type": "text"
+		},
+		{
 			"name": "created",
 			"value": "{{date|date:\\\"YYYY-MM-DDTHH:mm:ssZ\\\"}}",
 			"type": "date"

@@ -161,6 +161,7 @@ class ClipDispatcher:
                         "id": str(note_id),
                         "title": str(post.get("title") or Path(note_path).stem),
                         "url": str(post.get("url") or "").strip(),
+                        "note": str(post.get("备注") or "").strip(),
                         "created": str(post.get("created") or ""),
                         "review": REVIEW_TAG in tags,
                         "body": post.content or "",
@@ -240,8 +241,13 @@ class ClipDispatcher:
             return None, f"failed:{type(exc).__name__}"
 
     def _card_body(self, clip: Dict[str, Any], summary: Optional[Dict]) -> str:
-        """确认卡正文：标题 +（可选）观点总结与至多 3 条要点 + 建议归档。"""
+        """确认卡正文：标题 +（可选）用户备注 +（可选）观点总结与至多 3 条
+        要点 + 建议归档。备注是剪藏时用户随手写的"为什么存"
+        （2026-09-10 裁决 C1，frontmatter ``备注`` 字段），放在最显眼处。
+        """
         lines = [f"《{clip['title']}》已剪藏入库"]
+        if clip.get("note"):
+            lines += ["", f"你的备注：{clip['note']}"]
         if summary:
             lines += ["", str(summary.get("summary") or "").strip()]
             points = [

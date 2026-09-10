@@ -320,3 +320,32 @@ def test_cli_links_also_dispatches_clips(memory_tree, tmp_path, monkeypatch):
     assert code == 0
     assert len(notify.calls) == 1
     assert notify.calls[0]["confirm_note"] == "clip-a.md"
+
+
+def test_card_shows_user_note(memory_tree):
+    """剪藏带「备注」（为什么存）：确认卡正文在最显眼处展示（裁决 C1）。"""
+    notify = _Notify()
+    _clip(memory_tree)
+    # 给剪藏补上备注字段（模拟模板新属性，机器不改写——测试直接改文件模拟剪藏产物）
+    path = memory_tree.notes_dir / "clip-a.md"
+    post = frontmatter.loads(path.read_text(encoding="utf-8"))
+    post.metadata["备注"] = "讲 OCR 的那段对工作有用"
+    path.write_text(frontmatter.dumps(post), encoding="utf-8")
+
+    report = _dispatcher(memory_tree, notify).run()
+
+    assert report["cards"] == ["clip-a.md"]
+    message = notify.calls[0]["message"]
+    assert "你的备注：讲 OCR 的那段对工作有用" in message
+    # 备注在摘要之前（最显眼）
+    assert message.index("你的备注") < message.index("核心论点摘要。")
+
+
+def test_card_without_note_no_line(memory_tree):
+    """无备注（留空/旧模板剪藏）：卡片无备注行，流程零变化。"""
+    notify = _Notify()
+    _clip(memory_tree)
+
+    _dispatcher(memory_tree, notify).run()
+
+    assert "你的备注" not in notify.calls[0]["message"]
