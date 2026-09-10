@@ -45,7 +45,10 @@ cp /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
 Atelierr 应用（后台管线，定时器无人值守）。两平面代码零互调，交接只走
 `$OV` 数据面；只读桥当前仅 `/weekly` 启用。
 
-**后台管线**（横向）：捕获入口（速记/链接/截图/录音/PDF/网页剪藏）→ dispatch 分发
+**后台管线**（横向）：捕获入口（速记/链接[抖音·小红书·B站]/截图/录音/PDF/网页剪藏；
+原资料按平台分目录存 attachments/媒体/·书籍/·抖音/·小红书/·B站/，视频只存
+480p——片源已 ≤480p 则存原件，电脑截图只认 ~/图片/进系统/ 专用夹复制进入，
+09-10 捕获 v2.1）→ dispatch 分发
 （15 分钟轮询，links→media→todos→highlights；links 同班次处理网页剪藏：
 新剪藏复用链接 LLM 摘要管道推飞书确认卡——摘要只进卡片不落笔记，
 同 url 重复剪藏由机器在 sidecar 标 pending_delete 待人工 purge，09-10）→ processors 引擎
@@ -57,6 +60,8 @@ Atelierr 应用（后台管线，定时器无人值守）。两平面代码零�
 候选清单，人工勾中直接转 wiki 摘录卡（type: Excerpt，from 指回清单+页码；
 Cognitive OS §7.9 机制 09-03 落地，09-06 方案③改为勾选即沉淀，不再经
 memory 待确认中转——摘录卡是文献笔记，周日提炼时改写为 concept 卡并互链）。
+捕获统计：晨报推送带昨日简数、摘要昨日节附入口分布、周日摘要加本周
+详细节（确认率/wiki 沉淀数），`dispatch_cli stats` 可随时查（09-10）。
 
 **回响回路**：decay（03:00 分层，只写 sidecar）+ 检索式晨报（07:53，
 复习 + 提炼候选，冷却 3 天）+ 周回顾四问飞书作答回填（09-08，prompt
