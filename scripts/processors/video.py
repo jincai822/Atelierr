@@ -48,6 +48,54 @@ _model_cache: Dict[str, Any] = {}
 DEFAULT_INITIAL_PROMPT = "以下是普通话转写，使用规范书面标点，如逗号、句号、问号、感叹号、冒号、引号与书名号《》。"
 
 
+def compress_to_480p(src: Path, dst: Path, ffmpeg: str = "ffmpeg") -> bool:
+    """ffmpeg 压到 480p（H.264 crf30 + AAC 96k，约为原件 1/10）；失败 False。
+
+    高度大于 480 才缩（小片源不放大，避免越压越大）；faststart 便于
+    Obsidian/浏览器边下边播。本函数是全系统视频存储规格的**唯一实现**
+    （2026-09-10 裁决 G2：链接视频只存 480p 单份；2026-09-11 裁决 B：
+    直发视频同规格）——processors/link.py 与 dispatch/media.py 共用，
+    禁止另起炉灶复制 ffmpeg 参数。
+
+    Args:
+        src: 源视频路径。
+        dst: 产出路径（调用方负责临时名+原子改名；本函数只写不搬）。
+        ffmpeg: ffmpeg 可执行文件。
+
+    Returns:
+        bool: 压缩成功且产出非空为 True；任何失败 False（调用方保底
+        留原件，绝不压坏了还丢原件）。
+    """
+    command = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(src),
+        "-vf",
+        "scale=w='if(gt(ih,480),-2,iw)':h='if(gt(ih,480),480,ih)'",
+        "-c:v",
+        "libx264",
+        "-crf",
+        "30",
+        "-preset",
+        "veryfast",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "96k",
+        "-movflags",
+        "+faststart",
+        str(dst),
+    ]
+    try:
+        proc = subprocess.run(
+            command, capture_output=True, timeout=300, check=False
+        )
+    except Exception:  # noqa: BLE001 - 压缩失败走原件保底
+        return False
+    return proc.returncode == 0 and dst.exists() and dst.stat().st_size > 0
+
+
 def _load_model(model_name: str) -> Any:
     """按名称加载 Whisper 模型（懒加载并缓存实例）。
 

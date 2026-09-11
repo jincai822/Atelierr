@@ -59,7 +59,7 @@ import opencc
 import yt_dlp
 
 from scripts.processors.base import BaseProcessor, ProcessResult
-from scripts.processors.video import VideoProcessor
+from scripts.processors.video import VideoProcessor, compress_to_480p
 
 #: 抖音域名（短链 / 视频页 / 分享页）
 _DOUYIN_HOSTS: Tuple[str, ...] = (
@@ -1041,36 +1041,11 @@ class LinkProcessor(BaseProcessor):
         """ffmpeg 压到 480p（H.264 crf30 + AAC 96k，约为原件 1/10）；失败 False。
 
         高度大于 480 才缩（小片源不放大，避免越压越大）；faststart 便于
-        Obsidian/浏览器边下边播。
+        Obsidian/浏览器边下边播。实现收敛在
+        :func:`scripts.processors.video.compress_to_480p`（与直发视频通道
+        共用唯一实现，禁止复制参数另起炉灶）。
         """
-        command = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            str(src),
-            "-vf",
-            "scale=w='if(gt(ih,480),-2,iw)':h='if(gt(ih,480),480,ih)'",
-            "-c:v",
-            "libx264",
-            "-crf",
-            "30",
-            "-preset",
-            "veryfast",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "96k",
-            "-movflags",
-            "+faststart",
-            str(dst),
-        ]
-        try:
-            proc = subprocess.run(
-                command, capture_output=True, timeout=300, check=False
-            )
-        except Exception:  # noqa: BLE001 - 压缩失败走原件保底
-            return False
-        return proc.returncode == 0 and dst.exists() and dst.stat().st_size > 0
+        return compress_to_480p(src, dst)
 
     @staticmethod
     def _cleanup(download_dir: str) -> None:

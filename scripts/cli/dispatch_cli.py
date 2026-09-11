@@ -5,7 +5,7 @@
     python -m scripts.cli.dispatch_cli links --dry-run  # 只报告不处理
     python -m scripts.cli.dispatch_cli todos            # 扫描并抽取待办事项
     python -m scripts.cli.dispatch_cli todos --dry-run  # 只报告不建笔记
-    python -m scripts.cli.dispatch_cli media            # 扫描 attachments/ 截图录音并 OCR/转写
+    python -m scripts.cli.dispatch_cli media            # 扫描 attachments/ 截图/录音/视频并 OCR/转写
     python -m scripts.cli.dispatch_cli media --dry-run  # 只报告不处理
     python -m scripts.cli.dispatch_cli highlights       # 划重点清单勾中项转 wiki 摘录卡
     python -m scripts.cli.dispatch_cli digest           # 创建今日摘要笔记
@@ -369,7 +369,7 @@ class DispatchCLI:
             help="只扫描报告，不建笔记、不写状态、不加载引擎",
         )
         def media_command(dry_run: bool) -> None:
-            """扫描 attachments/ 里的截图/录音并自动 OCR/转写入库。"""
+            """扫描 attachments/ 里的截图/录音/视频并自动 OCR/转写入库。"""
             tree = self._build_tree()
             with _dispatch_lock(tree.state_dir) as locked:
                 if not locked:
@@ -397,7 +397,7 @@ class DispatchCLI:
                     _notify_media_failures(report["failed"])
                     if report["created"]:
                         _notify_created_notes(
-                            "Atelierr OCR 笔记待确认",
+                            "Atelierr 附件笔记待确认",
                             "已识别入库",
                             report["created"],
                             notes_dir=tree.notes_dir,

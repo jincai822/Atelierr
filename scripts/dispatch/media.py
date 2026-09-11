@@ -1,6 +1,6 @@
-"""附件自动路由：attachments/ 里的截图/录音 → OCR/Whisper → 建"待确认"笔记；
-PDF（书籍/长文）→ 划重点清单笔记（机器代读出可勾选候选，勾中条目由
-:mod:`scripts.dispatch.highlights` 转为 wiki 摘录卡）。
+"""附件自动路由：attachments/ 里的截图/录音/直发视频 → OCR/Whisper →
+建"待确认"笔记；PDF（书籍/长文）→ 划重点清单笔记（机器代读出可勾选
+候选，勾中条目由 :mod:`scripts.dispatch.highlights` 转为 wiki 摘录卡）。
 
 定位：与 links/todos 同源的 dispatch 顶层组合模块（memory 与 processors
 之间唯一的接线点）。触发由 systemd 定时器驱动
@@ -9,17 +9,26 @@ PDF（书籍/长文）→ 划重点清单笔记（机器代读出可勾选候选
 
 典型路径：手机截图/录音 → Obsidian 附件目录 → Syncthing 同步到电脑
 → 本模块识别 → 建笔记（内嵌原附件 ``![[attachments/媒体/xxx]]``，
-Obsidian 里图片直接显示、录音直接可播）→ 正文同时进入 todos 分发的
-扫描范围（截图里有行动意图时自动抽取待办）。
+Obsidian 里图片直接显示、录音/视频直接可播）→ 正文同时进入 todos
+分发的扫描范围（截图里有行动意图时自动抽取待办）。
 
 原资料归位（2026-09-10 用户裁决 G1）：附件按来源平台分子目录——
-``媒体/``（截图/图片/语音）、``书籍/``（PDF）、``抖音/`` ``小红书/``
-``B站/``（链接视频，由 links 管线写入，本模块不处理视频）；与笔记归档
-目录同一套名字。扫描覆盖 attachments/ 顶层与一层子目录（视频 .mp4 不在
-可处理扩展名内，天然跳过）。原件只增不减：本模块绝不删除/移动附件。
+``媒体/``（截图/图片/语音/**直发视频**）、``书籍/``（PDF）、``抖音/``
+``小红书/`` ``B站/``（链接视频，由 links 管线写入）；与笔记归档目录
+同一套名字。扫描覆盖 attachments/ 顶层与一层子目录。
+
+直发视频（2026-09-11 用户裁决：飞书直接发视频文件，不用链接）：
+只认 ``媒体/`` 子目录里的视频——平台目录（抖音/小红书/B站）的 mp4
+是 links 管线保存的原视频，绝不作为输入（防"自产自吃"循环）；顶层
+散放视频同样不碰（要进系统请放进 attachments/媒体/）。转写成功后
+压 480p **替换原件**（2026-09-11 用户裁决 B：与链接视频同一存储规格，
+这是"原件只增不减"的唯一例外，仅限本通道直发视频；压缩失败保留
+原件保底，绝不压坏了还丢原件）。其余附件原件只增不减：本模块绝不
+删除/移动附件。
 
 纪律（与 links.py 一致）：
-- 只新增笔记，绝不改写/移动/删除既有笔记与附件本身；
+- 只新增笔记，绝不改写/移动/删除既有笔记与附件本身（直发视频的
+  480p 替换是唯一例外，见上）；
 - 幂等：附件处理状态记录于 ``<state_dir>/processed_media.json``，
   以附件相对笔记根目录路径为键（如 ``attachments/媒体/IMG_001.jpg``），
   同一文件只成功处理一次（文件内容变化不重新处理——手机附件一旦同步
@@ -35,6 +44,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import shutil
 import time
@@ -51,6 +61,8 @@ from scripts.processors.audio import AudioProcessor
 from scripts.processors.highlights import HighlightsProcessor
 from scripts.processors.image import SUPPORTED_EXTENSIONS as IMAGE_EXTS
 from scripts.processors.image import ImageProcessor
+from scripts.processors.video import SUPPORTED_EXTENSIONS as VIDEO_EXTS
+from scripts.processors.video import VideoProcessor, compress_to_480p
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +89,9 @@ MIN_AGE_SECONDS = 30
 #: 人工勾中的条目由 dispatch/highlights.py 转为正式笔记）
 _PDF_EXTS = {".pdf"}
 
+#: 直发视频扩展名（2026-09-11 裁决）——只认 媒体/ 子目录，见 _collect_files
+_VIDEO_EXTS = set(VIDEO_EXTS)
+
 _KIND_BY_EXT = {ext: "截图" for ext in IMAGE_EXTS}
 _KIND_BY_EXT.update({ext: "录音" for ext in AUDIO_EXTS})
 
@@ -98,6 +113,7 @@ class MediaDispatcher:
         audio_factory: Optional[Callable[[], AudioProcessor]] = None,
         highlights_factory: Optional[Callable[[], HighlightsProcessor]] = None,
         screenshot_inbox: Optional[str] = None,
+        video_factory: Optional[Callable[[], VideoProcessor]] = None,
     ) -> None:
         """初始化。
 
@@ -112,15 +128,19 @@ class MediaDispatcher:
             只把该文件夹里的图片**复制**进 attachments/媒体/，复制不
             移动、其他截图一概不碰）；None 不启用（配置
             ``processors.media.screenshot_inbox``，由 dispatch_cli 注入）。
+            video_factory: 视频处理器工厂（2026-09-11 裁决：直发视频走
+            Whisper 转写），缺省为 VideoProcessor；每轮运行最多构造一次。
         """
         self.tree = tree
         self._image_factory = image_factory or ImageProcessor
         self._audio_factory = audio_factory or AudioProcessor
         self._highlights_factory = highlights_factory or HighlightsProcessor
+        self._video_factory = video_factory or VideoProcessor
         self._inbox = screenshot_inbox
         self._image: Optional[ImageProcessor] = None
         self._audio: Optional[AudioProcessor] = None
         self._highlights: Optional[HighlightsProcessor] = None
+        self._video: Optional[VideoProcessor] = None
         self.state_path = Path(tree.state_dir) / "processed_media.json"
 
     def run(self, dry_run: bool = False) -> Dict[str, Any]:
@@ -193,9 +213,10 @@ class MediaDispatcher:
     def _collect_files(self, report: Dict[str, Any]) -> List[Path]:
         """列出 attachments/ 顶层与一层子目录下全部可处理附件（按 mtime 升序）。
 
-        只认图片/录音/PDF 扩展名——``抖音/`` 等视频目录里的 .mp4 不在
-        可处理扩展名内（那是 links 管线保存的原视频，不是待 OCR/转写
-        的输入），天然跳过。
+        只认图片/录音/PDF 扩展名，外加**仅 媒体/ 子目录**的视频扩展名
+        （2026-09-11 裁决）：``抖音/`` 等平台目录里的 mp4 是 links 管线
+        保存的原视频，顶层散放视频也不是约定入口，都绝不作为输入
+        （防"自产自吃"循环）。
         """
         attach_dir = Path(self.tree.notes_dir) / ATTACHMENTS_DIR
         if not attach_dir.is_dir():
@@ -209,7 +230,11 @@ class MediaDispatcher:
         for path in sorted(candidates):
             if path.name.startswith("."):
                 continue
-            if path.suffix.lower() not in _KIND_BY_EXT and path.suffix.lower() not in _PDF_EXTS:
+            suffix = path.suffix.lower()
+            if suffix in _VIDEO_EXTS:
+                if path.parent.name != MEDIA_SUBDIR:
+                    continue
+            elif suffix not in _KIND_BY_EXT and suffix not in _PDF_EXTS:
                 continue
             report["scanned"] += 1
             try:
@@ -251,7 +276,13 @@ class MediaDispatcher:
                 entry["note"] = rel
                 report["created"].append(rel)
                 return
-            kind = _KIND_BY_EXT[path.suffix.lower()]
+            suffix = path.suffix.lower()
+            kind = "视频" if suffix in _VIDEO_EXTS else _KIND_BY_EXT[suffix]
+            if kind == "视频":
+                # 2026-09-11 裁决 B：直发视频压 480p 替换原件（先转写后
+                # 压缩——用原音质抽音轨；替换后 mtime 刷新，下方笔记
+                # 文件名/时间戳读取的即处理当下）
+                self._compress_in_place(path)
             filename = self._note_filename(path)
             body = self._build_note(path, kind, result.text)
             source, tags = "media", [REVIEW_TAG, kind]
@@ -280,9 +311,32 @@ class MediaDispatcher:
             if self._image is None:
                 self._image = self._image_factory()
             return self._image
+        if suffix in _VIDEO_EXTS:
+            if self._video is None:
+                self._video = self._video_factory()
+            return self._video
         if self._audio is None:
             self._audio = self._audio_factory()
         return self._audio
+
+    def _compress_in_place(self, path: Path) -> None:
+        """直发视频压 480p 并原子替换原件（2026-09-11 用户裁决 B）。
+
+        与链接视频同一规格，共用
+        :func:`scripts.processors.video.compress_to_480p` 唯一实现；
+        压缩/替换失败保留原件保底（绝不压坏了还丢原件），笔记照常创建。
+        临时文件用同目录隐藏名（``.`` 前缀），扫描天然跳过。
+        """
+        tmp = path.with_name(f".{path.stem}.480p.tmp.mp4")
+        try:
+            if not compress_to_480p(path, tmp):
+                tmp.unlink(missing_ok=True)
+                logger.warning("视频压 480p 失败，保留原件: %s", path)
+                return
+            os.replace(tmp, path)
+        except OSError as exc:
+            logger.warning("视频替换原件失败 %s: %s", path, exc)
+            tmp.unlink(missing_ok=True)
 
     @staticmethod
     def _pdf_note_filename(path: Path) -> str:

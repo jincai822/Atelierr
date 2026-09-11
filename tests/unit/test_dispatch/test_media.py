@@ -1,6 +1,8 @@
 """附件自动路由单元测试（无真实 OCR/Whisper，处理器以工厂注入假实现）。
 
-附件扫描、状态幂等、失败熔断、mtime 防半文件守卫均为真实代码路径。
+附件扫描、状态幂等、失败熔断、mtime 防半文件守卫、直发视频路由
+（仅 媒体/ 目录）与 480p 替换原件均为真实代码路径；压缩以
+monkeypatch 替换 ``scripts.dispatch.media.compress_to_480p``。
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from pathlib import Path
 import frontmatter
 import pytest
 
+from scripts.dispatch import media as media_module
 from scripts.dispatch.media import MediaDispatcher
 from scripts.processors.base import ProcessResult
 
@@ -47,10 +50,31 @@ class _FakeAudioProcessor:
         )
 
 
+class _FakeVideoProcessor:
+    """假视频处理器：记录调用，返回固定转写结果。"""
+
+    calls = []
+    fail_with = None
+
+    def process(self, path):
+        type(self).calls.append(str(path))
+        if type(self).fail_with:
+            return ProcessResult(success=False, error=type(self).fail_with)
+        return ProcessResult(
+            success=True, text="视频转写文本。", markdown="", confidence=0.8,
+        )
+
+
+def _fake_compress_ok(src, dst, ffmpeg="ffmpeg"):
+    """假压缩成功：写出更小的"480p"字节并返回 True。"""
+    Path(dst).write_bytes(b"480p-bytes")
+    return True
+
+
 @pytest.fixture(autouse=True)
 def _reset_fakes():
     """每个用例重置假处理器的调用记录与失败开关。"""
-    for fake in (_FakeImageProcessor, _FakeAudioProcessor):
+    for fake in (_FakeImageProcessor, _FakeAudioProcessor, _FakeVideoProcessor):
         fake.calls = []
         fake.fail_with = None
     yield
@@ -58,7 +82,10 @@ def _reset_fakes():
 
 def _dispatcher(tree):
     return MediaDispatcher(
-        tree, image_factory=_FakeImageProcessor, audio_factory=_FakeAudioProcessor
+        tree,
+        image_factory=_FakeImageProcessor,
+        audio_factory=_FakeAudioProcessor,
+        video_factory=_FakeVideoProcessor,
     )
 
 
@@ -374,3 +401,99 @@ def test_inbox_disabled_by_default(memory_tree, tmp_path):
     report = _dispatcher(memory_tree).run()
 
     assert report["imported"] == 0
+
+
+# ----------------------------------------------------------------------
+# 直发视频（2026-09-11 用户裁决：飞书直接发视频 → 转写 + 压 480p 替换原件）
+# ----------------------------------------------------------------------
+
+
+def test_video_creates_note_and_replaces_with_480p(memory_tree, monkeypatch):
+    """媒体/ 里的视频：转写建「待确认/视频」笔记 + 压 480p 替换原件（裁决 B）。"""
+    monkeypatch.setattr(media_module, "compress_to_480p", _fake_compress_ok)
+    path = _add_attachment(memory_tree, "clip.mp4", subdir="媒体")
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["found"] == 1
+    assert len(report["created"]) == 1
+    note = _created_note(memory_tree)
+    post = frontmatter.loads(note.read_text(encoding="utf-8"))
+    assert post["tags"] == ["待确认", "视频"]
+    assert post["source"] == "media"
+    assert "![[attachments/媒体/clip.mp4]]" in post.content
+    assert "## 转写全文" in post.content
+    assert "视频转写文本。" in post.content
+    # 原件已被 480p 同路径替换
+    assert path.read_bytes() == b"480p-bytes"
+    state = json.loads(
+        (memory_tree.state_dir / "processed_media.json").read_text()
+    )
+    assert state["attachments/媒体/clip.mp4"]["status"] == "done"
+
+
+def test_video_outside_media_subdir_ignored(memory_tree):
+    """视频只认 媒体/：顶层散放与书籍/ 里的 mp4 都不处理（平台目录见前例）。"""
+    _add_attachment(memory_tree, "loose.mp4")
+    _add_attachment(memory_tree, "odd.mp4", subdir="书籍")
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["scanned"] == 0
+    assert report["found"] == 0
+    assert _FakeVideoProcessor.calls == []
+    assert not list(Path(memory_tree.notes_dir).glob("media-*.md"))
+
+
+def test_video_compress_failure_keeps_original(memory_tree, monkeypatch):
+    """压缩失败：保留原件保底（绝不压坏了还丢原件），笔记照常创建。"""
+    monkeypatch.setattr(
+        media_module, "compress_to_480p", lambda *a, **k: False
+    )
+    path = _add_attachment(memory_tree, "clip.mp4", subdir="媒体")
+    original = path.read_bytes()
+
+    report = _dispatcher(memory_tree).run()
+
+    assert len(report["created"]) == 1
+    assert path.read_bytes() == original
+    note = _created_note(memory_tree)
+    assert "![[attachments/媒体/clip.mp4]]" in note.read_text(encoding="utf-8")
+
+
+def test_video_transcribe_failure_no_compress(memory_tree, monkeypatch):
+    """转写失败：不压缩、原件不动、计入失败熔断。"""
+    calls = []
+
+    def _spy_compress(src, dst, ffmpeg="ffmpeg"):
+        calls.append(1)
+        return True
+
+    monkeypatch.setattr(media_module, "compress_to_480p", _spy_compress)
+    _FakeVideoProcessor.fail_with = "Whisper 失败"
+    path = _add_attachment(memory_tree, "clip.mp4", subdir="媒体")
+    original = path.read_bytes()
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["created"] == []
+    assert len(report["failed"]) == 1
+    assert calls == []
+    assert path.read_bytes() == original
+
+
+def test_video_idempotent_second_run(memory_tree, monkeypatch):
+    """同一视频第二轮跳过：480p 替换刷新 mtime 也不会触发重处理。"""
+    monkeypatch.setattr(media_module, "compress_to_480p", _fake_compress_ok)
+    path = _add_attachment(memory_tree, "clip.mp4", subdir="媒体")
+    dispatcher = _dispatcher(memory_tree)
+    dispatcher.run()
+    # 替换后 mtime 是当下（正中 30s 防半文件守卫）——回拨模拟下一轮班次
+    old = time.time() - 60
+    os.utime(path, (old, old))
+
+    report = dispatcher.run()
+
+    assert report["created"] == []
+    assert report["skipped"] == 1
+    assert len(_FakeVideoProcessor.calls) == 1

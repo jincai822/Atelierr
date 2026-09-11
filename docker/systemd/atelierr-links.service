@@ -3,8 +3,9 @@
 # 每 15 分钟跑四条分发（顺序有意安排）：
 #   1. links — 扫描笔记中的抖音链接，抓取视频、Whisper 转写建"待确认"
 #      笔记（见 scripts/dispatch/links.py）；
-#   2. media — 扫描 attachments/ 的截图/录音，OCR/Whisper 转写建"待确认"
-#      笔记；PDF 走划重点清单（见 scripts/dispatch/media.py）；
+#   2. media — 扫描 attachments/ 的截图/录音/直发视频，OCR/Whisper 转写
+#      建"待确认"笔记（直发视频压 480p 替换原件）；PDF 走划重点清单
+#      （见 scripts/dispatch/media.py）；
 #   3. todos — 扫描笔记行动意图建待办（见 scripts/dispatch/todos.py），
 #      排在 links/media 之后：当轮产出的正文同轮即可被待办分发捡到；
 #   4. highlights — 划重点清单里人工勾中的候选转正式笔记
@@ -38,7 +39,7 @@ Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
 EnvironmentFile=-%h/.config/atelierr/env
 ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
 ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli links
-# 同轮顺带做附件分发（attachments/ 截图/录音 OCR/转写，见 scripts/dispatch/media.py）
+# 同轮顺带做附件分发（attachments/ 截图/录音/视频 OCR/转写，见 scripts/dispatch/media.py）
 ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli media
 # 待办分发排在第三：links/media 当轮产出的正文同轮即可被捡到（见 scripts/dispatch/todos.py）
 ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli todos
