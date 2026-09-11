@@ -6,6 +6,8 @@
 > - 细化①捕获→加工→入库：`atelierr-flow-pipeline.dataflow.json`
 > - 细化②回响·沉淀·删除·会话：`atelierr-flow-loop.dataflow.json`
 > - 细化③飞书中枢（双向通道全颗粒）：`atelierr-flow-feishu.dataflow.json`
+> - 细化④摄入模块全颗粒（九条来源→加工→入库→下游接口，含直发视频
+>   裁决 B）：`atelierr-ingest.dataflow.json` → `atelierr-ingest.html`
 > 渲染产物（可点开看的 HTML/PNG）在 `~/atelierr-data/exports/`。
 > 纪律（2026-09-02 用户裁决）：架构图只维护这一份计划版，不再出现状图；
 > 架构有变化就更新这份 IR 并重渲染。
@@ -25,17 +27,20 @@ node $ARCH/renderers/dataflow/render-dataflow.mjs \
   docs/architecture/atelierr-flow-loop.dataflow.json /tmp/atelierr-flow-loop.html
 node $ARCH/renderers/dataflow/render-dataflow.mjs \
   docs/architecture/atelierr-flow-feishu.dataflow.json /tmp/atelierr-flow-feishu.html
+node $ARCH/renderers/dataflow/render-dataflow.mjs \
+  docs/architecture/atelierr-ingest.dataflow.json /tmp/atelierr-ingest.html
 # 注入流线动画（archify 无动画能力，渲染后加 CSS）：
 .venv-atelierr/bin/python tools/archify_animate.py \
   /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
   /tmp/atelierr-flow-pipeline.html /tmp/atelierr-flow-loop.html \
-  /tmp/atelierr-flow-feishu.html
+  /tmp/atelierr-flow-feishu.html /tmp/atelierr-ingest.html
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-plan.html  # 全 ok:true
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-flow.html
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-flow-feishu.html
+node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-ingest.html
 cp /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
    /tmp/atelierr-flow-pipeline.html /tmp/atelierr-flow-loop.html \
-   /tmp/atelierr-flow-feishu.html \
+   /tmp/atelierr-flow-feishu.html /tmp/atelierr-ingest.html \
    ~/atelierr-data/exports/
 ```
 
