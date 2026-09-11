@@ -3,69 +3,415 @@
   "diagram_type": "dataflow",
   "meta": {
     "title": "摄入模块 · 加工篇：四条管线怎么加工、到哪去",
-    "subtitle": "分发 → 引擎逐步动作 → 入库形态 → 下游模块接口 · 2026-09-11（含直发视频裁决 B）",
+    "subtitle": "箭头上的 ①②③ 就是加工顺序：跟着编号走 · 2026-09-11（含直发视频裁决 B）",
     "output": "atelierr-ingest-pipeline.html",
-    "viewBox": [980, 780]
+    "viewBox": [
+      980,
+      780
+    ]
   },
   "stages": [
-    { "label": "① 分发 · 15 分钟轮询" },
-    { "label": "② 加工引擎（逐步拆解）" },
-    { "label": "③ 入库 · 笔记+原资料" },
-    { "label": "④ 接口 · 下游模块" }
+    {
+      "label": "① 分发 · 15 分钟轮询"
+    },
+    {
+      "label": "② 加工引擎（逐步拆解）"
+    },
+    {
+      "label": "③ 入库 · 笔记+原资料"
+    },
+    {
+      "label": "④ 接口 · 下游模块"
+    }
   ],
   "nodes": [
-    { "id": "links", "type": "backend", "label": "links 链接分发", "sublabel": "抖音/小红书/B站 URL", "stage": 0, "row": 0 },
-    { "id": "clips", "type": "backend", "label": "clips 剪藏分发", "sublabel": "新剪藏 · 同 url 查重", "stage": 0, "row": 1 },
-    { "id": "media", "type": "backend", "label": "media 附件分发", "sublabel": "截图/录音/直发视频/PDF", "stage": 0, "row": 2 },
-    { "id": "todos", "type": "backend", "label": "todos 意图分发", "sublabel": "正文行动意图", "stage": 0, "row": 3 },
-
-    { "id": "ytdlp", "type": "backend", "label": "yt-dlp 下载", "sublabel": "借浏览器 cookie 反爬 · 限高 480p", "stage": 1, "row": 0 },
-    { "id": "whisper", "type": "backend", "label": "Whisper 转写", "sublabel": "GPU fp32 · 带标点提示词", "stage": 1, "row": 1 },
-    { "id": "ocr", "type": "backend", "label": "OCR 引擎", "sublabel": "PaddleOCR · rapidocr 备选", "stage": 1, "row": 2 },
-    { "id": "llm", "type": "cloud", "label": "DeepSeek 整理", "sublabel": "分段/观点/中图法标签/划重点/判待办", "stage": 1, "row": 3 },
-    { "id": "ffmpeg", "type": "backend", "label": "ffmpeg 480p", "sublabel": "链接视频存单份 · 直发视频替换原件", "stage": 1, "row": 4 },
-
-    { "id": "notes", "type": "database", "label": "待确认笔记", "sublabel": "memory/ 根 · tags=[待确认] · 内嵌原资料", "stage": 2, "row": 0, "tag": "机器不改写" },
-    { "id": "orig", "type": "database", "label": "原资料 平台/", "sublabel": "attachments/抖音/小红书/B站 · 480p 单份", "stage": 2, "row": 1, "tag": "只增不减" },
-    { "id": "checklist", "type": "database", "label": "划重点清单", "sublabel": "系统/ · ≤20 条复选框候选", "stage": 2, "row": 2 },
-    { "id": "todonote", "type": "database", "label": "待办笔记", "sublabel": "tags=[待办] · 单向同步飞书任务", "stage": 2, "row": 3 },
-    { "id": "sidecar", "type": "database", "label": "sidecar 状态", "sublabel": "index.json + processed_×3 幂等 · 每日 git 快照", "stage": 2, "row": 4 },
-
-    { "id": "card", "type": "external", "label": "飞书确认卡", "sublabel": "✅确认 / 📁归档…（三人工例外入口）", "stage": 3, "row": 0 },
-    { "id": "arch", "type": "database", "label": "归档 平台/分类/", "sublabel": "你点按钮才移动 · sidecar 状态跟随", "stage": 3, "row": 1 },
-    { "id": "wiki", "type": "database", "label": "wiki/ 知识总库", "sublabel": "摘录卡/concept · cognition 判断登记处", "stage": 3, "row": 2, "tag": "cognition 冻结" },
-    { "id": "decay", "type": "backend", "label": "decay 遗忘", "sublabel": "每日 03:00 分层 · 只写 sidecar → trash/", "stage": 3, "row": 3 },
-    { "id": "digest", "type": "backend", "label": "晨报/周报/搜索", "sublabel": "捕获统计+复习推送+全库检索", "stage": 3, "row": 4 }
+    {
+      "id": "links",
+      "type": "backend",
+      "label": "links 链接分发",
+      "sublabel": "抖音/小红书/B站 URL",
+      "stage": 0,
+      "row": 0
+    },
+    {
+      "id": "clips",
+      "type": "backend",
+      "label": "clips 剪藏分发",
+      "sublabel": "新剪藏 · 同 url 查重",
+      "stage": 0,
+      "row": 1
+    },
+    {
+      "id": "media",
+      "type": "backend",
+      "label": "media 附件分发",
+      "sublabel": "截图/录音/直发视频/PDF",
+      "stage": 0,
+      "row": 2
+    },
+    {
+      "id": "todos",
+      "type": "backend",
+      "label": "todos 意图分发",
+      "sublabel": "正文行动意图",
+      "stage": 0,
+      "row": 3
+    },
+    {
+      "id": "ytdlp",
+      "type": "backend",
+      "label": "yt-dlp 下载",
+      "sublabel": "借浏览器 cookie 反爬 · 限高 480p",
+      "stage": 1,
+      "row": 0
+    },
+    {
+      "id": "whisper",
+      "type": "backend",
+      "label": "Whisper 转写",
+      "sublabel": "GPU fp32 · 带标点提示词",
+      "stage": 1,
+      "row": 1
+    },
+    {
+      "id": "llm",
+      "type": "cloud",
+      "label": "DeepSeek 整理",
+      "sublabel": "分段/观点/中图法标签/划重点/判待办",
+      "stage": 1,
+      "row": 2
+    },
+    {
+      "id": "ocr",
+      "type": "backend",
+      "label": "OCR 引擎",
+      "sublabel": "PaddleOCR · rapidocr 备选",
+      "stage": 1,
+      "row": 3
+    },
+    {
+      "id": "ffmpeg",
+      "type": "backend",
+      "label": "ffmpeg 480p",
+      "sublabel": "链接视频存单份 · 直发视频替换原件",
+      "stage": 1,
+      "row": 4
+    },
+    {
+      "id": "notes",
+      "type": "database",
+      "label": "待确认笔记",
+      "sublabel": "memory/ 根 · tags=[待确认] · 内嵌原资料",
+      "stage": 2,
+      "row": 0,
+      "tag": "机器不改写"
+    },
+    {
+      "id": "orig",
+      "type": "database",
+      "label": "原资料 平台/",
+      "sublabel": "attachments/抖音/小红书/B站 · 480p 单份",
+      "stage": 2,
+      "row": 1,
+      "tag": "只增不减"
+    },
+    {
+      "id": "checklist",
+      "type": "database",
+      "label": "划重点清单",
+      "sublabel": "系统/ · ≤20 条复选框候选",
+      "stage": 2,
+      "row": 2
+    },
+    {
+      "id": "todonote",
+      "type": "database",
+      "label": "待办笔记",
+      "sublabel": "tags=[待办] · 单向同步飞书任务",
+      "stage": 2,
+      "row": 3
+    },
+    {
+      "id": "sidecar",
+      "type": "database",
+      "label": "sidecar 状态",
+      "sublabel": "index.json + processed_×3 幂等 · 每日 git 快照",
+      "stage": 2,
+      "row": 4
+    },
+    {
+      "id": "card",
+      "type": "external",
+      "label": "飞书确认卡",
+      "sublabel": "✅确认 / 📁归档…（三人工例外入口）",
+      "stage": 3,
+      "row": 0
+    },
+    {
+      "id": "arch",
+      "type": "database",
+      "label": "归档 平台/分类/",
+      "sublabel": "你点按钮才移动 · sidecar 状态跟随",
+      "stage": 3,
+      "row": 1
+    },
+    {
+      "id": "wiki",
+      "type": "database",
+      "label": "wiki/ 知识总库",
+      "sublabel": "摘录卡/concept · cognition 判断登记处",
+      "stage": 3,
+      "row": 2,
+      "tag": "cognition 冻结"
+    },
+    {
+      "id": "decay",
+      "type": "backend",
+      "label": "decay 遗忘",
+      "sublabel": "每日 03:00 分层 · 只写 sidecar → trash/",
+      "stage": 3,
+      "row": 3
+    },
+    {
+      "id": "digest",
+      "type": "backend",
+      "label": "晨报/周报/搜索",
+      "sublabel": "捕获统计+复习推送+全库检索",
+      "stage": 3,
+      "row": 4
+    }
   ],
   "flows": [
-    { "from": "links", "to": "ytdlp", "label": "链接", "variant": "emphasis", "route": "straight" },
-    { "from": "clips", "to": "llm", "label": "剪藏正文", "variant": "emphasis", "labelAt": [207, 326] },
-    { "from": "media", "to": "ocr", "label": "截图/图片", "variant": "emphasis", "route": "straight" },
-    { "from": "media", "to": "whisper", "label": "录音/视频", "variant": "emphasis", "labelAt": [207, 300] },
-    { "from": "media", "to": "llm", "label": "PDF 逐页", "variant": "emphasis", "labelAt": [207, 440] },
-    { "from": "todos", "to": "llm", "label": "候选正文", "variant": "emphasis" },
-
-    { "from": "ytdlp", "to": "whisper", "label": "视频抽音轨", "variant": "emphasis" },
-    { "from": "ytdlp", "to": "ffmpeg", "label": "原视频", "variant": "emphasis", "fromSide": "right", "toSide": "right", "route": "vertical-channel", "channelX": 392, "labelAt": [400, 430] },
-    { "from": "whisper", "to": "llm", "label": "转写全文", "variant": "emphasis", "fromSide": "right", "toSide": "right", "route": "vertical-channel", "channelX": 438, "labelAt": [442, 296] },
-
-    { "from": "whisper", "to": "notes", "label": "音/视频成稿", "variant": "emphasis" },
-    { "from": "ocr", "to": "notes", "label": "OCR 成稿", "variant": "emphasis" },
-    { "from": "llm", "to": "notes", "label": "整理成稿", "variant": "emphasis" },
-    { "from": "llm", "to": "checklist", "label": "候选清单", "variant": "emphasis", "labelAt": [422, 395] },
-    { "from": "llm", "to": "todonote", "label": "待办判定", "variant": "emphasis", "route": "straight" },
-    { "from": "ffmpeg", "to": "orig", "label": "480p 单份", "variant": "emphasis", "labelAt": [422, 448] },
-    { "from": "orig", "to": "notes", "label": "内嵌引用", "variant": "dashed", "fromSide": "top", "toSide": "bottom", "route": "straight" },
-
-    { "from": "notes", "to": "card", "label": "待确认卡", "variant": "emphasis", "route": "straight" },
-    { "from": "card", "to": "arch", "label": "📁 确认并归档", "variant": "emphasis" },
-    { "from": "notes", "to": "decay", "label": "每日衰减", "variant": "default", "labelAt": [637, 310] },
-    { "from": "notes", "to": "digest", "label": "统计/复习", "variant": "default", "labelAt": [637, 425] },
-    { "from": "checklist", "to": "wiki", "label": "勾 [x] 转卡", "variant": "emphasis", "route": "straight", "labelAt": [637, 348] },
-    { "from": "todonote", "to": "card", "label": "待办卡", "variant": "emphasis", "labelAt": [637, 262] },
-    { "from": "notes", "to": "sidecar", "label": "登记", "variant": "default", "fromSide": "right", "toSide": "right", "route": "vertical-channel", "channelX": 630, "labelAt": [630, 530] }
+    {
+      "from": "links",
+      "to": "ytdlp",
+      "label": "① 下载视频/页面",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "from": "clips",
+      "to": "llm",
+      "label": "⑤ 剪藏求摘要",
+      "variant": "emphasis",
+      "labelAt": [
+        195,
+        304
+      ]
+    },
+    {
+      "from": "media",
+      "to": "ocr",
+      "label": "⑥ 截图 OCR",
+      "variant": "emphasis",
+      "labelAt": [
+        185,
+        452
+      ]
+    },
+    {
+      "from": "media",
+      "to": "whisper",
+      "label": "⑦ 录音/视频转写",
+      "variant": "emphasis",
+      "labelAt": [
+        205,
+        348
+      ]
+    },
+    {
+      "from": "media",
+      "to": "llm",
+      "label": "⑧ PDF 代读",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "from": "todos",
+      "to": "llm",
+      "label": "⑨ 判行动意图",
+      "variant": "emphasis",
+      "labelAt": [
+        218,
+        424
+      ]
+    },
+    {
+      "from": "ytdlp",
+      "to": "whisper",
+      "label": "② 抽音轨",
+      "variant": "emphasis",
+      "labelAt": [
+        255,
+        205
+      ]
+    },
+    {
+      "from": "ytdlp",
+      "to": "ffmpeg",
+      "label": "③ 原视频送压",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "right",
+      "route": "vertical-channel",
+      "channelX": 392,
+      "labelAt": [
+        410,
+        548
+      ]
+    },
+    {
+      "from": "whisper",
+      "to": "llm",
+      "label": "④ 转写全文送整理",
+      "variant": "emphasis",
+      "labelAt": [
+        232,
+        324
+      ]
+    },
+    {
+      "from": "whisper",
+      "to": "notes",
+      "label": "⑩ 音/视频成稿",
+      "variant": "emphasis"
+    },
+    {
+      "from": "ocr",
+      "to": "notes",
+      "label": "⑪ OCR 成稿",
+      "variant": "emphasis"
+    },
+    {
+      "from": "llm",
+      "to": "notes",
+      "label": "⑫ 整理成稿",
+      "variant": "emphasis"
+    },
+    {
+      "from": "ffmpeg",
+      "to": "orig",
+      "label": "⑬ 存 480p 单份",
+      "variant": "emphasis",
+      "labelAt": [
+        440,
+        445
+      ]
+    },
+    {
+      "from": "orig",
+      "to": "notes",
+      "label": "⑭ 内嵌引用",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "route": "straight",
+      "labelAt": [
+        458,
+        230
+      ]
+    },
+    {
+      "from": "llm",
+      "to": "checklist",
+      "label": "⑮ 出候选清单",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "from": "llm",
+      "to": "todonote",
+      "label": "⑯ 建待办",
+      "variant": "emphasis",
+      "labelAt": [
+        400,
+        425
+      ]
+    },
+    {
+      "from": "notes",
+      "to": "card",
+      "label": "⑰ 推确认卡",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "from": "todonote",
+      "to": "card",
+      "label": "⑱ 推待办卡",
+      "variant": "emphasis",
+      "labelAt": [
+        637,
+        262
+      ]
+    },
+    {
+      "from": "card",
+      "to": "arch",
+      "label": "⑲ 点归档才移动",
+      "variant": "emphasis",
+      "labelAt": [
+        700,
+        205
+      ]
+    },
+    {
+      "from": "checklist",
+      "to": "wiki",
+      "label": "⑳ 勾 [x] 转 wiki 卡",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        637,
+        395
+      ]
+    },
+    {
+      "from": "notes",
+      "to": "sidecar",
+      "label": "登记索引（异步）",
+      "variant": "default",
+      "fromSide": "right",
+      "toSide": "right",
+      "route": "vertical-channel",
+      "channelX": 630,
+      "labelAt": [
+        630,
+        530
+      ]
+    },
+    {
+      "from": "notes",
+      "to": "decay",
+      "label": "每日 03:00 衰减（异步）",
+      "variant": "default",
+      "labelAt": [
+        637,
+        310
+      ]
+    },
+    {
+      "from": "notes",
+      "to": "digest",
+      "label": "统计/复习（异步）",
+      "variant": "default",
+      "labelAt": [
+        637,
+        455
+      ]
+    }
   ],
   "cards": [
+    {
+      "dot": "slate",
+      "title": "箭头怎么读（先看这个）",
+      "items": [
+        "粗绿线 = 主数据流（内容本体在流动）；箭头上的 ①②③ 是加工顺序，跟着编号走",
+        "细灰线 = 异步后台批处理（登记/衰减/统计这类，不占主故事线）",
+        "紫虚线 = 引用关系（笔记内嵌原资料，不搬运内容）",
+        "绿框 = 处理者（程序）；紫框 = 存储（文件/目录）；黄框 = 外部服务（DeepSeek）"
+      ]
+    },
     {
       "dot": "amber",
       "title": "② 引擎与成本护栏",

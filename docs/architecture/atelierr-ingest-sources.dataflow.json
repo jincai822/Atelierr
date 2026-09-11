@@ -3,7 +3,7 @@
   "diagram_type": "dataflow",
   "meta": {
     "title": "摄入模块 · 入口篇：九条来源怎么进库",
-    "subtitle": "每条来源 → 落地位置 → 哪条分发线接手；加工细节见《加工篇》 · 2026-09-11",
+    "subtitle": "箭头上的 ①②③ 就是阅读顺序：跟着编号走 · 2026-09-11",
     "output": "atelierr-ingest-sources.html",
     "viewBox": [980, 780]
   },
@@ -38,30 +38,40 @@
     { "id": "todoline", "type": "backend", "label": "待办判定线", "sublabel": "DeepSeek 判 0..N 条 → 待办笔记+飞书任务", "stage": 3, "row": 4 }
   ],
   "flows": [
-    { "from": "quickadd", "to": "sync", "label": "速记/想法", "variant": "emphasis", "route": "straight" },
-    { "from": "sync", "to": "vault", "label": "同步笔记", "variant": "emphasis" },
-    { "from": "feishu", "to": "vault", "label": "文字/链接", "variant": "emphasis", "route": "straight" },
-    { "from": "feishu", "to": "attm", "label": "图/音/视频", "variant": "emphasis", "labelAt": [207, 300] },
-    { "from": "feishu", "to": "attb", "label": "PDF 原件", "variant": "emphasis", "labelAt": [228, 418] },
-    { "from": "desktop", "to": "vault", "label": "直写笔记", "variant": "emphasis", "labelAt": [168, 326] },
-    { "from": "desktop", "to": "attm", "label": "拖文件", "variant": "emphasis", "route": "straight", "labelAt": [232, 350] },
-    { "from": "clipper", "to": "vault", "label": "剪藏 md", "variant": "emphasis", "labelAt": [200, 372] },
-    { "from": "inbox", "to": "attm", "label": "复制不移动", "variant": "emphasis" },
+    { "from": "quickadd", "to": "sync", "label": "① 速记/想法", "variant": "emphasis", "route": "straight" },
+    { "from": "sync", "to": "vault", "label": "② 实时同步", "variant": "emphasis" },
+    { "from": "feishu", "to": "vault", "label": "③ 文字/链接入根", "variant": "emphasis", "route": "straight" },
+    { "from": "feishu", "to": "attm", "label": "④ 图/音/视频原件", "variant": "emphasis", "labelAt": [207, 300] },
+    { "from": "feishu", "to": "attb", "label": "⑤ PDF 原件", "variant": "emphasis", "labelAt": [228, 418] },
+    { "from": "desktop", "to": "vault", "label": "⑥ 直写笔记", "variant": "emphasis", "labelAt": [168, 326] },
+    { "from": "desktop", "to": "attm", "label": "⑦ 拖入附件", "variant": "emphasis", "route": "straight", "labelAt": [228, 350] },
+    { "from": "clipper", "to": "vault", "label": "⑧ 剪藏成 md", "variant": "emphasis", "labelAt": [200, 372] },
+    { "from": "inbox", "to": "attm", "label": "⑨ 复制进系统", "variant": "emphasis", "labelAt": [185, 462] },
 
-    { "from": "vault", "to": "watcher", "label": "新裸笔记", "variant": "emphasis" },
-    { "from": "vault", "to": "links", "label": "扫出 URL", "variant": "emphasis", "route": "straight" },
-    { "from": "vault", "to": "clips", "label": "新剪藏", "variant": "emphasis" },
-    { "from": "attm", "to": "media", "label": "新附件", "variant": "emphasis", "labelAt": [410, 405] },
-    { "from": "attb", "to": "media", "label": "PDF", "variant": "emphasis", "route": "straight" },
-    { "from": "vault", "to": "todos", "label": "正文扫描", "variant": "emphasis", "labelAt": [445, 440] },
+    { "from": "vault", "to": "watcher", "label": "裸笔记归一化（异步）", "variant": "default" },
+    { "from": "watcher", "to": "sidecar", "label": "登记索引（异步）", "variant": "default", "route": "straight" },
+    { "from": "vault", "to": "links", "label": "⑩ 扫出链接", "variant": "emphasis", "route": "straight" },
+    { "from": "vault", "to": "clips", "label": "⑪ 发现新剪藏", "variant": "emphasis" },
+    { "from": "attm", "to": "media", "label": "⑫ 发现新附件", "variant": "emphasis", "labelAt": [418, 408] },
+    { "from": "attb", "to": "media", "label": "⑬ 发现 PDF", "variant": "emphasis", "route": "straight" },
+    { "from": "vault", "to": "todos", "label": "⑭ 扫行动意图", "variant": "emphasis", "labelAt": [445, 440] },
 
-    { "from": "watcher", "to": "sidecar", "label": "登记 id/confidence", "variant": "default", "route": "straight" },
-    { "from": "links", "to": "linkline", "label": "链接", "variant": "emphasis", "route": "straight" },
-    { "from": "clips", "to": "clipline", "label": "剪藏正文", "variant": "emphasis", "route": "straight" },
-    { "from": "media", "to": "medialine", "label": "附件", "variant": "emphasis", "route": "straight" },
-    { "from": "todos", "to": "todoline", "label": "候选正文", "variant": "emphasis", "route": "straight" }
+    { "from": "links", "to": "linkline", "label": "⑮ 去链接加工线", "variant": "emphasis", "route": "straight" },
+    { "from": "clips", "to": "clipline", "label": "⑯ 去剪藏摘要", "variant": "emphasis", "route": "straight" },
+    { "from": "media", "to": "medialine", "label": "⑰ 去附件加工", "variant": "emphasis", "route": "straight" },
+    { "from": "todos", "to": "todoline", "label": "⑱ 去待办判定", "variant": "emphasis", "route": "straight" }
   ],
   "cards": [
+    {
+      "dot": "slate",
+      "title": "箭头怎么读（先看这个）",
+      "items": [
+        "粗绿线 = 主数据流（内容本体在流动）；箭头上的 ①②③ 是阅读顺序，跟着编号走",
+        "细灰线 = 异步后台批处理（watcher 登记这类，不占主故事线）",
+        "紫虚线 = 引用关系（不搬运内容，只是指向）",
+        "绿框 = 处理者（程序）；紫框 = 存储（文件/目录）；蓝框 = 你的入口设备；黄框 = 外部服务"
+      ]
+    },
     {
       "dot": "cyan",
       "title": "① 九条入口通道（逐条对准）",
