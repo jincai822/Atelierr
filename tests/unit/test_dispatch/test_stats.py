@@ -1,12 +1,16 @@
 """捕获统计单元测试（只读聚合，无网络/LLM）。
 
-统计口径、确认率、wiki 沉淀数、晨报简数行、周日摘要详细节、
-stats 子命令均为真实代码路径。
+统计口径、确认率、wiki 沉淀数、遗忘数（回收站 ctime）、晨报简数行、
+周日摘要详细节、stats 子命令均为真实代码路径。
 """
 
 from __future__ import annotations
 
 import json
+import os
+from datetime import datetime
+from pathlib import Path
+from unittest import mock
 
 from scripts.dispatch.digest import DigestDispatcher
 from scripts.dispatch.stats import (
@@ -35,6 +39,19 @@ def _wiki_card(tree, name, created):
     (wiki_dir / name).write_text(
         f"---\ncreated: {created}\ntype: Excerpt\n---\n\n卡\n", encoding="utf-8"
     )
+
+
+def _trash_file(tree, name):
+    """造一篇回收站文件（模拟 purge 移入；frontmatter 故意用旧日期——
+    遗忘数必须按移入时间 ctime 计，而非笔记 created）。"""
+    trash_dir = tree.state_dir / "trash"
+    trash_dir.mkdir(parents=True, exist_ok=True)
+    path = trash_dir / name
+    path.write_text(
+        "---\ncreated: 2026-01-01\nsource: link\n---\n\n旧笔记\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def test_by_source_and_total(memory_tree):
@@ -136,6 +153,52 @@ def test_digest_weekly_section_only_on_sunday(memory_tree):
 
     saturday = DigestDispatcher(memory_tree).run(today="2026-09-12")
     assert "## 📊 本周捕获统计" not in saturday["markdown"]
+
+
+def test_purged_counts_recent_trash(memory_tree):
+    """遗忘数：回收站中 ctime 落在窗口内的文件（不看笔记 created）。"""
+    _trash_file(memory_tree, "gone.md")
+
+    stats = capture_stats(memory_tree, days=7, today=TODAY)
+
+    assert stats["purged"] == 1
+
+
+def test_purged_zero_without_trash_dir(memory_tree):
+    """无回收站（从未 purge）：遗忘数 0，不报错。"""
+    stats = capture_stats(memory_tree, days=7, today=TODAY)
+
+    assert stats["purged"] == 0
+
+
+def test_purged_excludes_old_ctime(memory_tree):
+    """窗口前移入回收站的文件不计入（ctime 界外）。"""
+    old_path = _trash_file(memory_tree, "ancient.md")
+    _trash_file(memory_tree, "fresh.md")
+    real_stat = Path.stat
+
+    def fake_stat(self, *args, **kwargs):
+        result = real_stat(self, *args, **kwargs)
+        if self == old_path:
+            values = list(result)
+            values[9] = datetime(2026, 8, 1).timestamp()  # st_ctime 改旧
+            return os.stat_result(tuple(values))
+        return result
+
+    with mock.patch.object(Path, "stat", fake_stat):
+        stats = capture_stats(memory_tree, days=7, today=TODAY)
+
+    assert stats["purged"] == 1
+
+
+def test_weekly_render_has_purge_line(memory_tree):
+    """周报详细节带「本周遗忘」一行。"""
+    _trash_file(memory_tree, "gone.md")
+
+    stats = capture_stats(memory_tree, days=7, today=TODAY)
+    lines = render_weekly_stats(stats)
+
+    assert any("本周遗忘（purge 进回收站）：1 条" in line for line in lines)
 
 
 def test_cli_stats_command(memory_tree, tmp_path):

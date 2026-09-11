@@ -14,7 +14,11 @@
 - 确认率：窗口内机器产出（link/media/webclip——带「待确认」门的来源）
   中，当前已摘除「待确认」标签的比例（确认是后验动作，以当前标签
   状态回看）；
-- 沉淀数：wiki/ 中 frontmatter ``created`` 落在窗口内的卡片数。
+- 沉淀数：wiki/ 中 frontmatter ``created`` 落在窗口内的卡片数；
+- 遗忘数：回收站（<state_dir>/trash/）中 ctime 落在窗口内的文件数
+  （purge 移入回收站即刷新 ctime；人工恢复出回收站即不再计入）。
+  健康线见 docs/CAPTURE-STAGE-REVIEW-2.md：确认率 100% 且从不清空
+  不是好事，稳定的遗忘流是健康信号。
 
 纪律：全部数据来自 frontmatter 只读聚合——不新增任何写入面（裁决 D2）。
 """
@@ -61,7 +65,8 @@ def capture_stats(
     Returns:
         Dict[str, Any]: days / total / by_source（显示名→条数）/
         auto_total（机器产出数）/ confirmed（已确认数）/
-        confirm_rate（0-1 或 None=无机器产出）/ wiki_new（沉淀数）。
+        confirm_rate（0-1 或 None=无机器产出）/ wiki_new（沉淀数）/
+        purged（窗口内移入回收站的条数=遗忘数）。
     """
     end = datetime.strptime(today, "%Y-%m-%d") if today else datetime.now()
     start = (end - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -93,6 +98,7 @@ def capture_stats(
                 if "待确认" not in tags:
                     confirmed += 1
     wiki_new = _wiki_new_count(tree, start, end_str)
+    purged = _purge_count(tree, start, end_str)
     return {
         "days": days,
         "total": total,
@@ -101,6 +107,7 @@ def capture_stats(
         "confirmed": confirmed,
         "confirm_rate": (confirmed / auto_total) if auto_total else None,
         "wiki_new": wiki_new,
+        "purged": purged,
     }
 
 
@@ -117,6 +124,28 @@ def _wiki_new_count(tree: MemoryTree, start: str, end_str: str) -> int:
             continue
         created = str(post.get("created") or "")[:10]
         if created and start < created <= end_str:
+            count += 1
+    return count
+
+
+def _purge_count(tree: MemoryTree, start: str, end_str: str) -> int:
+    """回收站中 ctime 落在 (start, end] 的文件数（遗忘数）。
+
+    purge 用 shutil.move 把笔记移入 <state_dir>/trash/，移动即刷新
+    ctime（mtime 保留原文时间，不可用）；人工恢复出回收站后文件
+    消失，自然不再计入。回收站不存在即 0。
+    """
+    trash_dir = Path(tree.state_dir) / "trash"
+    if not trash_dir.is_dir():
+        return 0
+    count = 0
+    for path in trash_dir.glob("*"):
+        try:
+            moved = datetime.fromtimestamp(path.stat().st_ctime)
+        except OSError:
+            continue
+        moved_date = moved.strftime("%Y-%m-%d")
+        if start < moved_date <= end_str:
             count += 1
     return count
 
@@ -150,4 +179,5 @@ def render_weekly_stats(stats: Dict[str, Any]) -> List[str]:
     else:
         lines.append("- 确认率：—（窗口内无机器产出）")
     lines.append(f"- 沉淀进 wiki：{stats['wiki_new']} 张卡")
+    lines.append(f"- 本周遗忘（purge 进回收站）：{stats['purged']} 条")
     return lines
