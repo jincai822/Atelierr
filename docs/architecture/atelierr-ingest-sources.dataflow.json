@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "摄入模块 · 入口篇：九条来源怎么进库",
+    "subtitle": "每条来源 → 落地位置 → 哪条分发线接手；加工细节见《加工篇》 · 2026-09-11",
+    "output": "atelierr-ingest-sources.html",
+    "viewBox": [980, 780]
+  },
+  "stages": [
+    { "label": "① 来源 · 九条通道" },
+    { "label": "② 落地 · 同一个库" },
+    { "label": "③ 分发 · 15 分钟轮询" },
+    { "label": "④ 去向 · 加工线（详见加工篇）" }
+  ],
+  "nodes": [
+    { "id": "quickadd", "type": "frontend", "label": "手机 QuickAdd", "sublabel": "速记/想法 · 一键记下自动起名", "stage": 0, "row": 0 },
+    { "id": "feishu", "type": "frontend", "label": "飞书消息", "sublabel": "文字/链接+评论/图片/语音/视频/PDF", "stage": 0, "row": 1 },
+    { "id": "desktop", "type": "frontend", "label": "电脑 Obsidian", "sublabel": "直写笔记 · 拖文件进 attachments", "stage": 0, "row": 2 },
+    { "id": "clipper", "type": "frontend", "label": "Chrome 剪藏", "sublabel": "一键剪网页 · 备注框可选", "stage": 0, "row": 3 },
+    { "id": "inbox", "type": "frontend", "label": "截图专用夹", "sublabel": "~/图片/进系统/ · 只认这个夹", "stage": 0, "row": 4 },
+
+    { "id": "sync", "type": "cloud", "label": "Syncthing", "sublabel": "手机↔电脑 实时双向", "stage": 1, "row": 0 },
+    { "id": "vault", "type": "database", "label": "memory/ 根·裸笔记", "sublabel": "收件箱 · 捕获时刻不分类不摘要", "stage": 1, "row": 1, "tag": "零摩擦" },
+    { "id": "attm", "type": "database", "label": "attachments/媒体/", "sublabel": "图片/语音/视频原件", "stage": 1, "row": 2 },
+    { "id": "attb", "type": "database", "label": "attachments/书籍/", "sublabel": "PDF 原件", "stage": 1, "row": 3 },
+
+    { "id": "watcher", "type": "backend", "label": "watcher 归一化", "sublabel": "裸 md 补一次性 frontmatter · 还原 mtime", "stage": 2, "row": 0 },
+    { "id": "links", "type": "backend", "label": "links 链接分发", "sublabel": "扫正文抓 URL · 同一链接只处理一次", "stage": 2, "row": 1 },
+    { "id": "clips", "type": "backend", "label": "clips 剪藏分发", "sublabel": "新剪藏识别 · 同 url 查重", "stage": 2, "row": 2 },
+    { "id": "media", "type": "backend", "label": "media 附件分发", "sublabel": "扫 媒体/书籍/ · mtime>30s 才动", "stage": 2, "row": 3 },
+    { "id": "todos", "type": "backend", "label": "todos 意图分发", "sublabel": "扫正文找行动意图", "stage": 2, "row": 4 },
+
+    { "id": "sidecar", "type": "database", "label": "sidecar 状态", "sublabel": "index.json + processed_×3 幂等", "stage": 3, "row": 0 },
+    { "id": "linkline", "type": "backend", "label": "链接加工线", "sublabel": "yt-dlp → Whisper → DeepSeek → 480p", "stage": 3, "row": 1 },
+    { "id": "clipline", "type": "backend", "label": "剪藏加工线", "sublabel": "DeepSeek 摘要 → 确认卡（摘要只进卡）", "stage": 3, "row": 2 },
+    { "id": "medialine", "type": "backend", "label": "附件加工线", "sublabel": "OCR/Whisper → 笔记 · 视频压 480p", "stage": 3, "row": 3 },
+    { "id": "todoline", "type": "backend", "label": "待办判定线", "sublabel": "DeepSeek 判 0..N 条 → 待办笔记+飞书任务", "stage": 3, "row": 4 }
+  ],
+  "flows": [
+    { "from": "quickadd", "to": "sync", "label": "速记/想法", "variant": "emphasis", "route": "straight" },
+    { "from": "sync", "to": "vault", "label": "同步笔记", "variant": "emphasis" },
+    { "from": "feishu", "to": "vault", "label": "文字/链接", "variant": "emphasis", "route": "straight" },
+    { "from": "feishu", "to": "attm", "label": "图/音/视频", "variant": "emphasis", "labelAt": [207, 300] },
+    { "from": "feishu", "to": "attb", "label": "PDF 原件", "variant": "emphasis", "labelAt": [228, 418] },
+    { "from": "desktop", "to": "vault", "label": "直写笔记", "variant": "emphasis", "labelAt": [168, 326] },
+    { "from": "desktop", "to": "attm", "label": "拖文件", "variant": "emphasis", "route": "straight", "labelAt": [232, 350] },
+    { "from": "clipper", "to": "vault", "label": "剪藏 md", "variant": "emphasis", "labelAt": [200, 372] },
+    { "from": "inbox", "to": "attm", "label": "复制不移动", "variant": "emphasis" },
+
+    { "from": "vault", "to": "watcher", "label": "新裸笔记", "variant": "emphasis" },
+    { "from": "vault", "to": "links", "label": "扫出 URL", "variant": "emphasis", "route": "straight" },
+    { "from": "vault", "to": "clips", "label": "新剪藏", "variant": "emphasis" },
+    { "from": "attm", "to": "media", "label": "新附件", "variant": "emphasis", "labelAt": [410, 405] },
+    { "from": "attb", "to": "media", "label": "PDF", "variant": "emphasis", "route": "straight" },
+    { "from": "vault", "to": "todos", "label": "正文扫描", "variant": "emphasis", "labelAt": [445, 440] },
+
+    { "from": "watcher", "to": "sidecar", "label": "登记 id/confidence", "variant": "default", "route": "straight" },
+    { "from": "links", "to": "linkline", "label": "链接", "variant": "emphasis", "route": "straight" },
+    { "from": "clips", "to": "clipline", "label": "剪藏正文", "variant": "emphasis", "route": "straight" },
+    { "from": "media", "to": "medialine", "label": "附件", "variant": "emphasis", "route": "straight" },
+    { "from": "todos", "to": "todoline", "label": "候选正文", "variant": "emphasis", "route": "straight" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "① 九条入口通道（逐条对准）",
+      "items": [
+        "B1 手机 QuickAdd：一键速记自动起名 → Syncthing 同步 → memory/ 根",
+        "B2 电脑 Obsidian 直写：落 memory/ 根即被登记；手动拖文件进 attachments/媒体/",
+        "B3/B8 链接（抖音/小红书/B站）：飞书或 Obsidian 粘贴皆可，随手评论会上确认卡",
+        "B4 Chrome 剪藏：一键剪藏 + 备注框（可空）；B5 截图：飞书发图或专用夹复制（复制不移动）",
+        "B6 飞书语音：存 .ogg 走 Whisper；B7 PDF：存 书籍/ 走划重点；B10 直发视频：存 媒体/ 走转写+480p"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "② 落地规矩（捕获红线）",
+      "items": [
+        "零摩擦第一：任何通道从想记到记下 ≤3 秒，无必填项；落地即裸 md/原件，人可读",
+        "机器只接不判断：捕获时刻不分类/不摘要/不改写/不写 frontmatter（watcher 事后一次性补）",
+        "原资料按平台分目录（媒体/书籍/抖音/小红书/B站），与笔记归档目录同一套名字",
+        "Syncthing 双向同步整个库；state/sessions/exports 不上手机"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "③ 分发纪律（无人值守）",
+      "items": [
+        "15 分钟一轮：links → media → todos → highlights，顺序有意（当轮产出同轮被捡到）",
+        "watcher：新裸笔记补一次性 frontmatter，os.utime 还原 mtime（同步语义不破坏）",
+        "幂等：processed_links/media/todos.json 记状态，同一 URL/文件只成功处理一次",
+        "失败 3 次熔断（模型不为空转反复加载）；mtime<30s 不动（防读半文件）；flock 互斥"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "④ 读完这张看下一张",
+      "items": [
+        "本图只回答：东西从哪来、落在哪、谁接手",
+        "《加工篇》回答：接手后每一步怎么加工、存成什么、流向下游哪些模块",
+        "两张图节点一一对应（links/clips/media/todos 是衔接点）"
+      ]
+    }
+  ]
+}

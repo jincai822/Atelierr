@@ -6,8 +6,11 @@
 > - 细化①捕获→加工→入库：`atelierr-flow-pipeline.dataflow.json`
 > - 细化②回响·沉淀·删除·会话：`atelierr-flow-loop.dataflow.json`
 > - 细化③飞书中枢（双向通道全颗粒）：`atelierr-flow-feishu.dataflow.json`
-> - 细化④摄入模块全颗粒（九条来源→加工→入库→下游接口，含直发视频
->   裁决 B）：`atelierr-ingest.dataflow.json` → `atelierr-ingest.html`
+> - 细化④摄入模块（拆两张，单页全颗粒过密已废弃）：
+>   入口篇（九条来源→落地→分发接手）`atelierr-ingest-sources.dataflow.json`
+>   → `atelierr-ingest-sources.html`；
+>   加工篇（分发→引擎→入库→下游接口，含直发视频裁决 B）
+>   `atelierr-ingest-pipeline.dataflow.json` → `atelierr-ingest-pipeline.html`
 > 渲染产物（可点开看的 HTML/PNG）在 `~/atelierr-data/exports/`。
 > 纪律（2026-09-02 用户裁决）：架构图只维护这一份计划版，不再出现状图；
 > 架构有变化就更新这份 IR 并重渲染。
@@ -28,19 +31,24 @@ node $ARCH/renderers/dataflow/render-dataflow.mjs \
 node $ARCH/renderers/dataflow/render-dataflow.mjs \
   docs/architecture/atelierr-flow-feishu.dataflow.json /tmp/atelierr-flow-feishu.html
 node $ARCH/renderers/dataflow/render-dataflow.mjs \
-  docs/architecture/atelierr-ingest.dataflow.json /tmp/atelierr-ingest.html
+  docs/architecture/atelierr-ingest-sources.dataflow.json /tmp/atelierr-ingest-sources.html
+node $ARCH/renderers/dataflow/render-dataflow.mjs \
+  docs/architecture/atelierr-ingest-pipeline.dataflow.json /tmp/atelierr-ingest-pipeline.html
 # 注入流线动画（archify 无动画能力，渲染后加 CSS）：
 .venv-atelierr/bin/python tools/archify_animate.py \
   /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
   /tmp/atelierr-flow-pipeline.html /tmp/atelierr-flow-loop.html \
-  /tmp/atelierr-flow-feishu.html /tmp/atelierr-ingest.html
+  /tmp/atelierr-flow-feishu.html \
+  /tmp/atelierr-ingest-sources.html /tmp/atelierr-ingest-pipeline.html
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-plan.html  # 全 ok:true
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-flow.html
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-flow-feishu.html
-node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-ingest.html
+node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-ingest-sources.html
+node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-ingest-pipeline.html
 cp /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
    /tmp/atelierr-flow-pipeline.html /tmp/atelierr-flow-loop.html \
-   /tmp/atelierr-flow-feishu.html /tmp/atelierr-ingest.html \
+   /tmp/atelierr-flow-feishu.html \
+   /tmp/atelierr-ingest-sources.html /tmp/atelierr-ingest-pipeline.html \
    ~/atelierr-data/exports/
 ```
 
