@@ -67,6 +67,27 @@ _LLM_DEFAULT_BASE_URL = "https://api.deepseek.com"
 _LLM_DEFAULT_MODEL = "deepseek-v4-flash"
 _LLM_MAX_BODY_CHARS = 2000
 
+#: 平台分享样板行（与 dispatch/links.py _BOILERPLATE_RE 同值，同一真实
+#: 样本清单——评论提取与待办提取是同一行分享文本的两个消费者，命中
+#: 判定必须一致，否则一边丢弃的样板另一边会当成任务）
+_SHARE_BOILERPLATE_RE = re.compile(r"复制打开抖音|【小红书】|复制后快来|复制本条信息")
+
+#: 分享样板段（命中样板行后逐段剥除）：抖音「9.46 复制打开抖音，看看
+#: 【X的作品】」整段、小红书备文案、口令残留
+_SHARE_SEGMENT_RES = (
+    re.compile(r"\d+(?:\.\d+)?\s*复制打开抖音[^，。\n]*[，。]?\s*看看【[^】]*】"),
+    re.compile(r"【小红书】[^\n]*"),
+    re.compile(r"复制本条信息[^\n]*"),
+    re.compile(r"复制后快来~?"),
+)
+#: 抖音口令尾（"HVl:/ V@L.Jv 10/23 :5pm" 这类字母数字口令串），
+#: 剥完样板段后常残留在行尾；只在命中样板的行内剥，不误伤正常文本
+_SHARE_TOKEN_TAIL_RE = re.compile(
+    r"(?:[A-Za-z0-9]{2,6}:/|[A-Za-z0-9]@[A-Za-z0-9.]+)(?:\s+[A-Za-z0-9@.:/]+)*\s*$"
+)
+#: 日记列表行的时间戳前缀（与 dispatch/links.py _TIME_PREFIX_RE 同值）
+_TIME_PREFIX_RE = re.compile(r"^[-*\s]*\d{1,2}:\d{2}(?::\d{2})?\s+")
+
 #: 截止日格式（Tasks 插件 📅 后使用）
 _DUE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -147,8 +168,39 @@ def _summary_sections(body: str) -> str:
     return "\n\n".join(picked)
 
 
+def _strip_share_boilerplate(body: str) -> str:
+    """剥掉平台分享样板行，防止「复制打开抖音，看看【X的作品】」被误提
+    为待办（2026-09-12 真实样本：todo-20260912-97aa56「打开抖音看农人
+    老贾的作品」——抖音口令被 LLM 当成祈使句）。
+
+    规则：命中样板的行剥掉 URL、样板段与口令尾后，剩余不足 2 个有效
+    字符视为纯分享，整行不进 LLM 输入；同行带用户自己的话（如
+    "这个讲得太好了"）保留剩余部分。未命中样板的行原样保留。
+
+    Args:
+        body: 笔记正文。
+
+    Returns:
+        str: 剥离后的正文。
+    """
+    lines: List[str] = []
+    for line in body.splitlines():
+        if _SHARE_BOILERPLATE_RE.search(line):
+            text = URL_RE.sub("", line)
+            for pattern in _SHARE_SEGMENT_RES:
+                text = pattern.sub("", text)
+            text = _SHARE_TOKEN_TAIL_RE.sub("", text)
+            text = _TIME_PREFIX_RE.sub("", text).strip(" \t，。：:;；-")
+            if len(_norm_task_text(text)) < 2:
+                continue
+            line = text
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _llm_input(body: str, source: str) -> str:
-    """构造喂给分类器的文本：链接产出笔记只取摘要两节，其余取全文。
+    """构造喂给分类器的文本：链接产出笔记只取摘要两节，其余取全文
+    （先剥平台分享样板行）。
 
     Args:
         body: 笔记正文。
@@ -161,7 +213,7 @@ def _llm_input(body: str, source: str) -> str:
         picked = _summary_sections(body)
         if picked:
             return picked[:_LLM_MAX_BODY_CHARS]
-    return body[:_LLM_MAX_BODY_CHARS]
+    return _strip_share_boilerplate(body)[:_LLM_MAX_BODY_CHARS]
 
 
 class TodoDispatcher:
@@ -408,6 +460,8 @@ class TodoDispatcher:
             "规则：含行动意图即抽取——时间词（明天/周五前/下周）、义务动词"
             "（记得/要去/需要/得）、意愿词（想看/想买/想学/打算/准备）、"
             "祈使句都算；纯观点、摘抄、感慨、已完成事项的流水记录不算；"
+            "平台分享模板文字（如「复制打开抖音，看看【某人的作品】」、"
+            "「【小红书】里的笔记已备好」）不是行动项，绝不抽取；"
             "没有行动项输出空表；最多 5 条；text 不超过 40 字。"
             "text 必须脱离原文也能看懂：把'里面的书/那个/这篇'等指代替换为"
             "笔记中提到的具体对象（如《作为意志和表象的世界》），"

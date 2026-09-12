@@ -121,14 +121,16 @@ _LLM_DEFAULT_MODEL = "deepseek-v4-flash"
 _REVIEW_TAG = "待确认"
 
 #: 链接整理（_summarize）的 v4 提示词，末尾拼转写全文。
-#: 输出：summary / points / insights / entities / category / topics；
-#: category 取自中图法两级分类表（二级优先，大类兜底，Z 综合收尾）。
+#: 输出：summary / points / insights / entities / category / topics / title；
+#: category 取自中图法两级分类表（二级优先，大类兜底，Z 综合收尾）；
+#: title 是语义标题，供平台占位标题（「Douyin video #id」）兜底用。
 _SUMMARIZE_V4_PROMPT = """请阅读以下视频转写全文，为个人知识库生成结构化笔记元数据，只输出 JSON：
-{"summary": "...", "points": ["..."], "insights": ["..."], "entities": ["..."], "category": "...", "topics": ["..."]}。
+{"summary": "...", "points": ["..."], "insights": ["..."], "entities": ["..."], "category": "...", "topics": ["..."], "title": "..."}。
 要求：
+- title：10-20 字语义标题，一句话概括核心内容（如"经济危机是社会关系的危机"），可直接作笔记文件名；不带平台名、不带 #、不带书名号。
 - summary：150-250 字，一段话讲清核心论点和论证脉络。
-- points：分观点论述，覆盖原文全部独立论点，不限条数；每条独立成句、不依赖上下文，不超过 60 字，按论述顺序排列。
-- insights：金句摘录，原文中最有价值的原话（关键判断/反常识观点），3-8 条，保持原话不改写。
+- points：分观点论述，覆盖原文全部独立论点，合并同义反复，5-8 条；每条独立成句、不依赖上下文，不超过 60 字，按论述顺序排列。
+- insights：金句摘录，原文中最有价值的原话（关键判断/反常识观点），3-5 条，保持原话不改写。
 - entities：原文提到的书籍/人物/概念，格式"名称（谁的作品/什么人/什么意思）"；没有则空数组。
 - category：从下方分类表选 1 个最贴切的类目，优先选二级类（如 B84-心理学）；二级无合适的用大类（如 B-哲学）；无法归类用 Z-综合。禁止编造表外编号，拿不准就选更宽的类。
 - topics：3-6 个自由主题词，短语，覆盖跨领域内容。
@@ -169,6 +171,75 @@ _SEGMENT_LINE_RE = re.compile(r"^- \[\d{2}:\d{2}\]\s*", re.M)
 
 #: 句末标点（分段优先落在句界上）
 _SENTENCE_END_RE = re.compile(r"(?<=[。！？!?…])")
+
+#: yt-dlp 对无标题抖音作品返回的通用占位标题（2026-09-12 真实样本：
+#: 「Douyin video #7674839354331095781」）——这类标题没有语义，
+#: 文件名检索/快速切换/回顾全部失效
+_MACHINE_TITLE_RE = re.compile(r"\s*douyin\s+video\s*#?\s*\d+\s*", re.I)
+
+#: 断句（折叠连续重复句用）：句末标点后或换行处
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？!?…])\s*|\n+")
+
+#: 句子归一化（重复判定用）：剥掉全部空白与标点
+_SENTENCE_NORM_RE = re.compile(r"[\s，。：:；;、！!？?《》<>\"'“”‘’—…·~]+")
+
+
+def _is_machine_title(title: str) -> bool:
+    """平台通用占位标题判定（整串匹配，不误伤真实标题）。"""
+    return bool(_MACHINE_TITLE_RE.fullmatch(str(title or "")))
+
+
+def _collapse_consecutive_repeats(text: str) -> str:
+    """折叠 Whisper 连续重复句（2026-09-12 真实样本：「所以它更多的就是
+    一种资源配置上出了差异」连重复 3 次、「冲突就是一种冲突」4 次——
+    不确定音频段的识别假象，不是讲者强调）。
+
+    只折叠归一化后完全相同的**相邻**句，保留第一遍：内容不丢，可读性
+    恢复；非相邻的重复（讲者真正的反复）原样保留。无折叠发生时返回
+    原文（逐字节不变）。
+
+    Args:
+        text: 简体转写全文。
+
+    Returns:
+        str: 折叠后的文本。
+    """
+    sentences = [s for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
+    if not sentences:
+        return text
+    kept: List[str] = []
+    prev_norm = ""
+    for sentence in sentences:
+        norm = _SENTENCE_NORM_RE.sub("", sentence)
+        if norm and norm == prev_norm:
+            continue
+        kept.append(sentence.strip())
+        prev_norm = norm
+    if len(kept) == len(sentences):
+        return text
+    return " ".join(kept)
+
+
+def _semantic_title(title: str, summary: Optional[Dict[str, Any]]) -> str:
+    """标题兜底（2026-09-12 用户裁决：笔记标题 =「平台-主题」）：平台
+    标题为空或是通用占位标题（_is_machine_title）时，换用 LLM 产出的
+    语义标题；LLM 也没有则原样返回（下游仍可按 id 兜底命名）。
+
+    Args:
+        title: 平台/分享文本给出的标题（可为空串）。
+        summary: _summarize 的产出（可为 None）。
+
+    Returns:
+        str: 最终采用的标题。
+    """
+    title = str(title or "").strip()
+    if title and not _is_machine_title(title):
+        return title
+    if summary:
+        llm_title = str(summary.get("title") or "").strip()
+        if llm_title:
+            return llm_title
+    return title
 
 #: 繁体 → 简体转换器（模块级单例）
 _T2S = opencc.OpenCC("t2s")
@@ -384,8 +455,13 @@ class LinkProcessor(BaseProcessor):
             title = str(info.get("title") or "").strip() or share_title
             author = str(info.get("uploader") or "").strip() or share_author
             source_label = "B站" if platform == "bilibili" else "抖音"
-            transcript_text = _T2S.convert(video_result.text).strip()
+            transcript_text = _collapse_consecutive_repeats(
+                _T2S.convert(video_result.text).strip()
+            )
             summary, llm_status = self._summarize(transcript_text)
+            # 平台占位标题（「Douyin video #id」）换 LLM 语义标题——须在
+            # _preserve_video/_transcript_rel 之前（附件主名随标题定）
+            title = _semantic_title(title, summary)
             formatted, fmt_status = self._format_transcript(transcript_text)
             doc_id = str(info.get("id") or "")
             video_rel, video_blob = self._preserve_video(
@@ -462,6 +538,8 @@ class LinkProcessor(BaseProcessor):
             if not title and not desc:
                 return self._fail("小红书笔记无有效内容（无标题无正文）")
             summary, llm_status = self._summarize(desc)
+            title = _semantic_title(title, summary)  # 空标题用 LLM 语义标题兜底
+            metadata["title"] = title
             body = self._compose_body(desc, raw_body=True)
             transcript_rel = None
             if len(body) > INLINE_BODY_MAX:
@@ -494,8 +572,12 @@ class LinkProcessor(BaseProcessor):
         video_result = VideoProcessor({"model": self.model}).process(video_path)
         if not video_result.success:
             return self._fail(video_result.error or "视频转写失败")
-        transcript_text = _T2S.convert(video_result.text).strip()
+        transcript_text = _collapse_consecutive_repeats(
+            _T2S.convert(video_result.text).strip()
+        )
         summary, llm_status = self._summarize(transcript_text)
+        title = _semantic_title(title, summary)  # 空标题用 LLM 语义标题兜底
+        metadata["title"] = title
         formatted, fmt_status = self._format_transcript(transcript_text)
         video_rel, video_blob = self._preserve_video(
             video_path, "小红书", title, note_id
@@ -792,10 +874,11 @@ class LinkProcessor(BaseProcessor):
         转写超过 max_transcript_chars（成本护栏，长视频留给人工）。
 
         LLM 输出 v4 JSON（summary / points / insights / entities /
-        category / topics），旧格式（只有 summary / points）向后兼容，
-        缺失字段按空处理。points/insights/entities/topics 上限分别为
-        20/10/10/6 条；category/topics 清洗为 Obsidian 标签（内部空白
-        替换为 ``-``），category 为空则不产出分类标签。
+        category / topics / title），旧格式（只有 summary / points）
+        向后兼容，缺失字段按空处理。points/insights/entities/topics
+        上限分别为 20/10/10/6 条；category/topics 清洗为 Obsidian
+        标签（内部空白替换为 ``-``），category 为空则不产出分类标签；
+        title 截 40 字，供平台占位标题兜底（_semantic_title）。
 
         Args:
             transcript: 简体转写全文（网页剪藏复用时为文章全文）。
@@ -803,7 +886,7 @@ class LinkProcessor(BaseProcessor):
                 传 _SUMMARIZE_CLIP_PROMPT，见 dispatch/clips.py）。
 
         Returns:
-            Tuple[Optional[Dict[str, Any]], str]: (六键字典或 None,
+            Tuple[Optional[Dict[str, Any]], str]: (七键字典或 None,
             状态串 ok / skipped:* / failed:*）。
         """
         if not os.environ.get(self.llm_api_key_env, "").strip():
@@ -838,6 +921,7 @@ class LinkProcessor(BaseProcessor):
                 if str(item).strip()
             ][:6]
             category = _tag_clean(str(data.get("category") or ""))
+            llm_title = str(data.get("title") or "").strip()[:40]
             if not summary_text:
                 return None, "failed:empty-summary"
             return {
@@ -847,6 +931,7 @@ class LinkProcessor(BaseProcessor):
                 "entities": entities,
                 "category": category,
                 "topics": topics,
+                "title": llm_title,
             }, "ok"
         except Exception as exc:  # noqa: BLE001 - LLM 失败降级，不阻塞管线
             return None, f"failed:{type(exc).__name__}"

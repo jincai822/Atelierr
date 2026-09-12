@@ -494,3 +494,60 @@ def test_note_filename_strips_hash(memory_tree):
     )
     assert "#" not in filename
     assert filename == "抖音-Douyin video 7674839354331095781.md"
+
+
+def test_daily_note_annotated_with_backlink(memory_tree):
+    """处理成功后在源日记行尾追加 → [[卡]] 回链（2026-09-12 用户裁决），
+    mtime 还原（不进 confidence 时钟）。"""
+    import os
+    import time
+
+    memory_tree.create_note(
+        "2026-09-12.md",
+        f"- 20:15 看看 {DOUYIN_URL}\n",
+        source="lark",
+    )
+    diary = memory_tree.notes_dir / "2026-09-12.md"
+    old_mtime = diary.stat().st_mtime
+    time.sleep(0.02)  # 保证若被改写 mtime 必然变化
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["created"]
+    stem = report["created"][0].removesuffix(".md")
+    text = diary.read_text(encoding="utf-8")
+    assert f"- 20:15 看看 {DOUYIN_URL} → [[{stem}]]" in text
+    assert diary.stat().st_mtime == old_mtime
+
+
+def test_non_daily_note_not_annotated(memory_tree):
+    """非日记源笔记绝不改写（红线）。"""
+    memory_tree.create_note("inbox.md", f"链接 {DOUYIN_URL}", source="test")
+
+    _dispatcher(memory_tree).run()
+
+    assert "→" not in (memory_tree.notes_dir / "inbox.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_annotation_idempotent(memory_tree):
+    """行内已含回链不重复追加（重放/手工补链后重跑）。"""
+    import os
+
+    memory_tree.create_note(
+        "2026-09-12.md",
+        f"- 20:15 看看 {DOUYIN_URL} → [[douyin-vid123]]\n",
+        source="lark",
+    )
+    dispatcher = _dispatcher(memory_tree)
+    # 清掉状态让同一链接重跑一次（回链已在行内）
+    dispatcher.run()
+    (memory_tree.state_dir / "processed_links.json").unlink()
+    before = (memory_tree.notes_dir / "2026-09-12.md").read_text(encoding="utf-8")
+
+    dispatcher.run()
+
+    after = (memory_tree.notes_dir / "2026-09-12.md").read_text(encoding="utf-8")
+    assert before == after
+    assert after.count("→ [[douyin-vid123]]") == 1

@@ -7,7 +7,9 @@
 转写内容后自行移除标签，系统不做进一步状态机。
 
 纪律（与 DEVELOPMENT-PLAN-3MVP.md backlog 约定一致）：
-- 只新增笔记与附件，绝不改写/移动/删除既有笔记（源笔记原样保留）；
+- 只新增笔记与附件，绝不改写/移动/删除既有笔记（源笔记原样保留；
+  唯一例外：处理成功后在源**日记**行尾追加 `` → [[卡]]`` 回链——
+  2026-09-12 用户裁决，仅限 YYYY-MM-DD.md，原子写并还原 mtime）；
 - 原视频保存（2026-09-10 用户裁决 G2）：处理器转写后压 480p 经
   metadata 交回 bytes，本模块原子写入 ``attachments/<平台>/``（抖音/
   小红书/），笔记内嵌可播；下载原件由处理器随临时目录删除，压缩失败
@@ -77,6 +79,10 @@ _COMMENT_MAX_CHARS = 200
 #: （2026-09-12 碎片治理：飞书文字并入当天日记后，链接所在行必然带
 #: 时间前缀；纯时间行剥完为空自然跳过，同行带人话的取出干净评论）
 _TIME_PREFIX_RE = re.compile(r"^[-*\s]*\d{1,2}:\d{2}(?::\d{2})?\s+")
+
+#: 日记文件名（2026-09-12.md）：链接回链只追加在日记行尾——其他笔记
+#: 机器绝不改写（红线），日记追加已有用户批准先例（飞书文字并入）
+_DAILY_NOTE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
 
 
 def extract_comment(body: str, url: str) -> str:
@@ -259,12 +265,46 @@ class LinkDispatcher:
             if comment:
                 entry["comment"] = comment
                 report["comments"][filename] = comment
+            self._annotate_source(url, filename)
             report["created"].append(filename)
             return
         entry["last_error"] = (result.error or "")[:300]
         if entry["attempts"] >= MAX_ATTEMPTS:
             entry["status"] = "failed"
         report["failed"].append({"url": url, "error": result.error})
+
+    def _annotate_source(self, url: str, filename: str) -> None:
+        """在源日记行的链接后补 `` → [[产出卡]]`` 回链（2026-09-12 用户
+        裁决：日记里的分享原文是死胡同，处理完应能一键跳到卡）。
+
+        只在日记（YYYY-MM-DD.md）行尾追加——其他笔记机器绝不改写；
+        原子写入并还原 mtime（回链不进 confidence 时钟）；行内已含回链
+        跳过（幂等，重跑不重复追加）。任何失败只记日志，不影响主流程。
+
+        Args:
+            url: 被处理的链接（定位行）。
+            filename: 产出笔记文件名（取 stem 做 wikilink）。
+        """
+        src = self._sources.get(url)
+        if src is None or not _DAILY_NOTE_RE.match(Path(src).name):
+            return
+        stem = Path(filename).stem
+        try:
+            path = Path(src)
+            lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+            for i, line in enumerate(lines):
+                if url in line and f"[[{stem}]]" not in line:
+                    lines[i] = line.rstrip("\n") + f" → [[{stem}]]\n"
+                    break
+            else:
+                return
+            stat = path.stat()
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text("".join(lines), encoding="utf-8")
+            os.replace(tmp, path)
+            os.utime(path, (stat.st_atime, stat.st_mtime))
+        except OSError as exc:
+            logger.warning("日记回链写入失败 %s: %s", src, exc)
 
     def _comment_for(self, url: str) -> str:
         """提取该 URL 源笔记里的用户随手评论（无源笔记或无评论返回空串）。"""

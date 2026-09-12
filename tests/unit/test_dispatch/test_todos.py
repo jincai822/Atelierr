@@ -465,3 +465,67 @@ def test_overlap_helper_edge_cases():
     assert not _overlaps_explicit("打印报告", ["给系统做体检"])
     assert not _overlaps_explicit("", ["给系统做体检"])
     assert not _overlaps_explicit("给系统做体检", [])
+
+
+def test_share_boilerplate_line_dropped_from_llm_input(memory_tree, monkeypatch):
+    """平台分享样板行不进 LLM 输入（2026-09-12 真实样本：抖音口令
+    「复制打开抖音，看看【农人老贾的作品】」被误提为待办「打开抖音
+    看农人老贾的作品」）。"""
+    calls = []
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+
+    def _post(url, **kwargs):
+        calls.append(kwargs["json"]["messages"][0]["content"])
+        return _FakeLLMResponse(_todos_payload([]))
+
+    monkeypatch.setattr(todos_module.httpx, "post", _post)
+    memory_tree.create_note(
+        "2026-09-12.md",
+        "- 20:15 9.46 复制打开抖音，看看【农人老贾的作品】  "
+        "https://v.douyin.com/TTQnzBUpaaw/ HVl:/ V@L.Jv 10/23 :5pm\n",
+        source="lark",
+    )
+
+    report = TodoDispatcher(memory_tree).run()
+
+    assert report["created"] == []
+    assert calls  # LLM 确实被调用了
+    prompt = calls[-1]
+    # 提示词本身带平台样板防御规则（含「复制打开抖音」字样），
+    # 断言针对内容部分：样板与口令不得进内容
+    content = prompt.split("笔记内容：", 1)[1]
+    assert "复制打开抖音" not in content
+    assert "HVl" not in content
+    assert "农人老贾" not in content
+    assert "平台分享模板文字" in prompt
+
+
+def test_share_line_with_user_comment_keeps_comment():
+    """分享行里用户自己的话保留（只剥样板段与口令尾）。"""
+    from scripts.dispatch.todos import _strip_share_boilerplate
+
+    body = (
+        "- 20:15 这个讲得太好了 9.46 复制打开抖音，看看【农人老贾的作品】 "
+        "https://v.douyin.com/TTQnzBUpaaw/ HVl:/\n"
+        "明天记得还书\n"
+        "笔记标题 https://xhslink.cn/o/abc 【小红书】里的笔记已备好，复制后快来~\n"
+    )
+
+    stripped = _strip_share_boilerplate(body)
+
+    lines = stripped.splitlines()
+    assert lines[0] == "这个讲得太好了"
+    assert lines[1] == "明天记得还书"
+    assert lines[2] == "笔记标题"
+
+
+def test_pure_share_line_drops_to_empty():
+    """纯分享行整体剥为空（时间前缀也剥掉），不再进 LLM。"""
+    from scripts.dispatch.todos import _llm_input
+
+    body = (
+        "- 20:15 9.46 复制打开抖音，看看【农人老贾的作品】  "
+        "https://v.douyin.com/TTQnzBUpaaw/ HVl:/ V@L.Jv 10/23 :5pm"
+    )
+
+    assert _llm_input(body, "lark") == ""

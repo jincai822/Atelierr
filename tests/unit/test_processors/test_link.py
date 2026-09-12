@@ -1021,3 +1021,133 @@ def test_xhs_long_text_note_externalized(fake_xhs_page, monkeypatch):
     assert rel == "attachments/小红书/小红书-图文笔记标题-txt456.md"
     assert f"[[{rel}|查看笔记正文]]" in result.markdown
     assert result.metadata["transcript_text"] == long_desc
+
+
+# ---- 语义标题兜底与转写去重（2026-09-12） ----
+
+
+class _MachineTitleYT(_FakeYoutubeDL):
+    """假 yt-dlp：返回抖音通用占位标题（2026-09-12 真实样本）。"""
+
+    def extract_info(self, url, download=True):
+        super().extract_info(url, download)
+        return {
+            "id": "vid123",
+            "title": "Douyin video #7674839354331095781",
+            "uploader": "农人老贾",
+        }
+
+
+def test_machine_title_replaced_by_llm_title(fake_pipeline, monkeypatch):
+    """占位标题换 LLM 语义标题；附件主名随新标题（须在 _preserve_video
+    之前换）。"""
+    monkeypatch.setattr(link_module.yt_dlp, "YoutubeDL", _MachineTitleYT)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _fixed_llm(
+        monkeypatch, _llm_payload(extra={"title": "经济危机是社会关系的危机"})
+    )
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert result.metadata["title"] == "经济危机是社会关系的危机"
+    assert result.markdown.startswith("# 经济危机是社会关系的危机\n")
+    assert (
+        result.metadata["video_rel"]
+        == "attachments/抖音/抖音-经济危机是社会关系的危机-vid123.mp4"
+    )
+
+
+def test_real_title_kept_over_llm_title(fake_pipeline, monkeypatch):
+    """真实平台标题不被 LLM 标题覆盖。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _fixed_llm(monkeypatch, _llm_payload(extra={"title": "另一个标题"}))
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.metadata["title"] == "信息标题"
+    assert result.markdown.startswith("# 信息标题\n")
+
+
+def test_machine_title_without_llm_keeps_original(fake_pipeline, monkeypatch):
+    """占位标题 + 无 LLM（无 key）：原样保留，下游仍可按 id 兜底命名。"""
+    monkeypatch.setattr(link_module.yt_dlp, "YoutubeDL", _MachineTitleYT)
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert result.metadata["title"] == "Douyin video #7674839354331095781"
+
+
+def test_xhs_empty_title_filled_by_llm(fake_xhs_page, monkeypatch):
+    """小红书空标题：LLM 语义标题兜底（图文路径）。"""
+    fake_xhs_page["note"] = {**_XHS_NOTE_TEXT, "title": ""}
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _fixed_llm(monkeypatch, _llm_payload(extra={"title": "图文笔记的语义标题"}))
+
+    result = LinkProcessor().process(XHS_SHARE_TEXT)
+
+    assert result.success, result.error
+    assert result.metadata["title"] == "图文笔记的语义标题"
+    assert result.markdown.startswith("# 图文笔记的语义标题\n")
+
+
+def test_is_machine_title():
+    """占位标题整串匹配：带不带 #、大小写都算；真实标题不误伤。"""
+    assert link_module._is_machine_title("Douyin video #7674839354331095781")
+    assert link_module._is_machine_title("douyin video 12345")
+    assert not link_module._is_machine_title("Douyin video 教程：三个方法")
+    assert not link_module._is_machine_title("")
+    assert not link_module._is_machine_title("经济危机是社会关系的危机")
+
+
+def test_collapse_consecutive_repeats():
+    """Whisper 连续重复句折叠：只留第一遍；无重复逐字节不变；
+    非相邻重复（讲者真正的反复）保留。"""
+    text = (
+        "所以它是一种危机。所以它更多的就是一种资源配置上出了差异。"
+        "所以它更多的就是一种资源配置上出了差异。"
+        "所以它更多的就是一种资源配置上出了差异。如果看到这一点就不用恐慌。"
+    )
+    collapsed = link_module._collapse_consecutive_repeats(text)
+    assert collapsed.count("所以它更多的就是一种资源配置上出了差异。") == 1
+    assert "所以它是一种危机。" in collapsed
+    assert "如果看到这一点就不用恐慌。" in collapsed
+
+    clean = "第一句。第二句。\n\n第三句。"
+    assert link_module._collapse_consecutive_repeats(clean) == clean
+
+    apart = "甲句。乙句。甲句。"
+    assert link_module._collapse_consecutive_repeats(apart) == apart
+
+
+def test_repeats_collapsed_before_llm(fake_pipeline, monkeypatch):
+    """重复句折叠发生在 LLM 摘要之前：摘要输入里重复句只剩一遍。"""
+
+    class _RepeatVideo(_FakeVideoProcessor):
+        def process(self, path):
+            return ProcessResult(
+                success=True,
+                text="甲句。乙句。乙句。乙句。丙句。",
+                markdown="# vid123\n\n- [00:00] 甲句",
+                confidence=0.9,
+                metadata={"segments": 1},
+            )
+
+    monkeypatch.setattr(link_module, "VideoProcessor", _RepeatVideo)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    prompts = []
+
+    def _post(url, headers=None, json=None, timeout=None):
+        prompts.append(json["messages"][0]["content"])
+        return _FakeLLMResponse({"choices": [{"message": {"content": ""}}]})
+
+    monkeypatch.setattr(link_module.httpx, "post", _post)
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    summarize_prompt = next(p for p in prompts if "结构化笔记元数据" in p)
+    assert summarize_prompt.count("乙句。") == 1
+    format_prompt = next(p for p in prompts if "整理为易读" in p)
+    assert format_prompt.count("乙句。") == 1
