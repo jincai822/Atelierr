@@ -497,3 +497,72 @@ def test_video_idempotent_second_run(memory_tree, monkeypatch):
     assert report["created"] == []
     assert report["skipped"] == 1
     assert len(_FakeVideoProcessor.calls) == 1
+
+
+def test_long_text_externalized_to_attachments(memory_tree):
+    """方案 B（2026-09-12）：全文 >800 字符外置 attachments/媒体/<同名>.md，
+    卡上只留「## 全文」链接节；内嵌原件不变；同名再调不覆盖。"""
+    long_text = "长文本。" * 400  # 1600 字符
+
+    class _LongImage(_FakeImageProcessor):
+        def process(self, path):
+            return ProcessResult(
+                success=True, text=long_text, markdown="", confidence=0.9
+            )
+
+    _add_attachment(memory_tree, "IMG_001.png")
+    dispatcher = MediaDispatcher(
+        memory_tree,
+        image_factory=_LongImage,
+        audio_factory=_FakeAudioProcessor,
+        video_factory=_FakeVideoProcessor,
+    )
+    report = dispatcher.run()
+
+    assert report["found"] == 1
+    note = _created_note(memory_tree)
+    post = frontmatter.loads(note.read_text(encoding="utf-8"))
+    assert "## OCR 全文" not in post.content
+    assert "![[attachments/IMG_001.png]]" in post.content
+    rel = f"attachments/媒体/{note.stem}.md"
+    assert f"## 全文\n\n[[{rel}|查看OCR 全文]]" in post.content
+    full = memory_tree.notes_dir / rel
+    assert full.exists()
+    assert full.read_text(encoding="utf-8") == long_text
+    # 同名跳过（幂等）：再调一次不改写既有全文
+    dispatcher._build_note(
+        memory_tree.notes_dir / "attachments/IMG_001.png",
+        "截图",
+        "另一份全文",
+        note.stem,
+    )
+    assert full.read_text(encoding="utf-8") == long_text
+
+
+def test_externalize_write_failure_falls_back_inline(memory_tree, monkeypatch):
+    """全文落盘失败：降级卡内联保底，卡不丢内容。"""
+    long_text = "长文本。" * 400
+
+    class _LongImage(_FakeImageProcessor):
+        def process(self, path):
+            return ProcessResult(
+                success=True, text=long_text, markdown="", confidence=0.9
+            )
+
+    monkeypatch.setattr(
+        media_module, "write_text_skip_existing", lambda target, text: False
+    )
+    _add_attachment(memory_tree, "IMG_001.png")
+    dispatcher = MediaDispatcher(
+        memory_tree,
+        image_factory=_LongImage,
+        audio_factory=_FakeAudioProcessor,
+        video_factory=_FakeVideoProcessor,
+    )
+    report = dispatcher.run()
+
+    assert report["found"] == 1
+    note = _created_note(memory_tree)
+    post = frontmatter.loads(note.read_text(encoding="utf-8"))
+    assert "## OCR 全文" in post.content
+    assert long_text in post.content

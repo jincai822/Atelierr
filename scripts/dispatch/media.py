@@ -53,11 +53,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from scripts.dispatch.highlights import CHECKLIST_SOURCE, ITEM_TAG
+from scripts.utils.file_utils import write_text_skip_existing
 from scripts.utils.state_store import read_json, write_json
 from scripts.dispatch.sysdir import SYSTEM_DIRNAME, write_machine_note
 from scripts.memory.core import MemoryTree
 from scripts.processors.audio import SUPPORTED_EXTENSIONS as AUDIO_EXTS
 from scripts.processors.audio import AudioProcessor
+from scripts.processors.base import INLINE_BODY_MAX
 from scripts.processors.highlights import HighlightsProcessor
 from scripts.processors.image import SUPPORTED_EXTENSIONS as IMAGE_EXTS
 from scripts.processors.image import ImageProcessor
@@ -284,7 +286,7 @@ class MediaDispatcher:
                 # 文件名/时间戳读取的即处理当下）
                 self._compress_in_place(path)
             filename = self._note_filename(path)
-            body = self._build_note(path, kind, result.text)
+            body = self._build_note(path, kind, result.text, Path(filename).stem)
             source, tags = "media", [REVIEW_TAG, kind]
             try:
                 self.tree.create_note(filename, body, source=source, tags=tags)
@@ -359,17 +361,38 @@ class MediaDispatcher:
         digest = hashlib.sha1(self._key(path).encode("utf-8")).hexdigest()[:6]
         return f"media-{date}-{digest}.md"
 
-    def _build_note(self, path: Path, kind: str, text: str) -> str:
-        """组装笔记正文：内嵌原附件（相对路径）+ 提取全文（录音带书名号标点）。"""
+    def _build_note(
+        self, path: Path, kind: str, text: str, note_stem: str
+    ) -> str:
+        """组装卡正文：内嵌原附件 + 提取全文（短内联，长外置留链接节）。
+
+        方案 B（2026-09-12 用户裁决）：全文 >INLINE_BODY_MAX 时原子写入
+        ``attachments/媒体/<笔记同名>.md``（同名跳过幂等；实现与链接
+        管线共用 write_text_skip_existing），卡上只留「## 全文」链接节；
+        写入失败降级为内联保底——卡绝不丢内容。
+        """
         stamp = datetime.fromtimestamp(path.stat().st_mtime).strftime(
             "%Y-%m-%d %H:%M"
         )
         section = "OCR 全文" if kind == "截图" else "转写全文"
+        body = (text or "").strip()
+        if len(body) > INLINE_BODY_MAX:
+            rel = f"{ATTACHMENTS_DIR}/{MEDIA_SUBDIR}/{note_stem}.md"
+            target = self.tree.notes_dir / rel
+            wrote = write_text_skip_existing(target, body)
+            if wrote or target.exists():
+                return (
+                    f"# {kind} {stamp}\n\n"
+                    f"![[{self._key(path)}]]\n\n"
+                    f"## 全文\n\n"
+                    f"[[{rel}|查看{section}]]\n"
+                )
+            logger.warning("全文落盘失败，降级为卡内联: %s", target)
         return (
             f"# {kind} {stamp}\n\n"
             f"![[{self._key(path)}]]\n\n"
             f"## {section}\n\n"
-            f"{(text or '').strip()}\n"
+            f"{body}\n"
         )
 
     def _load_state(self) -> Dict[str, Any]:

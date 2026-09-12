@@ -35,6 +35,7 @@ from typing import Any, Callable, Dict, List, Optional
 import frontmatter
 
 from scripts.memory.core import LAYERS, MemoryTree
+from scripts.utils.file_utils import write_text_skip_existing
 from scripts.utils.state_store import read_json, write_json
 from scripts.memory.watcher import MemoryWatcher
 from scripts.processors.link import LinkProcessor, URL_RE, detect_platform
@@ -302,22 +303,11 @@ class LinkDispatcher:
 
         与 _save_video 同规：rel 由处理器按 ``attachments/<平台>/<名>.md``
         约定给出（卡 markdown 里的 ``[[...]]`` 链接与之为同一字符串）；
-        绝不覆盖既有文件。
+        绝不覆盖既有文件。实现收敛在
+        :func:`scripts.utils.file_utils.write_text_skip_existing`（与
+        media 管线共用唯一实现）。
         """
-        target = self.tree.notes_dir / rel
-        if target.exists():
-            return
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(target.name + ".tmp")
-        try:
-            tmp.write_text(text, encoding="utf-8")
-            os.replace(tmp, target)
-        except OSError as exc:
-            logger.warning("保存全文失败 %s: %s", target, exc)
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
+        write_text_skip_existing(self.tree.notes_dir / rel, text)
 
     @staticmethod
     def _note_filename(url: str, platform: str, doc_id: str, title: str = "") -> str:
