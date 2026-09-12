@@ -20,9 +20,8 @@
     { "id": "clipper", "type": "frontend", "label": "Chrome 剪藏", "sublabel": "一键剪网页 · 备注框可选", "stage": 0, "row": 3 },
 
     { "id": "sync", "type": "cloud", "label": "Syncthing", "sublabel": "手机↔电脑 实时双向", "stage": 1, "row": 0 },
-    { "id": "vault", "type": "database", "label": "memory/ 根·裸笔记", "sublabel": "收件箱 · 捕获时刻不分类不摘要", "stage": 1, "row": 1, "tag": "零摩擦" },
-    { "id": "attm", "type": "database", "label": "attachments/媒体/", "sublabel": "图片/语音/视频原件", "stage": 1, "row": 2 },
-    { "id": "attb", "type": "database", "label": "attachments/书籍/", "sublabel": "PDF 原件", "stage": 1, "row": 3 },
+    { "id": "vault", "type": "database", "label": "memory/ 根·裸笔记", "sublabel": "文字口袋 · 捕获时刻不分类不摘要", "stage": 1, "row": 1, "tag": "零摩擦" },
+    { "id": "att", "type": "database", "label": "attachments/ 原件区", "sublabel": "原件口袋 · 按平台分目录：媒体/书籍/抖音/小红书/B站", "stage": 1, "row": 2 },
 
     { "id": "watcher", "type": "backend", "label": "watcher 归一化", "sublabel": "裸 md 补一次性 frontmatter · 还原 mtime", "stage": 2, "row": 0 },
     { "id": "links", "type": "backend", "label": "links 链接分发", "sublabel": "扫正文抓 URL · 同一链接只处理一次", "stage": 2, "row": 1 },
@@ -40,24 +39,22 @@
     { "from": "quickadd", "to": "sync", "label": "① 速记/想法", "variant": "emphasis", "route": "straight" },
     { "from": "sync", "to": "vault", "label": "② 实时同步", "variant": "emphasis" },
     { "from": "feishu", "to": "vault", "label": "③ 文字/链接入根", "variant": "emphasis", "route": "straight" },
-    { "from": "feishu", "to": "attm", "label": "④ 图/音/视频原件", "variant": "emphasis", "labelAt": [207, 300] },
-    { "from": "feishu", "to": "attb", "label": "⑤ PDF 原件", "variant": "emphasis", "labelAt": [228, 418] },
-    { "from": "desktop", "to": "vault", "label": "⑥ 直写笔记", "variant": "emphasis", "labelAt": [168, 326] },
-    { "from": "desktop", "to": "attm", "label": "⑦ 拖入附件", "variant": "emphasis", "route": "straight", "labelAt": [228, 350] },
-    { "from": "clipper", "to": "vault", "label": "⑧ 剪藏成 md", "variant": "emphasis", "labelAt": [200, 372] },
+    { "from": "feishu", "to": "att", "label": "④ 图/音/视频/PDF", "variant": "emphasis", "labelAt": [207, 302] },
+    { "from": "desktop", "to": "vault", "label": "⑤ 直写笔记", "variant": "emphasis", "labelAt": [150, 340] },
+    { "from": "desktop", "to": "att", "label": "⑥ 拖入附件", "variant": "emphasis", "route": "straight", "labelAt": [235, 345] },
+    { "from": "clipper", "to": "vault", "label": "⑦ 剪藏成 md", "variant": "emphasis", "labelAt": [200, 402] },
 
     { "from": "vault", "to": "watcher", "label": "裸笔记归一化（异步）", "variant": "default" },
     { "from": "watcher", "to": "sidecar", "label": "登记索引（异步）", "variant": "default", "route": "straight" },
-    { "from": "vault", "to": "links", "label": "⑨ 扫出链接", "variant": "emphasis", "route": "straight" },
-    { "from": "vault", "to": "clips", "label": "⑩ 发现新剪藏", "variant": "emphasis" },
-    { "from": "attm", "to": "media", "label": "⑪ 发现新附件", "variant": "emphasis", "labelAt": [418, 408] },
-    { "from": "attb", "to": "media", "label": "⑫ 发现 PDF", "variant": "emphasis", "route": "straight" },
-    { "from": "vault", "to": "todos", "label": "⑬ 扫行动意图", "variant": "emphasis", "labelAt": [445, 440] },
+    { "from": "vault", "to": "links", "label": "⑧ 扫出链接", "variant": "emphasis", "route": "straight" },
+    { "from": "vault", "to": "clips", "label": "⑨ 发现新剪藏", "variant": "emphasis" },
+    { "from": "att", "to": "media", "label": "⑩ 发现新附件/PDF", "variant": "emphasis", "labelAt": [418, 408] },
+    { "from": "vault", "to": "todos", "label": "⑪ 扫行动意图", "variant": "emphasis", "labelAt": [445, 440] },
 
-    { "from": "links", "to": "linkline", "label": "⑭ 去链接加工线", "variant": "emphasis", "route": "straight" },
-    { "from": "clips", "to": "clipline", "label": "⑮ 去剪藏摘要", "variant": "emphasis", "route": "straight" },
-    { "from": "media", "to": "medialine", "label": "⑯ 去附件加工", "variant": "emphasis", "route": "straight" },
-    { "from": "todos", "to": "todoline", "label": "⑰ 去待办判定", "variant": "emphasis", "route": "straight" }
+    { "from": "links", "to": "linkline", "label": "⑫ 去链接加工线", "variant": "emphasis", "route": "straight" },
+    { "from": "clips", "to": "clipline", "label": "⑬ 去剪藏摘要", "variant": "emphasis", "route": "straight" },
+    { "from": "media", "to": "medialine", "label": "⑭ 去附件加工", "variant": "emphasis", "route": "straight" },
+    { "from": "todos", "to": "todoline", "label": "⑮ 去待办判定", "variant": "emphasis", "route": "straight" }
   ],
   "cards": [
     {
@@ -85,9 +82,10 @@
       "dot": "emerald",
       "title": "② 落地规矩（捕获红线）",
       "items": [
+        "落地就两个口袋（同一个 vault、同一条同步、同一个快照）：文字 → memory/ 根，原件 → attachments/ 平台目录",
         "零摩擦第一：任何通道从想记到记下 ≤3 秒，无必填项；落地即裸 md/原件，人可读",
         "机器只接不判断：捕获时刻不分类/不摘要/不改写/不写 frontmatter（watcher 事后一次性补）",
-        "原资料按平台分目录（媒体/书籍/抖音/小红书/B站），与笔记归档目录同一套名字",
+        "原件只增不减：机器永不移动/删除原文件（红线 G7），所以口袋在落地时就分好，不做二次分拣",
         "Syncthing 双向同步整个库；state/sessions/exports 不上手机"
       ]
     },
