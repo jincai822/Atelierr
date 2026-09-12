@@ -72,6 +72,11 @@ _POINTER_WORDS = frozenset(
 #: 用户评论展示上限（卡片正文里截断）
 _COMMENT_MAX_CHARS = 200
 
+#: 日记列表行的时间戳前缀（``- HH:MM ``）：剥掉它再判断用户评论
+#: （2026-09-12 碎片治理：飞书文字并入当天日记后，链接所在行必然带
+#: 时间前缀；纯时间行剥完为空自然跳过，同行带人话的取出干净评论）
+_TIME_PREFIX_RE = re.compile(r"^[-*\s]*\d{1,2}:\d{2}(?::\d{2})?\s+")
+
 
 def extract_comment(body: str, url: str) -> str:
     """从含链接的源笔记正文提取用户随手评论（裁决 C2：确认卡上展示意图）。
@@ -91,7 +96,8 @@ def extract_comment(body: str, url: str) -> str:
     for line in body.splitlines():
         if _BOILERPLATE_RE.search(line):
             continue
-        text = URL_RE.sub("", line).strip(" \t，。：:;；")
+        text = URL_RE.sub("", line)
+        text = _TIME_PREFIX_RE.sub("", text).strip(" \t，。：:;；")
         if len(text) >= 2 and text not in _POINTER_WORDS:
             fragments.append(text)
     comment = "；".join(fragments).strip()

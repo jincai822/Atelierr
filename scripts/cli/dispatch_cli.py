@@ -226,6 +226,8 @@ def _notify_digest(
         f"待办 {counts['todos']}，今日复习 {counts['resurface']}，"
         f"昨日新入库 {counts['yesterday_new']}"
     )
+    if counts.get("stale"):
+        message += f"；⏰ 滞留 {counts['stale']} 条"
     if counts.get("health_stale"):
         message += f"；⚠️ 自检异常 {counts['health_stale']} 项"
     send_dispatch_notice(

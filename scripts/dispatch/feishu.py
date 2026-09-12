@@ -75,6 +75,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import frontmatter
 
 from scripts.dispatch.prompt import CLOSE_WORDS, PromptStore
+from scripts.utils.date_utils import local_timezone
 from scripts.utils.state_store import read_json, write_json
 
 from scripts.dispatch.archive import derive_archive_dir
@@ -499,6 +500,22 @@ class FeishuBridge:
             reason = self._error_reason(detail)
             self._send_feedback(chat_id, f"⚠️ {reason}：{filename}")
             return {"toast": {"type": "error", "content": reason}}
+        if detail == "confirm_only":
+            # 推导不出归档目录：只确认不移动（留在收件箱由人日后归类）
+            title = self._feedback_title(filename)
+            self._send_feedback(
+                chat_id, f"✅ 已确认（推导不出归档目录，留在收件箱）：{title}"
+            )
+            return {
+                "toast": {"type": "success", "content": "已确认（留在收件箱）"},
+                "card": {
+                    "type": "raw",
+                    "data": self._confirmed_card(
+                        filename,
+                        note_line="已移除「待确认」标签；推导不出归档目录，留在收件箱",
+                    ),
+                },
+            }
         if detail == "tag_fail":
             # 移动成功但删标签失败：不回滚，卡片提示手动摘除
             title = self._feedback_title(filename)
@@ -1106,7 +1123,10 @@ class FeishuBridge:
 
         定位（与确认同）→ 目标目录：显式给定（目录选择卡点定，先经
         _valid_archive_dir 校验）或机器推导（平台[/分类]，规则见
-        scripts/dispatch/archive.py；平台推不出落 媒体/）→ 已在目标
+        scripts/dispatch/archive.py；**平台推不出时不再兜底移动**——
+        2026-09-12 裁决：退化为仅确认（只删标签、留在收件箱），返回
+        "confirm_only"；「选目录…」卡片的推荐项仍用 媒体/ 兜底，因为
+        那是人显式点目录的场景）→ 已在目标
         目录则只删标签（幂等，不移动）→ 否则：目标重名检查（绝不
         覆盖）→ mkdir → rename → sidecar 按 id 即时迁移 path
         （MemoryTree.relocate_entry，动态状态原样保留，不等 watcher
@@ -1114,7 +1134,8 @@ class FeishuBridge:
         返回 (True, "tag_fail")（提示手动摘除，绝不回滚）。
 
         Returns:
-            Tuple[bool, str]: 成功返回 (True, 目标相对目录) 或
+            Tuple[bool, str]: 成功返回 (True, 目标相对目录)、
+                (True, "confirm_only")（推导不出平台，仅确认未移动）或
                 (True, "tag_fail")；失败返回 (False, 错误详情串)。
         """
         note_path, err = self._locate_note(filename)
@@ -1123,7 +1144,10 @@ class FeishuBridge:
         if target_dir is None:
             post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
             platform, category = derive_archive_dir(post)
-            platform = platform or FALLBACK_ARCHIVE_DIR
+            if platform is None:
+                # 推导不出平台：退化为仅确认（留在收件箱），不兜底乱移
+                self._strip_review_tag(note_path)
+                return True, "confirm_only"
             target_dir = platform if not category else f"{platform}/{category}"
         elif not self._valid_archive_dir(target_dir):
             return False, "非法目录"
@@ -1187,7 +1211,10 @@ class FeishuBridge:
     def _receive_text(
         self, message_id: str, text: str, chat_id: Optional[str] = None
     ) -> Optional[Path]:
-        """文本消息 → memory/ 笔记（source: lark；空文本忽略）。
+        """文本消息 → 追加进当天日记（source: lark；空文本忽略）。
+
+        2026-09-12 裁决（碎片治理）：不再逐条建 feishu-哈希.md 碎片，
+        见 _append_diary。
 
         待答问题会话 open 期间（scripts/dispatch/prompt.py），文本视为
         周回顾等仪式的**回答**：追加进会话状态、回执条数，不捕获为
@@ -1220,18 +1247,42 @@ class FeishuBridge:
         if text in ("搜", "搜索"):
             self._send_feedback(chat_id, "用法：发「搜 关键词」，我回前 5 条匹配")
             return None
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        suffix = hashlib.sha1(message_id.encode("utf-8")).hexdigest()[:6]
         try:
-            note = self.tree.create_note(
-                f"feishu-{stamp}-{suffix}.md", text + "\n", source="lark"
-            )
+            note = self._append_diary(text)
         except Exception as exc:  # noqa: BLE001 - 捕获失败文字回执，不中断守护
             print(f"[feishu] capture fail: {exc}", flush=True)
             self._send_feedback(chat_id, "⚠️ 捕获失败，请稍后重发")
             return None
         self._add_reaction(message_id)
         return note
+
+    def _append_diary(self, text: str) -> Optional[Path]:
+        """飞书文字追加进当天日记（2026-09-12 用户裁决：碎片治理）。
+
+        不再逐条建 feishu-时间戳-哈希.md 碎片（收件箱乱码名堆积、
+        不想点不敢删），统一追加到 memory/ 根目录 ``YYYY-MM-DD.md``
+        ——与 QuickAdd 速记同一个文件，格式同为 ``- HH:MM 内容``
+        列表行（多行消息后续行缩进两格）。**机器追加日记是"笔记创建
+        后绝不改写"红线的用户批准例外，仅此路径**；追加不碰
+        frontmatter（id/created 不变），既有日记 bump last_accessed
+        （新内容算活跃）；日期用本地时区（日记按自然日）。
+        链接消息照常进日记正文——links 管线扫全库正文照样能抓到，
+        评论提取见 dispatch/links.py extract_comment 的时间行豁免。
+        """
+        now = datetime.now(local_timezone())
+        diary = Path(self.tree.notes_dir) / f"{now.strftime('%Y-%m-%d')}.md"
+        lines = text.splitlines()
+        entry = f"- {now.strftime('%H:%M')} {lines[0]}"
+        entry += "".join(f"\n  {line}" for line in lines[1:])
+        if not diary.exists():
+            self.tree.create_note(diary.name, f"{entry}\n", source="lark")
+            return diary
+        content = diary.read_text(encoding="utf-8")
+        sep = "" if content.endswith("\n") else "\n"
+        with diary.open("a", encoding="utf-8") as fh:
+            fh.write(f"{sep}{entry}\n")
+        self.tree.on_note_accessed(diary)
+        return diary
 
     def _receive_resource(
         self, message_id: str, msg_type: str, content: Dict[str, Any]

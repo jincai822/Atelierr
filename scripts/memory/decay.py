@@ -93,6 +93,15 @@ class DecayManager:
         pending = confidence < self.tree.settings.delete_threshold
         return confidence, layer, pending
 
+    def backlink_counts(self) -> Dict[Path, int]:
+        """公开的反链统计（只读）：每日衰减的同一份扫描，供 digest
+        「沉淀候选」等统计复用——反链逻辑只此一处，禁止另写扫描。
+
+        Returns:
+            Dict[Path, int]: 每个笔记文件 → 被不同笔记引用的次数。
+        """
+        return self._scan_backlinks()
+
     def _scan_backlinks(self) -> Dict[Path, int]:
         """全量扫描所有 .md 笔记正文的 [[wikilink]] 反链。
 

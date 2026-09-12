@@ -156,11 +156,13 @@ def send_feishu(
 def _confirm_action_card(
     title: str, message: str, confirm_note: Optional[str]
 ) -> Dict[str, Any]:
-    """确认卡 JSON：打开（URI）+ 可选「✅ 确认」「📁 归档…」callback 按钮。
+    """确认卡 JSON：打开（URI）+ 确认/归档三按钮（callback）。
 
-    「📁 归档…」先弹目录选择卡（archive_pick）——机器推导只作推荐项，
-    去处由人点定后才移动（archive_note 带 dir）；取消还原本卡。
-    send_feishu 推送与归档取消回调共用本组装器，避免两处卡片漂移。
+    2026-09-12 裁决（归档默认化）：主按钮「✅ 确认并归档」一步到位
+    （机器推导目录直接移动+删标签；推导不出平台时退化为仅确认不移动，
+    见 feishu.py _archive_note 的 confirm_only 分支）；「📁 选目录…」
+    弹目录选择卡（想换去处时用，取消还原本卡）；「仅确认」留在收件箱
+    （根目录）显式选择。滞留根目录由晨报「滞留提醒」兜底点名。
     """
     actions = [
         {
@@ -177,15 +179,16 @@ def _confirm_action_card(
         actions.append(
             {
                 "tag": "button",
-                "text": {"tag": "plain_text", "content": "✅ 确认"},
+                "text": {"tag": "plain_text", "content": "✅ 确认并归档"},
                 "type": "primary",
                 # 新版卡片 callback：value 直接放 JSON 对象（若放字符串，
                 # 回调时平台原样回传，SDK 校验 action.value 必须是 dict
                 # 会直接报错丢弃，回调永远到不了处理器）
+                # 不带 dir：归档目标由 _archive_note 推导（推不出→仅确认）
                 "behaviors": [
                     {
                         "type": "callback",
-                        "value": {"action": CONFIRM_ACTION, "note": confirm_note},
+                        "value": {"action": ARCHIVE_ACTION, "note": confirm_note},
                     }
                 ],
             }
@@ -193,7 +196,7 @@ def _confirm_action_card(
         actions.append(
             {
                 "tag": "button",
-                "text": {"tag": "plain_text", "content": "📁 归档…"},
+                "text": {"tag": "plain_text", "content": "📁 选目录…"},
                 "type": "primary",
                 # 同上：value 必须是 dict（回调进 handle_card_action 的
                 # archive_pick 分支：先弹目录选择卡，点定才移动）
@@ -204,6 +207,19 @@ def _confirm_action_card(
                             "action": ARCHIVE_PICK_ACTION,
                             "note": confirm_note,
                         },
+                    }
+                ],
+            }
+        )
+        actions.append(
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": "仅确认"},
+                "type": "default",
+                "behaviors": [
+                    {
+                        "type": "callback",
+                        "value": {"action": CONFIRM_ACTION, "note": confirm_note},
                     }
                 ],
             }

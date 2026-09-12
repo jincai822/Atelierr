@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -18,6 +19,12 @@ import scripts.dispatch.feishu as feishu_module
 import scripts.dispatch.feishu_cards as feishu_cards_module
 import scripts.dispatch.feishu_io as feishu_io_module
 from scripts.dispatch.feishu import FeishuBridge, send_feishu
+from scripts.utils.date_utils import local_timezone
+
+
+def _today() -> str:
+    """当天日记文件名主干（本地时区，与 _append_diary 同口径）。"""
+    return datetime.now(local_timezone()).strftime("%Y-%m-%d")
 
 
 def _event(message_id: str, msg_type: str, content: dict):
@@ -52,51 +59,71 @@ def _fake_lark(monkeypatch, client):
     return fake_lark
 
 
-def test_text_message_creates_lark_note(memory_tree, capsys):
-    """文本消息 → memory/ 笔记：source=lark、正文原样、sidecar 登记。"""
+def test_text_message_appends_to_diary(memory_tree, capsys):
+    """文本消息 → 当天日记（2026-09-12 碎片治理裁决）：source=lark、
+    ``- HH:MM 内容`` 列表行（多行缩进续行）、sidecar 登记；
+    不再建 feishu-哈希.md 碎片。"""
     bridge = _bridge(memory_tree)
     event = _event("m1", "text", {"text": "今天想到：\n好点子"})
     event.event.message.chat_id = "oc_demo_chat"
     bridge.handle_event(event)
 
-    notes = list(memory_tree.notes_dir.glob("feishu-*.md"))
+    notes = list(memory_tree.notes_dir.glob(f"{_today()}.md"))
     assert len(notes) == 1
     text = notes[0].read_text(encoding="utf-8")
     assert "source: lark" in text
-    assert "好点子" in text
+    assert "  好点子" in text  # 第二行两格缩进续行
+    assert not list(memory_tree.notes_dir.glob("feishu-*.md"))
     index_text = (memory_tree.state_dir / "index.json").read_text(encoding="utf-8")
     assert notes[0].stem in index_text
     # 日志带 chat_id（供用户抄进 FEISHU_CHAT_ID）
     assert "chat=oc_demo_chat" in capsys.readouterr().out
 
 
+def test_text_appends_to_existing_diary(memory_tree):
+    """当天日记已存在（QuickAdd 速记写过）：追加列表行，frontmatter 不动。"""
+    memory_tree.create_note(f"{_today()}.md", "- 09:00 早上速记\n", source="sync")
+    bridge = _bridge(memory_tree)
+
+    bridge.handle_event(_event("m-d1", "text", {"text": "飞书补充"}))
+
+    content = (memory_tree.notes_dir / f"{_today()}.md").read_text(encoding="utf-8")
+    assert "- 09:00 早上速记" in content
+    assert "飞书补充" in content
+    assert "source: sync" in content  # frontmatter 未被改写
+    assert not list(memory_tree.notes_dir.glob("feishu-*.md"))
+
+
 def test_text_with_url_kept_verbatim(memory_tree):
-    """含 URL 的消息正文原样保留（links 分发下一轮自动捡起）。"""
+    """含 URL 的消息原样进日记（links 分发下一轮从正文自动捡起）。"""
     bridge = _bridge(memory_tree)
     bridge.handle_event(_event("m2", "text", {"text": "看这个 https://v.douyin.com/abc/"}))
 
-    notes = list(memory_tree.notes_dir.glob("feishu-*.md"))
+    notes = list(memory_tree.notes_dir.glob(f"{_today()}.md"))
     assert len(notes) == 1
     assert "https://v.douyin.com/abc/" in notes[0].read_text(encoding="utf-8")
 
 
 def test_duplicate_message_id_skipped(memory_tree):
-    """同一 message_id 重复投递：只建一条笔记。"""
+    """同一 message_id 重复投递：日记只追加一次。"""
     bridge = _bridge(memory_tree)
     event = _event("m3", "text", {"text": "重复投递"})
     bridge.handle_event(event)
     bridge.handle_event(event)
 
-    assert len(list(memory_tree.notes_dir.glob("feishu-*.md"))) == 1
+    notes = list(memory_tree.notes_dir.glob(f"{_today()}.md"))
+    assert len(notes) == 1
+    assert notes[0].read_text(encoding="utf-8").count("重复投递") == 1
 
 
 def test_empty_text_ignored(memory_tree):
-    """空白文本：不建笔记（但仍登记防重试风暴）。"""
+    """空白文本：不建日记（但仍登记防重试风暴）。"""
     bridge = _bridge(memory_tree)
     bridge.handle_event(_event("m4", "text", {"text": "  "}))
     bridge.handle_event(_event("m4", "text", {"text": "  "}))
 
     assert not list(memory_tree.notes_dir.glob("feishu-*.md"))
+    assert not list(memory_tree.notes_dir.glob(f"{_today()}.md"))
 
 
 def test_malformed_event_skipped(memory_tree):
@@ -109,6 +136,7 @@ def test_malformed_event_skipped(memory_tree):
     bridge.handle_event(SimpleNamespace(event=None))
 
     assert not list(memory_tree.notes_dir.glob("feishu-*.md"))
+    assert not list(memory_tree.notes_dir.glob(f"{_today()}.md"))
 
 
 def test_image_message_saved_to_attachments(memory_tree, monkeypatch):
@@ -430,7 +458,7 @@ def test_card_action_file_only_in_trash_not_found(memory_tree):
 
 
 def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
-    """带 confirm_note 的卡片：追加「✅ 确认」「📁 确认并归档」两 callback 按钮。"""
+    """带 confirm_note 的卡片：打开 + 确认并归档/选目录/仅确认 callback 按钮。"""
     monkeypatch.setenv("FEISHU_APP_ID", "cli_x")
     monkeypatch.setenv("FEISHU_APP_SECRET", "secret")
     monkeypatch.setenv("FEISHU_CHAT_ID", "oc_chat")
@@ -459,10 +487,12 @@ def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
     assert msg_type == "interactive"
     card = json.loads(content)
     actions = card["elements"][1]["actions"]
+    # 2026-09-12 归档默认化：主按钮一步到位确认并归档
     assert [a["text"]["content"] for a in actions] == [
         "在 Obsidian 中打开",
-        "✅ 确认",
-        "📁 归档…",
+        "✅ 确认并归档",
+        "📁 选目录…",
+        "仅确认",
     ]
     for button in actions[1:]:
         behavior = button["behaviors"][0]
@@ -470,12 +500,16 @@ def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
         # value 必须是 dict 而非 JSON 字符串：平台回传字符串会被 SDK 校验丢弃
         assert isinstance(behavior["value"], dict)
     assert actions[1]["behaviors"][0]["value"] == {
-        "action": feishu_module.CONFIRM_ACTION,
+        "action": feishu_module.ARCHIVE_ACTION,
         "note": "douyin-x.md",
     }
-    # 「📁 归档…」先弹目录选择卡（archive_pick），点定目录才移动
+    # 「📁 选目录…」先弹目录选择卡（archive_pick），点定目录才移动
     assert actions[2]["behaviors"][0]["value"] == {
         "action": feishu_module.ARCHIVE_PICK_ACTION,
+        "note": "douyin-x.md",
+    }
+    assert actions[3]["behaviors"][0]["value"] == {
+        "action": feishu_module.CONFIRM_ACTION,
         "note": "douyin-x.md",
     }
 
@@ -586,7 +620,7 @@ def test_card_archive_uses_cclass_subdir(memory_tree):
 
 
 def test_card_archive_lark_and_fallback_media_dirs(memory_tree):
-    """source=lark → 飞书/；平台推不出（media 无平台标签）→ 媒体/。"""
+    """source=lark → 飞书/；media（媒体类附件）→ 媒体/。"""
     bridge = _bridge(memory_tree)
     memory_tree.create_note("fl-想法.md", "正文\n", source="lark", tags=["待确认"])
     memory_tree.create_note("ocr-截图.md", "正文\n", source="media", tags=["待确认", "截图"])
@@ -598,6 +632,23 @@ def test_card_archive_lark_and_fallback_media_dirs(memory_tree):
     resp = bridge.handle_card_action(_card_archive("ocr-截图.md"))
     assert resp["toast"]["content"] == "已确认并归档到 媒体/"
     assert (memory_tree.notes_dir / "媒体" / "ocr-截图.md").exists()
+
+
+def test_card_archive_underivable_confirm_only(memory_tree):
+    """推导不出平台（无 source 映射、无平台标签）：退化为仅确认不移动
+    （2026-09-12 裁决；防兜底乱移 媒体/）。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("速记碎片.md", "正文\n", source="sync", tags=["待确认"])
+
+    resp = bridge.handle_card_action(_card_archive("速记碎片.md"))
+
+    assert resp["toast"]["content"] == "已确认（留在收件箱）"
+    note = memory_tree.notes_dir / "速记碎片.md"
+    assert note.exists()  # 没移动
+    assert not (memory_tree.notes_dir / "媒体" / "速记碎片.md").exists()
+    assert "待确认" not in frontmatter.loads(
+        note.read_text(encoding="utf-8")
+    ).metadata["tags"]
 
 
 def test_card_archive_idempotent_when_already_in_target(memory_tree):
@@ -904,7 +955,7 @@ def test_capture_text_adds_done_reaction(memory_tree, monkeypatch):
     bridge.handle_event(event)
 
     assert reactions == ["m-react-1"]
-    assert len(list(memory_tree.notes_dir.glob("feishu-*.md"))) == 1
+    assert len(list(memory_tree.notes_dir.glob(f"{_today()}.md"))) == 1
 
 
 def test_capture_resource_adds_done_reaction(memory_tree, monkeypatch):
@@ -943,7 +994,7 @@ def test_reaction_api_failure_still_captures(memory_tree, monkeypatch):
 
     bridge.handle_event(_event("m-react-3", "text", {"text": "照进"}))
 
-    assert len(list(memory_tree.notes_dir.glob("feishu-*.md"))) == 1
+    assert len(list(memory_tree.notes_dir.glob(f"{_today()}.md"))) == 1
     client.im.v1.message_reaction.create.assert_called_once()
 
 
@@ -1440,7 +1491,7 @@ def test_archive_to_invalid_dir_rejected(memory_tree):
 
 
 def test_archive_cancel_restores_confirm_card(memory_tree):
-    """「取消」：还原确认卡（打开/✅确认/📁归档…），无文件变动。"""
+    """「取消」：还原确认卡（打开/确认并归档/选目录/仅确认），无文件变动。"""
     memory_tree.create_note("x.md", "正文\n", source="link", tags=["待确认"])
     bridge = _bridge(memory_tree)
 
@@ -1449,8 +1500,9 @@ def test_archive_cancel_restores_confirm_card(memory_tree):
     actions = result["card"]["data"]["elements"][1]["actions"]
     assert [a["text"]["content"] for a in actions] == [
         "在 Obsidian 中打开",
-        "✅ 确认",
-        "📁 归档…",
+        "✅ 确认并归档",
+        "📁 选目录…",
+        "仅确认",
     ]
     assert (memory_tree.notes_dir / "x.md").exists()
 
@@ -1810,7 +1862,7 @@ def test_owner_sender_message_accepted(memory_tree):
     )
     bridge.handle_event(event)
 
-    assert len(list(memory_tree.notes_dir.glob("feishu-*.md"))) == 1
+    assert len(list(memory_tree.notes_dir.glob(f"{_today()}.md"))) == 1
 
 
 def test_foreign_operator_action_ignored(memory_tree):

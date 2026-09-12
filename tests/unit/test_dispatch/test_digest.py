@@ -371,3 +371,53 @@ def test_digest_markdown_has_health_section(memory_tree):
     assert "## 🩺 系统自检" in report["markdown"]
     assert "health_stale" in report["counts"]
     assert report["counts"]["health_stale"] == 5  # 临时库全是缺文件
+
+
+def test_digest_stale_pending_section(memory_tree):
+    """滞留提醒（2026-09-12 裁决）：根目录待确认超 7 天逐条点名带天数；
+    新待确认、已归档（子目录）、无待确认标签的都不计。"""
+    memory_tree.create_note("old.md", "旧待确认", source="link", tags=["待确认"])
+    _backdate_created(memory_tree, "old.md", "2026-08-20")
+    memory_tree.create_note("new.md", "新待确认", source="link", tags=["待确认"])
+    _backdate_created(memory_tree, "new.md", "2026-08-31")  # 未满 7 天
+    memory_tree.create_note("done.md", "已确认的旧笔记", source="link", tags=[])
+    _backdate_created(memory_tree, "done.md", "2026-08-01")
+    # 已归档进子目录的旧待确认：不算根目录滞留
+    memory_tree.create_note("arch.md", "归档的待确认", source="link", tags=["待确认"])
+    _backdate_created(memory_tree, "arch.md", "2026-08-01")
+    subdir = memory_tree.notes_dir / "抖音"
+    subdir.mkdir()
+    (memory_tree.notes_dir / "arch.md").rename(subdir / "arch.md")
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-01")
+
+    body = report["markdown"]
+    assert "## ⏰ 滞留提醒（1）" in body
+    assert "[[old]]（滞留 12 天）" in body
+    assert "[[new]]（滞留" not in body
+    assert "[[done]]" not in body.split("## ⏰")[1].split("## 🧠")[0]
+    assert "[[arch]]" not in body.split("## ⏰")[1].split("## 🧠")[0]
+    assert report["counts"]["stale"] == 1
+
+
+def test_digest_no_stale_no_section(memory_tree):
+    """无滞留：不出「滞留提醒」节；counts['stale'] 为 0。"""
+    memory_tree.create_note("fresh.md", "新待确认", source="link", tags=["待确认"])
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-01")
+
+    assert "滞留提醒" not in report["markdown"]
+    assert report["counts"]["stale"] == 0
+
+
+def test_digest_undistilled_backlink_path(memory_tree):
+    """被别的笔记 [[引用]] ≥1 次即进提炼候选（2026-09-12 裁决②：
+    沉淀从自己笔记里长出来；被引用者已是枢纽）。"""
+    memory_tree.create_note("hub.md", "被引用的笔记", source="link", tags=[])
+    memory_tree.create_note("ref.md", "详见 [[hub]] 的论述", source="test")
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-01")
+
+    section = report["markdown"].split("## 🧠 提炼候选")[1].split("## ✅")[0]
+    assert "[[hub]]" in section
+    assert "[[ref]]" not in section  # 引用别人不等于自己被引用

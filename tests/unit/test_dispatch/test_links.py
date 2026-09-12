@@ -410,6 +410,16 @@ def test_extract_comment_helper():
     assert len(extract_comment(long_body, DOUYIN_URL)) == 200
 
 
+def test_extract_comment_strips_diary_timestamp():
+    """日记行（- HH:MM 前缀，2026-09-12 碎片治理）：纯时间链接行无评论；
+    同行带人话的剥掉前缀取干净评论。"""
+    from scripts.dispatch.links import extract_comment
+
+    assert extract_comment(f"- 21:04 {DOUYIN_URL}", DOUYIN_URL) == ""
+    body = f"- 10:24 {DOUYIN_URL} 我想看里面的书！"
+    assert extract_comment(body, DOUYIN_URL) == "我想看里面的书！"
+
+
 BILIBILI_URL = "https://www.bilibili.com/video/BV1xx411c7mD"
 
 

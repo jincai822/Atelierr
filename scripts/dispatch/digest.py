@@ -58,6 +58,7 @@ from scripts.dispatch.stats import (
 )
 from scripts.dispatch.sysdir import SYSTEM_DIRNAME, write_machine_note
 from scripts.memory.core import LAYERS, SYNC_CONFLICT_RE, MemoryTree
+from scripts.memory.decay import DecayManager
 from scripts.memory.resurface import ResurfaceManager
 from scripts.memory.watcher import MemoryWatcher
 from scripts.wiki.manager import WikiManager
@@ -65,6 +66,7 @@ from scripts.wiki.manager import WikiManager
 MIN_PUSH_COUNT = 2  # 推送达到此次数仍未提炼，进"提炼候选"节
 DISTILL_MIN_AGE_DAYS = 3  # 已确认笔记创建满此天数即可提炼（沉一沉再动笔）
 MAX_DISTILL_CANDIDATES = 5  # 候选节最多列几条（防长列表制造压力）
+STALE_PENDING_DAYS = 7  # 根目录待确认滞留超此天数，晨报「滞留提醒」点名
 
 #: 系统自检探测点（名称, state_dir 内相对路径, 允许的最大沉默秒数）：
 #: 15 分钟班次给 2 小时余量；decay 每日 03:00 给 30 小时
@@ -184,6 +186,7 @@ class DigestDispatcher:
                 "markdown": "",
             }
         pending, todos, yesterday_new = self._collect(today)
+        stale_pending = self._stale_pending(today)
         review = self.resurface.candidates()
         review_stems = [Path(item["filename"]).stem for item in review]
         wiki = WikiManager(self.tree)
@@ -207,6 +210,7 @@ class DigestDispatcher:
             today, pending, todos, review_stems, yesterday_new,
             undistilled, wiki_issues, health, health_stale,
             capture_line=capture_line, weekly_lines=weekly_lines,
+            stale_lines=stale_pending,
         )
         created = None
         if not dry_run:
@@ -228,6 +232,7 @@ class DigestDispatcher:
                 "undistilled": len(undistilled),
                 "yesterday_new": len(yesterday_new),
                 "health_stale": health_stale,
+                "stale": len(stale_pending),
             },
             "review": review,
             "markdown": markdown,
@@ -236,8 +241,11 @@ class DigestDispatcher:
     def _distill_candidates(self, wiki: WikiManager, today: str) -> List[str]:
         """提炼候选：从未进 wiki 且值得动笔的笔记 stem（截断到上限）。
 
-        两路汇合，去重后推送多的在前、其次最旧的在前：
+        三路汇合，去重后推送多的在前、其次被引用多的、最后最旧的在前：
         - 反复推送：ResponseProbe 累计推送 ≥MIN_PUSH_COUNT 次；
+        - 被引用：别的笔记 [[wikilink]] 引用 ≥1 次（2026-09-12 裁决②：
+        沉淀从"自己的笔记长出来"——被引用的已是枢纽，与每日衰减同源
+        的反链统计，DecayManager.backlink_counts）；
         - 沉一沉：已确认且 created 满 DISTILL_MIN_AGE_DAYS 天。
         文件已消失（purge 也是加工）自然不计；日报/控制台/摘要/
         划重点清单/待确认/待办不候选（见 _excluded_from_distill）。
@@ -246,14 +254,24 @@ class DigestDispatcher:
             str(slot.get("filename") or ""): int(slot.get("count") or 0)
             for slot in self.probe.push_counts().values()
         }
+        backlink_by_stem = {
+            path.stem: count
+            for path, count in DecayManager(self.tree).backlink_counts().items()
+            if count >= 1
+        }
         distilled = wiki.distilled_stems()
         cutoff = (
             datetime.strptime(today, "%Y-%m-%d")
             - timedelta(days=DISTILL_MIN_AGE_DAYS)
         ).strftime("%Y-%m-%d")
         pushed: List[Tuple[int, str]] = []  # (-count, stem)
+        linked: List[Tuple[int, str]] = []  # (-引用数, stem)
         settled: List[Tuple[str, str]] = []  # (created, stem)
-        for note_path in sorted(Path(self.tree.notes_dir).glob("*.md")):
+        # 全库扫描（含已归档子目录）：归档后的笔记被引用多了照样该提炼
+        all_paths = [
+            path for layer in LAYERS for path in self.tree.list_notes(layer)
+        ]
+        for note_path in sorted(all_paths):
             if SYNC_CONFLICT_RE.search(note_path.name):
                 continue  # Syncthing 冲突副本不是笔记
             stem = note_path.stem
@@ -269,10 +287,15 @@ class DigestDispatcher:
             if push_count >= MIN_PUSH_COUNT:
                 pushed.append((-push_count, stem))
                 continue
+            ref_count = backlink_by_stem.get(stem, 0)
+            if ref_count >= 1:
+                linked.append((-ref_count, stem))
+                continue
             created = str(post.get("created") or "")[:10]
             if created and created <= cutoff:
                 settled.append((created, stem))
         picked = [stem for _, stem in sorted(pushed)]
+        picked += [stem for _, stem in sorted(linked)]
         picked += [stem for _, stem in sorted(settled)]
         return picked[:MAX_DISTILL_CANDIDATES]
 
@@ -317,6 +340,40 @@ class DigestDispatcher:
                     yesterday_new.append(stem)
         return sorted(pending), sorted(todos), sorted(yesterday_new)
 
+    def _stale_pending(self, today: str) -> List[str]:
+        """根目录滞留点名（2026-09-12 裁决：归档默认化的兜底提醒）。
+
+        只看收件箱顶层 *.md（不进子目录——已归档的不算滞留）：带
+        「待确认」且 created 满 STALE_PENDING_DAYS 天的笔记，逐条列出
+        滞留天数（久的在前）。提醒文案引导点「✅ 确认并归档」收编，
+        不值得留的等 decay 到期走 review→purge。
+        """
+        cutoff = datetime.strptime(today, "%Y-%m-%d") - timedelta(
+            days=STALE_PENDING_DAYS
+        )
+        rows: List[Tuple[int, str]] = []  # (-滞留天数, 行文本)
+        for note_path in sorted(Path(self.tree.notes_dir).glob("*.md")):
+            if SYNC_CONFLICT_RE.search(note_path.name):
+                continue
+            try:
+                post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if "待确认" not in (post.get("tags") or []):
+                continue
+            created = str(post.get("created") or "")[:10]
+            if not created:
+                continue
+            try:
+                created_date = datetime.strptime(created, "%Y-%m-%d")
+            except ValueError:
+                continue
+            if created_date > cutoff:
+                continue
+            days = (datetime.strptime(today, "%Y-%m-%d") - created_date).days
+            rows.append((-days, f"- [[{note_path.stem}]]（滞留 {days} 天）"))
+        return [line for _, line in sorted(rows)]
+
     @staticmethod
     def _build(
         today: str,
@@ -330,12 +387,14 @@ class DigestDispatcher:
         health_stale: int,
         capture_line: Optional[str] = None,
         weekly_lines: Optional[List[str]] = None,
+        stale_lines: Optional[List[str]] = None,
     ) -> str:
         """组装摘要 Markdown（空节显示"无"）。
 
         undistilled 同时写进 frontmatter（控制台 Dataview 桥接——
         sidecar 里的推送观测数据 Dataview 看不见）。capture_line 是昨日
-        捕获入口分布一行；weekly_lines 仅周日传入（本周捕获统计详细节）。
+        捕获入口分布一行；weekly_lines 仅周日传入（本周捕获统计详细节）；
+        stale_lines 是根目录滞留点名（无滞留时不出现该节）。
         """
 
         def _lines(items: List[str]) -> List[str]:
@@ -350,6 +409,16 @@ class DigestDispatcher:
 
         sections = [f"# 今日摘要 {today}", ""]
         sections += [f"## ⏳ 待我确认（{len(pending)}）", "", *_lines(pending), ""]
+        if stale_lines:
+            sections += [
+                f"## ⏰ 滞留提醒（{len(stale_lines)}）",
+                "",
+                "> 根目录待确认超 7 天：飞书确认卡点「✅ 确认并归档」一键收编；",
+                "> 不值得留的不用管，decay 到期后走 review→purge。",
+                "",
+                *stale_lines,
+                "",
+            ]
         sections += [f"## 🧠 提炼候选（{len(undistilled)}）", ""]
         if undistilled:
             sections += [
