@@ -278,7 +278,12 @@ class FeishuBridge:
                     chat_id=str(getattr(message, "chat_id", "") or "") or None,
                 )
             elif msg_type in ("image", "file", "audio"):
-                self._receive_resource(message_id, msg_type, content)
+                self._receive_resource(
+                    message_id,
+                    msg_type,
+                    content,
+                    chat_id=str(getattr(message, "chat_id", "") or "") or None,
+                )
         finally:
             self._mark_seen(message_id)
 
@@ -1285,7 +1290,11 @@ class FeishuBridge:
         return diary
 
     def _receive_resource(
-        self, message_id: str, msg_type: str, content: Dict[str, Any]
+        self,
+        message_id: str,
+        msg_type: str,
+        content: Dict[str, Any],
+        chat_id: Optional[str] = None,
     ) -> Optional[Path]:
         """图片/文件/语音消息 → 下载进 attachments/ 平台子目录（media 分发自动接手）。
 
@@ -1295,6 +1304,9 @@ class FeishuBridge:
         飞书按住说话入口：存 .ogg（AudioProcessor 支持），下一轮 media
         分发走 Whisper 转写 → 转写确认卡，与截图同路。资源 API 的
         type 只有 image/file 两类：语音按 file 拉取。
+
+        下载失败（含飞书 234037 文件超限）不再静默：打日志并回执
+        用户原因与出路（2026-09-12 实测：手机直出视频超限无任何反馈）。
         """
         key = content.get("image_key") or content.get("file_key")
         if not key:
@@ -1302,6 +1314,13 @@ class FeishuBridge:
         resource_type = "image" if msg_type == "image" else "file"
         blob = self._download_resource(message_id, str(key), resource_type)
         if blob is None:
+            name = str(content.get("file_name") or "附件").strip() or "附件"
+            self._send_feedback(
+                chat_id,
+                f"⚠️ 附件下载失败：{name}。"
+                "如是手机直出的大视频（飞书接口限制），"
+                "请改发短片段、发链接，或在电脑端直接拖入 attachments/媒体/",
+            )
             return None
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         suffix = hashlib.sha1(message_id.encode("utf-8")).hexdigest()[:6]
@@ -1342,6 +1361,11 @@ class FeishuBridge:
         )
         response = client.im.v1.message_resource.get(request)
         if not response.success():
+            print(
+                f"[feishu] resource download fail msg={message_id} "
+                f"code={response.code} msg={response.msg}",
+                flush=True,
+            )
             return None
         raw = response.file
         return raw.read() if hasattr(raw, "read") else bytes(raw)

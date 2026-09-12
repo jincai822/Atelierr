@@ -1897,3 +1897,28 @@ def test_owner_operator_action_accepted(memory_tree):
     resp = bridge.handle_card_action(event)
 
     assert resp["toast"]["type"] == "success"
+
+
+def test_resource_download_failure_sends_feedback(memory_tree, monkeypatch):
+    """附件下载失败（如飞书 234037 大视频超限）：回执用户原因与出路——
+    2026-09-12 实测手机直出视频超限、飞书端毫无反馈。"""
+    client = MagicMock()
+    fail = client.im.v1.message_resource.get.return_value
+    fail.success.return_value = False
+    fail.code = 234037
+    fail.msg = "Downloaded file size exceeds limit."
+    _fake_lark(monkeypatch, client)
+    feedback = []
+    monkeypatch.setattr(
+        FeishuBridge, "_send_feedback", lambda self, chat_id, text: feedback.append(text)
+    )
+
+    bridge = _bridge(memory_tree)
+    bridge.handle_event(
+        _event("m-big", "file", {"file_key": "fk-big", "file_name": "SVID_1.mp4"})
+    )
+
+    assert not (memory_tree.notes_dir / "attachments").exists()
+    assert len(feedback) == 1
+    assert "SVID_1.mp4" in feedback[0]
+    assert "下载失败" in feedback[0]
