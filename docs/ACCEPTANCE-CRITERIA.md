@@ -168,12 +168,15 @@ test_invalid_path PASSED
 **功能要求**:
 
 ```python
-✅ 必须实现（架构 v1.2：无状态纯函数）:
-  - conf = decay_rate ** (idle_days / ref_factor)，范围 [0.0, 1.0]
+✅ 必须实现（架构 v1.4：无状态纯函数）:
+  - conf = decay_rate ** (idle_days × source_factor / ref_factor)，范围 [0.0, 1.0]
   - idle_days 取最后访问与最后修改的较新者
   - 引用因素为乘性：ref_factor = 1 + 0.2 * min(references, 10)
+  - 来源因子（v1.4 方案 C，2026-09-12 用户特批）：source ∈ {link, media}
+    时 source_factor = 3.0（机器转写约 15 天触及待删，人写 45 天），
+    其余来源与缺省 = 1.0（与 v1.2 行为完全等价）
   - 幂等：同一元数据任何时刻重算结果一致
-  - 衰减率与引用系数可配置（config/memory.yaml）
+  - 衰减率与引用系数可配置（config/memory.yaml；来源因子 decay.machine_factor）
   
 ✅ 边界条件:
   - 新创建的笔记: confidence = 1.0
@@ -233,6 +236,15 @@ def test_confidence_range():
         random_metadata = generate_random_metadata()
         conf = calc.calculate(metadata=random_metadata)
         assert 0.0 <= conf <= 1.0
+
+def test_source_factor_accelerates_decay():
+    """方案 C（v1.4）：link/media 来源 3 倍速——机器 15 天 ≈ 人写 45 天"""
+    calc = ConfidenceCalculator(source_factors={"link": 3.0, "media": 3.0})
+    assert calc.from_idle_days(15, source="link") == pytest.approx(
+        calc.from_idle_days(45, source="manual"))
+    # 缺省（无因子表）与 v1.2 完全等价
+    assert ConfidenceCalculator().from_idle_days(
+        30, source="link") == pytest.approx(0.95 ** 30)
 ```
 
 **验收检查**:

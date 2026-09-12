@@ -56,6 +56,16 @@ MACHINE_SOURCES: frozenset[str] = frozenset(
     {"link", "media", "webclip", "highlights"}
 )
 
+#: 方案 C 差异化衰减（2026-09-12 用户特批修订锁定契约 v1.3→v1.4）：
+#: 自动管线转写（link/media）的闲置时间轴乘 MACHINE_DECAY_FACTOR——
+#: 无人碰的转写约 15 天触及 pending_delete（人写笔记 45 天），
+#: 工作记忆自我清洁；webclip 是人主动剪藏、highlights 是周日人工
+#: 清单，均按原速（不在此表）。公式同形仍是无状态纯函数，
+#: 只是 idle 按来源乘因子。被 [[引用]] 照旧经 ref_factor 减缓，
+#: 访问照旧重置闲置时钟——有人用的卡不会消失。
+MACHINE_DECAY_SOURCES: frozenset[str] = frozenset({"link", "media"})
+MACHINE_DECAY_FACTOR: float = 3.0
+
 #: Crockford base32 字母表（ULID 用，去除 I/L/O/U）
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
@@ -124,6 +134,8 @@ class MemorySettings:
         ref_coefficient: 引用减缓系数（默认 0.2）。
         ref_cap: 引用数封顶（默认 10）。
         delete_threshold: confidence 低于该值置 pending_delete（默认 0.1）。
+        machine_decay_factor: MACHINE_DECAY_SOURCES 来源的闲置时间轴
+            因子（默认 MACHINE_DECAY_FACTOR=3.0，方案 C v1.4）。
     """
 
     short_term_min: float = 0.7
@@ -132,6 +144,7 @@ class MemorySettings:
     ref_coefficient: float = 0.2
     ref_cap: int = 10
     delete_threshold: float = 0.1
+    machine_decay_factor: float = MACHINE_DECAY_FACTOR
 
     def assign_layer(self, confidence: float) -> str:
         """按 confidence 分配逻辑层级。
@@ -550,6 +563,10 @@ class MemoryTree:
             decay_rate=self.settings.decay_rate,
             ref_coefficient=self.settings.ref_coefficient,
             ref_cap=self.settings.ref_cap,
+            source_factors={
+                source: self.settings.machine_decay_factor
+                for source in MACHINE_DECAY_SOURCES
+            },
         )
         confidence = calculator.calculate(
             {
@@ -558,6 +575,7 @@ class MemoryTree:
                     path.stat().st_mtime, tz=local_timezone()
                 ),
                 "references": entry.get("references", 0),
+                "source": str(post.metadata.get("source") or ""),
             }
         )
         return {
@@ -675,6 +693,11 @@ class MemoryTree:
             ref_cap=int(decay.get("ref_cap", tree.settings.ref_cap)),
             delete_threshold=float(
                 decay.get("delete_threshold", tree.settings.delete_threshold)
+            ),
+            machine_decay_factor=float(
+                decay.get(
+                    "machine_factor", tree.settings.machine_decay_factor
+                )
             ),
         )
         return tree

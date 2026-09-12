@@ -1,6 +1,6 @@
-# Atelierr 架构规范 v1.3 (LOCKED)
+# Atelierr 架构规范 v1.4 (LOCKED)
 
-**版本**: v1.3
+**版本**: v1.4
 **状态**: 🔒 已锁定  
 **日期**: 2026-08-29
 **下次修订**: 需明确的问题或需求变更时
@@ -8,12 +8,13 @@
 > v1.1 修订：Confidence 语义统一为"新鲜度"模型，与 `docs/ACCEPTANCE-CRITERIA.md` 对齐。  
 > v1.2 修订：平面存储（Flatnotes 兼容）+ sidecar 状态索引 + 无状态 confidence 重算 + 访问信号契约 + trash/purge 流程。
 > v1.3 修订：锁定 Phase 5 认知模块；认知确信度使用 `certainty`，与 memory `confidence` 从字段名上隔离；正式 schema 与状态流转见 `docs/prd/COGNITION-SPEC.md` v1.0。
+> v1.4 修订（2026-09-12 用户特批，方案 C）：confidence 公式引入来源因子 `source_factor`——自动管线转写（source=link/media）闲置时间轴 ×3 加速衰减（约 15 天触及待删，人写笔记 45 天），工作记忆自我清洁；公式仍是无状态纯函数，人写来源与 webclip/highlights 按原速，缺省行为与 v1.2 完全等价。
 
 ---
 
 ## 文档说明
 
-本文档是 Atelierr 系统的**官方架构规范**，当前锁定版本为 v1.3。
+本文档是 Atelierr 系统的**官方架构规范**，当前锁定版本为 v1.4。
 
 **修订原则**:
 - ✅ 实现过程中发现的技术细节可补充
@@ -241,7 +242,10 @@ class ConfidenceCalculator:
         # 引用减缓时间流逝（被引用越多，衰减越慢）
         ref_factor = 1 + 0.2 * min(metadata.get("references", 0), 10)
 
-        return 0.95 ** (idle_days / ref_factor)
+        # 来源因子（v1.4 方案 C）：自动管线转写加速衰减，缺省 1.0
+        source_factor = {"link": 3.0, "media": 3.0}.get(metadata.get("source"), 1.0)
+
+        return 0.95 ** (idle_days * source_factor / ref_factor)
 ```
 
 **设计要点**：
@@ -249,8 +253,14 @@ class ConfidenceCalculator:
 - 无引用笔记：约 7 天降到 0.7（出 short-term），约 19 天降到 0.4，
   约 45 天降到 0.1（进入待删除标记区）
 - 10 次引用（ref_factor = 3）：时间轴放慢 3 倍，约 135 天才触及 0.1
+- 来源因子（v1.4 方案 C，2026-09-12 用户特批）：source=link/media
+  （链接转写/截图 OCR 等自动管线产物）时间轴 ×3——无人碰的转写约
+  15 天触及待删标记区，工作记忆自我清洁；被引用照旧经 ref_factor
+  减缓、被访问照旧重置闲置时钟，有人用的卡不会消失；
+  webclip（人主动剪藏）与 highlights（周日人工清单）不加速
 - 纯函数 ⇒ 幂等：定时任务漏跑、重跑结果都一致；不存在增量复利误差
 - 衰减率与引用系数通过 `config/memory.yaml` 配置
+  （来源因子：`decay.machine_factor`，默认 3.0）
 
 **访问信号契约**（衰减的输入从哪来）：
 - `modified`：文件 mtime（用户在 Flatnotes/Obsidian 编辑即刷新）— 主信号
@@ -259,7 +269,9 @@ class ConfidenceCalculator:
   文件系统 atime 不可靠）。阅读多、编辑少的重要笔记靠引用因子保护
 - `references`：每日任务全量扫描 `[[wikilink]]` 反链得出，写入 sidecar
 
-`source`（web/obsidian/lark/agent/reflection）仅作为元数据记录，不参与计算。
+`source` 默认仅作为元数据记录；例外是 v1.4 方案 C 的加速来源表
+（link/media，见上「Confidence 机制」）——其余来源（web/obsidian/
+lark/agent/reflection/webclip/highlights）不参与计算。
 
 ### 衰减机制
 
@@ -663,8 +675,9 @@ class ConfidenceCalculator:
     """无状态 confidence 重算 (confidence.py)"""
     
     def calculate(self, metadata: Dict) -> float:
-        """纯函数：0.95 ** (idle_days / ref_factor)，返回 [0.0, 1.0]，
-        新笔记 = 1.0；幂等，可随时全量重算"""
+        """纯函数：0.95 ** (idle_days × source_factor / ref_factor)，
+        返回 [0.0, 1.0]，新笔记 = 1.0；source_factor 缺省 1.0，
+        link/media = 3.0（v1.4 方案 C）；幂等，可随时全量重算"""
 
 
 class DecayManager:
@@ -754,7 +767,8 @@ class DecayManager:
 2. 执行 python -m scripts.cli.memory_cli decay
 3. DecayManager 全量扫描 [[wikilink]] 反链，更新 references
 4. 对每个笔记（只写 sidecar，不碰文件）：
-   - 无状态重算: conf = 0.95^(idle_days / ref_factor)
+   - 无状态重算: conf = 0.95^(idle_days × source_factor / ref_factor)
+     （source_factor 缺省 1.0；link/media = 3.0，v1.4 方案 C）
    - 按阈值更新逻辑层级: ≥0.7 short / 0.4~0.7 mid / <0.4 long
    - conf < 0.1: 置 pending_delete 标记（不自动删除）
 5. 生成衰减报告（层级迁移 + 待删除清单）
@@ -985,8 +999,9 @@ logs/memory.log
    last_accessed/references/pending_delete 移出 frontmatter，
    frontmatter 创建时写一次后机器不再改写（消除 mtime 污染、
    Git 噪音、与 Web 编辑器的写冲突）
-✅ 无状态 confidence：conf = 0.95^(idle_days / ref_factor)，
-   纯函数幂等，修复增量式 0.95^days 每日复利错误与重复加分
+✅ 无状态 confidence：conf = 0.95^(idle_days × source_factor / ref_factor)，
+   纯函数幂等，修复增量式 0.95^days 每日复利错误与重复加分；
+   source_factor 缺省 1.0，link/media = 3.0（v1.4 方案 C 差异化衰减）
 ✅ 访问信号契约：mtime（编辑）为主信号 + CLI/Agent 显式上报；
    明确接受 Web 纯阅读不计数的降级；references 由每日反链扫描产生
 ✅ 引用因子改为减缓时间流逝（乘性）而非加分（加性），

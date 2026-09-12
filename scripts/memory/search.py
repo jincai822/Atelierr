@@ -28,7 +28,12 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 import frontmatter
 
 from scripts.memory.confidence import ConfidenceCalculator
-from scripts.memory.core import MACHINE_SOURCES, NOTE_EXCLUDED_DIRS, SYNC_CONFLICT_RE
+from scripts.memory.core import (
+    MACHINE_DECAY_SOURCES,
+    MACHINE_SOURCES,
+    NOTE_EXCLUDED_DIRS,
+    SYNC_CONFLICT_RE,
+)
 from scripts.utils.date_utils import parse_date
 
 #: 机器搬运来源的排序权重（<1 = 降权）；frontmatter source 行只从
@@ -84,6 +89,10 @@ class MemorySearcher:
             decay_rate=settings.decay_rate,
             ref_coefficient=settings.ref_coefficient,
             ref_cap=settings.ref_cap,
+            source_factors={
+                source: settings.machine_decay_factor
+                for source in MACHINE_DECAY_SOURCES
+            },
         )
         #: 相对路径（notes_dir 下，POSIX / 分隔）-> (mtime_ns, size, raw_text, raw_text_lower)
         self._raw_cache: Dict[str, Tuple[int, int, str, str]] = {}
@@ -201,12 +210,15 @@ class MemorySearcher:
         entry: Optional[dict],
         references: int,
         stat,
+        source: str = "",
     ) -> float:
         """live 重算 confidence（epoch 浮点快速路径，纯浮点运算）。
 
         idle_days 语义与 ConfidenceCalculator.calculate 完全一致：
         ``floor((now - max(mtime, accessed)) / 86400)``，负值经
         from_idle_days 钳 0；只是不逐文件构造 datetime（热路径优化）。
+        source 命中 MACHINE_DECAY_SOURCES 时与 decay 同因子加速
+        （方案 C v1.4）——展示值与 sidecar 真值不分叉。
         """
         accessed_ts = 0.0
         if entry is not None and entry.get("last_accessed"):
@@ -216,7 +228,7 @@ class MemorySearcher:
                 accessed_ts = 0.0
         last_active = max(stat.st_mtime, accessed_ts)
         idle_days = int((time.time() - last_active) // 86400)
-        return self.calculator.from_idle_days(idle_days, references)
+        return self.calculator.from_idle_days(idle_days, references, source=source)
 
     def _materialize(
         self,
@@ -320,9 +332,10 @@ class MemorySearcher:
                 ):
                     continue
             references = entry.get("references", 0) if entry is not None else 0
-            confidence = self._live_confidence(entry, references, stat)
             source_match = _SOURCE_RE.search(text[:400])
-            if source_match and source_match.group(1) in MACHINE_SOURCES:
+            source = source_match.group(1) if source_match else ""
+            confidence = self._live_confidence(entry, references, stat, source=source)
+            if source in MACHINE_SOURCES:
                 score = confidence * MACHINE_SOURCE_WEIGHT
             else:
                 score = confidence

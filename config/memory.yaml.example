@@ -17,15 +17,18 @@ memory:
     mid_term_min: 0.4     # 0.4 ≤ confidence < 0.7  → mid-term
                           # confidence < 0.4        → long-term
 
-  # 无状态 confidence: conf = decay_rate ** (idle_days / ref_factor)
+  # 无状态 confidence: conf = decay_rate ** (idle_days × source_factor / ref_factor)
   # idle_days = 距 max(最后访问, 最后修改) 的天数
   # ref_factor = 1 + ref_coefficient * min(references, ref_cap)
+  # source_factor = 来源因子（v1.4 方案 C）：link/media = machine_factor，其余 1.0
   decay:
     rate: 0.95            # 无引用笔记约 7 天出 short-term，45 天触及待删区
     ref_coefficient: 0.2  # 引用减缓时间流逝（乘性）
     ref_cap: 10           # 引用因子封顶（factor 最大 3.0）
     delete_threshold: 0.1 # 低于此值置 pending_delete 标记；
                           # 只有 memory_cli review→purge 才移入 trash/
+    machine_factor: 3.0   # 方案 C：link/media 转写时间轴倍率（约 15 天触及
+                          # 待删）；webclip/highlights 与人写笔记不受此参数影响
 
   # 复习队列「回响」（decay 的反面）：晨间摘要把快被遗忘的笔记送回面前
   resurface:

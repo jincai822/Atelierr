@@ -199,18 +199,24 @@ def test_mark_pushed_persists_json(memory_tree, make_note):
 
 def test_machine_sources_excluded(memory_tree):
     """机器搬运来源（link/media/webclip）不进复习队列（2026-09-12 药2：
-    复习位只留给人写与被引用的笔记）。"""
+    复习位只留给人写与被引用的笔记）。
+
+    闲置 8 天：方案 C（v1.4）3 倍速后 confidence ≈ 0.29 仍在复习窗口
+    内——排除只能来自机器来源规则，而非窗口过滤。"""
     for i, src in enumerate(("link", "media", "webclip")):
         path = memory_tree.create_note(f"m{i}.md", "机器全文", source=src)
-        _age(path, 20)
+        _age(path, 8)
 
     assert ResurfaceManager(memory_tree).candidates() == []
 
 
 def test_machine_source_with_backlink_included(memory_tree, make_note):
-    """例外：机器全文被 [[引用]] ≥1 次恢复复习资格（反链与每日衰减同源）。"""
+    """例外：机器全文被 [[引用]] ≥1 次恢复复习资格（反链与每日衰减同源）。
+
+    闲置 10 天 + 1 次引用：方案 C（v1.4）下 confidence = 0.95^(30/1.2)
+    ≈ 0.28，仍在复习窗口内—— exemption 生效可见。"""
     dump = memory_tree.create_note("dump.md", "转写全文", source="link")
-    _age(dump, 20)
+    _age(dump, 10)
     make_note(memory_tree, "mine.md", "参见 [[dump]] 的观点", idle_days=5)
 
     picked = ResurfaceManager(memory_tree).candidates()

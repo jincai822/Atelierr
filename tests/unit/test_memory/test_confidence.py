@@ -142,3 +142,45 @@ def test_custom_parameters():
     old = datetime.now() - timedelta(days=10)
     conf = calc.calculate(metadata={"modified": old, "references": 4})
     assert conf == pytest.approx(0.9 ** (10 / 3.0))
+
+
+def test_source_factor_accelerates_decay():
+    """方案 C（v1.4）：命中 source_factors 的来源时间轴乘因子——
+    机器转写 15 天 ≈ 人写 45 天（均触及 0.1 待删线）。"""
+    calc = ConfidenceCalculator(source_factors={"link": 3.0, "media": 3.0})
+    machine = calc.from_idle_days(15, source="link")
+    human = calc.from_idle_days(45, source="manual")
+    assert machine == pytest.approx(human)
+    assert machine < 0.1  # 触及待删线
+    # media 同样加速；未登记来源不受影响
+    assert calc.from_idle_days(15, source="media") == pytest.approx(machine)
+    assert calc.from_idle_days(15, source="webclip") > 0.4
+
+
+def test_source_factor_via_calculate_metadata():
+    """calculate 的 metadata.source 键生效；缺省/空串按 1.0（v1.2 行为）。"""
+    calc = ConfidenceCalculator(source_factors={"link": 3.0})
+    old = datetime.now() - timedelta(days=20)
+    base = {"created": old, "accessed": old, "modified": old}
+    accelerated = calc.calculate(metadata={**base, "source": "link"})
+    standard = calc.calculate(metadata=base)
+    assert accelerated == pytest.approx(0.95 ** 60)
+    assert standard == pytest.approx(0.95 ** 20)
+    assert accelerated < standard
+
+
+def test_source_factor_default_unchanged():
+    """无 source_factors 构造（默认）：带 source 调用结果与 v1.2 完全一致。"""
+    calc = ConfidenceCalculator()
+    assert calc.from_idle_days(30, source="link") == pytest.approx(0.95 ** 30)
+    old = datetime.now() - timedelta(days=30)
+    assert calc.calculate(
+        metadata={"modified": old, "source": "link"}
+    ) == pytest.approx(0.95 ** 30)
+
+
+def test_source_factor_negative_clamped():
+    """负因子钳 0（永不衰减），空串/未知来源按 1.0。"""
+    calc = ConfidenceCalculator(source_factors={"link": -2.0})
+    assert calc.from_idle_days(100, source="link") == 1.0
+    assert calc.from_idle_days(100, source="") == pytest.approx(0.95 ** 100)

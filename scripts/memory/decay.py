@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 import frontmatter
 
 from scripts.memory.confidence import ConfidenceCalculator
-from scripts.memory.core import iter_note_files
+from scripts.memory.core import MACHINE_DECAY_SOURCES, iter_note_files
 from scripts.utils.date_utils import local_timezone, parse_date
 
 if TYPE_CHECKING:
@@ -48,6 +48,10 @@ class DecayManager:
             decay_rate=settings.decay_rate,
             ref_coefficient=settings.ref_coefficient,
             ref_cap=settings.ref_cap,
+            source_factors={
+                source: settings.machine_decay_factor
+                for source in MACHINE_DECAY_SOURCES
+            },
         )
 
     # ------------------------------------------------------------------
@@ -73,8 +77,13 @@ class DecayManager:
         path: Path,
         entry: Optional[dict],
         references: int = 0,
+        source: str = "",
     ) -> Tuple[float, str, bool]:
-        """无状态重算单个笔记的 confidence / layer / pending。"""
+        """无状态重算单个笔记的 confidence / layer / pending。
+
+        source（frontmatter）命中 MACHINE_DECAY_SOURCES 时按方案 C
+        因子加速衰减（v1.4）；缺省空串按原速。
+        """
         accessed = None
         if entry is not None and entry.get("last_accessed"):
             try:
@@ -87,6 +96,7 @@ class DecayManager:
                 "accessed": accessed,
                 "modified": modified,
                 "references": references,
+                "source": source,
             }
         )
         layer = self.tree.settings.assign_layer(confidence)
@@ -165,10 +175,11 @@ class DecayManager:
             path = self.tree.notes_dir / entry["path"]
             if not path.exists():
                 continue
-            if self._note_source(path) == "system":
+            source = self._note_source(path) or ""
+            if source == "system":
                 continue  # 与 run() 一致：基础设施笔记不计入衰减统计
             _, layer, pending = self._recompute(
-                path, entry, references=entry.get("references", 0)
+                path, entry, references=entry.get("references", 0), source=source
             )
             counts["total_notes"] += 1
             counts[_LAYER_KEY[layer]] += 1
@@ -207,7 +218,8 @@ class DecayManager:
             if note_id is None:
                 skipped.append(path)
                 continue
-            if self._note_source(path) == "system":
+            source = self._note_source(path) or ""
+            if source == "system":
                 # 基础设施笔记（控制台等）：不衰减、不计数、不置待删
                 system_notes.append(path)
                 continue
@@ -231,7 +243,9 @@ class DecayManager:
                 ):
                     entry["path"] = self.tree._rel_key(path)  # 顺带迁移
             refs = references.get(path, 0)
-            confidence, layer, pending = self._recompute(path, entry, references=refs)
+            confidence, layer, pending = self._recompute(
+                path, entry, references=refs, source=source
+            )
             total += 1
             counts[_LAYER_KEY[layer]] += 1
             if pending:

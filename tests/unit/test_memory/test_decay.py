@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import frontmatter
+import pytest
 
 from scripts.memory.decay import DecayManager
 
@@ -157,3 +158,61 @@ def test_decay_skips_system_notes(memory_tree, make_note):
     assert entry["confidence"] == 1.0
     scan = DecayManager(memory_tree).scan()
     assert scan["total_notes"] == 1
+
+
+def test_machine_source_decays_faster(memory_tree):
+    """方案 C（v1.4）：link/media 来源 3 倍速衰减——同 20 天闲置，
+    人写笔记不删、机器转写触及 pending_delete；sidecar 写入真值。"""
+    old_ns = int((time.time() - 20 * 86400) * 1e9)
+    human = memory_tree.create_note("human.md", "人写", source="manual")
+    machine = memory_tree.create_note("machine.md", "转写", source="link")
+    for path in (human, machine):
+        os.utime(path, ns=(old_ns, old_ns))
+    for entry in memory_tree._load_index().values():
+        entry["last_accessed"] = None
+    memory_tree._save_index()
+
+    report = DecayManager(memory_tree).run()
+
+    human_entry = memory_tree._entry(human)
+    machine_entry = memory_tree._entry(machine)
+    assert human_entry["confidence"] == pytest.approx(0.95 ** 20, abs=1e-3)
+    assert human_entry["pending_delete"] is False
+    assert machine_entry["confidence"] == pytest.approx(0.95 ** 60, abs=1e-3)
+    assert machine_entry["pending_delete"] is True
+    assert str(machine) in report["pending"]
+    assert str(human) not in report["pending"]
+
+
+def test_machine_source_references_still_slow_decay(memory_tree):
+    """被引用的机器转写：ref_factor 照旧减缓加速衰减（有人用的卡不消失）。"""
+    old_ns = int((time.time() - 20 * 86400) * 1e9)
+    machine = memory_tree.create_note("machine.md", "转写", source="link")
+    memory_tree.create_note("ref.md", "引用 [[machine]]", source="manual")
+    os.utime(machine, ns=(old_ns, old_ns))
+    for entry in memory_tree._load_index().values():
+        entry["last_accessed"] = None
+    memory_tree._save_index()
+
+    DecayManager(memory_tree).run()
+
+    entry = memory_tree._entry(machine)
+    # idle 20×3=60，ref_factor=1.2 → 0.95^(60/1.2)=0.95^50
+    assert entry["references"] == 1
+    assert entry["confidence"] == pytest.approx(0.95 ** 50, abs=1e-3)
+
+
+def test_webclip_not_accelerated(memory_tree):
+    """webclip（人主动剪藏）不在方案 C 加速表内：同 idle 按原速。"""
+    old_ns = int((time.time() - 20 * 86400) * 1e9)
+    clip = memory_tree.create_note("clip.md", "剪藏", source="webclip")
+    os.utime(clip, ns=(old_ns, old_ns))
+    for entry in memory_tree._load_index().values():
+        entry["last_accessed"] = None
+    memory_tree._save_index()
+
+    DecayManager(memory_tree).run()
+
+    entry = memory_tree._entry(clip)
+    assert entry["confidence"] == pytest.approx(0.95 ** 20, abs=1e-3)
+    assert entry["pending_delete"] is False

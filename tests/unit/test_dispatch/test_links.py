@@ -499,7 +499,6 @@ def test_note_filename_strips_hash(memory_tree):
 def test_daily_note_annotated_with_backlink(memory_tree):
     """处理成功后在源日记行尾追加 → [[卡]] 回链（2026-09-12 用户裁决），
     mtime 还原（不进 confidence 时钟）。"""
-    import os
     import time
 
     memory_tree.create_note(
@@ -533,8 +532,6 @@ def test_non_daily_note_not_annotated(memory_tree):
 
 def test_annotation_idempotent(memory_tree):
     """行内已含回链不重复追加（重放/手工补链后重跑）。"""
-    import os
-
     memory_tree.create_note(
         "2026-09-12.md",
         f"- 20:15 看看 {DOUYIN_URL} → [[douyin-vid123]]\n",
