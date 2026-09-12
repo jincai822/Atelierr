@@ -291,7 +291,7 @@
     {
       "from": "ffmpeg",
       "to": "orig",
-      "label": "⑬ 存 480p+长全文",
+      "label": "⑬ 存 480p 单份",
       "variant": "emphasis",
       "labelAt": [
         440,

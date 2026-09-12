@@ -123,7 +123,7 @@
       "title": "④ 终态全景",
       "items": [
         "memory/<平台>/ = 工作记忆：会遗忘（decay 每日 03:00 分层，只写 sidecar）",
-        "attachments/<平台>/ = 原资料+外置全文（方案 B：>800 字转写/OCR 存同名 .md）：不进笔记扫描域，搜索「资料全文」组照常可搜",
+        "attachments/<平台>/ = 原资料+外置全文（方案 B：>800 字转写/OCR 存 .md，与 480p 视频同主名）：不进笔记扫描域，搜索「资料全文」组照常可搜",
         "memory/wiki/ = 真沉淀：不衰减；PDF 勾中直达，周报「沉淀候选」你点头才建 concept 卡",
         "trash/ = 唯一删除出口：decay → review → purge，purge 只走 CLI",
         "日记 YYYY-MM-DD.md 与 主页/控制台：免滞留点名，永不被机器移动"
