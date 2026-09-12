@@ -1069,6 +1069,8 @@ class LinkProcessor(BaseProcessor):
         safe = ""
         if title:
             safe = re.sub(r'[/\\:*?"<>|\x00-\x1f]', "-", title)
+            # “#”在 wikilink/嵌入里是标题引用符，出现在文件名会断链，剔除
+            safe = safe.replace("#", "")
             safe = re.sub(r"\s+", " ", safe).strip().strip(".")
             if len(safe) > 60:
                 safe = safe[:60].rstrip()

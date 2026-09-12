@@ -18,7 +18,7 @@
       "label": "② 加工引擎（逐步拆解）"
     },
     {
-      "label": "③ 入库 · 笔记+原资料"
+      "label": "③ 入库 · 卡+原资料"
     },
     {
       "label": "④ 接口 · 下游模块"
@@ -100,8 +100,8 @@
     {
       "id": "notes",
       "type": "database",
-      "label": "待确认笔记",
-      "sublabel": "memory/ 根 · tags=[待确认] · 内嵌原资料",
+      "label": "待确认卡",
+      "sublabel": "memory/ 根 · 标题+摘要+内嵌原件+全文链接",
       "stage": 2,
       "row": 0,
       "tag": "机器不改写"
@@ -110,7 +110,7 @@
       "id": "orig",
       "type": "database",
       "label": "原资料 平台/",
-      "sublabel": "attachments/抖音/小红书/B站 · 480p 单份",
+      "sublabel": "attachments/平台/ · 480p 单份 + 长全文 .md（方案 B）",
       "stage": 2,
       "row": 1,
       "tag": "只增不减"
@@ -285,13 +285,13 @@
     {
       "from": "llm",
       "to": "notes",
-      "label": "⑫ 整理成稿",
+      "label": "⑫ 整理成卡",
       "variant": "emphasis"
     },
     {
       "from": "ffmpeg",
       "to": "orig",
-      "label": "⑬ 存 480p 单份",
+      "label": "⑬ 存 480p+长全文",
       "variant": "emphasis",
       "labelAt": [
         440,
@@ -428,6 +428,7 @@
       "items": [
         "笔记创建后机器绝不改写/移动/删除——动态状态只进 sidecar（confidence/layer/pending_delete）",
         "原资料只增不减；视频只存 480p 单份（链接视频压完删原件）",
+        "方案 B（2026-09-12）：长全文 >800 字外置 attachments/平台/<同名>.md（原子写同名跳过），卡留「## 全文」链接节；搜索分笔记/资料两组",
         "唯一例外：直发视频压 480p 替换原件（2026-09-11 你拍的板，裁决 B；压失败留原件保底）",
         "三人工例外：你点按钮时机器才动手——删「待确认」/删「待办」/归档移动单篇"
       ]

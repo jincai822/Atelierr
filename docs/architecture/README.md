@@ -76,7 +76,13 @@ Atelierr 应用（后台管线，定时器无人值守）。两平面代码零�
 新剪藏复用链接 LLM 摘要管道推飞书确认卡——摘要只进卡片不落笔记，
 同 url 重复剪藏由机器在 sidecar 标 pending_delete 待人工 purge，09-10）→ processors 引擎
 （OCR/Whisper/LLM 摘要/LLM 划重点代读）→ memory/ 工作记忆（平面 .md
-缓冲区，会遗忘）→ wiki/ 知识总库。memory/ 根=收件箱；确认后归子目录
+缓冲区，会遗忘）→ wiki/ 知识总库。**卡形态（09-12 方案 B 用户裁决）**：
+链接/媒体产出为卡（标题+来源行+内嵌原件+LLM 摘要节），长全文
+（>800 字符，阈值单点定义于 processors/base.py INLINE_BODY_MAX）外置
+attachments/<平台>/<同名>.md（原子写同名跳过；attachments 不进笔记
+扫描域不进 decay），卡上只留「## 全文」链接节；搜索分「笔记/资料
+全文」两组（资料组扫 attachments/**/*.md，只在显式搜索时触发）；
+剪藏不动（全文笔记照旧，机器不搬）。memory/ 根=收件箱；确认后归子目录
 （平台/ · 书籍/分类/ · 日记/想法/目标/）：你手动拖或点飞书 📁 按钮，
 机器只在你触发时移动且衰减状态跟随；搜索/衰减递归覆盖子目录
 （wiki/attachments/trash/templates 排除）。PDF 走划重点通道：机器代读出可勾选

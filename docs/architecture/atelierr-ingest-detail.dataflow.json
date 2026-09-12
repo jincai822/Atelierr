@@ -28,9 +28,9 @@
     { "id": "f5", "type": "database", "label": "clip-<日期>.md", "sublabel": "memory/根 · 全文 md", "stage": 1, "row": 3, "yOffset": 33 },
     { "id": "f6", "type": "backend", "label": "todos 意图分发", "sublabel": "只读正文 · 原笔记不动", "stage": 1, "row": 3, "yOffset": 108 },
 
-    { "id": "p0", "type": "database", "label": "抖音-<标题>.md", "sublabel": "tags=[待确认] + 原视频 480p", "stage": 2, "row": 0 },
+    { "id": "p0", "type": "database", "label": "抖音-<标题>.md", "sublabel": "卡：摘要+480p视频+全文外置链接", "stage": 2, "row": 0 },
     { "id": "p1", "type": "database", "label": "日记即终态", "sublabel": "不加工 · decay 照常 · 免点名", "stage": 2, "row": 0, "yOffset": 75 },
-    { "id": "p2", "type": "database", "label": "media-***.md", "sublabel": "OCR/转写全文 · 内嵌原附件", "stage": 2, "row": 1, "yOffset": 36 },
+    { "id": "p2", "type": "database", "label": "media-***.md", "sublabel": "卡：OCR/转写 · >800字全文外置", "stage": 2, "row": 1, "yOffset": 36 },
     { "id": "p3", "type": "database", "label": "系统/划重点-***.md", "sublabel": "候选清单 · 机器产物区免确认", "stage": 2, "row": 2, "yOffset": -3 },
     { "id": "p4", "type": "database", "label": "你的笔记（无产物）", "sublabel": "滞留超14天晨报点名", "stage": 2, "row": 2, "yOffset": 72 },
     { "id": "p5", "type": "frontend", "label": "确认卡（摘要）", "sublabel": "DeepSeek 摘要只进卡不落笔记", "stage": 2, "row": 3, "yOffset": 33 },
@@ -123,6 +123,7 @@
       "title": "④ 终态全景",
       "items": [
         "memory/<平台>/ = 工作记忆：会遗忘（decay 每日 03:00 分层，只写 sidecar）",
+        "attachments/<平台>/ = 原资料+外置全文（方案 B：>800 字转写/OCR 存同名 .md）：不进笔记扫描域，搜索「资料全文」组照常可搜",
         "memory/wiki/ = 真沉淀：不衰减；PDF 勾中直达，周报「沉淀候选」你点头才建 concept 卡",
         "trash/ = 唯一删除出口：decay → review → purge，purge 只走 CLI",
         "日记 YYYY-MM-DD.md 与 主页/控制台：免滞留点名，永不被机器移动"
