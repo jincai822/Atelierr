@@ -67,6 +67,9 @@ MIN_PUSH_COUNT = 2  # 推送达到此次数仍未提炼，进"提炼候选"节
 DISTILL_MIN_AGE_DAYS = 3  # 已确认笔记创建满此天数即可提炼（沉一沉再动笔）
 MAX_DISTILL_CANDIDATES = 5  # 候选节最多列几条（防长列表制造压力）
 STALE_PENDING_DAYS = 7  # 根目录待确认滞留超此天数，晨报「滞留提醒」点名
+STALE_HUMAN_DAYS = 14  # 根目录人写/已确认笔记滞留超此天数，同节点名（入口收敛裁决⑤）
+#: 「你的笔记」组排除的机器来源（摘要/清单/系统容器不算人写）
+STALE_HUMAN_EXCLUDED_SOURCES = frozenset({"digest", "highlights", "system"})
 
 #: 系统自检探测点（名称, state_dir 内相对路径, 允许的最大沉默秒数）：
 #: 15 分钟班次给 2 小时余量；decay 每日 03:00 给 30 小时
@@ -186,7 +189,7 @@ class DigestDispatcher:
                 "markdown": "",
             }
         pending, todos, yesterday_new = self._collect(today)
-        stale_pending = self._stale_pending(today)
+        stale_pending, stale_human = self._stale_pending(today)
         review = self.resurface.candidates()
         review_stems = [Path(item["filename"]).stem for item in review]
         wiki = WikiManager(self.tree)
@@ -210,7 +213,7 @@ class DigestDispatcher:
             today, pending, todos, review_stems, yesterday_new,
             undistilled, wiki_issues, health, health_stale,
             capture_line=capture_line, weekly_lines=weekly_lines,
-            stale_lines=stale_pending,
+            stale_pending_lines=stale_pending, stale_human_lines=stale_human,
         )
         created = None
         if not dry_run:
@@ -232,7 +235,7 @@ class DigestDispatcher:
                 "undistilled": len(undistilled),
                 "yesterday_new": len(yesterday_new),
                 "health_stale": health_stale,
-                "stale": len(stale_pending),
+                "stale": len(stale_pending) + len(stale_human),
             },
             "review": review,
             "markdown": markdown,
@@ -340,26 +343,29 @@ class DigestDispatcher:
                     yesterday_new.append(stem)
         return sorted(pending), sorted(todos), sorted(yesterday_new)
 
-    def _stale_pending(self, today: str) -> List[str]:
+    def _stale_pending(self, today: str) -> Tuple[List[str], List[str]]:
         """根目录滞留点名（2026-09-12 裁决：归档默认化的兜底提醒）。
 
-        只看收件箱顶层 *.md（不进子目录——已归档的不算滞留）：带
-        「待确认」且 created 满 STALE_PENDING_DAYS 天的笔记，逐条列出
-        滞留天数（久的在前）。提醒文案引导点「✅ 确认并归档」收编，
-        不值得留的等 decay 到期走 review→purge。
+        只看收件箱顶层 *.md（不进子目录——已归档的不算滞留），分两组，
+        返回 (待确认行, 你的笔记行)，各自按滞留天数降序（久的在前）：
+
+        - 待确认：带「待确认」且 created 满 STALE_PENDING_DAYS 天。引导
+          点「✅ 确认并归档」收编，不值得留的等 decay 到期走 review→purge；
+        - 你的笔记：无「待确认」的人写/已确认笔记（排除日记/门面/机器
+          容器来源）满 STALE_HUMAN_DAYS 天——收件箱不该长住，归类或
+          留着由人定（2026-09-12 入口收敛裁决⑤）。
         """
-        cutoff = datetime.strptime(today, "%Y-%m-%d") - timedelta(
-            days=STALE_PENDING_DAYS
-        )
-        rows: List[Tuple[int, str]] = []  # (-滞留天数, 行文本)
+        today_date = datetime.strptime(today, "%Y-%m-%d")
+        pending_cutoff = today_date - timedelta(days=STALE_PENDING_DAYS)
+        human_cutoff = today_date - timedelta(days=STALE_HUMAN_DAYS)
+        pending_rows: List[Tuple[int, str]] = []  # (-滞留天数, 行文本)
+        human_rows: List[Tuple[int, str]] = []
         for note_path in sorted(Path(self.tree.notes_dir).glob("*.md")):
             if SYNC_CONFLICT_RE.search(note_path.name):
                 continue
             try:
                 post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
-                continue
-            if "待确认" not in (post.get("tags") or []):
                 continue
             created = str(post.get("created") or "")[:10]
             if not created:
@@ -368,11 +374,26 @@ class DigestDispatcher:
                 created_date = datetime.strptime(created, "%Y-%m-%d")
             except ValueError:
                 continue
-            if created_date > cutoff:
+            days = (today_date - created_date).days
+            if "待确认" in (post.get("tags") or []):
+                if created_date <= pending_cutoff:
+                    pending_rows.append(
+                        (-days, f"- [[{note_path.stem}]]（滞留 {days} 天）")
+                    )
                 continue
-            days = (datetime.strptime(today, "%Y-%m-%d") - created_date).days
-            rows.append((-days, f"- [[{note_path.stem}]]（滞留 {days} 天）"))
-        return [line for _, line in sorted(rows)]
+            stem = note_path.stem
+            if DAILY_NOTE_RE.match(stem) or stem in DASHBOARD_STEMS:
+                continue
+            if str(post.get("source") or "") in STALE_HUMAN_EXCLUDED_SOURCES:
+                continue
+            if created_date <= human_cutoff:
+                human_rows.append(
+                    (-days, f"- [[{stem}]]（你的笔记 · 滞留 {days} 天）")
+                )
+        return (
+            [line for _, line in sorted(pending_rows)],
+            [line for _, line in sorted(human_rows)],
+        )
 
     @staticmethod
     def _build(
@@ -387,14 +408,16 @@ class DigestDispatcher:
         health_stale: int,
         capture_line: Optional[str] = None,
         weekly_lines: Optional[List[str]] = None,
-        stale_lines: Optional[List[str]] = None,
+        stale_pending_lines: Optional[List[str]] = None,
+        stale_human_lines: Optional[List[str]] = None,
     ) -> str:
         """组装摘要 Markdown（空节显示"无"）。
 
         undistilled 同时写进 frontmatter（控制台 Dataview 桥接——
         sidecar 里的推送观测数据 Dataview 看不见）。capture_line 是昨日
         捕获入口分布一行；weekly_lines 仅周日传入（本周捕获统计详细节）；
-        stale_lines 是根目录滞留点名（无滞留时不出现该节）。
+        stale_pending_lines / stale_human_lines 是根目录滞留点名（待确认
+        组与你的笔记组，都无滞留时不出现该节）。
         """
 
         def _lines(items: List[str]) -> List[str]:
@@ -409,16 +432,31 @@ class DigestDispatcher:
 
         sections = [f"# 今日摘要 {today}", ""]
         sections += [f"## ⏳ 待我确认（{len(pending)}）", "", *_lines(pending), ""]
-        if stale_lines:
+        pending_stale = stale_pending_lines or []
+        human_stale = stale_human_lines or []
+        if pending_stale or human_stale:
             sections += [
-                f"## ⏰ 滞留提醒（{len(stale_lines)}）",
+                f"## ⏰ 滞留提醒（{len(pending_stale) + len(human_stale)}）",
                 "",
-                "> 根目录待确认超 7 天：飞书确认卡点「✅ 确认并归档」一键收编；",
+                "> 待确认超 7 天：飞书确认卡点「✅ 确认并归档」一键收编；",
                 "> 不值得留的不用管，decay 到期后走 review→purge。",
-                "",
-                *stale_lines,
+                "> 你的笔记在收件箱超 14 天：归个子目录，或留着——你定。",
                 "",
             ]
+            if pending_stale:
+                sections += [
+                    f"### 待确认（{len(pending_stale)}）",
+                    "",
+                    *pending_stale,
+                    "",
+                ]
+            if human_stale:
+                sections += [
+                    f"### 你的笔记（{len(human_stale)}）",
+                    "",
+                    *human_stale,
+                    "",
+                ]
         sections += [f"## 🧠 提炼候选（{len(undistilled)}）", ""]
         if undistilled:
             sections += [

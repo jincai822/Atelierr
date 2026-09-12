@@ -375,13 +375,14 @@ def test_digest_markdown_has_health_section(memory_tree):
 
 def test_digest_stale_pending_section(memory_tree):
     """滞留提醒（2026-09-12 裁决）：根目录待确认超 7 天逐条点名带天数；
-    新待确认、已归档（子目录）、无待确认标签的都不计。"""
+    无「待确认」的已确认/人写旧笔记（超 14 天）进「你的笔记」组；
+    新待确认、已归档（子目录）的都不计。"""
     memory_tree.create_note("old.md", "旧待确认", source="link", tags=["待确认"])
     _backdate_created(memory_tree, "old.md", "2026-08-20")
     memory_tree.create_note("new.md", "新待确认", source="link", tags=["待确认"])
     _backdate_created(memory_tree, "new.md", "2026-08-31")  # 未满 7 天
     memory_tree.create_note("done.md", "已确认的旧笔记", source="link", tags=[])
-    _backdate_created(memory_tree, "done.md", "2026-08-01")
+    _backdate_created(memory_tree, "done.md", "2026-08-01")  # 31 天 → 你的笔记组
     # 已归档进子目录的旧待确认：不算根目录滞留
     memory_tree.create_note("arch.md", "归档的待确认", source="link", tags=["待确认"])
     _backdate_created(memory_tree, "arch.md", "2026-08-01")
@@ -392,12 +393,60 @@ def test_digest_stale_pending_section(memory_tree):
     report = DigestDispatcher(memory_tree).run(today="2026-09-01")
 
     body = report["markdown"]
-    assert "## ⏰ 滞留提醒（1）" in body
-    assert "[[old]]（滞留 12 天）" in body
-    assert "[[new]]（滞留" not in body
-    assert "[[done]]" not in body.split("## ⏰")[1].split("## 🧠")[0]
-    assert "[[arch]]" not in body.split("## ⏰")[1].split("## 🧠")[0]
+    section = body.split("## ⏰")[1].split("## 🧠")[0]
+    assert "## ⏰ 滞留提醒（2）" in body
+    assert "### 待确认（1）" in body
+    assert "[[old]]（滞留 12 天）" in section
+    assert "[[new]]（滞留" not in section
+    assert "### 你的笔记（1）" in body
+    assert "[[done]]（你的笔记 · 滞留 31 天）" in section
+    assert "[[arch]]" not in section
+    assert report["counts"]["stale"] == 2
+
+
+def test_digest_stale_human_notes(memory_tree):
+    """你的笔记组（2026-09-12 入口收敛裁决⑤）：人写旧笔记被点名；
+    日记、机器容器来源、子目录归档、未满 14 天的都不计。"""
+    memory_tree.create_note("mine.md", "我的想法", source="web", tags=[])
+    _backdate_created(memory_tree, "mine.md", "2026-08-15")  # 17 天
+    memory_tree.create_note("young.md", "较新的想法", source="web", tags=[])
+    _backdate_created(memory_tree, "young.md", "2026-08-20")  # 12 天，未满
+    memory_tree.create_note("2026-08-10.md", "日记", source="web", tags=[])
+    _backdate_created(memory_tree, "2026-08-10.md", "2026-08-10")
+    memory_tree.create_note("digest_src.md", "机器容器", source="digest", tags=[])
+    _backdate_created(memory_tree, "digest_src.md", "2026-08-01")
+    # 已归档进子目录的人写旧笔记：不算根目录滞留
+    memory_tree.create_note("filed.md", "已归档的想法", source="web", tags=[])
+    _backdate_created(memory_tree, "filed.md", "2026-08-01")
+    subdir = memory_tree.notes_dir / "想法"
+    subdir.mkdir()
+    (memory_tree.notes_dir / "filed.md").rename(subdir / "filed.md")
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-01")
+
+    body = report["markdown"]
+    section = body.split("## ⏰")[1].split("## 🧠")[0]
+    assert "### 你的笔记（1）" in body
+    assert "[[mine]]（你的笔记 · 滞留 17 天）" in section
+    assert "[[young]]" not in section
+    assert "[[2026-08-10]]" not in section
+    assert "[[digest_src]]" not in section
+    assert "[[filed]]" not in section
     assert report["counts"]["stale"] == 1
+
+
+def test_digest_stale_human_threshold(memory_tree):
+    """你的笔记组阈值：13 天不点，15 天点（STALE_HUMAN_DAYS=14）。"""
+    memory_tree.create_note("d13.md", "x", source="web", tags=[])
+    _backdate_created(memory_tree, "d13.md", "2026-08-19")  # 13 天
+    memory_tree.create_note("d15.md", "x", source="web", tags=[])
+    _backdate_created(memory_tree, "d15.md", "2026-08-17")  # 15 天
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-01")
+
+    section = report["markdown"].split("## ⏰")[1].split("## 🧠")[0]
+    assert "[[d15]]（你的笔记 · 滞留 15 天）" in section
+    assert "[[d13]]" not in section
 
 
 def test_digest_no_stale_no_section(memory_tree):
