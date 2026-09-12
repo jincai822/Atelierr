@@ -7,7 +7,7 @@
 > - 细化②回响·沉淀·删除·会话：`atelierr-flow-loop.dataflow.json`
 > - 细化③飞书中枢（双向通道全颗粒）：`atelierr-flow-feishu.dataflow.json`
 > - 细化④摄入模块（拆两张，单页全颗粒过密已废弃）：
->   入口篇（九条来源→落地→分发接手）`atelierr-ingest-sources.dataflow.json`
+>   入口篇（3+1 入口→落地→分发接手）`atelierr-ingest-sources.dataflow.json`
 >   → `atelierr-ingest-sources.html`；
 >   加工篇（分发→引擎→入库→下游接口，含直发视频裁决 B）
 >   `atelierr-ingest-pipeline.dataflow.json` → `atelierr-ingest-pipeline.html`
@@ -58,10 +58,12 @@ cp /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
 Atelierr 应用（后台管线，定时器无人值守）。两平面代码零互调，交接只走
 `$OV` 数据面；只读桥当前仅 `/weekly` 启用。
 
-**后台管线**（横向）：捕获入口（速记/链接[抖音·小红书·B站]/截图/录音/PDF/网页剪藏；
-原资料按平台分目录存 attachments/媒体/·书籍/·抖音/·小红书/·B站/，视频只存
-480p——片源已 ≤480p 则存原件，电脑截图只认 ~/图片/进系统/ 专用夹复制进入，
-09-10 捕获 v2.1）→ dispatch 分发
+**后台管线**（横向）：捕获入口 3+1（2026-09-12 收敛裁决：① 飞书=手机主
+入口[链接·截图·语音·视频·PDF·转发文字]，② QuickAdd=手机速记[只记想法]，
+③ Obsidian=电脑主入口[直写+大文件直接拖 attachments 对应目录]，
++1 Chrome 剪藏=网页长文专用；截图专用夹 ~/图片/进系统/ 两周零使用已停用、
+代码保留可复活；原资料按平台分目录存 attachments/媒体/·书籍/·抖音/·小红书/·B站/，
+视频只存 480p——片源已 ≤480p 则存原件，09-10 捕获 v2.1）→ dispatch 分发
 （15 分钟轮询，links→media→todos→highlights；links 同班次处理网页剪藏：
 新剪藏复用链接 LLM 摘要管道推飞书确认卡——摘要只进卡片不落笔记，
 同 url 重复剪藏由机器在 sidecar 标 pending_delete 待人工 purge，09-10）→ processors 引擎

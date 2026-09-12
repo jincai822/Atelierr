@@ -2,13 +2,13 @@
   "schema_version": 1,
   "diagram_type": "dataflow",
   "meta": {
-    "title": "摄入模块 · 入口篇：九条来源怎么进库",
-    "subtitle": "箭头上的 ①②③ 就是阅读顺序：跟着编号走 · 2026-09-11",
+    "title": "摄入模块 · 入口篇：3+1 入口怎么进库",
+    "subtitle": "箭头上的 ①②③ 就是阅读顺序：跟着编号走 · 2026-09-12 入口收敛",
     "output": "atelierr-ingest-sources.html",
     "viewBox": [980, 780]
   },
   "stages": [
-    { "label": "① 来源 · 九条通道" },
+    { "label": "① 来源 · 3+1 入口" },
     { "label": "② 落地 · 同一个库" },
     { "label": "③ 分发 · 15 分钟轮询" },
     { "label": "④ 去向 · 加工线（详见加工篇）" }
@@ -18,7 +18,6 @@
     { "id": "feishu", "type": "frontend", "label": "飞书消息", "sublabel": "文字/链接+评论/图片/语音/视频/PDF", "stage": 0, "row": 1 },
     { "id": "desktop", "type": "frontend", "label": "电脑 Obsidian", "sublabel": "直写笔记 · 拖文件进 attachments", "stage": 0, "row": 2 },
     { "id": "clipper", "type": "frontend", "label": "Chrome 剪藏", "sublabel": "一键剪网页 · 备注框可选", "stage": 0, "row": 3 },
-    { "id": "inbox", "type": "frontend", "label": "截图专用夹", "sublabel": "~/图片/进系统/ · 只认这个夹", "stage": 0, "row": 4 },
 
     { "id": "sync", "type": "cloud", "label": "Syncthing", "sublabel": "手机↔电脑 实时双向", "stage": 1, "row": 0 },
     { "id": "vault", "type": "database", "label": "memory/ 根·裸笔记", "sublabel": "收件箱 · 捕获时刻不分类不摘要", "stage": 1, "row": 1, "tag": "零摩擦" },
@@ -46,20 +45,19 @@
     { "from": "desktop", "to": "vault", "label": "⑥ 直写笔记", "variant": "emphasis", "labelAt": [168, 326] },
     { "from": "desktop", "to": "attm", "label": "⑦ 拖入附件", "variant": "emphasis", "route": "straight", "labelAt": [228, 350] },
     { "from": "clipper", "to": "vault", "label": "⑧ 剪藏成 md", "variant": "emphasis", "labelAt": [200, 372] },
-    { "from": "inbox", "to": "attm", "label": "⑨ 复制进系统", "variant": "emphasis", "labelAt": [185, 462] },
 
     { "from": "vault", "to": "watcher", "label": "裸笔记归一化（异步）", "variant": "default" },
     { "from": "watcher", "to": "sidecar", "label": "登记索引（异步）", "variant": "default", "route": "straight" },
-    { "from": "vault", "to": "links", "label": "⑩ 扫出链接", "variant": "emphasis", "route": "straight" },
-    { "from": "vault", "to": "clips", "label": "⑪ 发现新剪藏", "variant": "emphasis" },
-    { "from": "attm", "to": "media", "label": "⑫ 发现新附件", "variant": "emphasis", "labelAt": [418, 408] },
-    { "from": "attb", "to": "media", "label": "⑬ 发现 PDF", "variant": "emphasis", "route": "straight" },
-    { "from": "vault", "to": "todos", "label": "⑭ 扫行动意图", "variant": "emphasis", "labelAt": [445, 440] },
+    { "from": "vault", "to": "links", "label": "⑨ 扫出链接", "variant": "emphasis", "route": "straight" },
+    { "from": "vault", "to": "clips", "label": "⑩ 发现新剪藏", "variant": "emphasis" },
+    { "from": "attm", "to": "media", "label": "⑪ 发现新附件", "variant": "emphasis", "labelAt": [418, 408] },
+    { "from": "attb", "to": "media", "label": "⑫ 发现 PDF", "variant": "emphasis", "route": "straight" },
+    { "from": "vault", "to": "todos", "label": "⑬ 扫行动意图", "variant": "emphasis", "labelAt": [445, 440] },
 
-    { "from": "links", "to": "linkline", "label": "⑮ 去链接加工线", "variant": "emphasis", "route": "straight" },
-    { "from": "clips", "to": "clipline", "label": "⑯ 去剪藏摘要", "variant": "emphasis", "route": "straight" },
-    { "from": "media", "to": "medialine", "label": "⑰ 去附件加工", "variant": "emphasis", "route": "straight" },
-    { "from": "todos", "to": "todoline", "label": "⑱ 去待办判定", "variant": "emphasis", "route": "straight" }
+    { "from": "links", "to": "linkline", "label": "⑭ 去链接加工线", "variant": "emphasis", "route": "straight" },
+    { "from": "clips", "to": "clipline", "label": "⑮ 去剪藏摘要", "variant": "emphasis", "route": "straight" },
+    { "from": "media", "to": "medialine", "label": "⑯ 去附件加工", "variant": "emphasis", "route": "straight" },
+    { "from": "todos", "to": "todoline", "label": "⑰ 去待办判定", "variant": "emphasis", "route": "straight" }
   ],
   "cards": [
     {
@@ -74,13 +72,13 @@
     },
     {
       "dot": "cyan",
-      "title": "① 九条入口通道（逐条对准）",
+      "title": "① 3+1 入口（逐条对准）",
       "items": [
-        "B1 手机 QuickAdd：一键速记自动起名 → Syncthing 同步 → memory/ 根",
-        "B2 电脑 Obsidian 直写：落 memory/ 根即被登记；手动拖文件进 attachments/媒体/",
-        "B3/B8 链接（抖音/小红书/B站）：飞书或 Obsidian 粘贴皆可，随手评论会上确认卡",
-        "B4 Chrome 剪藏：一键剪藏 + 备注框（可空）；B5 截图：飞书发图或专用夹复制（复制不移动）",
-        "B6 飞书语音：存 .ogg 走 Whisper；B7 PDF：存 书籍/ 走划重点；B10 直发视频：存 媒体/ 走转写+480p"
+        "入口① 飞书（手机主入口）：链接[抖音/小红书/B站]+随手评论/截图/语音/视频/PDF/转发文字——看到什么发什么；文字进 memory/ 根，原件进 attachments",
+        "入口② QuickAdd（手机速记）：只记想法灵感，一键记下自动起名 → Syncthing → memory/ 根",
+        "入口③ 电脑 Obsidian（电脑主入口）：直写落 memory/ 根即登记；大文件直接拖 attachments/ 对应平台目录",
+        "入口+1 Chrome 剪藏（网页长文专用）：一键剪藏+备注框（可空）→ memory/ 根，同 url 查重",
+        "已停用：截图专用夹 ~/图片/进系统/（两周零使用，2026-09-12 退役，代码保留可复活）"
       ]
     },
     {
