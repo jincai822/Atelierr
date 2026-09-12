@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import time
+
 import frontmatter
 
 from scripts.memory.search import MemorySearcher
@@ -197,3 +200,48 @@ def test_search_skips_system_dir_and_sync_conflict(memory_tree, make_note):
 
     results = MemorySearcher(memory_tree).search("叔本华")
     assert [r.title for r in results] == ["real"]
+
+
+def test_human_note_outranks_machine_on_tie(memory_tree):
+    """信噪比治理（2026-09-12 药1）：同热度时人写笔记排在机器全文前；
+    Memory.confidence 展示真实值（不含权重）。"""
+    memory_tree.create_note("mine.md", "英年早呆 手写想法", source="manual")
+    memory_tree.create_note("dump.md", "英年早呆 转写全文", source="link")
+
+    results = MemorySearcher(memory_tree).search("英年早呆")
+
+    assert [r.path.name for r in results] == ["mine.md", "dump.md"]
+    assert results[0].confidence == results[1].confidence
+
+
+def test_older_human_note_beats_fresh_machine_dump(memory_tree):
+    """人写笔记略旧（idle 2 天，confidence≈0.90）仍排新鲜机器全文（×0.85）前。"""
+    path = memory_tree.create_note("mine.md", "英年早呆 想法", source="web")
+    old_ns = int((time.time() - 2 * 86400) * 1e9)
+    os.utime(path, ns=(old_ns, old_ns))
+    memory_tree.create_note("dump.md", "英年早呆 转写", source="link")
+
+    results = MemorySearcher(memory_tree).search("英年早呆")
+
+    assert [r.path.name for r in results] == ["mine.md", "dump.md"]
+
+
+def test_machine_note_outranks_much_older_human(memory_tree):
+    """权重不是一票否决：人写笔记太冷（confidence<0.85）时机器全文排前。"""
+    path = memory_tree.create_note("mine.md", "英年早呆 想法", source="web")
+    old_ns = int((time.time() - 30 * 86400) * 1e9)
+    os.utime(path, ns=(old_ns, old_ns))  # confidence ≈ 0.95^30 ≈ 0.21
+    memory_tree.create_note("dump.md", "英年早呆 转写", source="link")
+
+    results = MemorySearcher(memory_tree).search("英年早呆")
+
+    assert [r.path.name for r in results] == ["dump.md", "mine.md"]
+
+
+def test_machine_note_still_findable(memory_tree):
+    """机器全文降权不消失：只有它命中时照常返回。"""
+    memory_tree.create_note("dump.md", "英年早呆 转写全文", source="link")
+
+    results = MemorySearcher(memory_tree).search("英年早呆")
+
+    assert [r.path.name for r in results] == ["dump.md"]

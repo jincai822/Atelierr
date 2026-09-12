@@ -49,6 +49,13 @@ NOTE_EXCLUDED_DIRS: frozenset[str] = frozenset(
 #: 双端同改一篇笔记时生成的旁路副本，不是新笔记，扫描/登记/搜索一律跳过
 SYNC_CONFLICT_RE = re.compile(r"\.sync-conflict-\d{8}-\d{6}")
 
+#: 机器搬运来源（链接转写/截图 OCR/剪藏全文/划重点清单）：信噪比治理
+#: （2026-09-12 用户裁决）——搜索降权（search.py）、复习不推（resurface.py，
+#: 被 [[引用]] ≥1 次的除外）；人写笔记（web/manual/sync/lark 等）不受影响
+MACHINE_SOURCES: frozenset[str] = frozenset(
+    {"link", "media", "webclip", "highlights"}
+)
+
 #: Crockford base32 字母表（ULID 用，去除 I/L/O/U）
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 

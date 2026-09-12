@@ -195,3 +195,24 @@ def test_mark_pushed_persists_json(memory_tree, make_note):
         (memory_tree.state_dir / "resurface.json").read_text(encoding="utf-8")
     )
     assert note_id in state
+
+
+def test_machine_sources_excluded(memory_tree):
+    """机器搬运来源（link/media/webclip）不进复习队列（2026-09-12 药2：
+    复习位只留给人写与被引用的笔记）。"""
+    for i, src in enumerate(("link", "media", "webclip")):
+        path = memory_tree.create_note(f"m{i}.md", "机器全文", source=src)
+        _age(path, 20)
+
+    assert ResurfaceManager(memory_tree).candidates() == []
+
+
+def test_machine_source_with_backlink_included(memory_tree, make_note):
+    """例外：机器全文被 [[引用]] ≥1 次恢复复习资格（反链与每日衰减同源）。"""
+    dump = memory_tree.create_note("dump.md", "转写全文", source="link")
+    _age(dump, 20)
+    make_note(memory_tree, "mine.md", "参见 [[dump]] 的观点", idle_days=5)
+
+    picked = ResurfaceManager(memory_tree).candidates()
+
+    assert [item["filename"] for item in picked] == ["dump.md"]

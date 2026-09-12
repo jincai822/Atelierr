@@ -11,7 +11,9 @@ decay 把 confidence 跌破 delete_threshold 的笔记推向 pending_delete
 纪律（与 decay 同源）：
 - 只读笔记与 sidecar 索引，绝不改写笔记文件；
 - 推送冷却时钟只写 ``<state_dir>/resurface.json``；
-- 幂等：同一笔记 cooldown_days 天内不重复推送。
+- 幂等：同一笔记 cooldown_days 天内不重复推送；
+- 机器搬运全文（MACHINE_SOURCES）默认不推，被 [[引用]] ≥1 次除外
+  （2026-09-12 信噪比治理：复习位只留给人写与被引用的笔记）。
 """
 
 from __future__ import annotations
@@ -21,7 +23,8 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from scripts.memory.core import LAYERS, MemoryTree
+from scripts.memory.core import LAYERS, MACHINE_SOURCES, MemoryTree
+from scripts.memory.decay import DecayManager
 from scripts.utils.date_utils import local_timezone, parse_date
 
 DEFAULT_WINDOW_LOW = 0.15  # 低于此值交给 decay 的待删除通道
@@ -110,8 +113,11 @@ class ResurfaceManager:
         """返回今日复习队列（按 confidence 升序，最该复习的在前）。
 
         只纳入：已登记且文件存在、非 pending_delete、非机器摘要/基础设施
-        （source=digest/system）、live confidence 落在 [window_low,
-        window_high)、且距上次推送已满 cooldown_days 的笔记。
+        （source=digest/system）、非机器搬运全文（MACHINE_SOURCES——复习位
+        是稀缺资源，机器全文靠搜索"拉取"证明自己，2026-09-12 用户裁决；
+        例外：被 [[引用]] ≥1 次的机器笔记恢复资格，反链统计与每日衰减
+        同源）、live confidence 落在 [window_low, window_high)、且距上次
+        推送已满 cooldown_days 的笔记。
 
         Args:
             limit: 条数上限；None 时用 daily_count；<= 0 返回空。
@@ -126,6 +132,7 @@ class ResurfaceManager:
         now = now or datetime.now().astimezone()
         pushed = self._load_state()
         picked: List[Dict[str, Any]] = []
+        backlinks: Optional[Dict[Any, int]] = None  # 惰性：有机器笔记才扫描
         for layer in LAYERS:
             for path in self.tree.list_notes(layer):
                 try:
@@ -134,8 +141,19 @@ class ResurfaceManager:
                     continue
                 if info["pending_delete"]:
                     continue
-                if info.get("source") in ("digest", "system"):
+                source = str(info.get("source") or "")
+                if source in ("digest", "system"):
                     continue  # 机器摘要/基础设施笔记（控制台等）不需复习
+                if source in MACHINE_SOURCES:
+                    if backlinks is None:
+                        backlinks = {
+                            p.stem: count
+                            for p, count in DecayManager(self.tree)
+                            .backlink_counts()
+                            .items()
+                        }
+                    if backlinks.get(path.stem, 0) < 1:
+                        continue  # 机器全文：未被引用则不占复习位
                 confidence = info["confidence"]
                 if not (self.window_low <= confidence < self.window_high):
                     continue

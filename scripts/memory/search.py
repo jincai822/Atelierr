@@ -1,4 +1,4 @@
-"""记忆搜索：全文/标签/日期/层级过滤，按 confidence 降序。
+"""记忆搜索：全文/标签/日期/层级过滤，按 confidence×来源权重 降序。
 
 覆盖顶层与用户手动归档的子目录（wiki/、attachments/、trash/ 等
 机器专用目录与隐藏目录除外）。性能关键路径：os.scandir 递归枚举
@@ -7,11 +7,17 @@
 浮点快速路径）；只对前 limit 个结果物化 Memory 对象。增量索引按
 (mtime_ns, size) 缓存原始文本（key 为相对 notes_dir 的路径），
 物化结果按 (相对路径, mtime_ns, size) 缓存。
+
+信噪比治理（2026-09-12 用户裁决）：机器搬运来源（MACHINE_SOURCES：
+转写/OCR/剪藏全文）排序分 = confidence × MACHINE_SOURCE_WEIGHT，
+人写笔记同热度下排在前；机器全文仍可被搜到（拉取不消失），
+Memory.confidence 展示的仍是真实 confidence（不含权重）。
 """
 
 from __future__ import annotations
 
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import date as _date
@@ -22,8 +28,13 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 import frontmatter
 
 from scripts.memory.confidence import ConfidenceCalculator
-from scripts.memory.core import NOTE_EXCLUDED_DIRS, SYNC_CONFLICT_RE
+from scripts.memory.core import MACHINE_SOURCES, NOTE_EXCLUDED_DIRS, SYNC_CONFLICT_RE
 from scripts.utils.date_utils import parse_date
+
+#: 机器搬运来源的排序权重（<1 = 降权）；frontmatter source 行只从
+#: 文本头部 400 字符内提取（frontmatter 必在文首，热路径不解析全文）
+MACHINE_SOURCE_WEIGHT = 0.85
+_SOURCE_RE = re.compile(r"^source:\s*['\"]?([^\s'\"]+)", re.M)
 
 if TYPE_CHECKING:
     from scripts.memory.core import MemoryTree
@@ -271,7 +282,8 @@ class MemorySearcher:
             limit: 返回条数上限（<= 0 返回空列表）。
 
         Returns:
-            List[Memory]: 按 confidence 降序的结果。
+            List[Memory]: 按 confidence×来源权重 降序的结果（机器搬运
+            来源降权，Memory.confidence 为真实值不含权重）。
         """
         if limit < 1:
             return []
@@ -280,7 +292,7 @@ class MemorySearcher:
         scanned = self._scan_candidates()
         need_frontmatter = bool(tags) or bool(date_from) or bool(date_to)
 
-        scored: List[Tuple[float, str, str, str]] = []
+        scored: List[Tuple[float, float, str, str, str]] = []
         for name, stat in scanned.items():
             text = self._raw_text(name, stat)
             if text is None:
@@ -303,12 +315,17 @@ class MemorySearcher:
                     continue
             references = entry.get("references", 0) if entry is not None else 0
             confidence = self._live_confidence(entry, references, stat)
-            scored.append((confidence, name, text, note_layer))
+            source_match = _SOURCE_RE.search(text[:400])
+            if source_match and source_match.group(1) in MACHINE_SOURCES:
+                score = confidence * MACHINE_SOURCE_WEIGHT
+            else:
+                score = confidence
+            scored.append((score, confidence, name, text, note_layer))
 
-        # 相对路径排序：同目录内按文件名，目录间按目录名（稳定可复现）
-        scored.sort(key=lambda item: (-item[0], item[1]))
+        # 排序分降序（同分按相对路径：同目录内按文件名，目录间按目录名）
+        scored.sort(key=lambda item: (-item[0], item[2]))
         results: List[Memory] = []
-        for confidence, name, text, note_layer in scored[:limit]:
+        for score, confidence, name, text, note_layer in scored[:limit]:
             memory = self._materialize(
                 name, confidence, note_layer, text, scanned[name]
             )
