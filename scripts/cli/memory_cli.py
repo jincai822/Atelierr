@@ -270,7 +270,8 @@ class MemoryCLI:
             layer: Optional[str],
             limit: int,
         ) -> None:
-            """全文/标签/日期/层级搜索（按 confidence 降序）。"""
+            """全文/标签/日期/层级搜索（笔记按 confidence 降序；命中时
+            末尾附 attachments 资料全文组）。"""
             tree: MemoryTree = ctx.obj
             results = tree.search(
                 query=query,
@@ -283,11 +284,17 @@ class MemoryCLI:
             if not results:
                 click.echo("无匹配笔记")
                 return
-            for memory in results:
+            notes = [m for m in results if m.group == "notes"]
+            reference = [m for m in results if m.group == "reference"]
+            for memory in notes:
                 click.echo(
                     f"[{memory.layer}] conf={memory.confidence:.3f} "
                     f"{memory.path.name} — {memory.title}"
                 )
+            if reference:
+                click.echo(f"── 资料全文（{len(reference)}）──")
+                for memory in reference:
+                    click.echo(f"  {memory.path.name} — {memory.title}")
 
         @cli.command()
         @click.pass_context

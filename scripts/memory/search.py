@@ -36,6 +36,9 @@ from scripts.utils.date_utils import parse_date
 MACHINE_SOURCE_WEIGHT = 0.85
 _SOURCE_RE = re.compile(r"^source:\s*['\"]?([^\s'\"]+)", re.M)
 
+#: 资料全文组（attachments/**/*.md）每次搜索最多返回条数
+_REFERENCE_LIMIT = 5
+
 if TYPE_CHECKING:
     from scripts.memory.core import MemoryTree
 
@@ -63,6 +66,7 @@ class Memory:
     confidence: float = 0.0
     layer: str = "short-term"
     id: Optional[str] = None
+    group: str = "notes"  # "notes"=笔记组 / "reference"=资料全文组（方案 B）
 
 
 class MemorySearcher:
@@ -282,8 +286,10 @@ class MemorySearcher:
             limit: 返回条数上限（<= 0 返回空列表）。
 
         Returns:
-            List[Memory]: 按 confidence×来源权重 降序的结果（机器搬运
-            来源降权，Memory.confidence 为真实值不含权重）。
+            List[Memory]: 笔记组在前（confidence×来源权重 降序，机器搬运
+            来源降权，Memory.confidence 为真实值不含权重）；query 非空时
+            末尾追加资料全文组（group="reference"，attachments/**/*.md
+            命中，最多 _REFERENCE_LIMIT 条）。
         """
         if limit < 1:
             return []
@@ -331,4 +337,46 @@ class MemorySearcher:
             )
             if memory is not None:
                 results.append(memory)
+        results.extend(self._search_reference(query_lower))
+        return results
+
+    # ------------------------------------------------------------------
+    # 资料全文组（方案 B：attachments/**/*.md 的外置全文）
+    # ------------------------------------------------------------------
+
+    def _search_reference(self, query_lower: str) -> List[Memory]:
+        """资料全文组：attachments/**/*.md 的子串命中（2026-09-12 方案 B）。
+
+        只在用户显式搜索（query 非空）时触发，不进任何定时班次；
+        不算 confidence、不按来源加权——全文文件是资料不是笔记，
+        按相对路径排序稳定输出，最多 _REFERENCE_LIMIT 条。
+        """
+        if not query_lower:
+            return []
+        attach = self.tree.notes_dir / "attachments"
+        if not attach.is_dir():
+            return []
+        results: List[Memory] = []
+        for path in sorted(attach.rglob("*.md")):
+            if any(part.startswith(".") for part in path.parts):
+                continue
+            if SYNC_CONFLICT_RE.search(path.name):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if query_lower not in text.lower():
+                continue
+            results.append(
+                Memory(
+                    path=path,
+                    title=path.stem,
+                    content=text.strip(),
+                    layer="reference",
+                    group="reference",
+                )
+            )
+            if len(results) >= _REFERENCE_LIMIT:
+                break
         return results

@@ -52,13 +52,16 @@ def test_search_finds_note_in_subdir(memory_tree, make_note):
 
 
 def test_search_ignores_special_dirs(memory_tree, make_note):
-    """wiki/attachments/trash/隐藏目录下的 md 永远不算笔记。"""
+    """wiki/attachments/trash/隐藏目录下的 md 永远不算笔记（笔记组豁免）；
+    attachments 命中只进资料全文组（2026-09-12 方案 B），wiki/trash/隐藏
+    目录连资料组也不进。"""
     make_note(memory_tree, filename="real.md", content="真笔记的独特词")
     for rel in ("wiki/摘录-概念.md", "attachments/x.md", "trash/旧.md", ".sync/隐藏.md"):
         _write_excluded_md(memory_tree, rel, "特殊目录独特词")
 
     results = MemorySearcher(memory_tree).search("特殊目录独特词")
-    assert results == []
+    assert [r for r in results if r.group == "notes"] == []
+    assert [r.path.name for r in results if r.group == "reference"] == ["x.md"]
     assert [r.path.name for r in MemorySearcher(memory_tree).search()] == ["real.md"]
 
 

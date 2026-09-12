@@ -245,3 +245,61 @@ def test_machine_note_still_findable(memory_tree):
     results = MemorySearcher(memory_tree).search("英年早呆")
 
     assert [r.path.name for r in results] == ["dump.md"]
+
+
+def test_reference_group_hits_attachments(memory_tree):
+    """资料全文组（2026-09-12 方案 B）：attachments/**/*.md 命中追加在
+    笔记组后；group/layer 标记正确，不算 confidence。"""
+    memory_tree.create_note("mine.md", "英年早呆 手写想法", source="manual")
+    attach = memory_tree.notes_dir / "attachments/抖音"
+    attach.mkdir(parents=True)
+    (attach / "抖音-健脑-vid123.md").write_text(
+        "这是转写全文，讲的是英年早呆的预防。", encoding="utf-8"
+    )
+
+    results = MemorySearcher(memory_tree).search("英年早呆")
+
+    assert [r.path.name for r in results if r.group == "notes"] == ["mine.md"]
+    reference = [r for r in results if r.group == "reference"]
+    assert [r.path.name for r in reference] == ["抖音-健脑-vid123.md"]
+    assert reference[0].layer == "reference"
+    assert reference[0].confidence == 0.0
+    assert results[-1].group == "reference"  # 资料组在笔记组之后
+
+
+def test_reference_group_empty_query_skipped(memory_tree):
+    """空 query 不触发资料组扫描（资料组只为显式搜索服务）。"""
+    attach = memory_tree.notes_dir / "attachments"
+    attach.mkdir()
+    (attach / "x.md").write_text("英年早呆", encoding="utf-8")
+
+    results = MemorySearcher(memory_tree).search("")
+
+    assert all(r.group == "notes" for r in results)
+
+
+def test_reference_group_limit_and_no_attachments(memory_tree):
+    """资料组上限 _REFERENCE_LIMIT；无 attachments 目录时安静返回空。"""
+    attach = memory_tree.notes_dir / "attachments/媒体"
+    attach.mkdir(parents=True)
+    for i in range(7):
+        (attach / f"f{i}.md").write_text("英年早呆 全文", encoding="utf-8")
+
+    results = MemorySearcher(memory_tree).search("英年早呆")
+    reference = [r for r in results if r.group == "reference"]
+
+    assert len(reference) == 5
+    assert [r.path.name for r in reference] == [f"f{i}.md" for i in range(5)]
+
+
+def test_reference_group_does_not_pollute_notes(memory_tree):
+    """attachments 里的 .md 不进笔记组（扫描域纪律不破）。"""
+    memory_tree.create_note("mine.md", "英年早呆 想法", source="web")
+    attach = memory_tree.notes_dir / "attachments"
+    attach.mkdir()
+    (attach / "dump.md").write_text("英年早呆 全文", encoding="utf-8")
+
+    results = MemorySearcher(memory_tree).search("英年早呆", limit=10)
+
+    notes = [r for r in results if r.group == "notes"]
+    assert [r.path.name for r in notes] == ["mine.md"]
