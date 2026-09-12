@@ -219,6 +219,13 @@ class LinkDispatcher:
             video_rel = result.metadata.get("video_rel")
             if video_blob and video_rel:
                 self._save_video(str(video_rel), video_blob)
+            # 全文外置（2026-09-12 方案 B 用户裁决）：>INLINE_BODY_MAX 的
+            # 正文由处理器经 metadata 交回，卡上只留「## 全文」链接节；
+            # 落盘失败只记日志，不阻断建卡
+            transcript_rel = result.metadata.pop("transcript_rel", None)
+            transcript_text = result.metadata.pop("transcript_text", None)
+            if transcript_rel and transcript_text:
+                self._save_transcript(str(transcript_rel), str(transcript_text))
             filename = self._note_filename(url, platform, doc_id, title)
             try:
                 self.tree.create_note(
@@ -285,6 +292,28 @@ class LinkDispatcher:
             os.replace(tmp, target)
         except OSError as exc:
             logger.warning("保存原视频失败 %s: %s", target, exc)
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+    def _save_transcript(self, rel: str, text: str) -> None:
+        """全文原子写入 attachments 平台目录；同名已存在跳过（同内容重跑幂等）。
+
+        与 _save_video 同规：rel 由处理器按 ``attachments/<平台>/<名>.md``
+        约定给出（卡 markdown 里的 ``[[...]]`` 链接与之为同一字符串）；
+        绝不覆盖既有文件。
+        """
+        target = self.tree.notes_dir / rel
+        if target.exists():
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, target)
+        except OSError as exc:
+            logger.warning("保存全文失败 %s: %s", target, exc)
             try:
                 tmp.unlink()
             except OSError:

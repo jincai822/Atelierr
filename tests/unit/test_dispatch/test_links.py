@@ -445,3 +445,42 @@ def test_processes_bilibili_link(memory_tree):
     post = frontmatter.loads(created.read_text(encoding="utf-8"))
     assert post["tags"] == ["待确认", "B站"]
     assert post["source"] == "link"
+
+
+def test_transcript_saved_to_attachments(memory_tree):
+    """方案 B（2026-09-12）：处理器交回 transcript_rel/text 时，全文原子
+    落盘 attachments/平台/；同名已存在跳过（幂等），落盘失败不阻断建卡。"""
+
+    class _TxProcessor:
+        def process(self, url):
+            return ProcessResult(
+                success=True,
+                text="长全文",
+                markdown=(
+                    "# 视频标题\n\n## 全文\n\n"
+                    "[[attachments/抖音/抖音-标题-vid123.md|查看转写全文]]"
+                ),
+                confidence=0.9,
+                metadata={
+                    "video_id": "vid123",
+                    "title": "标题",
+                    "transcript_rel": "attachments/抖音/抖音-标题-vid123.md",
+                    "transcript_text": "这是很长的转写全文",
+                },
+            )
+
+    memory_tree.create_note("daily.md", f"链接 {DOUYIN_URL}", source="test")
+    dispatcher = LinkDispatcher(memory_tree, processor_factory=_TxProcessor)
+
+    report = dispatcher.run()
+
+    assert report["created"] == ["抖音-标题.md"]
+    full = memory_tree.notes_dir / "attachments/抖音/抖音-标题-vid123.md"
+    assert full.exists()
+    assert full.read_text(encoding="utf-8") == "这是很长的转写全文"
+    # 同名跳过（幂等）：已有内容不被覆盖
+    full.write_text("既有内容", encoding="utf-8")
+    dispatcher._save_transcript(
+        "attachments/抖音/抖音-标题-vid123.md", "新内容"
+    )
+    assert full.read_text(encoding="utf-8") == "既有内容"

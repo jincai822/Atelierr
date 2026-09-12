@@ -63,6 +63,11 @@ DEFAULT_CONFIGS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+#: 卡内联全文上限（2026-09-12 方案 B 用户裁决）：OCR/转写/正文 ≤ 此长度
+#: 留卡内联（短文本卡自含）；超过则外置 attachments/<平台>/<同名>.md，
+#: 卡上只留「## 全文」链接节。link/media 两管线共用，禁止另立阈值
+INLINE_BODY_MAX = 800
+
 
 def load_processor_config(name: str) -> Dict[str, Any]:
     """加载 ``processors.<name>`` 配置节（含内置默认值的合并结果）。

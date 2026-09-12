@@ -5,10 +5,15 @@
 下载视频到临时目录（B站长视频限高 480p 防大文件）→ 复用
 :class:`VideoProcessor` 转写 → 组装带来源行的 Markdown → 清理临时文件。
 
-输出格式（v4）：标题 + 来源行 +（视频笔记内嵌 480p 原视频）+ 观点总结 /
+输出格式（v4，2026-09-12 方案 B 用户裁决·卡形态）：标题 + 来源行 +
+（视频笔记内嵌 480p 原视频）+ 观点总结 /
 分观点论述 / 金句摘录 / 提到的人·书·概念（LLM 生成，附中图法分类与主题词，
-经笔记 frontmatter ``tags`` 追加到"待确认"与平台标签之后）+ ``## 转写全文``——
-转写优先经 LLM 整理（按语义分段、补全标点、逐字不改写）；LLM 不可用/
+经笔记 frontmatter ``tags`` 追加到"待确认"与平台标签之后）+ 正文——
+正文 ≤ INLINE_BODY_MAX（base.py，800 字符）内联 ``## 转写全文``；
+超过则**外置**：卡上只留 ``## 全文`` 链接节，全文经
+``metadata["transcript_rel"]/["transcript_text"]`` 交回，由 dispatch
+落盘 ``attachments/<平台>/<同名>.md``（与 480p 视频同主名成对）。
+正文优先经 LLM 整理（按语义分段、补全标点、逐字不改写）；LLM 不可用/
 失败时降级为机械分段（去除逐句时间戳、按句界合并自然段、繁体转简体
 OpenCC），不带分类标签。LLM 摘要与整理经配置 ``processors.link.llm`` 启用：
 API key 从环境变量读取（默认 DEEPSEEK_API_KEY，不落盘到 config）；
@@ -58,7 +63,7 @@ import httpx
 import opencc
 import yt_dlp
 
-from scripts.processors.base import BaseProcessor, ProcessResult
+from scripts.processors.base import INLINE_BODY_MAX, BaseProcessor, ProcessResult
 from scripts.processors.video import VideoProcessor, compress_to_480p
 
 #: 抖音域名（短链 / 视频页 / 分享页）
@@ -386,15 +391,21 @@ class LinkProcessor(BaseProcessor):
             video_rel, video_blob = self._preserve_video(
                 video_path, source_label, title, doc_id
             )
+            body = self._compose_body(
+                video_result.markdown, body_override=formatted
+            )
+            transcript_rel = None
+            if len(body) > INLINE_BODY_MAX:
+                transcript_rel = self._transcript_rel(source_label, title, doc_id)
             markdown = self._build_markdown(
                 title or (video_path.stem if video_path else "link"),
                 author,
                 url,
-                video_result.markdown,
+                body,
                 summary,
                 source_label=source_label,
-                body_override=formatted,
                 video_rel=video_rel,
+                transcript_rel=transcript_rel,
             )
             metadata = {
                 "engine": "yt-dlp+whisper",
@@ -407,6 +418,8 @@ class LinkProcessor(BaseProcessor):
                 "llm": {"status": llm_status, "format": fmt_status, "model": self.llm_model},
                 "video_rel": video_rel,
                 "video_blob": video_blob,
+                "transcript_rel": transcript_rel,
+                "transcript_text": body if transcript_rel else None,
             }
             return ProcessResult(
                 success=True,
@@ -449,18 +462,24 @@ class LinkProcessor(BaseProcessor):
             if not title and not desc:
                 return self._fail("小红书笔记无有效内容（无标题无正文）")
             summary, llm_status = self._summarize(desc)
+            body = self._compose_body(desc, raw_body=True)
+            transcript_rel = None
+            if len(body) > INLINE_BODY_MAX:
+                transcript_rel = self._transcript_rel("小红书", title, note_id)
             markdown = self._build_markdown(
                 title or note_id or "小红书笔记",
                 author,
                 final_url,
-                desc,
+                body,
                 summary,
                 source_label="小红书",
                 body_label="笔记正文",
-                raw_body=True,
+                transcript_rel=transcript_rel,
             )
             metadata["engine"] = "xhs-page"
             metadata["llm"] = {"status": llm_status, "model": self.llm_model}
+            metadata["transcript_rel"] = transcript_rel
+            metadata["transcript_text"] = body if transcript_rel else None
             return ProcessResult(
                 success=True,
                 text=desc,
@@ -481,15 +500,21 @@ class LinkProcessor(BaseProcessor):
         video_rel, video_blob = self._preserve_video(
             video_path, "小红书", title, note_id
         )
+        body = self._compose_body(
+            video_result.markdown, body_override=formatted
+        )
+        transcript_rel = None
+        if len(body) > INLINE_BODY_MAX:
+            transcript_rel = self._transcript_rel("小红书", title, note_id)
         markdown = self._build_markdown(
             title or note_id or "小红书笔记",
             author,
             final_url,
-            video_result.markdown,
+            body,
             summary,
             source_label="小红书",
-            body_override=formatted,
             video_rel=video_rel,
+            transcript_rel=transcript_rel,
         )
         metadata["engine"] = "xhs-page+whisper"
         metadata["model"] = self.model
@@ -497,6 +522,8 @@ class LinkProcessor(BaseProcessor):
         metadata["llm"] = {"status": llm_status, "format": fmt_status, "model": self.llm_model}
         metadata["video_rel"] = video_rel
         metadata["video_blob"] = video_blob
+        metadata["transcript_rel"] = transcript_rel
+        metadata["transcript_text"] = body if transcript_rel else None
         return ProcessResult(
             success=True,
             text=video_result.text,
@@ -862,20 +889,43 @@ class LinkProcessor(BaseProcessor):
         return text, "ok"
 
     @staticmethod
+    def _compose_body(
+        transcript_markdown: str,
+        *,
+        raw_body: bool = False,
+        body_override: Optional[str] = None,
+    ) -> str:
+        """组装正文全文：LLM 整理稿优先，否则原文转换/机械分段。
+
+        Args:
+            transcript_markdown: 视频处理器的输出（逐句时间戳格式）；
+                raw_body=True 时为纯文本正文（小红书图文 desc）。
+            raw_body: True 时按原文使用（仅繁简转换），不做时间戳剥离。
+            body_override: LLM 整理后的正文（分段+补标点）；提供时优先。
+
+        Returns:
+            str: 正文全文；无有效内容为空串。
+        """
+        if body_override and body_override.strip():
+            return body_override.strip()
+        if raw_body:
+            return _T2S.convert(transcript_markdown.strip())
+        return _transcript_to_paragraphs(transcript_markdown)
+
+    @staticmethod
     def _build_markdown(
         title: str,
         author: str,
         url: str,
-        transcript_markdown: str,
+        body: str,
         summary: Optional[Dict[str, Any]] = None,
         *,
         source_label: str = "抖音",
         body_label: str = "转写全文",
-        raw_body: bool = False,
-        body_override: Optional[str] = None,
         video_rel: Optional[str] = None,
+        transcript_rel: Optional[str] = None,
     ) -> str:
-        """组装最终 Markdown：标题 + 来源行 +（可选）内嵌原视频 + 摘要各节 + 正文。
+        """组装最终卡 Markdown：标题 + 来源行 +（可选）内嵌原视频 + 摘要各节 + 正文。
 
         LLM 给出中图法分类/主题词时，Markdown 顶部带 ``tags``
         frontmatter（[待确认, 平台标签] + category + topics）；无则
@@ -885,19 +935,16 @@ class LinkProcessor(BaseProcessor):
             title: 笔记标题。
             author: 作者（可为空串）。
             url: 来源链接。
-            transcript_markdown: 视频处理器的输出（逐句时间戳格式，
-            在此转换，原标题行丢弃）；raw_body=True 时按原文使用。
+            body: 正文全文（_compose_body 的产物）；空串不产正文部分。
             summary: LLM 摘要 {"summary", "points", "insights",
             "entities", "category", "topics"}；None 时不出现摘要节
             （降级形态）。
             source_label: 来源行平台名（抖音/小红书），也作平台标签。
             body_label: 正文小节标题（转写全文/笔记正文）。
-            raw_body: True 时 transcript_markdown 为纯文本正文，不做
-            时间戳剥离与句界分段；正文为空时不产出正文小节。
-            body_override: LLM 整理后的正文（分段+补标点）；提供时
-            优先于 transcript_markdown 的机械分段结果。
             video_rel: 原视频（480p）的库内相对路径；提供时在来源行
             下方内嵌 ``![[...]]``（Obsidian 内可直接播放）。
+            transcript_rel: 全文外置的库内相对路径（2026-09-12 方案 B）；
+            提供时正文不进卡，只留 ``## 全文`` 链接节。
 
         Returns:
             str: 完整 Markdown。
@@ -945,13 +992,9 @@ class LinkProcessor(BaseProcessor):
                 sections += ["", "## 提到的人·书·概念", ""]
                 sections += [f"- {item}" for item in summary["entities"]]
             sections.append("")
-        if body_override and body_override.strip():
-            body = body_override.strip()
-        elif raw_body:
-            body = _T2S.convert(transcript_markdown.strip())
-        else:
-            body = _transcript_to_paragraphs(transcript_markdown)
-        if body:
+        if body and transcript_rel:
+            sections += ["## 全文", "", f"[[{transcript_rel}|查看{body_label}]]"]
+        elif body:
             sections += [f"## {body_label}", "", body]
         return "\n".join(sections) + "\n"
 
@@ -1016,14 +1059,12 @@ class LinkProcessor(BaseProcessor):
         return None
 
     @staticmethod
-    def _video_rel(source_label: str, title: str, doc_id: str) -> str:
-        """原视频库内相对路径：attachments/<平台>/<平台>-<标题>-<id前6>.mp4。
+    def _artifact_stem(source_label: str, title: str, doc_id: str) -> str:
+        """平台-标题-id短码 的文件主名（人读标题优先、净化、60 字截断）。
 
-        命名规则与 dispatch/links.py 的笔记命名同源（人读标题优先、
-        文件系统净化、60 字截断）；id 短码常驻——同名不同视频绝不互相
-        覆盖，同内容重跑（状态丢失重放）落盘时同名跳过即幂等。
-        attachments 根目录名与 dispatch/media.py ATTACHMENTS_DIR 是同一
-        约定（dispatch 层按此串原样落盘）。
+        命名规则与 dispatch/links.py 的笔记命名同源；id 短码常驻——
+        同名不同视频绝不互相覆盖，同内容重跑（状态丢失重放）落盘时
+        同名跳过即幂等。
         """
         safe = ""
         if title:
@@ -1034,7 +1075,22 @@ class LinkProcessor(BaseProcessor):
         stem = f"{source_label}-{safe}" if safe else source_label
         if doc_id:
             stem = f"{stem}-{doc_id[:6]}"
-        return f"attachments/{source_label}/{stem}.mp4"
+        return stem
+
+    @classmethod
+    def _video_rel(cls, source_label: str, title: str, doc_id: str) -> str:
+        """原视频库内相对路径：attachments/<平台>/<平台>-<标题>-<id前6>.mp4。
+
+        attachments 根目录名与 dispatch/media.py ATTACHMENTS_DIR 是同一
+        约定（dispatch 层按此串原样落盘）。
+        """
+        return f"attachments/{source_label}/{cls._artifact_stem(source_label, title, doc_id)}.mp4"
+
+    @classmethod
+    def _transcript_rel(cls, source_label: str, title: str, doc_id: str) -> str:
+        """全文库内相对路径（2026-09-12 方案 B）：与 _video_rel 同主名、
+        .md 成对——同内容的 480p 视频与全文天然同名相邻。"""
+        return f"attachments/{source_label}/{cls._artifact_stem(source_label, title, doc_id)}.md"
 
     @staticmethod
     def _compress_to_480p(src: Path, dst: Path) -> bool:

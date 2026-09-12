@@ -951,3 +951,73 @@ def test_probe_height_parses_video_stream(monkeypatch, tmp_path):
 
     monkeypatch.setattr(link_module.subprocess, "run", lambda *a, **k: _BadProc())
     assert LinkProcessor._probe_height(tmp_path / "x.mp4") is None
+
+
+# ---- 方案 B 卡形态（2026-09-12 用户裁决）----
+
+
+def test_long_body_externalized_to_transcript_rel(fake_pipeline, monkeypatch):
+    """正文 >800 字符外置：卡留「## 全文」链接节、无正文小节；
+    metadata 交回 transcript_rel/transcript_text（与 480p 视频同主名 .md）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    long_body = "整理后的长正文。" * 120  # 960 字符
+    _branching_llm(monkeypatch, format_text=long_body)
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "## 转写全文" not in result.markdown
+    rel = result.metadata["transcript_rel"]
+    assert rel == "attachments/抖音/抖音-信息标题-vid123.md"
+    assert f"## 全文\n\n[[{rel}|查看转写全文]]" in result.markdown
+    assert result.metadata["transcript_text"] == long_body
+
+
+def test_short_body_stays_inline(fake_pipeline, monkeypatch):
+    """正文 ≤800 字符保持卡内联（卡自含），不交回 transcript。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _branching_llm(monkeypatch, format_text="整理后第一段。\n\n整理后第二段。")
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "## 转写全文" in result.markdown
+    assert "## 全文" not in result.markdown
+    assert result.metadata["transcript_rel"] is None
+    assert result.metadata["transcript_text"] is None
+
+
+def test_body_threshold_boundary(fake_pipeline, monkeypatch):
+    """阈值边界：恰好 INLINE_BODY_MAX 内联，+1 外置（阈值单点定义于 base.py）。"""
+    from scripts.processors.base import INLINE_BODY_MAX
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _branching_llm(monkeypatch, format_text="甲" * INLINE_BODY_MAX)
+    result = LinkProcessor().process(SHARE_TEXT)
+    assert result.metadata["transcript_rel"] is None
+
+    _branching_llm(monkeypatch, format_text="甲" * (INLINE_BODY_MAX + 1))
+    result = LinkProcessor().process(SHARE_TEXT)
+    assert result.metadata["transcript_rel"] is not None
+
+
+def test_xhs_long_text_note_externalized(fake_xhs_page, monkeypatch):
+    """小红书图文长正文同样外置（body_label=笔记正文），无视频也成立。"""
+    long_desc = "长正文。" * 400  # 1600 字符
+    fake_xhs_page["note"] = {
+        "title": "图文笔记标题",
+        "desc": long_desc,
+        "type": "normal",
+        "noteId": "txt456",
+        "user": {"nickName": "某人"},
+    }
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+    result = LinkProcessor().process(XHS_SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "## 笔记正文" not in result.markdown
+    rel = result.metadata["transcript_rel"]
+    assert rel == "attachments/小红书/小红书-图文笔记标题-txt456.md"
+    assert f"[[{rel}|查看笔记正文]]" in result.markdown
+    assert result.metadata["transcript_text"] == long_desc
