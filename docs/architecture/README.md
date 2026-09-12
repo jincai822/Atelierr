@@ -89,14 +89,13 @@ memory 待确认中转——摘录卡是文献笔记，周日提炼时改写为 
 `cognition/` 间（判断登记处，审批写）、`reflections/` 间（周报与决策日志，
 只新建）。无 decay 无 purge。
 
-**legacy 卡库已并入 wiki 根层（方案 C，09-06）**：Cognitive OS 资产
-542 张卡（208 概念 + 280 术语 + 39 章笔记 + 11 认知条目随迁未激活 +
-4 Source 记录）平铺在 `memory/wiki/` 根层，与手工提炼条目同库；
-管理档案收 `wiki/_cognitive-os/`（含撞名改名规则：2 张术语卡带
-「（术语）」后缀）。WikiManager 三 schema 校验：手工条目要
-from+互链；摘录卡（type: Excerpt）要 type/title/from、豁免互链；
-Cognitive OS 卡（type+title）豁免 from/互链。② wiki 格式升级随
-「信息加工三步法」建议 3 调用；③ 认知条目激活随回路三解冻再议。
+**legacy 卡库方案 C 已回滚（2026-09-12 评审更正）**：09-06 实际落地
+97 张卡（208 概念+280 术语……的 542 为预估数，未全量迁入），当晚用户
+整批删除回滚（git 快照 `82e7332` 可恢复）——陌生卡库糊脸违背生成
+效应，沉淀只能从自己的笔记长出来。wiki/ 现状：根层空 +
+`wiki/_cognitive-os/` 管理档案随迁删除，仅 reflections/（周报）与
+cognition/（空，冻结）两间。新沉淀策略：周报「沉淀候选」节只建议
+（被引用/高活跃笔记），用户点头才建卡（2026-09-12 起）。
 
 **入口**：控制台.md 是总入口（Obsidian 内 Dataview 全 vault 渲染 +
 车间口令 + 桌面 ▶ 快捷按钮经 Shell Commands/Advanced URI 拉起 Codex 会话）。
