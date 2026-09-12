@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "摄入模块 · 明细篇：每条通道从入口到归档文件夹",
+    "subtitle": "一行一条通道，跟着本行 ①②③④ 走 · 节点写真实文件名/目录 · 2026-09-12",
+    "output": "atelierr-ingest-detail.html",
+    "viewBox": [1180, 950]
+  },
+  "stages": [
+    { "label": "① 入口（3+1）" },
+    { "label": "② 落地 · 真实文件" },
+    { "label": "③ 机器产物 · 真实文件名" },
+    { "label": "④ 你的人工确认" },
+    { "label": "⑤ 最终归宿 · 真实目录" }
+  ],
+  "nodes": [
+    { "id": "e0", "type": "frontend", "label": "发链接", "sublabel": "飞书/Obsidian 粘贴 · 抖音/小红书/B站", "stage": 0, "row": 0 },
+    { "id": "e1", "type": "frontend", "label": "飞书文字", "sublabel": "感想/转发/想说的话", "stage": 0, "row": 0, "yOffset": 75 },
+    { "id": "e2", "type": "frontend", "label": "飞书附件", "sublabel": "截图/照片/语音/视频文件", "stage": 0, "row": 1, "yOffset": 36 },
+    { "id": "e3", "type": "frontend", "label": "PDF", "sublabel": "飞书发送 或 电脑拖入", "stage": 0, "row": 2, "yOffset": -3 },
+    { "id": "e4", "type": "frontend", "label": "速记/直写", "sublabel": "QuickAdd · Obsidian", "stage": 0, "row": 2, "yOffset": 72 },
+    { "id": "e5", "type": "frontend", "label": "Chrome 剪藏", "sublabel": "一键剪网页 · 备注可选", "stage": 0, "row": 3, "yOffset": 33 },
+    { "id": "e6", "type": "backend", "label": "（副产物）", "sublabel": "任何笔记正文里的行动意图", "stage": 0, "row": 3, "yOffset": 108 },
+
+    { "id": "f0", "type": "database", "label": "含链接的笔记", "sublabel": "飞书发的→日记 · 粘贴的→裸md", "stage": 1, "row": 0 },
+    { "id": "f1", "type": "database", "label": "日记 YYYY-MM-DD.md", "sublabel": "- HH:MM 追加 · frontmatter 不动", "stage": 1, "row": 0, "yOffset": 75 },
+    { "id": "f2", "type": "database", "label": "attachments/媒体/", "sublabel": "图/音/视原件 · 视频压480p", "stage": 1, "row": 1, "yOffset": 36 },
+    { "id": "f3", "type": "database", "label": "attachments/书籍/", "sublabel": "PDF 原件 · 只增不减", "stage": 1, "row": 2, "yOffset": -3 },
+    { "id": "f4", "type": "database", "label": "<你的名>.md", "sublabel": "memory/根 · watcher 补一次性 fm", "stage": 1, "row": 2, "yOffset": 72 },
+    { "id": "f5", "type": "database", "label": "clip-<日期>.md", "sublabel": "memory/根 · 全文 md", "stage": 1, "row": 3, "yOffset": 33 },
+    { "id": "f6", "type": "backend", "label": "todos 意图分发", "sublabel": "只读正文 · 原笔记不动", "stage": 1, "row": 3, "yOffset": 108 },
+
+    { "id": "p0", "type": "database", "label": "抖音-<标题>.md", "sublabel": "tags=[待确认] + 原视频 480p", "stage": 2, "row": 0 },
+    { "id": "p1", "type": "database", "label": "日记即终态", "sublabel": "不加工 · decay 照常 · 免点名", "stage": 2, "row": 0, "yOffset": 75 },
+    { "id": "p2", "type": "database", "label": "media-***.md", "sublabel": "OCR/转写全文 · 内嵌原附件", "stage": 2, "row": 1, "yOffset": 36 },
+    { "id": "p3", "type": "database", "label": "系统/划重点-***.md", "sublabel": "候选清单 · 机器产物区免确认", "stage": 2, "row": 2, "yOffset": -3 },
+    { "id": "p4", "type": "database", "label": "你的笔记（无产物）", "sublabel": "滞留超14天晨报点名", "stage": 2, "row": 2, "yOffset": 72 },
+    { "id": "p5", "type": "frontend", "label": "确认卡（摘要）", "sublabel": "DeepSeek 摘要只进卡不落笔记", "stage": 2, "row": 3, "yOffset": 33 },
+    { "id": "p6", "type": "database", "label": "todo-***.md", "sublabel": "tags=[待办] + 同步飞书任务", "stage": 2, "row": 3, "yOffset": 108 },
+
+    { "id": "c0", "type": "frontend", "label": "✅ 确认并归档", "sublabel": "飞书卡片 · 删待确认标签", "stage": 3, "row": 0 },
+    { "id": "c2", "type": "frontend", "label": "✅ 确认并归档", "sublabel": "飞书卡片 · 删待确认标签", "stage": 3, "row": 1, "yOffset": 36 },
+    { "id": "c3", "type": "frontend", "label": "你勾选 [x]", "sublabel": "勾中即沉淀 · 不经待确认", "stage": 3, "row": 2, "yOffset": -3 },
+    { "id": "c4", "type": "frontend", "label": "你手动拖 / 📁", "sublabel": "机器绝不自动归档", "stage": 3, "row": 2, "yOffset": 72 },
+    { "id": "c5", "type": "frontend", "label": "✅ 确认", "sublabel": "确认卡按钮", "stage": 3, "row": 3, "yOffset": 33 },
+    { "id": "c6", "type": "frontend", "label": "飞书任务点✅", "sublabel": "完成状态双向同步", "stage": 3, "row": 3, "yOffset": 108 },
+
+    { "id": "d0", "type": "database", "label": "memory/抖音/", "sublabel": "小红书·B站同规则 · 可带中图法二级", "stage": 4, "row": 0 },
+    { "id": "d2", "type": "database", "label": "memory/媒体/", "sublabel": "source=media 推导落这", "stage": 4, "row": 1, "yOffset": 36 },
+    { "id": "d3", "type": "database", "label": "memory/wiki/", "sublabel": "摘录卡 type:Excerpt · 不衰减", "stage": 4, "row": 2, "yOffset": -3 },
+    { "id": "d4", "type": "database", "label": "memory/想法·目标/", "sublabel": "你定 · decay 状态跟随", "stage": 4, "row": 2, "yOffset": 72 },
+    { "id": "d5", "type": "database", "label": "memory/媒体/", "sublabel": "推不出平台时默认落这", "stage": 4, "row": 3, "yOffset": 33 },
+    { "id": "d6", "type": "backend", "label": "晨报追踪", "sublabel": "待办进行中 · 直到完成", "stage": 4, "row": 3, "yOffset": 108 }
+  ],
+  "flows": [
+    { "from": "e0", "to": "f0", "label": "① 链接进日记/根", "variant": "emphasis", "route": "straight" },
+    { "from": "f0", "to": "p0", "label": "② 扫出URL→转写", "variant": "emphasis", "route": "straight" },
+    { "from": "p0", "to": "c0", "label": "③ 推确认卡", "variant": "emphasis", "route": "straight" },
+    { "from": "c0", "to": "d0", "label": "④ 点归档才移动", "variant": "emphasis", "route": "straight" },
+
+    { "from": "e1", "to": "f1", "label": "① 追加一行", "variant": "emphasis", "route": "straight" },
+    { "from": "f1", "to": "p1", "label": "② 不加工", "variant": "emphasis", "route": "straight" },
+
+    { "from": "e2", "to": "f2", "label": "① 存原件", "variant": "emphasis", "route": "straight" },
+    { "from": "f2", "to": "p2", "label": "② OCR/Whisper", "variant": "emphasis", "route": "straight" },
+    { "from": "p2", "to": "c2", "label": "③ 推确认卡", "variant": "emphasis", "route": "straight" },
+    { "from": "c2", "to": "d2", "label": "④ 归档", "variant": "emphasis", "route": "straight" },
+
+    { "from": "e3", "to": "f3", "label": "① 存原件", "variant": "emphasis", "route": "straight" },
+    { "from": "f3", "to": "p3", "label": "② 代读出清单", "variant": "emphasis", "route": "straight" },
+    { "from": "p3", "to": "c3", "label": "③ 清单可勾", "variant": "emphasis", "route": "straight" },
+    { "from": "c3", "to": "d3", "label": "④ 勾中转卡", "variant": "emphasis", "route": "straight" },
+
+    { "from": "e4", "to": "f4", "label": "① 直写落根", "variant": "emphasis", "route": "straight" },
+    { "from": "f4", "to": "p4", "label": "② watcher 登记", "variant": "emphasis", "route": "straight" },
+    { "from": "p4", "to": "c4", "label": "③ 滞留提醒", "variant": "emphasis", "route": "straight" },
+    { "from": "c4", "to": "d4", "label": "④ 你拖才移动", "variant": "emphasis", "route": "straight" },
+
+    { "from": "e5", "to": "f5", "label": "① 剪藏成md", "variant": "emphasis", "route": "straight" },
+    { "from": "f5", "to": "p5", "label": "② 摘要进卡", "variant": "emphasis", "route": "straight" },
+    { "from": "p5", "to": "c5", "label": "③ 推确认卡", "variant": "emphasis", "route": "straight" },
+    { "from": "c5", "to": "d5", "label": "④ 归档", "variant": "emphasis", "route": "straight" },
+
+    { "from": "e6", "to": "f6", "label": "① 扫正文", "variant": "emphasis", "route": "straight" },
+    { "from": "f6", "to": "p6", "label": "② LLM 判 0..N 条", "variant": "emphasis", "route": "straight" },
+    { "from": "p6", "to": "c6", "label": "③ 同步飞书任务", "variant": "emphasis", "route": "straight" },
+    { "from": "c6", "to": "d6", "label": "④ 晨报追踪", "variant": "emphasis", "route": "straight" }
+  ],
+  "cards": [
+    {
+      "dot": "slate",
+      "title": "怎么读（先看这个）",
+      "items": [
+        "一行 = 一条通道的完整旅程，从左读到右；编号每行重新从 ① 开始",
+        "节点里写的是真实文件名/目录名：<>=占位，***=日期+哈希（见卡片③速查）",
+        "蓝框 = 你/你的设备（人工动作）；绿框 = 机器；紫框 = 文件/目录",
+        "飞书文字（第 2 行）最短：进日记就是终态，不再加工"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "② 七条通道一句话",
+      "items": [
+        "链接 → 转写笔记（抖音-<标题>.md）+ 480p 原视频；飞书文字 → 当天日记（终态）",
+        "图/音/视频 → OCR/Whisper 笔记（media-***.md）；PDF → 划重点清单 → 勾中直达 wiki",
+        "速记/直写 → 你的笔记（无机器产物，滞留 14 天晨报点名）；剪藏 → 摘要确认卡",
+        "待办（副产物）→ todo-***.md + 飞书任务，晨报追踪到完成"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "③ 文件名与归档规则速查",
+      "items": [
+        "产出文件名：抖音/小红书/B站-<标题>.md · media-<yyyymmdd>-<哈希6>.md · clip-<日期>-<标题>.md · 系统/划重点-<名>-<哈希6>.md · todo-<日期>-<哈希>.md · 日记 YYYY-MM-DD.md",
+        "归档一级目录=平台（archive.py 单一推导）：source=lark→飞书/ · media→媒体/ · link→tags 平台标签（抖音/小红书/B站）",
+        "二级目录=中图法标签（如 B84-心理学）；推不出平台时归档按钮默认落 媒体/",
+        "机器绝不自动归档：只在你点「✅确认并归档 / 📁」或手动拖时移动，sidecar 状态跟随"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "④ 终态全景",
+      "items": [
+        "memory/<平台>/ = 工作记忆：会遗忘（decay 每日 03:00 分层，只写 sidecar）",
+        "memory/wiki/ = 真沉淀：不衰减；PDF 勾中直达，周报「沉淀候选」你点头才建 concept 卡",
+        "trash/ = 唯一删除出口：decay → review → purge，purge 只走 CLI",
+        "日记 YYYY-MM-DD.md 与 主页/控制台：免滞留点名，永不被机器移动"
+      ]
+    }
+  ]
+}

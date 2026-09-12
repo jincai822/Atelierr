@@ -10,7 +10,9 @@
 >   入口篇（3+1 入口→落地→分发接手）`atelierr-ingest-sources.dataflow.json`
 >   → `atelierr-ingest-sources.html`；
 >   加工篇（分发→引擎→入库→下游接口，含直发视频裁决 B）
->   `atelierr-ingest-pipeline.dataflow.json` → `atelierr-ingest-pipeline.html`
+>   `atelierr-ingest-pipeline.dataflow.json` → `atelierr-ingest-pipeline.html`；
+>   明细篇（七车道，每条通道从入口到归档文件夹，节点写真实文件名/目录）
+>   `atelierr-ingest-detail.dataflow.json` → `atelierr-ingest-detail.html`
 > 渲染产物（可点开看的 HTML/PNG）在 `~/atelierr-data/exports/`。
 > 纪律（2026-09-02 用户裁决）：架构图只维护这一份计划版，不再出现状图；
 > 架构有变化就更新这份 IR 并重渲染。
@@ -34,21 +36,26 @@ node $ARCH/renderers/dataflow/render-dataflow.mjs \
   docs/architecture/atelierr-ingest-sources.dataflow.json /tmp/atelierr-ingest-sources.html
 node $ARCH/renderers/dataflow/render-dataflow.mjs \
   docs/architecture/atelierr-ingest-pipeline.dataflow.json /tmp/atelierr-ingest-pipeline.html
+node $ARCH/renderers/dataflow/render-dataflow.mjs \
+  docs/architecture/atelierr-ingest-detail.dataflow.json /tmp/atelierr-ingest-detail.html
 # 注入流线动画（archify 无动画能力，渲染后加 CSS）：
 .venv-atelierr/bin/python tools/archify_animate.py \
   /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
   /tmp/atelierr-flow-pipeline.html /tmp/atelierr-flow-loop.html \
   /tmp/atelierr-flow-feishu.html \
-  /tmp/atelierr-ingest-sources.html /tmp/atelierr-ingest-pipeline.html
+  /tmp/atelierr-ingest-sources.html /tmp/atelierr-ingest-pipeline.html \
+  /tmp/atelierr-ingest-detail.html
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-plan.html  # 全 ok:true
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-flow.html
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-flow-feishu.html
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-ingest-sources.html
 node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-ingest-pipeline.html
+node $ARCH/scripts/check-render-output.mjs /tmp/atelierr-ingest-detail.html
 cp /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
    /tmp/atelierr-flow-pipeline.html /tmp/atelierr-flow-loop.html \
    /tmp/atelierr-flow-feishu.html \
    /tmp/atelierr-ingest-sources.html /tmp/atelierr-ingest-pipeline.html \
+   /tmp/atelierr-ingest-detail.html \
    ~/atelierr-data/exports/
 ```
 
