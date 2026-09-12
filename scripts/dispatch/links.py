@@ -319,6 +319,9 @@ class LinkDispatcher:
         label = _PLATFORM_TAGS.get(platform, platform)
         if title:
             safe = re.sub(r'[/\\:*?"<>|\x00-\x1f]', "-", title)
+            # “#”在 wikilink 里是标题引用符，出现在文件名会断晨报/摘要的
+            # [[...]] 链接（2026-09-12 实测：抖音通用标题带 #id），剔除
+            safe = safe.replace("#", "")
             safe = re.sub(r"\s+", " ", safe).strip().strip(".")
             if len(safe) > 60:
                 safe = safe[:60].rstrip()

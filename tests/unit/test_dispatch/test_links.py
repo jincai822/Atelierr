@@ -484,3 +484,13 @@ def test_transcript_saved_to_attachments(memory_tree):
         "attachments/抖音/抖音-标题-vid123.md", "新内容"
     )
     assert full.read_text(encoding="utf-8") == "既有内容"
+
+
+def test_note_filename_strips_hash(memory_tree):
+    """笔记文件名剔除「#」（wikilink 标题引用符，晨报 [[...]] 链接会断；
+    2026-09-12 抖音通用标题 Douyin video #<id> 实测）。"""
+    filename = LinkDispatcher._note_filename(
+        DOUYIN_URL, "douyin", "vid123", "Douyin video #7674839354331095781"
+    )
+    assert "#" not in filename
+    assert filename == "抖音-Douyin video 7674839354331095781.md"
