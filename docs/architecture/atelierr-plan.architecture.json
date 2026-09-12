@@ -3,7 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "Atelierr 双平面架构 · 细化标注版（飞书中枢全通）",
-    "subtitle": "手机/电脑 → 捕获 → 全自动加工 → 工作记忆（会遗忘） → 知识总库（永久）· 2026-09-10 飞书中枢版",
+    "subtitle": "手机/电脑 → 捕获 → 全自动加工 → 工作记忆（会遗忘） → 知识总库（永久）· 2026-09-12 方案 B 卡形态版",
     "locale": "zh-CN",
     "output": "atelierr-plan.html",
     "quality_profile": "showcase",
@@ -27,7 +27,7 @@
           "wiki",
           "feishu"
         ],
-        "note": "Atelier 会话工作台垂直贯穿各层（人在会话中驱动）；Atelierr 后台管线横向流动（systemd 定时器、无人值守）；两平面代码零互调，交接只走 $OV 数据面。沉淀层合为一个 wiki/ 总库；legacy 卡库 542 张已并入 wiki/ 根层（方案 C，09-06）。飞书中枢（09-10 实测全通）：长连接收消息、卡片回调、任务/日历/看板单向同步，ntfy 已停用"
+        "note": "Atelier 会话工作台垂直贯穿各层（人在会话中驱动）；Atelierr 后台管线横向流动（systemd 定时器、无人值守）；两平面代码零互调，交接只走 $OV 数据面。沉淀层合为一个 wiki/ 总库；legacy 卡库 09-06 落地 97 张当晚整批回滚（git 快照 82e7332 可恢复，09-12 评审更正）——沉淀只从自己的笔记长出来。飞书中枢（09-10 实测全通）：长连接收消息、卡片回调、任务/日历/看板单向同步，ntfy 已停用"
       },
       {
         "id": "note-journey",
@@ -54,7 +54,7 @@
           "console",
           "wiki"
         ],
-        "note": "晨报提醒 → QuickAdd「提炼为 Wiki」60 秒 → concept 落 wiki/ 根层（from 指回来源 + ≥1 条互链）；或会话里 /promote；或划重点勾选 → 机器建摘录卡（type: Excerpt，from 回指清单）。WikiManager 三 schema 校验根层：手工条目要 from+互链，摘录卡要 type/title/from，legacy 卡 type+title 即合法；只校验，绝不改写"
+        "note": "晨报提醒 → QuickAdd「提炼为 Wiki」60 秒 → concept 落 wiki/ 根层（from 指回来源 + ≥1 条互链）；或会话里 /promote；或划重点勾选 → 机器建摘录卡（type: Excerpt，from 回指清单）。WikiManager 三 schema 校验根层：手工条目要 from+互链，摘录卡要 type/title/from；只校验，绝不改写"
       },
       {
         "id": "session-flow",
@@ -102,8 +102,8 @@
     {
       "id": "capture",
       "type": "cloud",
-      "label": "捕获入口",
-      "sublabel": "QuickAdd 速记 · 链接截图录音PDF · 飞书机器人 · 网页剪藏",
+      "label": "捕获入口 3+1",
+      "sublabel": "飞书主入口 · QuickAdd 速记 · Obsidian 直写/拖文件 · Chrome 剪藏",
       "pos": [
         640,
         130
@@ -162,7 +162,7 @@
       "id": "memory",
       "type": "database",
       "label": "memory/ 工作记忆",
-      "sublabel": "平面 .md · 机器绝不改正文 · 状态在 sidecar",
+      "sublabel": "卡+人写笔记 · 机器绝不改正文 · 状态在 sidecar",
       "pos": [
         460,
         400
@@ -177,7 +177,7 @@
       "id": "loop",
       "type": "backend",
       "label": "decay + 回响",
-      "sublabel": "03:00 分层 · 07:53 检索式晨报 · 响应观测",
+      "sublabel": "03:00 分层 · 07:53 晨报 · 复习只推人写/被引用",
       "pos": [
         820,
         400
@@ -192,7 +192,7 @@
       "id": "wiki",
       "type": "database",
       "label": "wiki/ 知识总库",
-      "sublabel": "根层 concept：手工提炼 + 摘录卡 + legacy 542 卡",
+      "sublabel": "根层 concept：手工提炼 + 摘录卡（legacy 卡库已回滚）",
       "pos": [
         560,
         580
@@ -328,7 +328,7 @@
       "id": "processors-memory",
       "from": "processors",
       "to": "memory",
-      "label": "转写/摘要成 .md 入库 · ntfy 推送",
+      "label": "卡形态 .md 入库（长全文外置 attachments）· 飞书推卡",
       "variant": "emphasis",
       "fromSide": "left",
       "toSide": "right",
@@ -599,10 +599,10 @@
       "dot": "emerald",
       "title": "总库铁律（同库分间 · 无 decay 无 purge）",
       "items": [
-        "一个总库 wiki/：根层 concept（手工 + 摘录卡 + legacy 542 卡）+ 三个房间",
+        "一个总库 wiki/：根层 concept（手工提炼 + 摘录卡）+ 三个房间",
         "根层只增不改 · cognition/ 审批写 · reflections/ 只新建",
         "进入三条路：你提炼 / /promote / 划重点勾选成摘录卡",
-        "legacy 双 schema：type+title 即合法，豁免 from/互链要求"
+        "legacy 卡库 09-06 落地 97 张当晚回滚（快照 82e7332）：沉淀只从自己的笔记长出来"
       ]
     },
     {
@@ -622,9 +622,9 @@
       "title": "一条笔记的生命周期（你只需两次触碰）",
       "items": [
         "第 1 次：扔进来——速记/链接/截图，标题都不用起",
-        "机器：15 分钟内抓取转写摘要 → 飞书推「待确认」卡",
+        "机器：15 分钟内抓取转写摘要 → 卡形态 .md（长全文外置 attachments）→ 飞书推「待确认」卡",
         "第 2 次：你确认内容（点卡上 ✅ 或 Obsidian 里去标签）",
-        "之后：晨报复习提醒 → 值得就 60 秒提炼进 wiki，不值得随它遗忘",
+        "之后：晨报复习提醒（只推人写/被引用）→ 值得就 60 秒提炼进 wiki，不值得随它遗忘",
         "遗忘路径：confidence 衰减 → 待删标记 → 你 review → purge 进 trash/"
       ]
     }
