@@ -15,13 +15,10 @@
     { "label": "⑤ 最终归宿 · 真实目录" }
   ],
   "nodes": [
-    { "id": "e0", "type": "frontend", "label": "发链接", "sublabel": "飞书/Obsidian 粘贴 · 抖音/小红书/B站", "stage": 0, "row": 0 },
-    { "id": "e1", "type": "frontend", "label": "飞书文字", "sublabel": "感想/转发/想说的话", "stage": 0, "row": 0, "yOffset": 75 },
-    { "id": "e2", "type": "frontend", "label": "飞书附件", "sublabel": "截图/照片/语音/视频文件", "stage": 0, "row": 1, "yOffset": 36 },
-    { "id": "e3", "type": "frontend", "label": "PDF", "sublabel": "飞书发送 或 电脑拖入", "stage": 0, "row": 2, "yOffset": -3 },
-    { "id": "e4", "type": "frontend", "label": "速记/直写", "sublabel": "QuickAdd · Obsidian", "stage": 0, "row": 2, "yOffset": 72 },
-    { "id": "e5", "type": "frontend", "label": "Chrome 剪藏", "sublabel": "一键剪网页 · 备注可选", "stage": 0, "row": 3, "yOffset": 33 },
-    { "id": "e6", "type": "backend", "label": "（副产物）", "sublabel": "任何笔记正文里的行动意图", "stage": 0, "row": 3, "yOffset": 108 },
+    { "id": "feishu", "type": "frontend", "label": "飞书", "sublabel": "手机主入口 · 看到什么发什么", "stage": 0, "row": 1 },
+    { "id": "obsidian", "type": "frontend", "label": "电脑 Obsidian", "sublabel": "电脑主入口 · 直写/拖文件/粘贴", "stage": 0, "row": 2, "yOffset": -3 },
+    { "id": "quickadd", "type": "frontend", "label": "QuickAdd", "sublabel": "手机速记 · 只记想法灵感", "stage": 0, "row": 2, "yOffset": 72 },
+    { "id": "clipper", "type": "frontend", "label": "Chrome 剪藏", "sublabel": "网页长文专用 · 备注可选", "stage": 0, "row": 3, "yOffset": 33 },
 
     { "id": "f0", "type": "database", "label": "含链接的笔记", "sublabel": "飞书发的→日记 · 粘贴的→裸md", "stage": 1, "row": 0 },
     { "id": "f1", "type": "database", "label": "日记 YYYY-MM-DD.md", "sublabel": "- HH:MM 追加 · frontmatter 不动", "stage": 1, "row": 0, "yOffset": 75 },
@@ -54,48 +51,51 @@
     { "id": "d6", "type": "backend", "label": "晨报追踪", "sublabel": "待办进行中 · 直到完成", "stage": 4, "row": 3, "yOffset": 108 }
   ],
   "flows": [
-    { "from": "e0", "to": "f0", "label": "① 链接进日记/根", "variant": "emphasis", "route": "straight" },
+    { "from": "feishu", "to": "f0", "label": "① 发链接", "variant": "emphasis" },
     { "from": "f0", "to": "p0", "label": "② 扫出URL→转写", "variant": "emphasis", "route": "straight" },
     { "from": "p0", "to": "c0", "label": "③ 推确认卡", "variant": "emphasis", "route": "straight" },
     { "from": "c0", "to": "d0", "label": "④ 点归档才移动", "variant": "emphasis", "route": "straight" },
 
-    { "from": "e1", "to": "f1", "label": "① 追加一行", "variant": "emphasis", "route": "straight" },
+    { "from": "feishu", "to": "f1", "label": "① 发文字", "variant": "emphasis" },
     { "from": "f1", "to": "p1", "label": "② 不加工", "variant": "emphasis", "route": "straight" },
 
-    { "from": "e2", "to": "f2", "label": "① 存原件", "variant": "emphasis", "route": "straight" },
+    { "from": "feishu", "to": "f2", "label": "① 发图/音/视频", "variant": "emphasis" },
+    { "from": "obsidian", "to": "f2", "label": "① 拖文件", "variant": "emphasis" },
     { "from": "f2", "to": "p2", "label": "② OCR/Whisper", "variant": "emphasis", "route": "straight" },
     { "from": "p2", "to": "c2", "label": "③ 推确认卡", "variant": "emphasis", "route": "straight" },
     { "from": "c2", "to": "d2", "label": "④ 归档", "variant": "emphasis", "route": "straight" },
 
-    { "from": "e3", "to": "f3", "label": "① 存原件", "variant": "emphasis", "route": "straight" },
+    { "from": "feishu", "to": "f3", "label": "① 发PDF", "variant": "emphasis" },
+    { "from": "obsidian", "to": "f3", "label": "① 拖PDF", "variant": "emphasis", "route": "straight" },
     { "from": "f3", "to": "p3", "label": "② 代读出清单", "variant": "emphasis", "route": "straight" },
     { "from": "p3", "to": "c3", "label": "③ 清单可勾", "variant": "emphasis", "route": "straight" },
     { "from": "c3", "to": "d3", "label": "④ 勾中转卡", "variant": "emphasis", "route": "straight" },
 
-    { "from": "e4", "to": "f4", "label": "① 直写落根", "variant": "emphasis", "route": "straight" },
+    { "from": "quickadd", "to": "f4", "label": "① 速记", "variant": "emphasis", "route": "straight" },
+    { "from": "obsidian", "to": "f4", "label": "① 直写", "variant": "emphasis" },
     { "from": "f4", "to": "p4", "label": "② watcher 登记", "variant": "emphasis", "route": "straight" },
     { "from": "p4", "to": "c4", "label": "③ 滞留提醒", "variant": "emphasis", "route": "straight" },
     { "from": "c4", "to": "d4", "label": "④ 你拖才移动", "variant": "emphasis", "route": "straight" },
 
-    { "from": "e5", "to": "f5", "label": "① 剪藏成md", "variant": "emphasis", "route": "straight" },
+    { "from": "clipper", "to": "f5", "label": "① 一键剪藏", "variant": "emphasis", "route": "straight" },
     { "from": "f5", "to": "p5", "label": "② 摘要进卡", "variant": "emphasis", "route": "straight" },
     { "from": "p5", "to": "c5", "label": "③ 推确认卡", "variant": "emphasis", "route": "straight" },
     { "from": "c5", "to": "d5", "label": "④ 归档", "variant": "emphasis", "route": "straight" },
 
-    { "from": "e6", "to": "f6", "label": "① 扫正文", "variant": "emphasis", "route": "straight" },
-    { "from": "f6", "to": "p6", "label": "② LLM 判 0..N 条", "variant": "emphasis", "route": "straight" },
-    { "from": "p6", "to": "c6", "label": "③ 同步飞书任务", "variant": "emphasis", "route": "straight" },
-    { "from": "c6", "to": "d6", "label": "④ 晨报追踪", "variant": "emphasis", "route": "straight" }
+    { "from": "f6", "to": "p6", "label": "① LLM 判 0..N 条", "variant": "emphasis", "route": "straight" },
+    { "from": "p6", "to": "c6", "label": "② 同步飞书任务", "variant": "emphasis", "route": "straight" },
+    { "from": "c6", "to": "d6", "label": "③ 晨报追踪", "variant": "emphasis", "route": "straight" }
   ],
   "cards": [
     {
       "dot": "slate",
       "title": "怎么读（先看这个）",
       "items": [
+        "入口只有 3+1 个（最左列蓝框）：飞书 / 电脑 Obsidian / QuickAdd / Chrome 剪藏——你发什么内容，就从入口扇出到哪条车道",
         "一行 = 一条通道的完整旅程，从左读到右；编号每行重新从 ① 开始",
         "节点里写的是真实文件名/目录名：<>=占位，***=日期+哈希（见卡片③速查）",
         "蓝框 = 你/你的设备（人工动作）；绿框 = 机器；紫框 = 文件/目录",
-        "飞书文字（第 2 行）最短：进日记就是终态，不再加工"
+        "「待办」是副产物车道：没有入口，机器从 todos 分发起步；飞书文字（第 2 行）最短：进日记就是终态"
       ]
     },
     {
