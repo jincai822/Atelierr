@@ -29,16 +29,21 @@ def test_weekly_questions_from_data(memory_tree, make_note):
     path.write_text(frontmatter.dumps(post), encoding="utf-8")
 
     questions = review_ritual.build_questions(memory_tree, review_ritual.KIND_WEEKLY)
+    intro = review_ritual.build_intro(memory_tree, review_ritual.KIND_WEEKLY)
 
-    assert any("本周捕获" in q for q in questions)
-    assert any("滞留超 7 天" in q for q in questions)
+    # 数据在正文摘要（卡片 markdown），问题是短句（手机可点）
+    assert "本周数据" in intro and "捕获" in intro
+    assert "滞留待确认超 7 天：1 条" in intro
+    assert any("最值得留" in q for q in questions)
+    assert any("留还是扔" in q for q in questions)
 
 
 def test_monthly_questions_are_light(memory_tree):
     """月末轻脉冲：节奏统计 + 两个开放问题，共 3 问。"""
     questions = review_ritual.build_questions(memory_tree, review_ritual.KIND_MONTHLY)
     assert len(questions) == 3
-    assert "本月捕获" in questions[0]
+    intro = review_ritual.build_intro(memory_tree, review_ritual.KIND_MONTHLY)
+    assert "本月数据" in intro and "捕获" in intro
 
 
 def test_open_pushes_form_and_registers_session(memory_tree, monkeypatch):

@@ -58,6 +58,33 @@ def _stale_pending_count(tree) -> int:
     return count
 
 
+def build_intro(tree, kind: str) -> str:
+    """卡片正文的数据摘要（Markdown）：数字放正文，问题才能保持短句
+    （2026-09-13 用户反馈：数据塞问题里当输入框标签，手机上没法看——
+    人机交互红线）。
+    """
+    days = 30 if kind == KIND_MONTHLY else 7
+    stats = capture_stats(tree, days=days)
+    rate = (
+        f"{stats['confirm_rate'] * 100:.0f}%"
+        if stats["confirm_rate"] is not None
+        else "—"
+    )
+    span = "本月" if kind == KIND_MONTHLY else "本周"
+    lines = [
+        f"📊 {span}数据：捕获 {stats['total']} 条（确认率 {rate}）"
+        f"｜沉淀 wiki {stats['wiki_new']} 张｜遗忘 {stats['purged']} 条",
+    ]
+    stale = _stale_pending_count(tree)
+    if stale:
+        lines.append(f"⏰ 滞留待确认超 7 天：{stale} 条")
+    pending_delete = len(tree.list_pending_delete())
+    if pending_delete:
+        lines.append(f"🗑 待删清单等你过目：{pending_delete} 条")
+    lines += ["", "不想答的留空，点提交即可。"]
+    return "\n".join(lines)
+
+
 def build_questions(tree, kind: str) -> List[str]:
     """由当期数据生成回顾问题（每周/每月内容不同，防仪式疲劳）。
 
@@ -69,41 +96,18 @@ def build_questions(tree, kind: str) -> List[str]:
         List[str]: 问题列表（至多 _MAX_QUESTIONS 条）。
     """
     if kind == KIND_MONTHLY:
-        stats = capture_stats(tree, days=30)
-        rate = (
-            f"{stats['confirm_rate'] * 100:.0f}%"
-            if stats["confirm_rate"] is not None
-            else "—"
-        )
         return [
-            f"本月捕获 {stats['total']} 条、确认率 {rate}、"
-            f"沉淀进 wiki {stats['wiki_new']} 张、遗忘 {stats['purged']} 条。"
-            "这个节奏健康吗？",
+            "这个节奏健康吗？（数据见上方摘要）",
             "本月最有价值的一条收获是什么？",
             "下个月想多收点什么、少收点什么？",
         ]
-    stats = capture_stats(tree, days=7)
-    stale = _stale_pending_count(tree)
-    pending_delete = len(tree.list_pending_delete())
-    rate = (
-        f"{stats['confirm_rate'] * 100:.0f}%"
-        if stats["confirm_rate"] is not None
-        else "—"
-    )
-    questions = [
-        f"本周捕获 {stats['total']} 条（确认率 {rate}）。"
-        "哪一条最值得留？为什么？",
-    ]
-    if stale:
-        questions.append(
-            f"有 {stale} 条待确认滞留超 7 天：留还是扔？"
-            "（值得留的去清单卡确认归档，不值得的留给 decay）"
-        )
-    if pending_delete:
-        questions.append(
-            f"待删清单有 {pending_delete} 条在等你过目，有没有误判？"
-            "（回「待删」两个字可让它们在清单里再躺一周）"
-        )
+    # 周回顾：问题保持短句（数据在卡片正文摘要里，2026-09-13 交互修正——
+    # 长句当输入框标签在手机上没法看）
+    questions = ["本周最值得留的是哪条？为什么？"]
+    if _stale_pending_count(tree):
+        questions.append("滞留的待确认卡：留还是扔？")
+    if tree.list_pending_delete():
+        questions.append("待删清单有没有误判？")
     questions += [
         "本周有什么反复出现的主题或念头？",
         "下周想重点关注什么？",
@@ -129,7 +133,7 @@ def open_ritual(tree, kind: str, send: bool = True) -> Dict[str, Any]:
     store.open(kind, questions)
     if send:
         title = "🌿 周回顾" if kind == KIND_WEEKLY else "🌙 月度回顾（轻）"
-        intro = "问题由你这周/月的数据生成。不想答的可留空，点提交即可。"
+        intro = build_intro(tree, kind)
         send_feishu_card(prompt_form_card(title, intro, questions))
     return {"opened": True, "questions": questions}
 
