@@ -25,7 +25,9 @@ def prompt_form_card(title: str, intro: str, questions: List[str]) -> Dict[str, 
 
     旧版卡片 schema 没有表单容器，故本卡用 ``"schema": "2.0"``；input
     组件必须嵌在 form 内（卡片 2.0 约束）。提交按钮
-    ``action_type=form_submit``，回调进
+    ``form_action_type=submit``（2026-09-13 实测修正：写
+    action_type=form_submit 平台直接拒收，230099/300123「form 容器
+    没有提交按钮」——此前该卡从未真机渲染成功过），回调进
     ``FeishuBridge._handle_prompt_submit``：value 固定
     ``{"action": "prompt_submit"}``，各问答案在 ``action.form_value``
     的 ``q1..qN`` 键位（序 = questions 序）。发送与降级走通用的
@@ -57,7 +59,7 @@ def prompt_form_card(title: str, intro: str, questions: List[str]) -> Dict[str, 
             "name": "submit",
             "text": {"tag": "plain_text", "content": "提交回答"},
             "type": "primary",
-            "action_type": "form_submit",
+            "form_action_type": "submit",
             "behaviors": [
                 {"type": "callback", "value": {"action": PROMPT_SUBMIT_ACTION}}
             ],
@@ -371,7 +373,7 @@ def confirmed_with_remark_card(
                             "name": "submit",
                             "text": {"tag": "plain_text", "content": "💾 记下"},
                             "type": "default",
-                            "action_type": "form_submit",
+                            "form_action_type": "submit",
                             "behaviors": [
                                 {
                                     "type": "callback",

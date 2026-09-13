@@ -1674,7 +1674,8 @@ def _card_form_action(form_value):
 
 
 def test_prompt_form_card_shape():
-    """表单卡：schema 2.0、form 容器内 q1..qN 输入框 + form_submit 提交钮。"""
+    """表单卡：schema 2.0、form 容器内 q1..qN 输入框 + form_action_type=submit
+    提交钮（2026-09-13 实测修正：form_submit 被平台拒收）。"""
     from scripts.dispatch.feishu import prompt_form_card
 
     card = prompt_form_card("Atelierr 问答（weekly）", "说明", ["问题一", "问题二"])
@@ -1686,7 +1687,7 @@ def test_prompt_form_card_shape():
     assert [item["name"] for item in inputs[:2]] == ["q1", "q2"]
     assert "1. 问题一" in inputs[0]["label"]["content"]
     submit = inputs[-1]
-    assert submit["action_type"] == "form_submit"
+    assert submit["form_action_type"] == "submit"
     assert submit["behaviors"][0]["value"] == {"action": "prompt_submit"}
     # 降级取标题兼容（header 结构与旧版一致）
     assert card["header"]["title"]["content"] == "Atelierr 问答（weekly）"
