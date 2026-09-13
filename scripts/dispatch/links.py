@@ -36,7 +36,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import frontmatter
 
-from scripts.memory.core import LAYERS, MemoryTree
+from scripts.memory.core import DAILY_NOTE_RE, LAYERS, MemoryTree
 from scripts.utils.file_utils import write_text_skip_existing
 from scripts.utils.state_store import read_json, write_json
 from scripts.memory.watcher import MemoryWatcher
@@ -82,7 +82,7 @@ _TIME_PREFIX_RE = re.compile(r"^[-*\s]*\d{1,2}:\d{2}(?::\d{2})?\s+")
 
 #: 日记文件名（2026-09-12.md）：链接回链只追加在日记行尾——其他笔记
 #: 机器绝不改写（红线），日记追加已有用户批准先例（飞书文字并入）
-_DAILY_NOTE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
+# 日记判定正则收敛在 scripts/memory/core.py（DAILY_NOTE_RE）
 
 
 def extract_comment(body: str, url: str) -> str:
@@ -288,7 +288,7 @@ class LinkDispatcher:
             filename: 产出笔记文件名（取 stem 做 wikilink）。
         """
         src = self._sources.get(url)
-        if src is None or not _DAILY_NOTE_RE.match(Path(src).name):
+        if src is None or not DAILY_NOTE_RE.match(Path(src).name):
             return
         stem = Path(filename).stem
         try:

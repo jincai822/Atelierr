@@ -216,3 +216,49 @@ def test_webclip_not_accelerated(memory_tree):
     entry = memory_tree._entry(clip)
     assert entry["confidence"] == pytest.approx(0.95 ** 20, abs=1e-3)
     assert entry["pending_delete"] is False
+
+
+def test_daily_notes_exempt_from_decay(memory_tree, make_note):
+    """日记豁免 decay（2026-09-13 用户裁决：日记是时间档案，保存而非复习）：
+    闲置 60 天的日记不重算分层、不置待删、不计入衰减总数；
+    同批普通笔记照常衰减。"""
+    import os
+    import time
+
+    diary = make_note(memory_tree, filename="2026-07-15.md", content="那天的事")
+    normal = make_note(memory_tree, filename="普通笔记.md", content="内容")
+    old_ns = int((time.time() - 60 * 86400) * 1e9)
+    for path in (diary, normal):
+        os.utime(path, ns=(old_ns, old_ns))
+
+    report = DecayManager(memory_tree).run()
+
+    entry_diary = memory_tree._entry(diary)
+    entry_normal = memory_tree._entry(normal)
+    # 日记：豁免（confidence 保持登记初值 1.0，不置待删）
+    assert entry_diary["confidence"] == 1.0
+    assert entry_diary["pending_delete"] is False
+    # 普通笔记：60 天闲置已被衰减到待删区
+    assert entry_normal["pending_delete"] is True
+    assert report["daily_exempt"] == 1
+    assert report["total_notes"] == 1  # 只有普通笔记计入衰减
+
+
+def test_daily_dir_also_exempt(memory_tree, make_note):
+    """日记/ 子目录下的笔记同样豁免（不只看文件名）。"""
+    subdir = memory_tree.notes_dir / "日记"
+    subdir.mkdir()
+    path = subdir / "碎碎念.md"
+    path.write_text("---\ntitle: 碎碎念\n---\n\n内容\n", encoding="utf-8")
+    import os
+    import time
+    old_ns = int((time.time() - 60 * 86400) * 1e9)
+    os.utime(path, ns=(old_ns, old_ns))
+    from scripts.memory.watcher import MemoryWatcher
+    MemoryWatcher(memory_tree).process_pending()
+
+    report = DecayManager(memory_tree).run()
+
+    entry = memory_tree._entry(path)
+    assert entry["pending_delete"] is False
+    assert report["daily_exempt"] == 1

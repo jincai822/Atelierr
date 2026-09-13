@@ -68,6 +68,19 @@ MACHINE_SOURCES: frozenset[str] = frozenset(
 MACHINE_DECAY_SOURCES: frozenset[str] = frozenset({"link", "media"})
 MACHINE_DECAY_FACTOR: float = 3.0
 
+#: 日记判定（2026-09-13 用户裁决）：YYYY-MM-DD.md 文件名或位于 日记/
+#: 子目录——日记是时间档案，性质是"保存"不是"复习"，豁免 decay 分层
+#: 与待删标记（不进待删清单、不进复习队列；照常登记、照常可搜）
+DAILY_NOTE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
+DAILY_NOTE_DIR = "日记"
+
+
+def is_daily_note(note_path: Path) -> bool:
+    """是否日记（时间档案）：文件名是 YYYY-MM-DD.md 或在 日记/ 子目录下。"""
+    path = Path(note_path)
+    return bool(DAILY_NOTE_RE.match(path.name)) or path.parent.name == DAILY_NOTE_DIR
+
+
 #: Crockford base32 字母表（ULID 用，去除 I/L/O/U）
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 

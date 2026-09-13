@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 import frontmatter
 
 from scripts.memory.confidence import ConfidenceCalculator
-from scripts.memory.core import MACHINE_DECAY_SOURCES
+from scripts.memory.core import MACHINE_DECAY_SOURCES, is_daily_note
 from scripts.utils.date_utils import local_timezone, parse_date
 
 if TYPE_CHECKING:
@@ -212,6 +212,7 @@ class DecayManager:
         pending_paths: List[Path] = []
         skipped: List[Path] = []
         system_notes: List[Path] = []
+        daily_notes: List[Path] = []  # 日记豁免（2026-09-13 用户裁决）
         counts = {"short_term": 0, "mid_term": 0, "long_term": 0}
         total = 0
 
@@ -233,6 +234,12 @@ class DecayManager:
             if source == "system":
                 # 基础设施笔记（控制台等）：不衰减、不计数、不置待删
                 system_notes.append(path)
+                continue
+            if is_daily_note(path):
+                # 日记是时间档案（保存而非复习）：豁免衰减——不重算分层、
+                # 不置待删、不进复习窗口（confidence 保持登记初值，自然
+                # 落在复习窗口之外）；照常登记、照常可搜
+                daily_notes.append(path)
                 continue
             rel = self.tree._rel_key(path)
             entry = next(
@@ -303,6 +310,7 @@ class DecayManager:
             "would_relayer": len(transitions) if dry_run else 0,
             "pending": [str(path) for path in pending_paths],
             "skipped": [str(path) for path in skipped],
+            "daily_exempt": len(daily_notes),
             "system": [str(path) for path in system_notes],
             "dry_run": dry_run,
         }
