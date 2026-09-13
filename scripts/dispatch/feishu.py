@@ -80,6 +80,7 @@ from scripts.utils.state_store import read_json, write_json
 
 from scripts.dispatch.archive import derive_archive_dir
 from scripts.dispatch.feishu_cards import (
+    confirmed_with_remark_card,
     prompt_form_card,
     send_resurface_feishu,
     send_todo_feishu,
@@ -92,12 +93,14 @@ from scripts.dispatch.feishu_io import (
     CONFIRM_TAG,
     DEFAULT_CONSOLE_URL,
     DEFAULT_VAULT_NAME,
+    DISCARD_ACTION,
     ENV_APP_ID,
     ENV_APP_SECRET,
     ENV_CHAT_ID,
     ENV_CONSOLE_URL,
     ENV_NOTE_PREFIX,
     ENV_VAULT_NAME,
+    NOTE_REMARK_ACTION,
     PROMPT_FORM_MAX_QUESTIONS,
     PROMPT_SUBMIT_ACTION,
     TODO_DONE_ACTION,
@@ -130,7 +133,9 @@ __all__ = [
     "ENV_CONSOLE_URL",
     "ENV_NOTE_PREFIX",
     "ENV_VAULT_NAME",
+    "DISCARD_ACTION",
     "MENU_COMMANDS",
+    "NOTE_REMARK_ACTION",
     "PROMPT_FORM_MAX_QUESTIONS",
     "PROMPT_SUBMIT_ACTION",
     "SEARCH_LIMIT",
@@ -346,6 +351,10 @@ class FeishuBridge:
             return self._handle_todo_done(filename, chat_id)
         if action_name == PROMPT_SUBMIT_ACTION:
             return self._handle_prompt_submit(action, chat_id)
+        if action_name == DISCARD_ACTION:
+            return self._handle_discard(filename, chat_id)
+        if action_name == NOTE_REMARK_ACTION:
+            return self._handle_note_remark(action, filename, chat_id)
         return {}
 
     @staticmethod
@@ -390,7 +399,10 @@ class FeishuBridge:
         self._send_feedback(chat_id, f"✅ 已确认：{title}")
         return {
             "toast": {"type": "success", "content": "已确认"},
-            "card": {"type": "raw", "data": self._confirmed_card(filename)},
+            "card": {
+                "type": "raw",
+                "data": confirmed_with_remark_card(filename, "已移除「待确认」标签"),
+            },
         }
 
     def _handle_archive_pick(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
@@ -515,9 +527,9 @@ class FeishuBridge:
                 "toast": {"type": "success", "content": "已确认（留在收件箱）"},
                 "card": {
                     "type": "raw",
-                    "data": self._confirmed_card(
+                    "data": confirmed_with_remark_card(
                         filename,
-                        note_line="已移除「待确认」标签；推导不出归档目录，留在收件箱",
+                        "已移除「待确认」标签；推导不出归档目录，留在收件箱",
                     ),
                 },
             }
@@ -532,8 +544,8 @@ class FeishuBridge:
                 },
                 "card": {
                     "type": "raw",
-                    "data": self._confirmed_card(
-                        filename, note_line="已归档；「待确认」标签请手动摘除"
+                    "data": confirmed_with_remark_card(
+                        filename, "已归档；「待确认」标签请手动摘除"
                     ),
                 },
             }
@@ -541,8 +553,8 @@ class FeishuBridge:
         self._send_feedback(chat_id, f"📁 已确认并归档到 {detail}/：{title}")
         card = {
             "type": "raw",
-            "data": self._confirmed_card(
-                filename, note_line=f"已归档到 {detail}/ 并移除「待确认」标签"
+            "data": confirmed_with_remark_card(
+                filename, f"已归档到 {detail}/ 并移除「待确认」标签"
             ),
         }
         return {
@@ -636,6 +648,94 @@ class FeishuBridge:
                     "问答表单",
                     note_line=f"已收到 {len(answers)} 条回答，会话已结束",
                     header="✅ 问答已提交",
+                ),
+            },
+        }
+
+    def _handle_discard(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
+        """「🗑 不要了」：只标 pending_delete（不动文件），删除仍走
+        review → purge → trash/ 人工链路（2026-09-13 环节三评审毛病 1：
+        垃圾卡有即时出口，丢弃有缓冲，误点可捞回）。"""
+        try:
+            note_path, err = self._locate_note(filename)
+            if err:
+                self._send_feedback(chat_id, f"⚠️ {err}：{filename}")
+                return {"toast": {"type": "error", "content": err}}
+            entry = self.tree._entry(note_path)
+            if entry is None:
+                self._send_feedback(chat_id, f"⚠️ 笔记未登记：{filename}")
+                return {"toast": {"type": "error", "content": "笔记未登记"}}
+            if entry.get("pending_delete"):
+                self._send_feedback(chat_id, f"已在待删清单里：{filename}")
+                return {"toast": {"type": "info", "content": "已在待删清单"}}
+            entry["pending_delete"] = True
+            self.tree._save_index()
+        except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
+            print(f"[feishu] discard note={filename} fail: {exc}", flush=True)
+            self._send_feedback(chat_id, f"⚠️ 处理失败，请稍后重试：{filename}")
+            return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
+        print(f"[feishu] discard note={filename} ok", flush=True)
+        self._send_feedback(
+            chat_id,
+            f"🗑 已标记待删：{filename}\n不会自动删：review → 你点头 → 回收站"
+            "（反悔随时到 Obsidian 摘除标记，或 review 时跳过）",
+        )
+        return {
+            "toast": {"type": "success", "content": "已标记待删"},
+            "card": {
+                "type": "raw",
+                "data": self._confirmed_card(
+                    filename,
+                    note_line="不会自动删：review → 你点头 → 回收站（可恢复）",
+                    header="🗑 已标记待删",
+                ),
+            },
+        }
+
+    def _handle_note_remark(
+        self, action: Any, filename: str, chat_id: Optional[str]
+    ) -> Dict[str, Any]:
+        """确认完成卡「💾 记下」：把顺手写的一句追加进笔记末尾。
+
+        第四个人工例外（2026-09-13 环节三评审毛病 2，用户批准）：用户
+        主动提交的一句话可以追加进笔记（原子写；不回拨 mtime——人碰过
+        的东西衰减时钟就该重置，与删标签同规矩）。空提交零成本：不动
+        文件、只 toast。
+        """
+        form_value = getattr(action, "form_value", None)
+        if isinstance(form_value, str):
+            try:
+                form_value = json.loads(form_value)
+            except ValueError:
+                form_value = None
+        remark = str((form_value or {}).get("q1") or "").strip()
+        if not remark:
+            return {"toast": {"type": "info", "content": "没填就不记，零成本"}}
+        try:
+            note_path, err = self._locate_note(filename)
+            if err:
+                self._send_feedback(chat_id, f"⚠️ {err}：{filename}")
+                return {"toast": {"type": "error", "content": err}}
+            text = note_path.read_text(encoding="utf-8")
+            stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            addition = f"> 💭 顺手记一句（{stamp}）：{remark}\n"
+            self._atomic_write(
+                note_path, (text.rstrip("\n") + "\n\n" + addition).encode("utf-8")
+            )
+        except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
+            print(f"[feishu] remark note={filename} fail: {exc}", flush=True)
+            self._send_feedback(chat_id, f"⚠️ 记入失败，请稍后重试：{filename}")
+            return {"toast": {"type": "error", "content": "记入失败，请稍后重试"}}
+        print(f"[feishu] remark note={filename} ok", flush=True)
+        self._send_feedback(chat_id, f"💭 已记进笔记末尾：{filename}")
+        return {
+            "toast": {"type": "success", "content": "已记入"},
+            "card": {
+                "type": "raw",
+                "data": self._confirmed_card(
+                    filename,
+                    note_line="已把一句记到笔记末尾",
+                    header="✅ 已确认",
                 ),
             },
         }

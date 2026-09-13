@@ -98,9 +98,14 @@ def test_pending_digest_card_shape(memory_tree, monkeypatch):
         for action in el["actions"]
     ]
     callbacks = [b for b in buttons if "behaviors" in b]
-    assert len(callbacks) == 2
+    # 每条两个回调按钮：✅ 确认并归档 + 🗑 不要了（「打开细看」是 URI 按钮）
+    assert len(callbacks) == 4
     assert callbacks[0]["behaviors"][0]["value"] == {
         "action": "archive_note",
+        "note": "抖音-a.md",
+    }
+    assert callbacks[1]["behaviors"][0]["value"] == {
+        "action": "discard_note",
         "note": "抖音-a.md",
     }
     texts = [

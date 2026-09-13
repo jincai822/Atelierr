@@ -47,6 +47,12 @@ ARCHIVE_PICK_ACTION = "archive_pick"
 ARCHIVE_CANCEL_ACTION = "archive_cancel"
 #: 问答表单卡「提交回答」（schema 2.0 form 容器；答案在回调 form_value）
 PROMPT_SUBMIT_ACTION = "prompt_submit"
+#: 「🗑 不要了」按钮（2026-09-13 环节三评审毛病 1）：只标 pending_delete
+#: （不动文件），仍走 review → purge → trash/ 人工链路，安全绳一层不少
+DISCARD_ACTION = "discard_note"
+#: 确认完成卡上的「💾 记下」可选表单（2026-09-13 环节三评审毛病 2：
+#: 确认时刻顺手记一句收获；答案在回调 form_value 的 q1，可空）
+NOTE_REMARK_ACTION = "note_remark"
 
 #: 问答表单卡的问题数上限（卡片长度护栏；周回顾四问远未触及）
 PROMPT_FORM_MAX_QUESTIONS = 8
@@ -220,6 +226,21 @@ def _confirm_action_card(
                     {
                         "type": "callback",
                         "value": {"action": CONFIRM_ACTION, "note": confirm_note},
+                    }
+                ],
+            }
+        )
+        actions.append(
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": "🗑 不要了"},
+                "type": "danger",
+                # 只标 pending_delete（不动文件），仍走 review → purge
+                # 人工链路——丢弃有缓冲，误点可捞回
+                "behaviors": [
+                    {
+                        "type": "callback",
+                        "value": {"action": DISCARD_ACTION, "note": confirm_note},
                     }
                 ],
             }

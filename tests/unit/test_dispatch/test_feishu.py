@@ -306,7 +306,8 @@ def test_card_action_confirm_removes_review_tag(memory_tree):
     assert resp["card"]["type"] == "raw"
     data = resp["card"]["data"]
     assert data["header"]["template"] == "green"
-    assert "已移除「待确认」标签" in data["elements"][0]["text"]["content"]
+    # 完成卡带「顺手记一句」表单（schema 2.0），完成文案在 markdown 节
+    assert "已移除「待确认」标签" in data["body"]["elements"][0]["content"]
     after = frontmatter.loads(path.read_text(encoding="utf-8"))
     assert after.metadata == {**before.metadata, "tags": ["抖音"]}
     assert after.content == before.content
@@ -487,12 +488,14 @@ def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
     assert msg_type == "interactive"
     card = json.loads(content)
     actions = card["elements"][1]["actions"]
-    # 2026-09-12 归档默认化：主按钮一步到位确认并归档
+    # 2026-09-12 归档默认化：主按钮一步到位确认并归档；
+    # 2026-09-13 环节三评审：补「🗑 不要了」（标 pending_delete）
     assert [a["text"]["content"] for a in actions] == [
         "在 Obsidian 中打开",
         "✅ 确认并归档",
         "📁 选目录…",
         "仅确认",
+        "🗑 不要了",
     ]
     for button in actions[1:]:
         behavior = button["behaviors"][0]
@@ -510,6 +513,11 @@ def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
     }
     assert actions[3]["behaviors"][0]["value"] == {
         "action": feishu_module.CONFIRM_ACTION,
+        "note": "douyin-x.md",
+    }
+    # 「🗑 不要了」只标 pending_delete（不动文件）
+    assert actions[4]["behaviors"][0]["value"] == {
+        "action": "discard_note",
         "note": "douyin-x.md",
     }
 
@@ -583,7 +591,8 @@ def test_card_archive_moves_note_and_strips_tag(memory_tree):
 
     assert resp["toast"] == {"type": "success", "content": "已确认并归档到 抖音/"}
     assert resp["card"]["type"] == "raw"
-    assert "已归档到 抖音/" in resp["card"]["data"]["elements"][0]["text"]["content"]
+    # 完成卡带「顺手记一句」表单（schema 2.0），完成文案在 markdown 节
+    assert "已归档到 抖音/" in resp["card"]["data"]["body"]["elements"][0]["content"]
     target = memory_tree.notes_dir / "抖音" / "douyin-x.md"
     assert target.exists()
     assert not note.exists()
@@ -1491,7 +1500,7 @@ def test_archive_to_invalid_dir_rejected(memory_tree):
 
 
 def test_archive_cancel_restores_confirm_card(memory_tree):
-    """「取消」：还原确认卡（打开/确认并归档/选目录/仅确认），无文件变动。"""
+    """「取消」：还原确认卡（打开/确认并归档/选目录/仅确认/不要了），无文件变动。"""
     memory_tree.create_note("x.md", "正文\n", source="link", tags=["待确认"])
     bridge = _bridge(memory_tree)
 
@@ -1503,6 +1512,7 @@ def test_archive_cancel_restores_confirm_card(memory_tree):
         "✅ 确认并归档",
         "📁 选目录…",
         "仅确认",
+        "🗑 不要了",
     ]
     assert (memory_tree.notes_dir / "x.md").exists()
 
@@ -1982,3 +1992,111 @@ def test_media_message_without_filename_defaults_mp4(memory_tree, monkeypatch):
     attach_dir = memory_tree.notes_dir / "attachments" / "媒体"
     saved = list(attach_dir.glob("feishu-*.mp4"))
     assert len(saved) == 1
+
+
+def _card_action_with_form(value: dict, form_value: dict):
+    """带表单值的卡片回调（顺手记一句用）。"""
+    return SimpleNamespace(
+        event=SimpleNamespace(
+            action=SimpleNamespace(value=value, form_value=form_value)
+        )
+    )
+
+
+def test_discard_marks_pending_delete(memory_tree):
+    """点「🗑 不要了」：只标 pending_delete，文件一字节不动。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("junk.md", "正文\n", source="link", tags=["待确认"])
+    path = memory_tree.notes_dir / "junk.md"
+    before = path.read_bytes()
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "discard_note", "note": "junk.md"})
+    )
+
+    assert resp["toast"]["type"] == "success"
+    assert memory_tree.is_pending_delete(path)
+    assert path.read_bytes() == before  # 文件不动
+    # 幂等：再点一次提示已在清单
+    resp2 = bridge.handle_card_action(
+        _card_action({"action": "discard_note", "note": "junk.md"})
+    )
+    assert resp2["toast"]["type"] == "info"
+
+
+def test_discard_missing_note_errors(memory_tree):
+    """待删目标不存在：toast 报错，不中断。"""
+    bridge = _bridge(memory_tree)
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "discard_note", "note": "ghost.md"})
+    )
+
+    assert resp["toast"]["type"] == "error"
+
+
+def test_confirm_card_has_discard_button(memory_tree):
+    """确认卡按钮区含「🗑 不要了」（discard_note 回调）。"""
+    from scripts.dispatch.feishu_io import _confirm_action_card
+
+    card = _confirm_action_card("标题", "正文", "x.md")
+    actions = card["elements"][1]["actions"]
+    discard = [a for a in actions if a.get("type") == "danger"]
+    assert len(discard) == 1
+    assert discard[0]["behaviors"][0]["value"] == {
+        "action": "discard_note",
+        "note": "x.md",
+    }
+
+
+def test_note_remark_appends_line(memory_tree):
+    """确认完成卡「💾 记下」：顺手一句追加到笔记末尾（原子写）。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("n1.md", "正文\n", source="link", tags=["抖音"])
+    path = memory_tree.notes_dir / "n1.md"
+
+    resp = bridge.handle_card_action(
+        _card_action_with_form(
+            {"action": "note_remark", "note": "n1.md"},
+            {"q1": "这条对我有用，下周试试"},
+        )
+    )
+
+    assert resp["toast"]["type"] == "success"
+    text = path.read_text(encoding="utf-8")
+    assert "💭 顺手记一句" in text
+    assert "这条对我有用，下周试试" in text
+    assert text.startswith("---")  # frontmatter 未动
+
+
+def test_note_remark_empty_noop(memory_tree):
+    """空提交零成本：不动文件。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("n2.md", "正文\n", source="link", tags=["抖音"])
+    path = memory_tree.notes_dir / "n2.md"
+    before = path.read_bytes()
+
+    resp = bridge.handle_card_action(
+        _card_action_with_form({"action": "note_remark", "note": "n2.md"}, {"q1": "  "})
+    )
+
+    assert resp["toast"]["type"] == "info"
+    assert path.read_bytes() == before
+
+
+def test_confirmed_with_remark_card_shape():
+    """确认完成卡（schema 2.0）：含可空输入框 + 提交按钮（note_remark）。"""
+    from scripts.dispatch.feishu_cards import confirmed_with_remark_card
+
+    card = confirmed_with_remark_card("x.md", "已移除「待确认」标签")
+
+    assert card["schema"] == "2.0"
+    form = card["body"]["elements"][1]
+    assert form["tag"] == "form"
+    field = form["elements"][0]
+    assert field["tag"] == "input" and field["required"] is False
+    submit = form["elements"][1]
+    assert submit["behaviors"][0]["value"] == {
+        "action": "note_remark",
+        "note": "x.md",
+    }

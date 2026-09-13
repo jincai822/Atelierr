@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional
 
 from scripts.dispatch.feishu_io import (
     ARCHIVE_ACTION,
+    DISCARD_ACTION,
+    NOTE_REMARK_ACTION,
     PROMPT_FORM_MAX_QUESTIONS,
     PROMPT_SUBMIT_ACTION,
     TODO_DONE_ACTION,
@@ -269,6 +271,18 @@ def send_pending_digest_feishu(
                         "type": "default",
                         "url": _console_url(rel),
                     },
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "🗑"},
+                        "type": "danger",
+                        # 只标 pending_delete（不动文件），review 时才进回收站
+                        "behaviors": [
+                            {
+                                "type": "callback",
+                                "value": {"action": DISCARD_ACTION, "note": rel},
+                            }
+                        ],
+                    },
                 ],
             }
         )
@@ -284,3 +298,74 @@ def send_pending_digest_feishu(
         "elements": elements,
     }
     return send_feishu_card(card, chat_id)
+
+
+def confirmed_with_remark_card(
+    filename: str, note_line: str, header: str = "✅ 已确认"
+) -> Dict[str, Any]:
+    """确认/归档完成卡（schema 2.0）：完成文案 + 「顺手记一句」可选表单。
+
+    2026-09-13 环节三评审毛病 2（用户批准）：确认时刻是意义建构窗口——
+    表单可空（不填零成本），填了经 NOTE_REMARK_ACTION 回调由
+    FeishuBridge._handle_note_remark 追加进笔记末尾。
+
+    Args:
+        filename: 笔记文件名（回调定位用）。
+        note_line: 完成场景文案（已确认/已归档到 X 等）。
+        header: 卡片头文案。
+
+    Returns:
+        Dict[str, Any]: 卡片 JSON（schema 2.0，form 容器）。
+    """
+    return {
+        "schema": "2.0",
+        "config": {"update_multi": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": header},
+            "template": "green",
+        },
+        "body": {
+            "elements": [
+                {
+                    "tag": "markdown",
+                    "content": f"**{filename}**\n{note_line}",
+                },
+                {
+                    "tag": "form",
+                    "name": "remark_form",
+                    "elements": [
+                        {
+                            "tag": "input",
+                            "name": "q1",
+                            "required": False,
+                            "width": "default",
+                            "label": {
+                                "tag": "plain_text",
+                                "content": "顺手记一句收获？（可空）",
+                            },
+                            "placeholder": {
+                                "tag": "plain_text",
+                                "content": "此刻的想法，不填零成本",
+                            },
+                        },
+                        {
+                            "tag": "button",
+                            "name": "submit",
+                            "text": {"tag": "plain_text", "content": "💾 记下"},
+                            "type": "default",
+                            "action_type": "form_submit",
+                            "behaviors": [
+                                {
+                                    "type": "callback",
+                                    "value": {
+                                        "action": NOTE_REMARK_ACTION,
+                                        "note": filename,
+                                    },
+                                }
+                            ],
+                        },
+                    ],
+                },
+            ]
+        },
+    }
