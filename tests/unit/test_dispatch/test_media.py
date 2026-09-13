@@ -294,15 +294,35 @@ def test_same_name_in_two_subdirs_both_processed(memory_tree):
     assert len(list(Path(memory_tree.notes_dir).glob("media-*.md"))) == 2
 
 
-def test_video_in_platform_dir_ignored(memory_tree):
-    """抖音/ 里的 .mp4（links 管线保存的原视频）不被当作待处理附件。"""
+def test_video_in_platform_dir_referenced_skipped(memory_tree):
+    """抖音/ 里**已被产出卡引用**的 .mp4（links 管线保存的原视频）跳过——
+    防自产自吃（2026-09-13 起由引用判定替代目录限定）。"""
     _add_attachment(memory_tree, "抖音-健脑-vid123.mp4", subdir="抖音")
+    memory_tree.create_note(
+        "抖音-健脑.md",
+        "# x\n\n![[attachments/抖音/抖音-健脑-vid123.mp4]]\n",
+        source="link",
+        tags=["待确认", "抖音"],
+    )
 
     report = _dispatcher(memory_tree).run()
 
     assert report["found"] == 0
-    assert _FakeImageProcessor.calls == []
-    assert _FakeAudioProcessor.calls == []
+    assert _FakeVideoProcessor.calls == []
+
+
+def test_video_in_platform_dir_unreferenced_processed(memory_tree, monkeypatch):
+    """抖音/ 里**未被引用**的 .mp4（用户手动投错目录的视频）照常处理——
+    "投错子目录也认得"覆盖视频（2026-09-13 裁决）。"""
+    monkeypatch.setattr(media_module, "compress_to_480p", _fake_compress_ok)
+    _add_attachment(memory_tree, "manual.mp4", subdir="抖音")
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["found"] == 1
+    assert len(report["created"]) == 1
+    note = _created_note(memory_tree)
+    assert "![[attachments/抖音/manual.mp4]]" in note.read_text(encoding="utf-8")
 
 
 # ----------------------------------------------------------------------
@@ -432,17 +452,17 @@ def test_video_creates_note_and_replaces_with_480p(memory_tree, monkeypatch):
     assert state["attachments/媒体/clip.mp4"]["status"] == "done"
 
 
-def test_video_outside_media_subdir_ignored(memory_tree):
-    """视频只认 媒体/：顶层散放与书籍/ 里的 mp4 都不处理（平台目录见前例）。"""
+def test_video_outside_media_subdir_also_processed(memory_tree, monkeypatch):
+    """顶层散放与书籍/ 里的 mp4 同样认得（2026-09-13 起视频全目录认；
+    防自产自吃靠引用判定，见上两条用例）。"""
+    monkeypatch.setattr(media_module, "compress_to_480p", _fake_compress_ok)
     _add_attachment(memory_tree, "loose.mp4")
     _add_attachment(memory_tree, "odd.mp4", subdir="书籍")
 
     report = _dispatcher(memory_tree).run()
 
-    assert report["scanned"] == 0
-    assert report["found"] == 0
-    assert _FakeVideoProcessor.calls == []
-    assert not list(Path(memory_tree.notes_dir).glob("media-*.md"))
+    assert report["found"] == 2
+    assert len(report["created"]) == 2
 
 
 def test_video_compress_failure_keeps_original(memory_tree, monkeypatch):
@@ -483,7 +503,8 @@ def test_video_transcribe_failure_no_compress(memory_tree, monkeypatch):
 
 
 def test_video_idempotent_second_run(memory_tree, monkeypatch):
-    """同一视频第二轮跳过：480p 替换刷新 mtime 也不会触发重处理。"""
+    """同一视频第二轮不重处理：产出卡已内嵌引用该附件，第二轮在引用
+    过滤阶段就跳过（比状态表幂等更早一层，2026-09-13 引用判定）。"""
     monkeypatch.setattr(media_module, "compress_to_480p", _fake_compress_ok)
     path = _add_attachment(memory_tree, "clip.mp4", subdir="媒体")
     dispatcher = _dispatcher(memory_tree)
@@ -495,7 +516,7 @@ def test_video_idempotent_second_run(memory_tree, monkeypatch):
     report = dispatcher.run()
 
     assert report["created"] == []
-    assert report["skipped"] == 1
+    assert report["found"] == 0
     assert len(_FakeVideoProcessor.calls) == 1
 
 

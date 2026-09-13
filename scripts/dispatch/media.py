@@ -18,9 +18,13 @@ Obsidian 里图片直接显示、录音/视频直接可播）→ 正文同时进
 同一套名字。扫描覆盖 attachments/ 顶层与一层子目录。
 
 直发视频（2026-09-11 用户裁决：飞书直接发视频文件，不用链接）：
-只认 ``媒体/`` 子目录里的视频——平台目录（抖音/小红书/B站）的 mp4
-是 links 管线保存的原视频，绝不作为输入（防"自产自吃"循环）；顶层
-散放视频同样不碰（要进系统请放进 attachments/媒体/）。转写成功后
+2026-09-13 起改为**全 attachments/ 认视频**（评审架构账 5：此前只认
+``媒体/`` 子目录，"视频必须投对目录"是用户身上唯一的目录负担）；
+防"自产自吃"改用**引用判定**——平台目录（抖音/小红书/B站）里的 mp4
+已被链接产出卡内嵌引用（``![[attachments/…]]``），被引用的附件是
+"产物"不是"输入"，跳过；未被引用的视频投在哪个子目录都认得。
+时序安全：links 管线先写视频、紧接建卡引用（秒级窗口），而 links 与
+media 在同一 service 内串行（flock 互斥），不会插队。转写成功后
 压 480p **替换原件**（2026-09-11 用户裁决 B：与链接视频同一存储规格，
 这是"原件只增不减"的唯一例外，仅限本通道直发视频；压缩失败保留
 原件保底，绝不压坏了还丢原件）。其余附件原件只增不减：本模块绝不
@@ -56,7 +60,7 @@ from scripts.dispatch.highlights import CHECKLIST_SOURCE, ITEM_TAG
 from scripts.utils.file_utils import write_text_skip_existing
 from scripts.utils.state_store import read_json, write_json
 from scripts.dispatch.sysdir import SYSTEM_DIRNAME, write_machine_note
-from scripts.memory.core import MemoryTree
+from scripts.memory.core import LAYERS, MemoryTree
 from scripts.processors.audio import SUPPORTED_EXTENSIONS as AUDIO_EXTS
 from scripts.processors.audio import AudioProcessor
 from scripts.processors.base import INLINE_BODY_MAX
@@ -91,8 +95,13 @@ MIN_AGE_SECONDS = 30
 #: 人工勾中的条目由 dispatch/highlights.py 转为正式笔记）
 _PDF_EXTS = {".pdf"}
 
-#: 直发视频扩展名（2026-09-11 裁决）——只认 媒体/ 子目录，见 _collect_files
+#: 直发视频扩展名（2026-09-11 裁决）——全 attachments/ 目录都认，
+#: 已被笔记引用的跳过（2026-09-13 起，见 _collect_files）
 _VIDEO_EXTS = set(VIDEO_EXTS)
+
+#: 笔记内嵌/链接附件的写法：``![[attachments/xx]]`` 或
+#: ``[[attachments/xx|别名]]``（只取路径段，别名丢弃）
+_ATTACH_REF_RE = re.compile(r"\[\[\s*(attachments/[^\]|]+?)(?:\|[^\]]*)?\s*\]\]")
 
 _KIND_BY_EXT = {ext: "截图" for ext in IMAGE_EXTS}
 _KIND_BY_EXT.update({ext: "录音" for ext in AUDIO_EXTS})
@@ -215,15 +224,16 @@ class MediaDispatcher:
     def _collect_files(self, report: Dict[str, Any]) -> List[Path]:
         """列出 attachments/ 顶层与一层子目录下全部可处理附件（按 mtime 升序）。
 
-        只认图片/录音/PDF 扩展名，外加**仅 媒体/ 子目录**的视频扩展名
-        （2026-09-11 裁决）：``抖音/`` 等平台目录里的 mp4 是 links 管线
-        保存的原视频，顶层散放视频也不是约定入口，都绝不作为输入
-        （防"自产自吃"循环）。
+        只认图片/录音/PDF 扩展名，外加视频扩展名（2026-09-13 起全目录认，
+        不再限定 媒体/）——**已被笔记引用的视频除外**（链接管线保存的
+        480p 原视频会被产出卡内嵌引用，是"产物"不是"输入"，跳过即防
+        "自产自吃"循环；见 _referenced_attachments）。
         """
         attach_dir = Path(self.tree.notes_dir) / ATTACHMENTS_DIR
         if not attach_dir.is_dir():
             return []
         now = time.time()
+        referenced = self._referenced_attachments()
         candidates = [path for path in attach_dir.iterdir() if path.is_file()]
         for subdir in sorted(attach_dir.iterdir()):
             if subdir.is_dir() and not subdir.name.startswith("."):
@@ -234,7 +244,8 @@ class MediaDispatcher:
                 continue
             suffix = path.suffix.lower()
             if suffix in _VIDEO_EXTS:
-                if path.parent.name != MEDIA_SUBDIR:
+                rel = path.relative_to(self.tree.notes_dir).as_posix()
+                if rel in referenced:
                     continue
             elif suffix not in _KIND_BY_EXT and suffix not in _PDF_EXTS:
                 continue
@@ -248,6 +259,24 @@ class MediaDispatcher:
             files.append(path)
         files.sort(key=lambda p: p.stat().st_mtime)
         return files
+
+    def _referenced_attachments(self) -> set:
+        """全部笔记里被引用的附件相对路径集合（``[[attachments/…]]``）。
+
+        链接产出卡内嵌 ``![[attachments/抖音/xxx.mp4]]``、外置全文用
+        ``[[attachments/媒体/xxx.md|别名]]``——两种写法都抓，只取路径段。
+        任何读取失败跳过该篇（不中断扫描）。
+        """
+        refs: set = set()
+        for layer in LAYERS:
+            for note_path in self.tree.list_notes(layer):
+                try:
+                    text = Path(note_path).read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                for match in _ATTACH_REF_RE.finditer(text):
+                    refs.add(match.group(1))
+        return refs
 
     def _process_one(
         self, path: Path, state: Dict[str, Any], report: Dict[str, Any]
