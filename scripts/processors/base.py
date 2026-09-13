@@ -20,8 +20,10 @@ import yaml
 
 #: 配置文件查找顺序（前者存在则优先；example 随仓库分发）
 CONFIG_FILES: Tuple[str, ...] = (
-    "config/processors.yaml",
+    # 顺序即优先级（后加载的覆盖先加载的）：示例是缺省层，真实配置必须最后
+    # 加载——2026-09-14 实测：写反过（真实在前示例在后），用户配置从未生效
     "config/processors.yaml.example",
+    "config/processors.yaml",
 )
 
 #: 内置默认配置（与 config/processors.yaml.example 对齐，作为兜底）

@@ -115,3 +115,21 @@ def test_initial_prompt_configurable_and_disableable(monkeypatch, video_mp4):
 
     VideoProcessor({"initial_prompt": ""}).process(str(video_mp4))
     assert "initial_prompt" not in model.kwargs
+
+
+def test_real_config_overrides_example(tmp_path, monkeypatch):
+    """真实配置必须覆盖示例（2026-09-14 实测：加载顺序写反过，
+    用户配置从未生效——video.model=large-v3 被示例的 base 顶掉）。"""
+    import scripts.processors.base as base_module
+
+    real = tmp_path / "real.yaml"
+    real.write_text("processors:\n  video:\n    model: large-v3\n", encoding="utf-8")
+    example = tmp_path / "example.yaml"
+    example.write_text("processors:\n  video:\n    model: base\n", encoding="utf-8")
+    monkeypatch.setattr(
+        base_module, "CONFIG_FILES", (str(example), str(real))  # 示例在前真实在后
+    )
+
+    from scripts.processors.video import VideoProcessor
+
+    assert VideoProcessor().model_name == "large-v3"
