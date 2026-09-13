@@ -1,0 +1,296 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Atelierr 总架构时序图：一条信息从发出到沉淀的完整旅程",
+    "subtitle": "从上到下是时间顺序 · 每条横箭头一句话说清这棒干什么 · 2026-09-13",
+    "output": "atelierr-overview-sequence.html",
+    "viewBox": [
+      1000,
+      920
+    ]
+  },
+  "participants": [
+    {
+      "id": "you",
+      "type": "external",
+      "label": "你",
+      "sublabel": "手机/电脑 · 四个入口"
+    },
+    {
+      "id": "vault",
+      "type": "database",
+      "label": "库·收件箱",
+      "sublabel": "memory/ 根 + attachments/ 平台目录"
+    },
+    {
+      "id": "dispatch",
+      "type": "backend",
+      "label": "分发班次",
+      "sublabel": "15 分钟一轮 · 幂等+熔断"
+    },
+    {
+      "id": "engines",
+      "type": "backend",
+      "label": "加工引擎组",
+      "sublabel": "yt-dlp·Whisper·DeepSeek·OCR·ffmpeg"
+    },
+    {
+      "id": "feishu",
+      "type": "external",
+      "label": "飞书卡片",
+      "sublabel": "确认卡/待办/晨报周报/回执"
+    },
+    {
+      "id": "sink",
+      "type": "database",
+      "label": "沉淀去向",
+      "sublabel": "归档平台/ · wiki/ · trash/"
+    },
+    {
+      "id": "upkeep",
+      "type": "backend",
+      "label": "定时维护",
+      "sublabel": "decay 03:00 · 晨报 07:53 · 周报周日"
+    },
+    {
+      "id": "atelier",
+      "type": "backend",
+      "label": "Atelier 车间",
+      "sublabel": "$hi/$weekly · 只读引用全库"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 290,
+      "label": "环节一 · 捕获：机器只接不判断（零摩擦，≤3 秒）"
+    },
+    {
+      "from": 295,
+      "to": 490,
+      "label": "环节二 · 分发+加工：15 分钟班次无人值守"
+    },
+    {
+      "from": 495,
+      "to": 610,
+      "label": "环节三 · 确认：你点按钮机器才动"
+    },
+    {
+      "from": 615,
+      "to": 830,
+      "label": "环节四 · 维护：遗忘+回顾（全异步）"
+    }
+  ],
+  "messages": [
+    {
+      "from": "you",
+      "to": "vault",
+      "y": 185,
+      "label": "① 发链接/截图/语音/视频/PDF/文字",
+      "variant": "emphasis"
+    },
+    {
+      "from": "you",
+      "to": "vault",
+      "y": 225,
+      "label": "② 速记/直写/剪藏——同一个收件箱，捕获期零 API",
+      "variant": "default"
+    },
+    {
+      "from": "dispatch",
+      "to": "vault",
+      "y": 265,
+      "label": "③ 扫库：新链接/新附件/新剪藏/行动意图",
+      "variant": "default"
+    },
+    {
+      "from": "vault",
+      "to": "dispatch",
+      "y": 305,
+      "label": "回：幂等过滤后的待处理清单（watcher 已登记）",
+      "variant": "return"
+    },
+    {
+      "from": "dispatch",
+      "to": "engines",
+      "y": 345,
+      "label": "⑤ 分派：链接→yt-dlp · 图→OCR · 音视频→Whisper · PDF/待办→DeepSeek",
+      "variant": "emphasis"
+    },
+    {
+      "from": "engines",
+      "to": "vault",
+      "y": 385,
+      "label": "⑥ 产出回库：待确认卡落根 + 480p 原件/全文归 attachments/平台/",
+      "variant": "emphasis"
+    },
+    {
+      "from": "engines",
+      "to": "feishu",
+      "y": 425,
+      "label": "⑦ 推确认卡：标题/摘要/分观点/金句（含你的评论）",
+      "variant": "emphasis"
+    },
+    {
+      "from": "dispatch",
+      "to": "feishu",
+      "y": 465,
+      "label": "⑧ 待办单向同步飞书任务/日历",
+      "variant": "dashed"
+    },
+    {
+      "from": "feishu",
+      "to": "you",
+      "y": 505,
+      "label": "⑨ 卡片到手：✅确认 / 📁归档… / 删除",
+      "variant": "return"
+    },
+    {
+      "from": "you",
+      "to": "feishu",
+      "y": 545,
+      "label": "⑩ 你点按钮——三人工例外，机器只在这时动笔记",
+      "variant": "security"
+    },
+    {
+      "from": "feishu",
+      "to": "sink",
+      "y": 585,
+      "label": "⑪ 归档平台/平铺（唯书籍留子目录）· 划重点→wiki 摘录卡",
+      "variant": "emphasis"
+    },
+    {
+      "from": "upkeep",
+      "to": "vault",
+      "y": 625,
+      "label": "⑫ 每日 03:00 decay：机器转写 3x 速衰减——只写索引不动文件",
+      "variant": "dashed"
+    },
+    {
+      "from": "upkeep",
+      "to": "feishu",
+      "y": 665,
+      "label": "⑬ 待删清单提醒 + 晨报 07:53 + 周日周报",
+      "variant": "dashed"
+    },
+    {
+      "from": "you",
+      "to": "sink",
+      "y": 705,
+      "label": "⑭ 你 CLI 点头 → purge → trash/（可恢复）",
+      "variant": "emphasis"
+    },
+    {
+      "from": "sink",
+      "to": "atelier",
+      "y": 745,
+      "label": "⑮ 周回顾只读引用 memory/wiki/cognition",
+      "variant": "dashed"
+    },
+    {
+      "from": "atelier",
+      "to": "sink",
+      "y": 785,
+      "label": "⑯ 回顾产物落 reflections/ → 进 wiki 展示",
+      "variant": "dashed"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "vault",
+      "from": 180,
+      "to": 430,
+      "type": "database"
+    },
+    {
+      "participant": "dispatch",
+      "from": 260,
+      "to": 490,
+      "type": "backend"
+    },
+    {
+      "participant": "engines",
+      "from": 340,
+      "to": 470,
+      "type": "backend"
+    },
+    {
+      "participant": "feishu",
+      "from": 420,
+      "to": 600,
+      "type": "external"
+    },
+    {
+      "participant": "sink",
+      "from": 580,
+      "to": 800,
+      "type": "database"
+    },
+    {
+      "participant": "upkeep",
+      "from": 620,
+      "to": 670,
+      "type": "backend"
+    },
+    {
+      "participant": "atelier",
+      "from": 740,
+      "to": 790,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "slate",
+      "title": "这张图怎么读（30 秒）",
+      "items": [
+        "从上到下 = 时间顺序：你发出 → 库接住 → 班次加工 → 你确认 → 沉淀/遗忘/回顾",
+        "每条横箭头一句话，说清这一棒干什么；编号 ①-⑯ 跟着读",
+        "绿粗线 = 内容在流动；灰细线 = 返回/应答；紫虚线 = 异步定时任务；橙线 = 你的按钮动作",
+        "竖虚线是各角色的「生命线」，箭头横穿它是正常的；所有箭头各占一行，互不重叠"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "环节一 · 捕获（①②）",
+      "items": [
+        "四个入口：飞书接一切（链接/截图/语音/视频/PDF/文字+评论）、QuickAdd 记想法、Obsidian 直写+拖大文件、剪藏收长文",
+        "落地两个口袋：文字→memory/ 根（日记追加一行）；原件→attachments/ 平台目录",
+        "红线：零摩擦 ≤3 秒无必填；机器只接不判断——不分类/不摘要/不改写；捕获期零 API",
+        "大视频超飞书上限（234037）有回执两条出路：发链接 / 电脑拖 attachments/媒体/"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "环节二 · 分发+加工（③-⑧）",
+      "items": [
+        "watcher 先把裸笔记补一次性 frontmatter（还原 mtime），sidecar 登记——内容一字不动",
+        "幂等：同一 URL/文件只成功处理一次；失败 3 次熔断；mtime<30s 不动（防读半文件）",
+        "成本护栏：DeepSeek 每篇≤1 次、超 6000 字跳过、失败降级；Whisper GPU 优先（链接/视频 large-v3，语音 base）",
+        "视频只存 480p 单份（压失败留原件）；长全文 >800 字外置 attachments/平台/<同名>.md（方案 B）"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "环节三 · 确认（⑨⑩⑪）",
+      "items": [
+        "三人工例外：你点按钮机器才动——删「待确认」/删「待办」/归档移动单篇",
+        "归档：平台/根目录平铺、分类全走标签；唯 书籍/ 保留类型子目录",
+        "待办单向同步飞书任务，点 ✅ 回写完成，截止日上「Atelierr」日历",
+        "划重点：PDF 清单勾选 [x] 直接转 wiki 摘录卡（不经待确认）"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "环节四 · 维护（⑫-⑯）+ 铁律",
+      "items": [
+        "decay 方案 C：机器转写 3x 速（约 15 天触及待删 vs 人写 45 天）；只写 sidecar，绝不动文件",
+        "删除只有一条路：pending_delete → review → 你 CLI 点头 → trash/（可恢复）；机器绝不自动删",
+        "wiki/ 是唯一沉淀出口：摘录卡/concept/判断登记处/反思产物都在这，不衰减不 purge",
+        "Atelier 车间只读引用全库（$weekly 周回顾），产物落 reflections/ 进 wiki；控制台主页在 Obsidian 一键进",
+        "库每日 03:00 git 快照；Syncthing 双向同步；WireGuard 内网不公网暴露"
+      ]
+    }
+  ]
+}
