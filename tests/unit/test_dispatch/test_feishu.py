@@ -1925,3 +1925,53 @@ def test_resource_download_failure_sends_feedback(memory_tree, monkeypatch):
     # 回执必须给两条出路（2026-09-13 升级）：发链接 + 电脑投递
     assert "发链接" in feedback[0]
     assert "attachments/媒体" in feedback[0]
+
+
+def test_media_message_saved_as_mp4(memory_tree, monkeypatch):
+    """飞书直发视频消息 msg_type=media（不是 file）：下载（资源 type=file）
+    → 存 .mp4 进 attachments/媒体/ → 加 ✅ 表情回执。
+    2026-09-13 实测：media 漏接分支导致小视频被静默吞掉。"""
+    bridge = _bridge(memory_tree)
+    downloads = []
+    monkeypatch.setattr(
+        bridge,
+        "_download_resource",
+        lambda mid, key, rtype: downloads.append((key, rtype)) or b"mp4blob",
+    )
+    reactions = []
+    monkeypatch.setattr(
+        bridge, "_add_reaction", lambda mid, **kw: reactions.append(mid)
+    )
+
+    bridge.handle_event(
+        _event(
+            "m-media-1",
+            "media",
+            {"file_key": "video_key", "file_name": "clip.mp4", "duration": 12},
+        )
+    )
+
+    assert downloads == [("video_key", "file")]
+    attach_dir = memory_tree.notes_dir / "attachments" / "媒体"
+    saved = list(attach_dir.glob("feishu-*.mp4"))
+    assert len(saved) == 1
+    assert "clip.mp4" in saved[0].name
+    assert saved[0].read_bytes() == b"mp4blob"
+    assert reactions == ["m-media-1"]
+
+
+def test_media_message_without_filename_defaults_mp4(memory_tree, monkeypatch):
+    """media 负载缺 file_name：兜底 .mp4 后缀（media 管线按后缀认视频）。"""
+    bridge = _bridge(memory_tree)
+    monkeypatch.setattr(
+        bridge, "_download_resource", lambda mid, key, rtype: b"mp4blob"
+    )
+    monkeypatch.setattr(bridge, "_add_reaction", lambda mid, **kw: None)
+
+    bridge.handle_event(
+        _event("m-media-2", "media", {"file_key": "video_key", "duration": 5})
+    )
+
+    attach_dir = memory_tree.notes_dir / "attachments" / "媒体"
+    saved = list(attach_dir.glob("feishu-*.mp4"))
+    assert len(saved) == 1

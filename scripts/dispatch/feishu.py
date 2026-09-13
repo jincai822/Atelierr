@@ -277,7 +277,7 @@ class FeishuBridge:
                     str(content.get("text") or ""),
                     chat_id=str(getattr(message, "chat_id", "") or "") or None,
                 )
-            elif msg_type in ("image", "file", "audio"):
+            elif msg_type in ("image", "file", "audio", "media"):
                 self._receive_resource(
                     message_id,
                     msg_type,
@@ -1302,8 +1302,11 @@ class FeishuBridge:
         图片/语音与其它文件 → ``attachments/媒体/``；PDF →
         ``attachments/书籍/``（划重点通道）。语音（msg_type=audio）是
         飞书按住说话入口：存 .ogg（AudioProcessor 支持），下一轮 media
-        分发走 Whisper 转写 → 转写确认卡，与截图同路。资源 API 的
-        type 只有 image/file 两类：语音按 file 拉取。
+        分发走 Whisper 转写 → 转写确认卡，与截图同路。视频消息
+        （msg_type=media）同样按 file 拉取、存 .mp4 进 媒体/，由 media
+        管线做转写+480p（2026-09-13 实测：飞书直发视频 msg_type 是
+        media 而非 file，漏接会被静默吞掉）。资源 API 的
+        type 只有 image/file 两类：语音/视频按 file 拉取。
 
         下载失败（含飞书 234037 文件超限）不再静默：打日志并回执
         用户原因与两条出路（2026-09-12 实测：手机直出视频超限无任何
@@ -1332,6 +1335,13 @@ class FeishuBridge:
             filename = f"feishu-{stamp}-{suffix}.png"
         elif msg_type == "audio":
             filename = f"feishu-{stamp}-{suffix}.ogg"
+        elif msg_type == "media":
+            original = _ILLEGAL_RE.sub(
+                "-", str(content.get("file_name") or "video.mp4")
+            ).strip(". ")
+            if "." not in original:
+                original += ".mp4"
+            filename = f"feishu-{stamp}-{original}"
         else:
             original = _ILLEGAL_RE.sub(
                 "-", str(content.get("file_name") or "file")
