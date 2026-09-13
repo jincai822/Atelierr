@@ -1,0 +1,18 @@
+# Atelierr 晚间待确认清单定时器（与 atelierr-pending.service 配套）
+#
+# 确认卡分级（2026-09-13 用户裁决）：发链接/剪藏时写了评论/备注的
+# 即时单卡推送；没写的攒进本班次，每晚 21:17 合成一张「今日待确认
+# 清单」卡批量处理（卡片每条带「✅ 确认并归档」按钮）。
+#
+# 用户级安装:
+#   systemctl --user enable --now atelierr-pending.timer
+
+[Unit]
+Description=Atelierr pending-confirm digest timer (daily 21:17)
+
+[Timer]
+OnCalendar=*-*-* 21:17:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

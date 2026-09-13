@@ -34,6 +34,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import frontmatter
 
+from scripts.dispatch import pending_push
 from scripts.dispatch.archive import derive_archive_dir
 from scripts.memory.core import LAYERS, MemoryTree
 from scripts.memory.watcher import MemoryWatcher
@@ -97,6 +98,7 @@ class ClipDispatcher:
             "scanned": 0,
             "new": 0,
             "cards": [],
+            "deferred": [],
             "duplicates": [],
             "skipped": 0,
         }
@@ -183,17 +185,26 @@ class ClipDispatcher:
         state: Dict[str, Any],
         report: Dict[str, Any],
     ) -> None:
-        """处理一篇新剪藏：重复检测 → （非重复）摘要 + 确认卡。"""
+        """处理一篇新剪藏：重复检测 → （非重复）摘要 + 确认卡。
+
+        确认卡分级（2026-09-13 用户裁决）：有备注（剪藏时写的"为什么
+        存"）→ 即时摘要+单推；无备注 → 不调 LLM（省一次 API），入队
+        pending_push 攒晚间清单卡。
+        """
         url = clip["url"]
         if url and (url in taken_urls or url in winners):
             self._mark_duplicate(clip, state, report)
             return
-        summary, status = self._summarize(clip)
-        self._send(
-            "Atelierr 剪藏待确认",
-            self._card_body(clip, summary),
-            confirm_note=clip["rel"],
-        )
+        status = "deferred:no-note"
+        if clip["note"]:
+            summary, status = self._summarize(clip)
+            self._send(
+                "Atelierr 剪藏待确认",
+                self._card_body(clip, summary),
+                confirm_note=clip["rel"],
+            )
+        else:
+            pending_push.enqueue(self.tree.state_dir, clip["rel"], kind="clip")
         state[clip["id"]] = {
             "path": clip["rel"],
             "url": url,
@@ -202,7 +213,10 @@ class ClipDispatcher:
         }
         if url:
             winners[url] = clip["id"]
-        report["cards"].append(clip["rel"])
+        if clip["note"]:
+            report["cards"].append(clip["rel"])
+        else:
+            report["deferred"].append(clip["rel"])
 
     def _mark_duplicate(
         self, clip: Dict[str, Any], state: Dict[str, Any], report: Dict[str, Any]

@@ -15,7 +15,9 @@ from unittest import mock
 from scripts.dispatch.digest import DigestDispatcher
 from scripts.dispatch.stats import (
     capture_stats,
+    failure_stats,
     render_capture_line,
+    render_failure_line,
     render_weekly_stats,
 )
 
@@ -215,3 +217,56 @@ def test_cli_stats_command(memory_tree, tmp_path):
     code = cli_module.DispatchCLI(config_path=str(config)).main(["stats"])
 
     assert code == 0
+
+
+def test_failure_stats_counts_failed_only(tmp_path):
+    """熔断条目（status=failed）按渠道计数；done/缺表/损坏表不计。"""
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "processed_links.json").write_text(
+        json.dumps(
+            {
+                "u1": {"status": "done"},
+                "u2": {"status": "failed", "attempts": 3},
+                "u3": {"status": "failed", "attempts": 4},
+                "u4": {"attempts": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (state / "processed_todos.json").write_text(
+        json.dumps({"n1": {"status": "failed"}}), encoding="utf-8"
+    )
+    (state / "processed_media.json").write_text("损坏{", encoding="utf-8")
+
+    assert failure_stats(state) == {"链接": 2, "待办": 1}
+
+
+def test_failure_stats_empty(tmp_path):
+    """无状态表 → 空表。"""
+    assert failure_stats(tmp_path) == {}
+
+
+def test_render_failure_line():
+    """无失败不占版面；有失败给一行点名+出路。"""
+    assert render_failure_line({}) is None
+    line = render_failure_line({"链接": 2, "待办": 1})
+    assert "3 条" in line
+    assert "链接 2" in line and "待办 1" in line
+    assert "重发" in line
+
+
+def test_digest_shows_failure_line(memory_tree, monkeypatch):
+    """晨报集成：状态表里有熔断条目时，摘要含失败点名行。"""
+    (memory_tree.state_dir / "processed_links.json").write_text(
+        json.dumps({"u1": {"status": "failed"}}), encoding="utf-8"
+    )
+    report = DigestDispatcher(memory_tree).run(dry_run=True, today=TODAY)
+    assert "处理失败未恢复 1 条" in report["markdown"]
+    assert "链接 1" in report["markdown"]
+
+
+def test_digest_no_failure_no_line(memory_tree):
+    """无熔断：摘要不出现失败行。"""
+    report = DigestDispatcher(memory_tree).run(dry_run=True, today=TODAY)
+    assert "处理失败" not in report["markdown"]

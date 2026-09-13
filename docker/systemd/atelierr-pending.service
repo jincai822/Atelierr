@@ -1,0 +1,19 @@
+# Atelierr 晚间待确认清单服务（oneshot，与 atelierr-pending.timer 配套）
+#
+# 只做一件事：把 pending_push 队列里仍待确认的笔记合成一张飞书卡
+# 推出（见 scripts/dispatch/pending_push.py）。
+
+[Unit]
+Description=Atelierr pending-confirm digest (daily evening)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/workspaces/Atelierr
+Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+EnvironmentFile=-%h/.config/atelierr/env
+ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli pending
+StandardOutput=append:%h/atelierr-data/state/logs/pending.log
+StandardError=append:%h/atelierr-data/state/logs/pending.log

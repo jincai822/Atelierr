@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -181,3 +182,59 @@ def render_weekly_stats(stats: Dict[str, Any]) -> List[str]:
     lines.append(f"- 沉淀进 wiki：{stats['wiki_new']} 张卡")
     lines.append(f"- 本周遗忘（purge 进回收站）：{stats['purged']} 条")
     return lines
+
+#: 分发状态表（渠道显示名 → 状态文件名），条目 status=="failed" 即熔断中
+_STATE_FILES = {
+    "链接": "processed_links.json",
+    "附件": "processed_media.json",
+    "待办": "processed_todos.json",
+}
+
+
+def failure_stats(state_dir: Path) -> Dict[str, int]:
+    """各分发渠道熔断中（status=failed）的条目数（只读；无表/损坏按 0）。
+
+    熔断是静默的（连续失败 3 次后该条目永久跳过，用户无感知）——
+    本统计进晨报让失败可见（2026-09-13 评审毛病 3，与 E6 同源：
+    失败不许静默）。
+
+    Args:
+        state_dir: sidecar 目录（tree.state_dir）。
+
+    Returns:
+        Dict[str, int]: 渠道显示名 → 熔断条目数（无失败的渠道不出现）。
+    """
+    result: Dict[str, int] = {}
+    for label, name in _STATE_FILES.items():
+        try:
+            data = json.loads((Path(state_dir) / name).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        count = sum(
+            1
+            for entry in data.values()
+            if isinstance(entry, dict) and entry.get("status") == "failed"
+        )
+        if count:
+            result[label] = count
+    return result
+
+
+def render_failure_line(failures: Dict[str, int]) -> Optional[str]:
+    """晨报失败行；无失败返回 None（不占版面）。
+
+    Args:
+        failures: failure_stats 的产出。
+
+    Returns:
+        Optional[str]: 一行警示文案或 None。
+    """
+    if not failures:
+        return None
+    parts = " · ".join(
+        f"{label} {count}" for label, count in sorted(failures.items())
+    )
+    return (
+        f"⚠️ 处理失败未恢复 {sum(failures.values())} 条（{parts}）"
+        "——重发原件/链接即可重试"
+    )

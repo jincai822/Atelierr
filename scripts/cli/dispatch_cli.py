@@ -41,6 +41,7 @@ from scripts.dispatch.highlights import HighlightsDispatcher
 from scripts.dispatch.links import LinkDispatcher
 from scripts.dispatch.media import MediaDispatcher
 from scripts.dispatch.notify import send_dispatch_notice
+from scripts.dispatch import pending_push
 from scripts.dispatch.prompt import PromptStore
 from scripts.dispatch.todos import TodoDispatcher
 from scripts.memory.core import MemoryTree
@@ -125,6 +126,7 @@ def _notify_created_notes(
     notes_dir: Path,
     skip_prefix: str = "",
     extras: Optional[Dict[str, str]] = None,
+    defer_queue: Optional[Path] = None,
 ) -> None:
     """新产出笔记逐条推送带「✅ 确认」按钮的卡片（confirm_note=文件名）。
 
@@ -134,6 +136,10 @@ def _notify_created_notes(
     （读笔记取平台/中图法标签，取不到就省略，绝不影响推送）。
     todos/dochealth 等汇总通知不走此路径。
 
+    确认卡分级（2026-09-13 用户裁决）：``defer_queue`` 给定时，
+    **无评论**的笔记不即时推卡，改为入队 pending_push（晚间
+    「今日待确认清单」一张卡批量处理）；有评论（extras）的照旧即推。
+
     Args:
         title: 通知标题。
         message: 通知正文前缀。
@@ -141,15 +147,20 @@ def _notify_created_notes(
         notes_dir: 笔记根目录（读 frontmatter 建议归档提示用）。
         skip_prefix: 按 basename 命中该前缀的不推送（如 划重点-）。
         extras: 按文件名附加的正文行（如链接笔记的「你的评论：…」，2026-09-10 裁决 C2）。
+        defer_queue: sidecar 目录（tree.state_dir）；None 不分级全即推。
     """
     if not _feishu_ready():
         return
     for filename in created:
         if skip_prefix and Path(filename).name.startswith(skip_prefix):
             continue
+        comment = extras.get(filename) if extras else None
+        if defer_queue is not None and not comment:
+            pending_push.enqueue(defer_queue, filename)
+            continue
         body = f"{message}：{filename}"
-        if extras and extras.get(filename):
-            body = f"{body}\n你的评论：{extras[filename]}"
+        if comment:
+            body = f"{body}\n你的评论：{comment}"
         hint = _archive_hint(notes_dir / filename)
         if hint:
             body = f"{body}\n{hint}"
@@ -319,6 +330,7 @@ class DispatchCLI:
                             report["created"],
                             notes_dir=tree.notes_dir,
                             extras=report.get("comments"),
+                            defer_queue=tree.state_dir,
                         )
                 # 同班次扫网页剪藏：新剪藏推 LLM 摘要确认卡，同 url
                 # 重复剪藏标 pending_delete（详见 dispatch/clips.py）
@@ -432,6 +444,25 @@ class DispatchCLI:
                     click.echo(f"  已创建摘录卡: wiki/{filename}")
                 if dry_run:
                     click.echo("（dry-run：未做处理）")
+
+        @cli.command(name="pending")
+        def pending_command() -> None:
+            """推「今日待确认清单」卡（确认卡分级：无评论的捕获攒成一张）。
+
+            由 atelierr-pending.timer 每晚触发；队列空或全部已解决时
+            静默不推。卡片每条带「✅ 确认并归档」按钮。
+            """
+            tree = self._build_tree()
+            report = pending_push.flush(tree)
+            if report["pending"] and report["sent"]:
+                click.echo(f"已推送待确认清单：{report['pending']} 条")
+            elif report["pending"]:
+                click.echo(f"推送失败（{report['pending']} 条留队下轮）")
+            else:
+                click.echo(
+                    f"无待确认（队列 {report['queued']} 条，"
+                    f"已解决 {report['resolved']} 条）"
+                )
 
         @cli.command(name="prompt-open")
         @click.argument("kind")

@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from scripts.dispatch.feishu_io import (
+    ARCHIVE_ACTION,
     PROMPT_FORM_MAX_QUESTIONS,
     PROMPT_SUBMIT_ACTION,
     TODO_DONE_ACTION,
@@ -204,3 +206,81 @@ def send_resurface_feishu(
     }
     return send_feishu_card(card, chat_id)
 
+
+
+def send_pending_digest_feishu(
+    filenames: List[str], chat_id: Optional[str] = None
+) -> bool:
+    """晚间待确认清单卡（2026-09-13 用户裁决：无评论的捕获不单独推卡，
+    攒成一张批量处理——确认端减负）。
+
+    每条笔记一节：标题 + 「✅ 确认并归档」按钮（callback 复用
+    FeishuBridge 的 archive_note 分支：推导目录直接移动+删标签，
+    推不出平台时退化为仅确认）。想细看/换目录：点标题到 Obsidian。
+
+    Args:
+        filenames: 仍带「待确认」的笔记相对路径列表（最多 20 条，
+            由 pending_push.MAX_ITEMS 截断）。
+        chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID``。
+
+    Returns:
+        bool: 发送成功返回 True；空列表/未配置静默 False。
+    """
+    if not filenames:
+        return False
+    elements: List[Dict[str, Any]] = [
+        {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": (
+                    "今天无评论的捕获攒成这一张（写了评论的已即时单推）。"
+                    "逐条点「✅ 确认并归档」，或到 Obsidian 细看再处理。"
+                ),
+            },
+        }
+    ]
+    for index, rel in enumerate(filenames[:20], 1):
+        stem = Path(rel).stem
+        elements.append(
+            {
+                "tag": "div",
+                "text": {"tag": "lark_md", "content": f"**{index}. {stem}**"},
+            }
+        )
+        elements.append(
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "✅ 确认并归档"},
+                        "type": "primary",
+                        "behaviors": [
+                            {
+                                "type": "callback",
+                                "value": {"action": ARCHIVE_ACTION, "note": rel},
+                            }
+                        ],
+                    },
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "打开细看"},
+                        "type": "default",
+                        "url": _console_url(rel),
+                    },
+                ],
+            }
+        )
+    card = {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {
+                "tag": "plain_text",
+                "content": f"📋 今日待确认清单（{len(filenames[:20])} 条）",
+            },
+            "template": "blue",
+        },
+        "elements": elements,
+    }
+    return send_feishu_card(card, chat_id)

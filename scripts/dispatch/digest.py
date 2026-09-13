@@ -53,7 +53,9 @@ import frontmatter
 from scripts.dispatch.response_probe import ResponseProbe
 from scripts.dispatch.stats import (
     capture_stats,
+    failure_stats,
     render_capture_line,
+    render_failure_line,
     render_weekly_stats,
 )
 from scripts.dispatch.sysdir import SYSTEM_DIRNAME, write_machine_note
@@ -203,6 +205,8 @@ class DigestDispatcher:
         capture_line = render_capture_line(
             capture_stats(self.tree, days=1, today=yesterday)
         )
+        # 熔断失败可见（2026-09-13 评审毛病 3）：静默熔断进晨报点名
+        failure_line = render_failure_line(failure_stats(Path(self.tree.state_dir)))
         is_sunday = datetime.strptime(today, "%Y-%m-%d").weekday() == 6
         weekly_lines = (
             render_weekly_stats(capture_stats(self.tree, days=7, today=today))
@@ -213,6 +217,7 @@ class DigestDispatcher:
             today, pending, todos, review_stems, yesterday_new,
             undistilled, wiki_issues, health, health_stale,
             capture_line=capture_line, weekly_lines=weekly_lines,
+            failure_line=failure_line,
             stale_pending_lines=stale_pending, stale_human_lines=stale_human,
         )
         created = None
@@ -408,6 +413,7 @@ class DigestDispatcher:
         health_stale: int,
         capture_line: Optional[str] = None,
         weekly_lines: Optional[List[str]] = None,
+        failure_line: Optional[str] = None,
         stale_pending_lines: Optional[List[str]] = None,
         stale_human_lines: Optional[List[str]] = None,
     ) -> str:
@@ -417,7 +423,8 @@ class DigestDispatcher:
         sidecar 里的推送观测数据 Dataview 看不见）。capture_line 是昨日
         捕获入口分布一行；weekly_lines 仅周日传入（本周捕获统计详细节）；
         stale_pending_lines / stale_human_lines 是根目录滞留点名（待确认
-        组与你的笔记组，都无滞留时不出现该节）。
+        组与你的笔记组，都无滞留时不出现该节）。failure_line 是分发熔断
+        点名（无失败不出现）。
         """
 
         def _lines(items: List[str]) -> List[str]:
@@ -488,6 +495,8 @@ class DigestDispatcher:
         ]
         if capture_line:
             sections += [f"> {capture_line}", ""]
+        if failure_line:
+            sections += [f"> {failure_line}", ""]
         sections += [
             *_lines(yesterday_new),
             "",

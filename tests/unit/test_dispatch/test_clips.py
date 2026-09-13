@@ -13,6 +13,7 @@ import pytest
 
 import scripts.cli.dispatch_cli as cli_module
 import scripts.dispatch.clips as clips_module
+from scripts.dispatch import pending_push
 from scripts.dispatch.clips import ClipDispatcher
 from scripts.processors.link import _SUMMARIZE_CLIP_PROMPT
 
@@ -72,8 +73,10 @@ def _clip(
     tags=("剪藏", "待确认"),
     created="2026-09-10 10:00:00+08:00",
     body="正文内容",
+    note="",
 ):
     """造一篇 webclip 笔记（frontmatter 与 Obsidian 剪藏模板同构）。"""
+    note_line = f"备注: {note}\n" if note else ""
     content = (
         "---\n"
         f"created: {created}\n"
@@ -81,6 +84,7 @@ def _clip(
         "source: webclip\n"
         f"tags: {json.dumps(list(tags), ensure_ascii=False)}\n"
         f"url: {url}\n"
+        f"{note_line}"
         "---\n\n"
         f"{body}\n"
     )
@@ -100,9 +104,9 @@ def _load_state(tree):
 
 
 def test_new_clip_gets_card(memory_tree):
-    """新剪藏 → 带确认按钮的卡片（含摘要与至多 3 条要点），状态登记。"""
+    """新剪藏（带备注）→ 带确认按钮的卡片（含摘要与至多 3 条要点），状态登记。"""
     notify = _Notify()
-    _clip(memory_tree)
+    _clip(memory_tree, note="对工作有用")
 
     report = _dispatcher(memory_tree, notify).run()
 
@@ -132,7 +136,7 @@ def test_new_clip_gets_card(memory_tree):
 def test_idempotent_second_run(memory_tree):
     """第二轮：不重复推卡、不重复调 LLM。"""
     notify = _Notify()
-    _clip(memory_tree)
+    _clip(memory_tree, note="有用")
     dispatcher = _dispatcher(memory_tree, notify)
     dispatcher.run()
 
@@ -185,7 +189,7 @@ def test_pending_delete_clip_ignored(memory_tree):
 def test_duplicate_url_marks_pending_delete(memory_tree):
     """同 url 剪两次：较新的标 pending_delete + 无按钮信息卡，不做摘要。"""
     notify = _Notify()
-    _clip(memory_tree, name="clip-a.md", created="2026-09-09 10:00:00+08:00")
+    _clip(memory_tree, name="clip-a.md", created="2026-09-09 10:00:00+08:00", note="有用")
     _clip(
         memory_tree,
         name="clip-b.md",
@@ -214,7 +218,7 @@ def test_duplicate_url_marks_pending_delete(memory_tree):
 def test_duplicate_second_run_noop(memory_tree):
     """重复标删后第二轮：不重复推卡（state + pending_delete 双重幂等）。"""
     notify = _Notify()
-    _clip(memory_tree, name="clip-a.md", created="2026-09-09 10:00:00+08:00")
+    _clip(memory_tree, name="clip-a.md", created="2026-09-09 10:00:00+08:00", note="有用")
     _clip(memory_tree, name="clip-b.md", created="2026-09-10 10:00:00+08:00")
     dispatcher = _dispatcher(memory_tree, notify)
     dispatcher.run()
@@ -248,7 +252,7 @@ def test_summary_failure_still_sends_card(memory_tree):
     """LLM 失败降级：卡片照发（无摘要节），状态照记，第二轮不重试。"""
     _FakeSummarizer.fail = True
     notify = _Notify()
-    _clip(memory_tree)
+    _clip(memory_tree, note="有用")
     dispatcher = _dispatcher(memory_tree, notify)
     report = dispatcher.run()
 
@@ -265,7 +269,7 @@ def test_summary_failure_still_sends_card(memory_tree):
 
 def test_long_body_truncated(memory_tree):
     """长文截到 llm_max_chars 再送 LLM（成本护栏与链接同源）。"""
-    _clip(memory_tree, body="字" * 8000)
+    _clip(memory_tree, body="字" * 8000, note="有用")
 
     _dispatcher(memory_tree).run()
 
@@ -292,7 +296,7 @@ def test_dry_run(memory_tree):
 def test_damaged_frontmatter_skipped(memory_tree):
     """登记后 frontmatter 被改坏的文件跳过计数，不中断班次。"""
     path = _clip(memory_tree, name="broken.md", url=URL_B)
-    _clip(memory_tree)
+    _clip(memory_tree, note="有用")
     # 模拟用户在编辑器里改坏 YAML（文件仍在索引中，watcher 不再处理）
     path.write_text("---\ntags: [unclosed\n---\n正文\n", encoding="utf-8")
 
@@ -307,7 +311,7 @@ def test_cli_links_also_dispatches_clips(memory_tree, tmp_path, monkeypatch):
     monkeypatch.setattr(clips_module, "LinkProcessor", _FakeSummarizer)
     notify = _Notify()
     monkeypatch.setattr(cli_module, "send_dispatch_notice", notify)
-    _clip(memory_tree)
+    _clip(memory_tree, note="有用")
     config = tmp_path / "memory.yaml"
     config.write_text(
         f"memory:\n  root: {memory_tree.notes_dir}\n"
@@ -342,10 +346,17 @@ def test_card_shows_user_note(memory_tree):
 
 
 def test_card_without_note_no_line(memory_tree):
-    """无备注（留空/旧模板剪藏）：卡片无备注行，流程零变化。"""
+    """无备注（留空/旧模板剪藏）：不即时推卡、不调 LLM，入晚间清单队列
+    （2026-09-13 确认卡分级裁决：无评论的攒「今日待确认清单」）。"""
     notify = _Notify()
     _clip(memory_tree)
 
-    _dispatcher(memory_tree, notify).run()
+    report = _dispatcher(memory_tree, notify).run()
 
-    assert "你的备注" not in notify.calls[0]["message"]
+    assert notify.calls == []  # 不即时推
+    assert report["cards"] == []
+    assert report["deferred"] == ["clip-a.md"]
+    assert _FakeSummarizer.calls == []  # 推迟=省一次 API（摘要只进卡）
+    queued = pending_push._load(memory_tree.state_dir)
+    assert [item["file"] for item in queued] == ["clip-a.md"]
+    assert queued[0]["kind"] == "clip"
