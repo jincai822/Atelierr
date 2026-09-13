@@ -59,6 +59,7 @@ from scripts.dispatch.stats import (
     render_weekly_stats,
 )
 from scripts.dispatch.sysdir import SYSTEM_DIRNAME, write_machine_note
+from scripts.utils.state_store import read_json
 from scripts.memory.core import LAYERS, SYNC_CONFLICT_RE, MemoryTree
 from scripts.memory.decay import DecayManager
 from scripts.memory.resurface import ResurfaceManager
@@ -207,6 +208,17 @@ class DigestDispatcher:
         )
         # 熔断失败可见（2026-09-13 评审毛病 3）：静默熔断进晨报点名
         failure_line = render_failure_line(failure_stats(Path(self.tree.state_dir)))
+        # 昨日 decay 账（2026-09-13 参数校准可见性）：decay-last.json 的
+        # 日期是昨天才显示（更早的已过时不误导）
+        decay_line = None
+        decay_last = read_json(Path(self.tree.state_dir) / "decay-last.json", None)
+        if isinstance(decay_last, dict) and decay_last.get("date") == yesterday:
+            decay_line = (
+                f"昨日 decay：在库 {decay_last.get('total', '?')} 篇 · "
+                f"分层迁移 {decay_last.get('relayered', 0)} · "
+                f"新进待删 {decay_last.get('pending', 0)} · "
+                f"日记豁免 {decay_last.get('daily_exempt', 0)}"
+            )
         is_sunday = datetime.strptime(today, "%Y-%m-%d").weekday() == 6
         weekly_lines = (
             render_weekly_stats(capture_stats(self.tree, days=7, today=today))
@@ -217,7 +229,7 @@ class DigestDispatcher:
             today, pending, todos, review_stems, yesterday_new,
             undistilled, wiki_issues, health, health_stale,
             capture_line=capture_line, weekly_lines=weekly_lines,
-            failure_line=failure_line,
+            failure_line=failure_line, decay_line=decay_line,
             stale_pending_lines=stale_pending, stale_human_lines=stale_human,
         )
         created = None
@@ -414,6 +426,7 @@ class DigestDispatcher:
         capture_line: Optional[str] = None,
         weekly_lines: Optional[List[str]] = None,
         failure_line: Optional[str] = None,
+        decay_line: Optional[str] = None,
         stale_pending_lines: Optional[List[str]] = None,
         stale_human_lines: Optional[List[str]] = None,
     ) -> str:
@@ -497,6 +510,8 @@ class DigestDispatcher:
             sections += [f"> {capture_line}", ""]
         if failure_line:
             sections += [f"> {failure_line}", ""]
+        if decay_line:
+            sections += [f"> {decay_line}", ""]
         sections += [
             *_lines(yesterday_new),
             "",

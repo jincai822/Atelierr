@@ -298,7 +298,9 @@ class DecayManager:
 
         report_path: Optional[Path] = None
         if not dry_run:
-            report_path = self._write_report(counts, transitions, pending_paths, total)
+            report_path = self._write_report(
+                counts, transitions, pending_paths, total, daily_exempt=len(daily_notes)
+            )
 
         result: Dict = {
             "total_notes": total,
@@ -331,12 +333,27 @@ class DecayManager:
         transitions: List[Dict],
         pending_paths: List[Path],
         total: int,
+        daily_exempt: int = 0,
     ) -> Path:
         """写衰减报告到 state_dir/reports/decay-YYYY-MM-DD.md。"""
         reports_dir = self.tree.state_dir / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
         today = datetime.now().astimezone().strftime("%Y-%m-%d")
         report_path = reports_dir / f"decay-{today}.md"
+
+        # JSON 账（晨报「昨日 decay」行的数据源；md 报告给人看，json 给机器读）
+        from scripts.utils.state_store import write_json
+
+        write_json(
+            self.tree.state_dir / "decay-last.json",
+            {
+                "date": today,
+                "total": total,
+                "relayered": len(transitions),
+                "pending": len(pending_paths),
+                "daily_exempt": daily_exempt,
+            },
+        )
 
         lines = [
             f"# 记忆衰减报告 {today}",

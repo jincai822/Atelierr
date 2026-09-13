@@ -53,6 +53,9 @@ DISCARD_ACTION = "discard_note"
 #: 确认完成卡上的「💾 记下」可选表单（2026-09-13 环节三评审毛病 2：
 #: 确认时刻顺手记一句收获；答案在回调 form_value 的 q1，可空）
 NOTE_REMARK_ACTION = "note_remark"
+#: 复习卡「想起来了/没想起来」反馈（2026-09-13 间隔重复升级：
+#: 驱动每篇笔记的独立复习间隔；value 带 outcome=good/bad）
+RESURFACE_FEEDBACK_ACTION = "resurface_feedback"
 
 #: 问答表单卡的问题数上限（卡片长度护栏；周回顾四问远未触及）
 PROMPT_FORM_MAX_QUESTIONS = 8

@@ -222,3 +222,83 @@ def test_machine_source_with_backlink_included(memory_tree, make_note):
     picked = ResurfaceManager(memory_tree).candidates()
 
     assert [item["filename"] for item in picked] == ["dump.md"]
+
+
+def test_record_outcome_spacing(memory_tree):
+    """间隔重复（简化 SM-2）：想起来 间隔×2（封顶 60）、没想起来 ÷2
+    （下限 1 天）、streak 计数；只写 resurface.json，不进 confidence。"""
+    manager = ResurfaceManager(memory_tree)
+    manager.mark_pushed(["n1"])
+
+    state = manager.record_outcome("n1", remembered=True)
+    assert state["interval"] == 6.0  # 3 × 2
+    assert state["streak"] == 1
+
+    state = manager.record_outcome("n1", remembered=True)
+    assert state["interval"] == 12.0
+    state = manager.record_outcome("n1", remembered=False)
+    assert state["interval"] == 6.0
+    assert state["streak"] == 0
+
+
+def test_outcome_drives_cooldown(memory_tree, make_note):
+    """没想起来 → 间隔缩短 → 更快再推；想起来两次 → 间隔拉长不再天天推。"""
+    note = make_note(memory_tree, filename="old.md", content="内容", idle_days=20)
+    manager = ResurfaceManager(memory_tree)
+    note_id = memory_tree._find_entry_id(note)
+
+    manager.mark_pushed([note_id])
+    manager.record_outcome(note_id, remembered=False)  # interval 3 → 1.5
+    # 2 天后：间隔 1.5 天已过 → 可再推
+    later = datetime.now().astimezone() + timedelta(days=2)
+    pushed = manager._load_state()
+    assert not manager._in_cooldown(pushed[note_id], later)
+
+    manager.record_outcome(note_id, remembered=True)   # 1.5 → 3
+    manager.record_outcome(note_id, remembered=True)   # 3 → 6
+    pushed = manager._load_state()
+    assert manager._in_cooldown(pushed[note_id], later)  # 2 天 < 6 天间隔
+
+
+def test_old_stamp_format_still_works(memory_tree):
+    """旧格式（纯时间戳）状态兼容：按 cooldown_days 判定。"""
+    manager = ResurfaceManager(memory_tree)
+    now = datetime.now().astimezone()
+    manager._save_state({"n1": now.isoformat(timespec="seconds")})
+    assert manager._in_cooldown(manager._load_state()["n1"], now)
+    assert not manager._in_cooldown(
+        manager._load_state()["n1"], now + timedelta(days=4)
+    )
+
+
+def test_resurface_feedback_bridge(memory_tree, make_note, monkeypatch):
+    """桥回调：点「想起来了」→ 间隔翻倍 + 记访问；批次重建剩余卡。"""
+    from types import SimpleNamespace
+    from scripts.dispatch.feishu import FeishuBridge
+
+    note = make_note(memory_tree, filename="old.md", content="内容", idle_days=20)
+    bridge = FeishuBridge(memory_tree, app_id="x", app_secret="y")
+    monkeypatch.setattr(bridge, "_send_feedback", lambda chat_id, text: None)
+
+    event = SimpleNamespace(
+        event=SimpleNamespace(
+            action=SimpleNamespace(
+                value={
+                    "action": "resurface_feedback",
+                    "note": "old.md",
+                    "outcome": "good",
+                    "batch": ["old.md", "other.md"],
+                }
+            ),
+            context=None,
+            operator=None,
+        )
+    )
+    resp = bridge.handle_card_action(event)
+
+    assert resp["toast"]["type"] == "success"
+    # 批次重建：剩余 other.md 的复习卡
+    card = resp["card"]["data"]
+    assert "1" in card["header"]["title"]["content"]
+    # 访问时钟已重置
+    assert memory_tree._entry(note)["last_accessed"] is not None

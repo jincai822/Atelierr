@@ -82,6 +82,7 @@ from scripts.dispatch.archive import derive_archive_dir
 from scripts.dispatch.feishu_cards import (
     confirmed_with_remark_card,
     pending_digest_card,
+    resurface_card,
     prompt_form_card,
     send_resurface_feishu,
     send_todo_feishu,
@@ -102,6 +103,7 @@ from scripts.dispatch.feishu_io import (
     ENV_NOTE_PREFIX,
     ENV_VAULT_NAME,
     NOTE_REMARK_ACTION,
+    RESURFACE_FEEDBACK_ACTION,
     PROMPT_FORM_MAX_QUESTIONS,
     PROMPT_SUBMIT_ACTION,
     TODO_DONE_ACTION,
@@ -361,6 +363,9 @@ class FeishuBridge:
             return self._handle_discard(filename, chat_id, batch)
         if action_name == NOTE_REMARK_ACTION:
             return self._handle_note_remark(action, filename, chat_id)
+        if action_name == RESURFACE_FEEDBACK_ACTION:
+            outcome = str(value.get("outcome") or "")
+            return self._handle_resurface_feedback(filename, outcome, chat_id, batch)
         return {}
 
     @staticmethod
@@ -813,6 +818,63 @@ class FeishuBridge:
                 ),
             },
         }
+
+    def _handle_resurface_feedback(
+        self,
+        filename: str,
+        outcome: str,
+        chat_id: Optional[str] = None,
+        batch: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """复习卡「想起来了/没想起来」：记每篇的独立复习间隔
+        （想起来 ×2、没想起来 ÷2；简化 SM-2，只写 resurface.json，
+        不进 confidence 公式）；想起来了顺带记一次访问（合法重置
+        闲置时钟）。批次场景重建剩余复习卡（整卡替换语义）。"""
+        from scripts.memory.resurface import ResurfaceManager
+
+        try:
+            note_path = self.tree._abs(filename)
+            note_id = self.tree._find_entry_id(note_path) or Path(filename).stem
+            manager = ResurfaceManager(self.tree)
+            state = manager.record_outcome(note_id, remembered=(outcome == "good"))
+            if outcome == "good" and note_path.exists():
+                self.tree.on_note_accessed(note_path)
+        except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
+            print(f"[feishu] resurface feedback note={filename} fail: {exc}", flush=True)
+            self._send_feedback(chat_id, f"⚠️ 处理失败，请稍后重试：{filename}")
+            return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
+        good = outcome == "good"
+        print(
+            f"[feishu] resurface feedback note={filename} outcome={outcome} "
+            f"interval={state['interval']}",
+            flush=True,
+        )
+        if good:
+            msg = f"✅ 好，它{state['interval']:.0f} 天后再来见你"
+        else:
+            msg = "❌ 收到，近期再来看一眼；值得就提炼进 wiki，不值得留给 decay"
+        self._send_feedback(chat_id, f"{msg}：{filename}")
+        if batch:
+            remaining = [item for item in batch if item != filename]
+            if remaining:
+                items = [
+                    {"relpath": rel, "title": Path(rel).stem, "idle_days": "?"}
+                    for rel in remaining
+                ]
+                return {
+                    "toast": {"type": "success", "content": msg},
+                    "card": {"type": "raw", "data": resurface_card(items)},
+                }
+        return {
+            "toast": {"type": "success", "content": msg},
+            "card": {
+                "type": "raw",
+                "data": self._confirmed_card(
+                    filename, note_line=msg, header="🔁 复习反馈已记录"
+                ),
+            },
+        }
+
 
     @staticmethod
     def _valid_archive_dir(target_dir: str) -> bool:

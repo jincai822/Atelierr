@@ -270,3 +270,34 @@ def test_digest_no_failure_no_line(memory_tree):
     """无熔断：摘要不出现失败行。"""
     report = DigestDispatcher(memory_tree).run(dry_run=True, today=TODAY)
     assert "处理失败" not in report["markdown"]
+
+
+def test_digest_shows_decay_line(memory_tree, monkeypatch):
+    """晨报含昨日 decay 账（decay-last.json 日期=昨天才显示）。"""
+    import json as _json
+    from datetime import datetime, timedelta
+
+    yesterday = (
+        datetime.strptime(TODAY, "%Y-%m-%d") - timedelta(days=1)
+    ).strftime("%Y-%m-%d")
+    (memory_tree.state_dir / "decay-last.json").write_text(
+        _json.dumps(
+            {"date": yesterday, "total": 16, "relayered": 2, "pending": 1, "daily_exempt": 5}
+        ),
+        encoding="utf-8",
+    )
+    report = DigestDispatcher(memory_tree).run(dry_run=True, today=TODAY)
+    assert "昨日 decay：在库 16 篇" in report["markdown"]
+    assert "新进待删 1" in report["markdown"]
+
+
+def test_digest_stale_decay_last_hidden(memory_tree):
+    """decay-last.json 过期（非昨天）不显示，避免误导。"""
+    import json as _json
+
+    (memory_tree.state_dir / "decay-last.json").write_text(
+        _json.dumps({"date": "2026-01-01", "total": 9, "relayered": 0, "pending": 0}),
+        encoding="utf-8",
+    )
+    report = DigestDispatcher(memory_tree).run(dry_run=True, today=TODAY)
+    assert "昨日 decay" not in report["markdown"]

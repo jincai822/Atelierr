@@ -11,9 +11,15 @@ decay 把 confidence 跌破 delete_threshold 的笔记推向 pending_delete
 纪律（与 decay 同源）：
 - 只读笔记与 sidecar 索引，绝不改写笔记文件；
 - 推送冷却时钟只写 ``<state_dir>/resurface.json``；
-- 幂等：同一笔记 cooldown_days 天内不重复推送；
+- 幂等：同一笔记间隔期内不重复推送；
 - 机器搬运全文（MACHINE_SOURCES）默认不推，被 [[引用]] ≥1 次除外
   （2026-09-12 信噪比治理：复习位只留给人写与被引用的笔记）。
+
+间隔重复（2026-09-13 升级）：复习卡带「想起来了/没想起来」反馈按钮，
+每篇笔记有独立间隔（想起来 ×2、没想起来 ÷2、上限 60 天）——常想起的
+少打扰，想不起来的多见面。反馈只写复习调度状态（resurface.json），
+不进 confidence 公式（无状态契约不破）；「想起来了」顺带记一次
+on_note_accessed（访问=使用信号，合法重置闲置时钟）。
 """
 
 from __future__ import annotations
@@ -178,7 +184,7 @@ class ResurfaceManager:
     def mark_pushed(
         self, note_ids: List[str], now: Optional[datetime] = None
     ) -> None:
-        """记录一批笔记已推送（冷却时钟起点）；空列表直接返回。
+        """记录一批笔记已推送（该篇间隔时钟起点）；空列表直接返回。
 
         只写 ``<state_dir>/resurface.json``（原子写），绝不触碰笔记文件。
 
@@ -193,13 +199,65 @@ class ResurfaceManager:
         state = self._load_state()
         stamp = now.isoformat(timespec="seconds")
         for note_id in ids:
-            state[note_id] = stamp
+            entry = state.get(note_id)
+            interval = (
+                float(entry.get("interval", self.cooldown_days))
+                if isinstance(entry, dict)
+                else self.cooldown_days
+            )
+            state[note_id] = {"pushed": stamp, "interval": interval, "streak": 0}
         self._save_state(state)
 
-    def _in_cooldown(self, stamp: str, now: datetime) -> bool:
-        """时间戳距 now 不足 cooldown_days 返回 True；损坏时间戳视为未推过。"""
+    def record_outcome(
+        self, note_id: str, remembered: bool, now: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """记录复习反馈（简化 SM-2）：想起来 → 间隔 ×2（封顶 60 天）且记一次
+        访问（合法重置闲置时钟）；没想起来 → 间隔 ÷2（下限 1 天）。
+
+        只写复习调度状态（resurface.json），不进 confidence 公式——
+        无状态契约不破。返回该笔记的新调度状态。
+
+        Args:
+            note_id: 笔记 id（sidecar 键）。
+            remembered: True=想起来了；False=没想起来。
+            now: 反馈时刻（测试用）。
+
+        Returns:
+            Dict[str, Any]: {"interval", "streak", "pushed"}。
+        """
+        now = now or datetime.now().astimezone()
+        state = self._load_state()
+        entry = state.get(note_id)
+        interval = (
+            float(entry.get("interval", self.cooldown_days))
+            if isinstance(entry, dict)
+            else self.cooldown_days
+        )
+        streak = int(entry.get("streak", 0)) if isinstance(entry, dict) else 0
+        if remembered:
+            interval = min(interval * 2, 60.0)
+            streak += 1
+        else:
+            interval = max(1.0, interval / 2)
+            streak = 0
+        state[note_id] = {
+            "pushed": now.isoformat(timespec="seconds"),
+            "interval": interval,
+            "streak": streak,
+        }
+        self._save_state(state)
+        return dict(state[note_id])
+
+    def _in_cooldown(self, stamp: Any, now: datetime) -> bool:
+        """距上次推送不足该篇间隔（缺省 cooldown_days）返回 True；
+        旧格式（纯时间戳）/损坏视为 cooldown_days 间隔。"""
+        if isinstance(stamp, dict):
+            interval = float(stamp.get("interval", self.cooldown_days))
+            stamp = stamp.get("pushed")
+        else:
+            interval = self.cooldown_days
         try:
-            return (now - parse_date(stamp)).days < self.cooldown_days
+            return (now - parse_date(str(stamp))).days < interval
         except ValueError:
             return False
 

@@ -1322,7 +1322,8 @@ def test_send_todo_feishu_card_buttons(monkeypatch):
 
 
 def test_send_resurface_feishu_card_layout(monkeypatch):
-    """复习卡：提示语 + 逐条标题/打开按钮；空队列不发。"""
+    """复习卡：提示语 + 逐条标题 + 打开/想起来了/没想起来三按钮
+    （2026-09-13 间隔重复升级）；空队列不发。"""
     assert feishu_module.send_resurface_feishu([]) is False
     cards = []
     monkeypatch.setattr(
@@ -1345,10 +1346,16 @@ def test_send_resurface_feishu_card_layout(monkeypatch):
         if e["tag"] == "action"
         for a in e["actions"]
     ]
-    assert len(buttons) == 2
+    assert len(buttons) == 6  # 每条：打开 + 想起来了 + 没想起来
+    uri_buttons = [b for b in buttons if "url" in b]
+    assert len(uri_buttons) == 2
     assert all(
-        b["url"].startswith("obsidian://open?vault=") for b in buttons
+        b["url"].startswith("obsidian://open?vault=") for b in uri_buttons
     )
+    callbacks = [b for b in buttons if "behaviors" in b]
+    assert callbacks[0]["behaviors"][0]["value"]["action"] == "resurface_feedback"
+    assert callbacks[0]["behaviors"][0]["value"]["outcome"] == "good"
+    assert callbacks[0]["behaviors"][0]["value"]["batch"] == ["a.md", "sub/b.md"]
     texts = " ".join(
         e.get("text", {}).get("content", "")
         for e in card["elements"]
