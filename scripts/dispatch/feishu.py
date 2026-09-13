@@ -1312,7 +1312,9 @@ class FeishuBridge:
         用户原因与两条出路（2026-09-12 实测：手机直出视频超限无任何
         反馈；2026-09-13 回执升级为编号出路清单）。
         """
-        key = content.get("image_key") or content.get("file_key")
+        # 视频消息同时带 image_key（封面）与 file_key（本体）：必须先取
+        # file_key，否则会把封面图当视频存（2026-09-13 实测 12KB 假 mp4）
+        key = content.get("file_key") or content.get("image_key")
         if not key:
             return None
         resource_type = "image" if msg_type == "image" else "file"

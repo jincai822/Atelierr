@@ -1947,10 +1947,17 @@ def test_media_message_saved_as_mp4(memory_tree, monkeypatch):
         _event(
             "m-media-1",
             "media",
-            {"file_key": "video_key", "file_name": "clip.mp4", "duration": 12},
+            {
+                "file_key": "video_key",
+                "image_key": "cover_key",
+                "file_name": "clip.mp4",
+                "duration": 12,
+            },
         )
     )
 
+    # 必须下载视频本体（file_key），不是封面图（image_key）——
+    # 2026-09-13 实测：先取 image_key 会把 12KB 封面当视频存成假 mp4
     assert downloads == [("video_key", "file")]
     attach_dir = memory_tree.notes_dir / "attachments" / "媒体"
     saved = list(attach_dir.glob("feishu-*.mp4"))
