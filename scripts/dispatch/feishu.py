@@ -724,8 +724,8 @@ class FeishuBridge:
             if entry.get("pending_delete"):
                 self._send_feedback(chat_id, f"已在待删清单里：{filename}")
                 return {"toast": {"type": "info", "content": "已在待删清单"}}
-            entry["pending_delete"] = True
-            self.tree._save_index()
+            # 多进程安全的公共 API（flock 事务；直改条目+缓存回写会丢更新）
+            self.tree.set_pending_delete(note_path)
         except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
             print(f"[feishu] discard note={filename} fail: {exc}", flush=True)
             self._send_feedback(chat_id, f"⚠️ 处理失败，请稍后重试：{filename}")

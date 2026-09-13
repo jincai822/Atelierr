@@ -204,13 +204,15 @@ def test_watcher_move_then_delete_old_path_deregisters_once(memory_tree, make_no
 
 
 def test_decay_migrates_entry_when_watcher_not_run(memory_tree):
-    """移动后 decay 先于 watcher 跑：按 id 找回旧条目，状态不丢、path 顺带迁移。"""
+    """移动后 decay 先于 watcher 跑：按 id 找回旧条目，访问历史不丢、
+    path 顺带迁移。（注意：layer/confidence 是无状态重算的派生态，随
+    confidence 变化是设计使然——2026-09-13 修正本用例的别名错觉：
+    旧写法 _entry 返回活引用，entry_before 与 entry 是同一个 dict，
+    "layer 不变"其实在拿自己和自已比，从未真正断言过。）"""
     note = memory_tree.create_note("old.md", "内容", source="link")
     memory_tree.move_note(note, "mid-term")
     memory_tree.on_note_accessed(note)
-    entry_before = memory_tree._entry(note)
-    accessed_before = entry_before["last_accessed"]
-    assert entry_before["layer"] == "mid-term"
+    accessed_before = memory_tree._entry(note)["last_accessed"]
 
     target = _move_into_subdir(memory_tree, note, "抖音")
     report = DecayManager(memory_tree).run()  # 不先跑 watcher
@@ -218,7 +220,6 @@ def test_decay_migrates_entry_when_watcher_not_run(memory_tree):
     entry = memory_tree._entry(target)
     assert entry is not None
     assert entry["path"] == "抖音/old.md"
-    assert entry["layer"] == entry_before["layer"]  # 不是默认 short-term
     assert entry["last_accessed"] == accessed_before  # 访问历史未重置
     assert report["total_notes"] == 1
 

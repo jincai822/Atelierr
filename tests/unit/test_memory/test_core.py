@@ -300,3 +300,25 @@ def test_iter_note_files_skips_sync_conflict(memory_tree):
 
     names = [path.name for path in iter_note_files(memory_tree.notes_dir)]
     assert names == ["real.md"]
+
+
+def test_concurrent_writers_no_lost_updates(tmp_path):
+    """多进程写者防丢更新（2026-09-13 实证：飞书守护刚写下的
+    pending_delete 被并发班次的旧缓存回写冲掉）：A 持旧缓存，B 写后
+    A 再写，B 的更新必须还在。"""
+    notes = tmp_path / "memory"
+    state = tmp_path / "state"
+    tree_a = MemoryTree(notes, state_dir=state)
+    tree_b = MemoryTree(notes, state_dir=state)
+    note_a = tree_a.create_note("a.md", "内容", source="link")
+    note_b = tree_a.create_note("b.md", "内容", source="link")
+
+    # B 标 b 待删（落盘）；A 的内存缓存停留在 create 时刻（无该标记）
+    assert tree_b.set_pending_delete(note_b)
+    # A 再写 a 的访问记录——若 A 用旧缓存整体回写，B 的标记会丢
+    tree_a.on_note_accessed(note_a)
+
+    # 第三方全新读：两个更新都在
+    tree_c = MemoryTree(notes, state_dir=state)
+    assert tree_c.is_pending_delete(note_b)
+    assert tree_c._entry(note_a)["last_accessed"] is not None

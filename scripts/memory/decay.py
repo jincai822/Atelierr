@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext as _nullcontext
+
 import re
 from datetime import datetime
 from pathlib import Path
@@ -213,7 +215,16 @@ class DecayManager:
         counts = {"short_term": 0, "mid_term": 0, "long_term": 0}
         total = 0
 
-        for path in self._list_md_files():
+        # flock 事务内跑整个重算循环（2026-09-13 竞态实证：守护进程与
+        # 分发班次的旧缓存回写会丢更新）；dry_run 不锁不写，只读缓存。
+        index_ctx = (
+            self.tree._index_transaction()
+            if not dry_run
+            else _nullcontext(self.tree._load_index())
+        )
+
+        with index_ctx as index:
+         for path in self._list_md_files():
             note_id = self.tree._read_note_id(path)
             if note_id is None:
                 skipped.append(path)
@@ -223,15 +234,18 @@ class DecayManager:
                 # 基础设施笔记（控制台等）：不衰减、不计数、不置待删
                 system_notes.append(path)
                 continue
-            entry = self.tree._entry(path)
+            rel = self.tree._rel_key(path)
+            entry = next(
+                (item for item in index.values() if item.get("path") == rel), None
+            )
             if entry is None:
                 # 文件可能已被用户手动移进归档子目录而 watcher 尚未跑：
                 # 按 frontmatter id 找回旧条目（避免当新文件重登记——
-                # _register 会重置 last_accessed 等动态状态）
+                # 重登记会重置 last_accessed 等动态状态）
                 entry = next(
                     (
                         candidate
-                        for nid, candidate in self.tree._load_index().items()
+                        for nid, candidate in index.items()
                         if nid == str(note_id)
                     ),
                     None,
@@ -257,14 +271,16 @@ class DecayManager:
                 )
             if not dry_run:
                 if entry is None:
-                    self.tree._register(
-                        path,
-                        note_id,
-                        confidence=confidence,
-                        layer=layer,
-                        references=refs,
-                        pending_delete=pending,
-                    )
+                    # 直接写事务内 index（不调 tree._register——flock
+                    # 事务不可嵌套）
+                    index[str(note_id)] = {
+                        "path": rel,
+                        "confidence": confidence,
+                        "layer": layer,
+                        "last_accessed": None,
+                        "references": refs,
+                        "pending_delete": pending,
+                    }
                 else:
                     entry.update(
                         confidence=confidence,
@@ -275,7 +291,6 @@ class DecayManager:
 
         report_path: Optional[Path] = None
         if not dry_run:
-            self.tree._save_index()
             report_path = self._write_report(counts, transitions, pending_paths, total)
 
         result: Dict = {

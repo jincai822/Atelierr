@@ -16,10 +16,12 @@ sidecar；笔记文件创建后机器绝不改写。id 为 26 字符 ULID。
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -220,14 +222,43 @@ class MemoryTree:
         except OSError:
             pass
 
-    def _save_index(self) -> None:
-        """原子写索引：先写临时文件再 rename。"""
+    def _write_index(self, index: Dict[str, dict]) -> None:
+        """原子写指定索引内容：先写临时文件再 rename。"""
         tmp = self.index_path.with_name(self.index_path.name + ".tmp")
         tmp.write_text(
-            json.dumps(self._load_index(), ensure_ascii=False, indent=2),
+            json.dumps(index, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         os.replace(tmp, self.index_path)
+
+    def _save_index(self) -> None:
+        """把本进程缓存的索引原子写盘（读路径兼容保留；改索引请走
+        ``_index_transaction``——缓存回写在多进程交叠时会丢更新）。"""
+        self._write_index(self._load_index())
+
+    @contextmanager
+    def _index_transaction(self) -> Iterator[Dict[str, dict]]:
+        """flock 保护的「读最新 → 改 → 原子写」事务（多进程写者防丢更新）。
+
+        sidecar 的写者不止一个：常驻飞书守护（卡片回调）、15 分钟分发
+        班次、decay/晨报 CLI 都会改 index.json。「缓存 + 无条件回写」
+        在写者交叠时会丢更新（2026-09-13 实证：守护刚写下的
+        pending_delete 标记被并发班次的旧缓存回写冲掉）。事务内读
+        磁盘最新版，提交时原子写并刷新本进程缓存。**同进程不得嵌套**
+        （flock 换 fd 会自锁）——嵌套场景（如 watcher 全量对齐）在
+        事务内直接改传入的 index 字典。
+        """
+        lock_path = self.index_path.with_name(self.index_path.name + ".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "w", encoding="utf-8") as lock_fh:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            try:
+                index = self._read_index()
+                yield index
+                self._write_index(index)
+                self._index = index
+            finally:
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
 
     def _rel_key(self, note_path: Path) -> str:
         """notes_dir 内路径 → 索引相对 key（POSIX / 分隔，含子目录前缀）。
@@ -279,27 +310,25 @@ class MemoryTree:
         references: int = 0,
         pending_delete: bool = False,
     ) -> None:
-        """登记/更新一条 sidecar 条目并原子写盘。"""
-        index = self._load_index()
-        index[str(note_id)] = {
-            "path": self._rel_key(note_path),
-            "confidence": confidence,
-            "layer": layer,
-            "last_accessed": last_accessed,
-            "references": references,
-            "pending_delete": pending_delete,
-        }
-        self._save_index()
+        """登记/更新一条 sidecar 条目并原子写盘（flock 事务）。"""
+        with self._index_transaction() as index:
+            index[str(note_id)] = {
+                "path": self._rel_key(note_path),
+                "confidence": confidence,
+                "layer": layer,
+                "last_accessed": last_accessed,
+                "references": references,
+                "pending_delete": pending_delete,
+            }
 
     def _remove_entry(self, note_path: Path) -> None:
-        """按相对路径移除 sidecar 条目。"""
+        """按相对路径移除 sidecar 条目（flock 事务）。"""
         key = self._rel_key(note_path)
-        index = self._load_index()
-        for nid, entry in list(index.items()):
-            if entry.get("path") == key:
-                del index[nid]
-                self._save_index()
-                return
+        with self._index_transaction() as index:
+            for nid, entry in list(index.items()):
+                if entry.get("path") == key:
+                    del index[nid]
+                    return
 
     def _read_note_id(self, path: Path) -> Optional[str]:
         """读取文件 frontmatter 中的 id；无 frontmatter 或损坏返回 None。"""
@@ -451,8 +480,11 @@ class MemoryTree:
         entry = self._load_index().get(str(note_id))
         if entry is None:
             return False
-        entry["path"] = new_rel
-        self._save_index()
+        with self._index_transaction() as index:
+            fresh = index.get(str(note_id))
+            if fresh is None:
+                return False
+            fresh["path"] = new_rel
         return True
 
     def list_notes(self, layer: str) -> List[Path]:
@@ -509,6 +541,27 @@ class MemoryTree:
         entry = self._entry(path)
         return bool(entry["pending_delete"]) if entry else False
 
+    def set_pending_delete(self, note_path: Path, flag: bool = True) -> bool:
+        """标/摘 pending_delete（多进程安全的公共 API，flock 事务）。
+
+        直改条目字典再 _save_index 的旧写法（缓存回写）在守护进程与
+        分发班次交叠时会丢更新（2026-09-13 实证），统一走这里。
+
+        Args:
+            note_path: 笔记文件路径。
+            flag: True 标记待删，False 摘除标记。
+
+        Returns:
+            bool: 条目存在并更新返回 True；未登记返回 False。
+        """
+        key = self._rel_key(note_path)
+        with self._index_transaction() as index:
+            for entry in index.values():
+                if entry.get("path") == key:
+                    entry["pending_delete"] = flag
+                    return True
+        return False
+
     def on_note_accessed(self, note_path: Path) -> None:
         """记录访问：更新 sidecar 的 last_accessed（闲置时钟归零）。
 
@@ -523,11 +576,23 @@ class MemoryTree:
         path = Path(note_path)
         if not path.exists():
             raise FileNotFoundError(f"笔记不存在: {path}")
-        entry = self._entry(path)
-        if entry is None:
-            entry = self._ensure_registered(path)
-        entry["last_accessed"] = _now_iso()
-        self._save_index()
+        key = self._rel_key(path)
+        with self._index_transaction() as index:
+            entry = next(
+                (item for item in index.values() if item.get("path") == key), None
+            )
+            if entry is None:
+                note_id = self._read_note_id(path) or generate_id()
+                entry = {
+                    "path": key,
+                    "confidence": 1.0,
+                    "layer": "short-term",
+                    "last_accessed": None,
+                    "references": 0,
+                    "pending_delete": False,
+                }
+                index[str(note_id)] = entry
+            entry["last_accessed"] = _now_iso()
 
     def list_pending_delete(self) -> List[Path]:
         """列出标记 pending_delete 且文件仍存在的笔记（供 review/purge）。

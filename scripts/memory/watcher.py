@@ -87,19 +87,18 @@ class MemoryWatcher:
             "deregistered": [],
             "skipped": [],
         }
-        index = self.tree._load_index()
-        indexed = {str(entry.get("path")) for entry in index.values()}
-        for path in iter_note_files(self.tree.notes_dir):
-            rel = self.tree._rel_key(path)
-            if rel in indexed:
-                continue
-            self._process_new_file(path, rel, index, result)
-        # 注销：sidecar 有条目但文件已消失（迁移过的旧路径在此清理）
-        for note_id, entry in list(index.items()):
-            if not (self.tree.notes_dir / entry["path"]).exists():
-                del index[note_id]
-                result["deregistered"].append(entry["path"])
-        self.tree._save_index()
+        with self.tree._index_transaction() as index:
+            indexed = {str(entry.get("path")) for entry in index.values()}
+            for path in iter_note_files(self.tree.notes_dir):
+                rel = self.tree._rel_key(path)
+                if rel in indexed:
+                    continue
+                self._process_new_file(path, rel, index, result)
+            # 注销：sidecar 有条目但文件已消失（迁移过的旧路径在此清理）
+            for note_id, entry in list(index.items()):
+                if not (self.tree.notes_dir / entry["path"]).exists():
+                    del index[note_id]
+                    result["deregistered"].append(entry["path"])
         return result
 
     def _process_new_file(
@@ -127,7 +126,15 @@ class MemoryWatcher:
         else:
             note_id = self._normalize(path, post, mtime_ns)
             result["normalized"].append(path)
-        self.tree._register(path, str(note_id))
+        # 直接写事务内的 index（不调 tree._register——flock 事务不可嵌套）
+        index[str(note_id)] = {
+            "path": rel,
+            "confidence": 1.0,
+            "layer": "short-term",
+            "last_accessed": None,
+            "references": 0,
+            "pending_delete": False,
+        }
 
     def _normalize(self, path: Path, post, mtime_ns: int) -> str:
         """一次性补写 frontmatter（id/title/created/source/tags）并还原 mtime。"""

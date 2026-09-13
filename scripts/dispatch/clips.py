@@ -222,10 +222,8 @@ class ClipDispatcher:
         self, clip: Dict[str, Any], state: Dict[str, Any], report: Dict[str, Any]
     ) -> None:
         """同 url 重复剪藏：sidecar 标 pending_delete（不动文件）+ 信息卡。"""
-        entry = self.tree._entry(self.tree.notes_dir / clip["rel"])
-        if entry is not None:
-            entry["pending_delete"] = True
-            self.tree._save_index()
+        # 多进程安全的公共 API（flock 事务；直改条目+缓存回写会丢更新）
+        self.tree.set_pending_delete(self.tree.notes_dir / clip["rel"])
         state[clip["id"]] = {
             "path": clip["rel"],
             "url": clip["url"],
