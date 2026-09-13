@@ -6,7 +6,7 @@
     "subtitle": "从上到下是时间顺序 · 每条横箭头一句话说清这棒干什么 · 2026-09-13",
     "output": "atelierr-overview-sequence.html",
     "viewBox": [
-      1000,
+      1400,
       920
     ]
   },
@@ -94,150 +94,106 @@
       "from": "you",
       "to": "vault",
       "y": 225,
-      "label": "② 速记/直写/剪藏——同一个收件箱，捕获期零 API",
+      "label": "② 速记/直写/剪藏进同一收件箱",
       "variant": "default"
     },
     {
       "from": "dispatch",
       "to": "vault",
       "y": 265,
-      "label": "③ 扫库：新链接/新附件/新剪藏/行动意图",
+      "label": "③ 扫库：新链接/新附件/行动意图",
       "variant": "default"
     },
     {
       "from": "vault",
       "to": "dispatch",
       "y": 305,
-      "label": "回：幂等过滤后的待处理清单（watcher 已登记）",
+      "label": "回：幂等过滤后的待处理清单",
       "variant": "return"
     },
     {
       "from": "dispatch",
       "to": "engines",
       "y": 345,
-      "label": "⑤ 分派：链接→yt-dlp · 图→OCR · 音视频→Whisper · PDF/待办→DeepSeek",
+      "label": "⑤ 分派：下载/OCR/转写/摘要",
       "variant": "emphasis"
     },
     {
       "from": "engines",
       "to": "vault",
       "y": 385,
-      "label": "⑥ 产出回库：待确认卡落根 + 480p 原件/全文归 attachments/平台/",
+      "label": "⑥ 产出回库：待确认卡 + 480p 原件",
       "variant": "emphasis"
     },
     {
       "from": "engines",
       "to": "feishu",
       "y": 425,
-      "label": "⑦ 推确认卡：标题/摘要/分观点/金句（含你的评论）",
+      "label": "⑦ 推确认卡（含你的评论）",
       "variant": "emphasis"
     },
     {
       "from": "dispatch",
       "to": "feishu",
       "y": 465,
-      "label": "⑧ 待办单向同步飞书任务/日历",
+      "label": "⑧ 待办单向同步飞书任务",
       "variant": "dashed"
     },
     {
       "from": "feishu",
       "to": "you",
       "y": 505,
-      "label": "⑨ 卡片到手：✅确认 / 📁归档… / 删除",
+      "label": "⑨ 卡片到手：✅/📁归档/删除",
       "variant": "return"
     },
     {
       "from": "you",
       "to": "feishu",
       "y": 545,
-      "label": "⑩ 你点按钮——三人工例外，机器只在这时动笔记",
+      "label": "⑩ 你点按钮，机器才动笔记",
       "variant": "security"
     },
     {
       "from": "feishu",
       "to": "sink",
       "y": 585,
-      "label": "⑪ 归档平台/平铺（唯书籍留子目录）· 划重点→wiki 摘录卡",
+      "label": "⑪ 归档平台/平铺 · 划重点进 wiki",
       "variant": "emphasis"
     },
     {
       "from": "upkeep",
       "to": "vault",
       "y": 625,
-      "label": "⑫ 每日 03:00 decay：机器转写 3x 速衰减——只写索引不动文件",
+      "label": "⑫ 03:00 decay 只写索引不动文件",
       "variant": "dashed"
     },
     {
       "from": "upkeep",
       "to": "feishu",
       "y": 665,
-      "label": "⑬ 待删清单提醒 + 晨报 07:53 + 周日周报",
+      "label": "⑬ 待删提醒 + 晨报 + 周报",
       "variant": "dashed"
     },
     {
       "from": "you",
       "to": "sink",
       "y": 705,
-      "label": "⑭ 你 CLI 点头 → purge → trash/（可恢复）",
+      "label": "⑭ 你点头 → purge → trash/",
       "variant": "emphasis"
     },
     {
       "from": "sink",
       "to": "atelier",
       "y": 745,
-      "label": "⑮ 周回顾只读引用 memory/wiki/cognition",
+      "label": "⑮ 周回顾只读引用全库",
       "variant": "dashed"
     },
     {
       "from": "atelier",
       "to": "sink",
       "y": 785,
-      "label": "⑯ 回顾产物落 reflections/ → 进 wiki 展示",
+      "label": "⑯ 回顾产物落 reflections/",
       "variant": "dashed"
-    }
-  ],
-  "activations": [
-    {
-      "participant": "vault",
-      "from": 180,
-      "to": 430,
-      "type": "database"
-    },
-    {
-      "participant": "dispatch",
-      "from": 260,
-      "to": 490,
-      "type": "backend"
-    },
-    {
-      "participant": "engines",
-      "from": 340,
-      "to": 470,
-      "type": "backend"
-    },
-    {
-      "participant": "feishu",
-      "from": 420,
-      "to": 600,
-      "type": "external"
-    },
-    {
-      "participant": "sink",
-      "from": 580,
-      "to": 800,
-      "type": "database"
-    },
-    {
-      "participant": "upkeep",
-      "from": 620,
-      "to": 670,
-      "type": "backend"
-    },
-    {
-      "participant": "atelier",
-      "from": 740,
-      "to": 790,
-      "type": "backend"
     }
   ],
   "cards": [
