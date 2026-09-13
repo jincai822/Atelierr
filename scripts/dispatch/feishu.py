@@ -413,27 +413,39 @@ class FeishuBridge:
             "card": {
                 "type": "raw",
                 "data": self._completion_card(
-                    filename, "已移除「待确认」标签", "✅ 已确认", batch
+                    filename, "已移除「待确认」标签", "✅ 已确认", batch, chat_id
                 ),
             },
         }
 
-    @staticmethod
     def _completion_card(
+        self,
         filename: str,
         note_line: str,
         header: str,
         batch: Optional[List[str]],
+        chat_id: Optional[str] = None,
+        offer_remark: bool = True,
     ) -> Dict[str, Any]:
-        """操作完成卡：清单卡批次场景（batch 非空）重建剩余条目的清单卡
-        ——平台回调的卡片更新是整卡替换，不重建会让其余条目从视图上消失
-        （2026-09-13 真机实测）；单卡场景给带「顺手记一句」表单的完成卡
-        （批次点到最后一条时同样回到表单完成卡）。"""
+        """操作完成卡：清单卡批次场景（batch 非空且还有剩余）重建剩余条目
+        的清单卡——平台回调的卡片更新是整卡替换，不重建会让其余条目从
+        视图上消失（2026-09-13 真机实测）。
+
+        最终完成时给 legacy 完成卡（回调更新只敢用 legacy——schema 2.0
+        卡作为回调返回值平台报错，2026-09-13 真机实测）；「顺手记一句」
+        表单卡**另发一条新消息**（schema 2.0 走新消息发送是已验证路径，
+        与周回顾四问同路）。丢弃（🗑）场景不邀功（offer_remark=False）。
+        """
         if batch:
             remaining = [item for item in batch if item != filename]
             if remaining:
                 return pending_digest_card(remaining)
-        return confirmed_with_remark_card(filename, note_line, header)
+        if offer_remark:
+            # 另发新消息（失败只 log，绝不影响完成卡更新）
+            self._send_card(
+                chat_id, confirmed_with_remark_card(filename, note_line, header)
+            )
+        return self._confirmed_card(filename, note_line=note_line, header=header)
 
     def _handle_archive_pick(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
         """「📁 归档…」：弹目录选择卡（不移动文件；点定目录才移）。
@@ -563,6 +575,7 @@ class FeishuBridge:
                         "已移除「待确认」标签；推导不出归档目录，留在收件箱",
                         "✅ 已确认",
                         batch,
+                        chat_id,
                     ),
                 },
             }
@@ -582,6 +595,7 @@ class FeishuBridge:
                         "已归档；「待确认」标签请手动摘除",
                         "✅ 已确认",
                         batch,
+                        chat_id,
                     ),
                 },
             }
@@ -591,7 +605,7 @@ class FeishuBridge:
             "type": "raw",
             "data": self._completion_card(
                 filename, f"已归档到 {detail}/ 并移除「待确认」标签",
-                "✅ 已确认", batch
+                "✅ 已确认", batch, chat_id
             ),
         }
         return {
@@ -731,6 +745,8 @@ class FeishuBridge:
                     "不会自动删：review → 你点头 → 回收站（可恢复）",
                     "🗑 已标记待删",
                     batch,
+                    chat_id,
+                    offer_remark=False,
                 ),
             },
         }

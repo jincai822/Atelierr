@@ -306,8 +306,7 @@ def test_card_action_confirm_removes_review_tag(memory_tree):
     assert resp["card"]["type"] == "raw"
     data = resp["card"]["data"]
     assert data["header"]["template"] == "green"
-    # 完成卡带「顺手记一句」表单（schema 2.0），完成文案在 markdown 节
-    assert "已移除「待确认」标签" in data["body"]["elements"][0]["content"]
+    assert "已移除「待确认」标签" in data["elements"][0]["text"]["content"]
     after = frontmatter.loads(path.read_text(encoding="utf-8"))
     assert after.metadata == {**before.metadata, "tags": ["抖音"]}
     assert after.content == before.content
@@ -591,8 +590,7 @@ def test_card_archive_moves_note_and_strips_tag(memory_tree):
 
     assert resp["toast"] == {"type": "success", "content": "已确认并归档到 抖音/"}
     assert resp["card"]["type"] == "raw"
-    # 完成卡带「顺手记一句」表单（schema 2.0），完成文案在 markdown 节
-    assert "已归档到 抖音/" in resp["card"]["data"]["body"]["elements"][0]["content"]
+    assert "已归档到 抖音/" in resp["card"]["data"]["elements"][0]["text"]["content"]
     target = memory_tree.notes_dir / "抖音" / "douyin-x.md"
     assert target.exists()
     assert not note.exists()
@@ -2129,18 +2127,28 @@ def test_batch_archive_rebuilds_digest_card(memory_tree):
     assert (memory_tree.notes_dir / "媒体" / "ma.md").exists()
 
 
-def test_batch_last_item_gets_remark_completion_card(memory_tree):
-    """批次点到最后一条：回到带「顺手记一句」表单的完成卡。"""
+def test_batch_last_item_gets_remark_completion_card(memory_tree, monkeypatch):
+    """批次点到最后一条：回调更新给 legacy 完成卡（schema 2.0 卡不能作
+    回调返回值，平台报错——2026-09-13 真机实测），「顺手记一句」表单
+    卡另发一条新消息（新消息路径已验证，与周回顾四问同路）。"""
     bridge = _bridge(memory_tree)
     memory_tree.create_note("only.md", "正文\n", source="media", tags=["待确认", "媒体"])
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_card", lambda chat_id, card: sent.append(card) or True
+    )
 
     resp = bridge.handle_card_action(
         _card_action({"action": "archive_note", "note": "only.md", "batch": ["only.md"]})
     )
 
     card = resp["card"]["data"]
-    assert card["schema"] == "2.0"  # 带表单的完成卡
-    assert card["body"]["elements"][1]["tag"] == "form"
+    assert card.get("schema") != "2.0"  # 回调更新是 legacy 完成卡
+    assert card["elements"][0]["text"]["content"].startswith("only.md")
+    # 表单卡另发新消息
+    assert len(sent) == 1
+    assert sent[0]["schema"] == "2.0"
+    assert sent[0]["body"]["elements"][1]["tag"] == "form"
 
 
 def test_batch_discard_rebuilds_digest_card(memory_tree):
