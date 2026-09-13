@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "记忆模块怎么和系统耦合：地基是文件系统，底座是 MemoryTree",
+    "subtitle": "三个模块家族互不认识，只靠库目录和底座 API 对视 · 2026-09-13",
+    "output": "atelierr-memory-coupling.html"
+  },
+  "components": [
+    { "id": "feishu", "type": "external", "label": "飞书守护（常驻）", "sublabel": "收消息 · 卡片按钮回调", "pos": [80, 140], "size": [220, 70] },
+    { "id": "ingest", "type": "backend", "label": "摄入班次（15 分钟）", "sublabel": "links / media / clips / todos / highlights", "pos": [370, 140], "size": [260, 70] },
+    { "id": "memsvc", "type": "backend", "label": "记忆服务", "sublabel": "watcher 归一化 · decay 03:00 · search 检索", "pos": [790, 140], "size": [280, 70] },
+
+    { "id": "tree", "type": "security", "label": "MemoryTree 底座（core.py）", "sublabel": "唯一状态入口：登记/分层/待删/迁移 · flock 事务防并发丢写", "pos": [700, 370], "size": [300, 80], "tag": "记忆模块" },
+
+    { "id": "vault", "type": "database", "label": "memory/ 笔记文件", "sublabel": "裸 md · 创建后机器绝不改写/移动 · 日记/平台目录/wiki/", "pos": [80, 600], "size": [300, 80] },
+    { "id": "att", "type": "database", "label": "attachments/ 原资料", "sublabel": "原件只增不减 · 视频 480p 单份 · 长全文外置", "pos": [480, 600], "size": [300, 80] },
+    { "id": "state", "type": "database", "label": "state/ sidecar 状态区", "sublabel": "index.json · processed_×3 · trash/ · 每日 git 快照", "pos": [880, 600], "size": [320, 80] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "同一个库 ~/atelierr-data/（文件级解耦的地基：人可读、脱离系统可打开）", "wraps": ["vault", "att", "state"] },
+    { "kind": "region", "label": "记忆模块 scripts/memory/", "wraps": ["memsvc", "tree"] }
+  ],
+  "connections": [
+    { "from": "feishu", "to": "vault", "label": "① 收消息落库 · 按钮动单篇", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "labelAt": [60, 330] },
+    { "from": "ingest", "to": "vault", "label": "② 产出就是普通 .md 文件", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "labelAt": [330, 330] },
+    { "from": "ingest", "to": "att", "label": "③ 原件/480p 归位", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "labelAt": [560, 300] },
+    { "from": "feishu", "to": "tree", "label": "④ 确认/归档/🗑 按钮（人工例外）", "variant": "security", "fromSide": "right", "toSide": "left", "labelAt": [400, 260] },
+    { "from": "memsvc", "to": "tree", "label": "⑤ 登记/重算/检索", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "labelAt": [870, 280] },
+    { "from": "tree", "to": "state", "label": "⑥ 动态状态只进 sidecar（flock 事务）", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "labelAt": [760, 510] },
+    { "from": "tree", "to": "vault", "label": "⑦ 读写文件经底座 API", "variant": "dashed", "fromSide": "left", "toSide": "right", "labelAt": [470, 480] }
+  ],
+  "cards": [
+    {
+      "dot": "slate",
+      "title": "这张图怎么读",
+      "items": [
+        "上面一排是三个模块家族：飞书守护（常驻进程）、摄入班次（15 分钟）、记忆服务（watcher/decay/search）——它们互不认识，代码里谁也不 import 谁",
+        "中间是 MemoryTree 底座（scripts/memory/core.py）：所有状态读写的唯一入口",
+        "下面一排是库目录本身：笔记文件、原资料、状态区——地基是普通文件，你直接打开就能读"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "耦合点就这七处（多了没有）",
+      "items": [
+        "①②③ 摄入与飞书只干一件事：把普通文件落进库——记忆模块不知道它们的存在",
+        "④ 飞书按钮回调是仅有的「人工例外」：确认删标签、归档移单篇、🗑 标待删、顺手记一句——全走底座 API",
+        "⑤ 记忆服务三件套：watcher 给裸笔记补身份证、decay 每天 03:00 重算分层、search 供检索",
+        "⑥⑦ 状态与文件的交汇全在底座：sidecar 只进状态（flock 事务防多进程丢写，2026-09-13 实证修复）"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "唯一的语义耦合：frontmatter 接头暗号",
+      "items": [
+        "source 字段：link/media 的机器产物衰减快 3 倍（方案 C），人写的原速——捕获侧与记忆侧唯一的规则约定",
+        "tags 里的「待确认」「待办」：确认/完成流程的状态暗号",
+        "备注/评论：你的意图信号，决定卡片即时推还是攒晚间清单",
+        "这几个字段写在契约文档里，改它们需要你拍板"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "解耦的证据（真实事件）",
+      "items": [
+        "2026-09-13 摄入班次崩了一次（ImportError），记忆模块毫发无损——它根本不知道摄入的存在",
+        "关掉飞书 daemon：库照常用 Obsidian 写，decay 照跑，搜索照用",
+        "删掉摄入模块：记忆模块的登记/衰减/检索全部照常——反过来也成立"
+      ]
+    }
+  ]
+}
