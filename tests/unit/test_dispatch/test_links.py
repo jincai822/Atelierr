@@ -372,7 +372,7 @@ def test_comment_extracted_to_state_and_report(memory_tree):
     """链接旁的用户评论 → report['comments'] 与 state 双登记；指路词不算。"""
     memory_tree.create_note(
         "daily.md",
-        f"这个讲得真好，回头细看\n链接 {DOUYIN_URL}",
+        f"{DOUYIN_URL} 这个讲得真好，回头细看",
         source="test",
     )
 
@@ -399,15 +399,20 @@ def test_boilerplate_only_no_comment(memory_tree):
 
 
 def test_extract_comment_helper():
-    """extract_comment 单元：剥 URL、丢样板行、丢指路词、多行拼接、截断。"""
+    """extract_comment 单元：只认链接同一行（2026-09-14 实测：整篇扫描把
+    日记里别的文字行误收成评论）；剥 URL、丢样板行、丢指路词、截断。"""
     from scripts.dispatch.links import extract_comment
 
+    # 同一行：链接前的随手话保留
+    assert extract_comment(f"值得二刷 {DOUYIN_URL}", DOUYIN_URL) == "值得二刷"
+    # 评论在别的行（别的消息行）不算——防日记串行污染
     body = f"值得二刷\n链接 {DOUYIN_URL}\n复制打开抖音，看看【某人的作品】xx"
-    assert extract_comment(body, DOUYIN_URL) == "值得二刷"
+    assert extract_comment(body, DOUYIN_URL) == ""
     assert extract_comment(f"链接 {DOUYIN_URL}", DOUYIN_URL) == ""
     assert extract_comment("看看这个", "https://x.com") == ""
-    long_body = f"评{'论' * 300}\n{DOUYIN_URL}"
-    assert len(extract_comment(long_body, DOUYIN_URL)) == 200
+    # 同行超长截断 200 字
+    long_line = f"{'评' * 300} {DOUYIN_URL}"
+    assert len(extract_comment(long_line, DOUYIN_URL)) == 200
 
 
 def test_extract_comment_strips_diary_timestamp():
@@ -548,3 +553,19 @@ def test_annotation_idempotent(memory_tree):
     after = (memory_tree.notes_dir / "2026-09-12.md").read_text(encoding="utf-8")
     assert before == after
     assert after.count("→ [[douyin-vid123]]") == 1
+
+
+def test_extract_comment_no_cross_line_contamination():
+    """2026-09-14 实测回归：日记里两条链接 + 一行独立文字——处理任一
+    链接时，独立文字行绝不被误收为评论。"""
+    from scripts.dispatch.links import extract_comment
+
+    diary = (
+        f"- 23:52 复制打开抖音，看看【甲的作品】内容… {DOUYIN_URL} 口令\n"
+        "- 23:56 纯测试，不记录\n"
+        f"- 23:54 {XHS_URL} 每个家庭不一样，要具体分析"
+    )
+    assert extract_comment(diary, DOUYIN_URL) == ""  # 抖音行无评论
+    assert extract_comment(diary, XHS_URL) == "每个家庭不一样，要具体分析"
+    # 独立文字行不属于任何链接
+    assert "纯测试" not in extract_comment(diary, DOUYIN_URL)

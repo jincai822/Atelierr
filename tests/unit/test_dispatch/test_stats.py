@@ -56,6 +56,35 @@ def _trash_file(tree, name):
     return path
 
 
+class _pin_ctime:
+    """把指定文件的 ctime 钉在窗口内（TODAY 中午）。ctime 无法用 os.utime
+    设置，只能 mock Path.stat——2026-09-14 实测：硬编码 TODAY + 真实 ctime
+    跨天漂移导致三个用例在午夜后集体失败。"""
+
+    def __init__(self, *paths):
+        self._paths = set(paths)
+
+    def __enter__(self):
+        real_stat = Path.stat
+        pinned = datetime.strptime(TODAY, "%Y-%m-%d").timestamp() + 43200
+        paths = self._paths
+
+        def fake_stat(self, *args, **kwargs):
+            result = real_stat(self, *args, **kwargs)
+            if self in paths:  # 注意：此 self 是 Path 实例，不是本类
+                values = list(result)
+                values[9] = pinned  # st_ctime
+                return os.stat_result(tuple(values))
+            return result
+
+        self._ctx = mock.patch.object(Path, "stat", fake_stat)
+        self._ctx.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        self._ctx.__exit__(*args)
+
+
 def test_by_source_and_total(memory_tree):
     """各入口分桶计数；机器产物（digest/highlights）不算捕获。"""
     _note(memory_tree, "a.md", "lark", TODAY)
@@ -159,9 +188,10 @@ def test_digest_weekly_section_only_on_sunday(memory_tree):
 
 def test_purged_counts_recent_trash(memory_tree):
     """遗忘数：回收站中 ctime 落在窗口内的文件（不看笔记 created）。"""
-    _trash_file(memory_tree, "gone.md")
+    path = _trash_file(memory_tree, "gone.md")
 
-    stats = capture_stats(memory_tree, days=7, today=TODAY)
+    with _pin_ctime(path):
+        stats = capture_stats(memory_tree, days=7, today=TODAY)
 
     assert stats["purged"] == 1
 
@@ -176,14 +206,20 @@ def test_purged_zero_without_trash_dir(memory_tree):
 def test_purged_excludes_old_ctime(memory_tree):
     """窗口前移入回收站的文件不计入（ctime 界外）。"""
     old_path = _trash_file(memory_tree, "ancient.md")
-    _trash_file(memory_tree, "fresh.md")
+    fresh_path = _trash_file(memory_tree, "fresh.md")
+
     real_stat = Path.stat
+    pinned_new = datetime.strptime(TODAY, "%Y-%m-%d").timestamp() + 43200
 
     def fake_stat(self, *args, **kwargs):
         result = real_stat(self, *args, **kwargs)
         if self == old_path:
             values = list(result)
-            values[9] = datetime(2026, 8, 1).timestamp()  # st_ctime 改旧
+            values[9] = datetime(2026, 8, 1).timestamp()  # st_ctime 改旧（窗口外）
+            return os.stat_result(tuple(values))
+        if self == fresh_path:
+            values = list(result)
+            values[9] = pinned_new  # 窗口内（防真实 ctime 跨天漂移）
             return os.stat_result(tuple(values))
         return result
 
@@ -195,9 +231,10 @@ def test_purged_excludes_old_ctime(memory_tree):
 
 def test_weekly_render_has_purge_line(memory_tree):
     """周报详细节带「本周遗忘」一行。"""
-    _trash_file(memory_tree, "gone.md")
+    path = _trash_file(memory_tree, "gone.md")
 
-    stats = capture_stats(memory_tree, days=7, today=TODAY)
+    with _pin_ctime(path):
+        stats = capture_stats(memory_tree, days=7, today=TODAY)
     lines = render_weekly_stats(stats)
 
     assert any("本周遗忘（purge 进回收站）：1 条" in line for line in lines)

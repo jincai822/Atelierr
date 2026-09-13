@@ -88,9 +88,11 @@ _TIME_PREFIX_RE = re.compile(r"^[-*\s]*\d{1,2}:\d{2}(?::\d{2})?\s+")
 def extract_comment(body: str, url: str) -> str:
     """从含链接的源笔记正文提取用户随手评论（裁决 C2：确认卡上展示意图）。
 
-    规则：整行命中平台分享样板的丢弃；其余行剥掉 URL 后保留非空片段
-    （只剩「链接」「看看」这类指路词的不算）。全无用户文字（纯分享文本）
-    返回空串——确认卡就不带评论行，绝不硬凑。
+    规则：只认**链接所在的同一行**（评论=捕获时随手写在链接旁的文字；
+    2026-09-14 实测：整篇扫描会把日记里别的文字行误收成评论——
+    「纯测试，不记录」被安到两张链接卡上）；整行命中平台分享样板的
+    丢弃；剥掉 URL 后保留非空片段（只剩「链接」「看看」这类指路词的
+    不算）。无同行用户文字返回空串——确认卡就不带评论行，绝不硬凑。
 
     Args:
         body: 源笔记正文。
@@ -101,6 +103,8 @@ def extract_comment(body: str, url: str) -> str:
     """
     fragments: List[str] = []
     for line in body.splitlines():
+        if url not in line:
+            continue  # 评论只认链接所在的同一行
         if _BOILERPLATE_RE.search(line):
             continue
         text = URL_RE.sub("", line)
