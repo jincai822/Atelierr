@@ -1,0 +1,21 @@
+# Atelierr 轻量分发定时器（与 atelierr-light.service 配套）
+#
+# 2026-09-13 从 atelierr-links 拆出（评审架构账 4：links/media 是重活
+# ——下载视频+Whisper 要几分钟，串行时把 todos 待办同步这种秒级活饿住）：
+# todos（行动意图→待办）+ highlights（划重点勾中→wiki 摘录卡）走自己的
+# 班次，每 15 分钟 :03/:18/:33/:48 触发（与 links 的 :07/:22/:37/:52 错开）。
+# 代价：links/media 当轮产出不再同轮被捡到，推迟一轮（≤15 分钟），
+# 待办/摘录不是秒级需求，可接受。
+#
+# 用户级安装:
+#   systemctl --user enable --now atelierr-light.timer
+
+[Unit]
+Description=Atelierr light dispatch timer (todos+highlights, every 15 min)
+
+[Timer]
+OnCalendar=*:3/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,26 @@
+# Atelierr 轻量分发服务（oneshot，与 atelierr-light.timer 配套）
+#
+# 只跑两条轻量分发（无 GPU/下载，秒级完成）：
+#   1. todos — 扫描笔记行动意图建待办（见 scripts/dispatch/todos.py）；
+#   2. highlights — 划重点清单勾中项转 wiki 摘录卡
+#      （见 scripts/dispatch/highlights.py）。
+# 与 atelierr-links（links+media 重活）拆开互不堵塞（2026-09-13 拆分）。
+#
+# 日志: ~/atelierr-data/state/logs/light.log
+
+[Unit]
+Description=Atelierr light dispatch (todos+highlights, every 15 min)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/workspaces/Atelierr
+Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+# todos 判定走 LLM（DeepSeek），key 经此环境文件注入（缺失自动降级跳过）
+EnvironmentFile=-%h/.config/atelierr/env
+ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli todos
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli highlights
+StandardOutput=append:%h/atelierr-data/state/logs/light.log
+StandardError=append:%h/atelierr-data/state/logs/light.log
