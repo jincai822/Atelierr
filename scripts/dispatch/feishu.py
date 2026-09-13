@@ -690,13 +690,21 @@ class FeishuBridge:
             store.append(text)
         closed = store.close()
         print(f"[feishu] prompt form submit: {len(answers)} answers", flush=True)
-        # 回顾仪式（review-* kind）：答案机械落盘 reflections/（方案 A）
+        # 回顾仪式（review-* kind）：答案机械落盘 reflections/（方案 A）；
+        # 钩子绝不弄砸回调本身（2026-09-13：用户看到报错但后端没日志，
+        # 从此钩子成败都打日志）
         if closed and str(closed.get("kind") or "").startswith("review"):
-            from scripts.dispatch import review_ritual
+            try:
+                from scripts.dispatch import review_ritual
 
-            written = review_ritual.write_answers(self.tree, closed)
-            if written is not None:
-                self._send_feedback(chat_id, f"答案已存进 {written.name}（下次会话综合成文）")
+                written = review_ritual.write_answers(self.tree, closed)
+                print(f"[feishu] review dump -> {written}", flush=True)
+                if written is not None:
+                    self._send_feedback(
+                        chat_id, f"答案已存进 {written.name}（下次会话综合成文）"
+                    )
+            except Exception as exc:  # noqa: BLE001 - 钩子是附加动作
+                print(f"[feishu] review dump fail: {exc}", flush=True)
         self._send_feedback(chat_id, f"已收到全部 {len(answers)} 条回答，问答结束 ✅")
         return {
             "toast": {"type": "success", "content": f"已提交 {len(answers)} 条回答"},
@@ -1406,13 +1414,17 @@ class FeishuBridge:
                 closed = store.close()
                 # 回顾仪式（review-* kind）：答案机械落盘 reflections/
                 if closed and str(closed.get("kind") or "").startswith("review"):
-                    from scripts.dispatch import review_ritual
+                    try:
+                        from scripts.dispatch import review_ritual
 
-                    written = review_ritual.write_answers(self.tree, closed)
-                    if written is not None:
-                        self._send_feedback(
-                            chat_id, f"答案已存进 {written.name}（下次会话综合成文）"
-                        )
+                        written = review_ritual.write_answers(self.tree, closed)
+                        print(f"[feishu] review dump -> {written}", flush=True)
+                        if written is not None:
+                            self._send_feedback(
+                                chat_id, f"答案已存进 {written.name}（下次会话综合成文）"
+                            )
+                    except Exception as exc:  # noqa: BLE001 - 钩子是附加动作
+                        print(f"[feishu] review dump fail: {exc}", flush=True)
                 self._send_feedback(chat_id, "好的，本次问答已结束 ✅")
             else:
                 count = store.append(text)
