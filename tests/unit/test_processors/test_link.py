@@ -1151,3 +1151,81 @@ def test_repeats_collapsed_before_llm(fake_pipeline, monkeypatch):
     assert summarize_prompt.count("乙句。") == 1
     format_prompt = next(p for p in prompts if "整理为易读" in p)
     assert format_prompt.count("乙句。") == 1
+
+
+def test_sanitize_title_strips_topic_tail():
+    """2026-09-13 真实样本：「…哲学之路 人文星闪耀计划 用知识解构社会现实」
+    ——空格尾段是话题/栏目尾巴，剥掉。"""
+    cleaned = link_module._sanitize_title(
+        "遇事的第一反应，会暴露每个人的三观，找寻并认识自己的哲学之路 "
+        "人文星闪耀计划 用知识解构社会现实"
+    )
+    assert cleaned == "遇事的第一反应，会暴露每个人的三观，找寻并认识自己的哲学之路"
+
+
+def test_sanitize_title_strips_hashtags():
+    """#话题 片段整个剥掉（不论中间还是结尾）。"""
+    assert (
+        link_module._sanitize_title("标题本体 #话题一 #话题二") == "标题本体"
+    )
+
+
+def test_sanitize_title_keeps_short_head_with_tail():
+    """首段不足 8 字时不丢尾（防误伤：有些标题本来就有空格）。"""
+    assert link_module._sanitize_title("短 尾巴保留") == "短 尾巴保留"
+
+
+def test_sanitize_title_caps_at_30():
+    """硬上限 30 字，截断后剥尾部标点。"""
+    assert link_module._sanitize_title("一" * 40) == "一" * 30
+    assert link_module._sanitize_title("一" * 29 + "，") == "一" * 29
+    assert link_module._sanitize_title("") == ""
+
+
+def test_summarize_caps_points_and_insights(fake_pipeline, monkeypatch):
+    """LLM 超契约（9 条分观点/7 条金句）：程序兜底截到 8/5。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _fixed_llm(
+        monkeypatch,
+        _llm_payload(
+            extra={
+                "points": [f"观点{i}。" for i in range(1, 10)],
+                "insights": [f"金句{i}" for i in range(1, 8)],
+            }
+        ),
+    )
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "8. 观点8。" in result.markdown
+    assert "9. 观点9。" not in result.markdown
+    quotes = [ln for ln in result.markdown.splitlines() if ln.startswith("> 金句")]
+    assert len(quotes) == 5
+
+
+def test_topic_tail_title_cleaned_end_to_end(fake_pipeline, monkeypatch):
+    """端到端：yt-dlp 标题带 #话题尾 → 文件名/ H1 用清洗后标题（无 LLM 也生效）。"""
+
+    class _TopicTailYT(_FakeYoutubeDL):
+        def extract_info(self, url, download=True):
+            info = super().extract_info(url, download)
+            info["title"] = (
+                "遇事的第一反应，会暴露每个人的三观，找寻并认识自己的哲学之路 "
+                "#人文星闪耀计划 #用知识解构社会现实"
+            )
+            return info
+
+    monkeypatch.setattr(link_module.yt_dlp, "YoutubeDL", _TopicTailYT)
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert (
+        result.metadata["title"]
+        == "遇事的第一反应，会暴露每个人的三观，找寻并认识自己的哲学之路"
+    )
+    assert "人文星闪耀计划" not in result.metadata["title"]
+    assert result.metadata["video_rel"].endswith(
+        "抖音-遇事的第一反应，会暴露每个人的三观，找寻并认识自己的哲学之路-vid123.mp4"
+    )

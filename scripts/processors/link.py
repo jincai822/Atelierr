@@ -189,6 +189,38 @@ def _is_machine_title(title: str) -> bool:
     return bool(_MACHINE_TITLE_RE.fullmatch(str(title or "")))
 
 
+#: 标题里的 #话题 片段（抖音分享文本尾巴常见：「…哲学之路 #人文星闪耀计划
+#: #用知识解构社会现实」，2026-09-13 真实样本）
+_TITLE_HASHTAG_RE = re.compile(r"\s*#[^#\s]+")
+
+#: 标题硬上限（提示词契约 10-20 字的程序兜底：LLM/平台不守规矩时代码截断）
+_TITLE_MAX_LEN = 30
+
+
+def _sanitize_title(title: str) -> str:
+    """标题清洗与限长（2026-09-13 实证：分享文本标题揉入话题尾，
+    「遇事的第一反应…哲学之路 人文星闪耀计划 用知识解构社会现实」40 字）。
+
+    - 剥掉 #话题 片段；
+    - 含空白的标题按空白切段，首段 ≥8 字时丢弃后续各段（中文真实标题
+      极少含空白，空格尾段几乎总是话题/栏目尾巴）；
+    - 硬上限 30 字，截断后剥掉尾部标点。
+
+    Args:
+        title: 原始标题。
+
+    Returns:
+        str: 清洗后的标题（可能为空串）。
+    """
+    text = _TITLE_HASHTAG_RE.sub("", str(title or "")).strip()
+    parts = [seg for seg in re.split(r"\s+", text) if seg]
+    if len(parts) > 1 and len(parts[0]) >= 8:
+        text = parts[0]
+    if len(text) > _TITLE_MAX_LEN:
+        text = text[:_TITLE_MAX_LEN]
+    return text.rstrip("，。、：:；;,.… ")
+
+
 def _collapse_consecutive_repeats(text: str) -> str:
     """折叠 Whisper 连续重复句（2026-09-12 真实样本：「所以它更多的就是
     一种资源配置上出了差异」连重复 3 次、「冲突就是一种冲突」4 次——
@@ -224,6 +256,7 @@ def _semantic_title(title: str, summary: Optional[Dict[str, Any]]) -> str:
     """标题兜底（2026-09-12 用户裁决：笔记标题 =「平台-主题」）：平台
     标题为空或是通用占位标题（_is_machine_title）时，换用 LLM 产出的
     语义标题；LLM 也没有则原样返回（下游仍可按 id 兜底命名）。
+    两条来源的标题都先过 _sanitize_title（剥话题尾 + 限长）。
 
     Args:
         title: 平台/分享文本给出的标题（可为空串）。
@@ -232,14 +265,14 @@ def _semantic_title(title: str, summary: Optional[Dict[str, Any]]) -> str:
     Returns:
         str: 最终采用的标题。
     """
-    title = str(title or "").strip()
-    if title and not _is_machine_title(title):
-        return title
+    raw = str(title or "").strip()
+    if raw and not _is_machine_title(raw):
+        return _sanitize_title(raw)
     if summary:
-        llm_title = str(summary.get("title") or "").strip()
+        llm_title = _sanitize_title(str(summary.get("title") or ""))
         if llm_title:
             return llm_title
-    return title
+    return raw
 
 #: 繁体 → 简体转换器（模块级单例）
 _T2S = opencc.OpenCC("t2s")
@@ -876,9 +909,11 @@ class LinkProcessor(BaseProcessor):
         LLM 输出 v4 JSON（summary / points / insights / entities /
         category / topics / title），旧格式（只有 summary / points）
         向后兼容，缺失字段按空处理。points/insights/entities/topics
-        上限分别为 20/10/10/6 条；category/topics 清洗为 Obsidian
-        标签（内部空白替换为 ``-``），category 为空则不产出分类标签；
-        title 截 40 字，供平台占位标题兜底（_semantic_title）。
+        上限 8/5/10/6 条（提示词契约 5-8/3-5 条的程序兜底，2026-09-13
+        实证 LLM 会超：分观点给过 9 条）；category/topics 清洗为
+        Obsidian 标签（内部空白替换为 ``-``），category 为空则不产出
+        分类标签；title 过 _sanitize_title（剥话题尾+限 30 字），供
+        平台占位标题兜底（_semantic_title）。
 
         Args:
             transcript: 简体转写全文（网页剪藏复用时为文章全文）。
@@ -904,12 +939,12 @@ class LinkProcessor(BaseProcessor):
                 str(item).strip()
                 for item in (data.get("points") or [])
                 if str(item).strip()
-            ][:20]
+            ][:8]
             insights = [
                 str(item).strip()
                 for item in (data.get("insights") or [])
                 if str(item).strip()
-            ][:10]
+            ][:5]
             entities = [
                 str(item).strip()
                 for item in (data.get("entities") or [])
@@ -921,7 +956,7 @@ class LinkProcessor(BaseProcessor):
                 if str(item).strip()
             ][:6]
             category = _tag_clean(str(data.get("category") or ""))
-            llm_title = str(data.get("title") or "").strip()[:40]
+            llm_title = _sanitize_title(str(data.get("title") or ""))
             if not summary_text:
                 return None, "failed:empty-summary"
             return {
