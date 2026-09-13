@@ -2,8 +2,8 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "方案 A（修正版 v2）：Atelier 作思考层——3 个约定接入，零代码耦合",
-    "subtitle": "自审修正：refl 不进 wiki（出口收敛）· 口令是指示牌 · 答案机械落盘 · 问题由当周数据生成",
+    "title": "方案 A（v3）：Atelier 作思考层——3 个约定接入，零代码耦合",
+    "subtitle": "周回顾+月回顾双定时 · refl 不进 wiki（出口收敛）· 答案机械落盘 · 问题由当期数据生成",
     "output": "atelierr-option-a.html"
   },
   "components": [
@@ -39,8 +39,8 @@
     {
       "id": "weekly",
       "type": "backend",
-      "label": "周回顾定时器",
-      "sublabel": "周日唤起 · 问题由当周数据生成（捕获/滞留/复习/待删）",
+      "label": "回顾定时器",
+      "sublabel": "周日周回顾 · 月末月轻脉冲 · 问题由当期数据生成",
       "pos": [
         730,
         120
@@ -210,7 +210,7 @@
     {
       "from": "weekly",
       "to": "rituals",
-      "label": "周日自动唤起",
+      "label": "周日/月末自动唤起",
       "variant": "dashed",
       "fromSide": "bottom",
       "toSide": "top",
@@ -344,7 +344,7 @@
       "dot": "amber",
       "title": "改什么 / 明确不改",
       "items": [
-        "改 1：加 atelierr-weekly.timer——周日唤起周回顾；问题由当周数据生成（捕获统计/滞留/复习/待删清单），不是固定四问（防仪式疲劳）",
+        "改 1：加回顾定时器——周日周回顾 + 月末月回顾轻脉冲（同一套表单机制）；问题由当期数据生成（捕获统计/滞留/复习/待删清单），不是固定四问（防仪式疲劳）",
         "改 1 附则：你的答案机械落盘 reflections/（零自动 LLM），综合成周报发生在你下次会话——headless 自动跑明确不做（与 autoevo 不移植同理由）",
         "改 2：控制台加「车间」区——口令指示牌（不是按钮，口令到会话里跑）+ 判断登记处视图 + 最新反思 3 条",
         "改 3：/decision 产物登记进 cognition/（schema 草案动手前给你过目）",
