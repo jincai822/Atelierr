@@ -1,0 +1,362 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "目标架构：Atelier 车间按三条回路接入信息流（方案讨论稿，未实施）",
+    "subtitle": "回路一不动 · 回路二强化 · 回路三解冻 · 文件级解耦不破 · 2026-09-13",
+    "output": "atelierr-atelier-target.html"
+  },
+  "components": [
+    {
+      "id": "you",
+      "type": "external",
+      "label": "你（手机/电脑）",
+      "sublabel": "飞书/QuickAdd/Obsidian/剪藏",
+      "pos": [
+        60,
+        120
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "pipe",
+      "type": "backend",
+      "label": "摄入管线（今天的系统）",
+      "sublabel": "捕获 → 分发 → 加工 → 确认 → 归档",
+      "pos": [
+        320,
+        120
+      ],
+      "size": [
+        240,
+        64
+      ],
+      "tag": "回路一"
+    },
+    {
+      "id": "timers",
+      "type": "backend",
+      "label": "定时器",
+      "sublabel": "晨报 07:53 · 周回顾 周日 · 月回顾 月末",
+      "pos": [
+        710,
+        120
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "feishut",
+      "type": "external",
+      "label": "飞书交互",
+      "sublabel": "表单作答 · 口令触发",
+      "pos": [
+        920,
+        120
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "console",
+      "type": "frontend",
+      "label": "控制台（Obsidian 主页）",
+      "sublabel": "车间口令一键进 · 判断登记处视图",
+      "pos": [
+        1140,
+        120
+      ],
+      "size": [
+        240,
+        64
+      ]
+    },
+    {
+      "id": "rituals",
+      "type": "security",
+      "label": "Atelier 仪式（思考层）",
+      "sublabel": "周回顾/日反思/决策/月度回顾/精力审计/prm",
+      "pos": [
+        660,
+        300
+      ],
+      "size": [
+        300,
+        84
+      ],
+      "tag": "回路二+三"
+    },
+    {
+      "id": "roles",
+      "type": "backend",
+      "label": "15 角色 + 23 思维框架",
+      "sublabel": "cercle 沙龙 · 第一性原理/五问/Cynefin…",
+      "pos": [
+        1040,
+        307
+      ],
+      "size": [
+        260,
+        70
+      ]
+    },
+    {
+      "id": "memory",
+      "type": "database",
+      "label": "memory/ 笔记",
+      "sublabel": "收件箱+平台目录 · decay 分层",
+      "pos": [
+        330,
+        560
+      ],
+      "size": [
+        220,
+        72
+      ]
+    },
+    {
+      "id": "refl",
+      "type": "database",
+      "label": "reflections/ 回顾产物",
+      "sublabel": "周报/反思 md · 机器产物可改写",
+      "pos": [
+        695,
+        560
+      ],
+      "size": [
+        230,
+        72
+      ]
+    },
+    {
+      "id": "wiki",
+      "type": "database",
+      "label": "wiki/ 知识总库",
+      "sublabel": "摘录卡/concept · 不衰减",
+      "pos": [
+        970,
+        560
+      ],
+      "size": [
+        220,
+        72
+      ]
+    },
+    {
+      "id": "cog",
+      "type": "database",
+      "label": "cognition/ 判断登记处",
+      "sublabel": "信念/假设/问题 · schema+审批才登记",
+      "pos": [
+        1260,
+        560
+      ],
+      "size": [
+        220,
+        72
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Atelier 车间（思考层：怎么想你）",
+      "wraps": [
+        "rituals",
+        "roles"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "同一个库 ~/atelierr-data/（文件级解耦地基：车间只读库、只写自己的目录）",
+      "wraps": [
+        "memory",
+        "refl",
+        "wiki",
+        "cog"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from": "you",
+      "to": "pipe",
+      "label": "发/写/剪",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight"
+    },
+    {
+      "from": "pipe",
+      "to": "memory",
+      "label": "回路一 · 不动",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [
+        455,
+        360
+      ]
+    },
+    {
+      "from": "timers",
+      "to": "rituals",
+      "label": "定时唤起",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [
+        845,
+        240
+      ]
+    },
+    {
+      "from": "feishut",
+      "to": "rituals",
+      "label": "表单/口令",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        950,
+        240
+      ]
+    },
+    {
+      "from": "console",
+      "to": "rituals",
+      "label": "车间口令",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "right",
+      "labelAt": [
+        1150,
+        250
+      ]
+    },
+    {
+      "from": "memory",
+      "to": "rituals",
+      "label": "回路二 · 只读引用（MemoryTree）",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "left",
+      "labelAt": [
+        470,
+        430
+      ]
+    },
+    {
+      "from": "rituals",
+      "to": "refl",
+      "label": "产物落盘",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [
+        815,
+        460
+      ]
+    },
+    {
+      "from": "refl",
+      "to": "wiki",
+      "label": "提炼/展示",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight",
+      "labelAt": [
+        947,
+        545
+      ]
+    },
+    {
+      "from": "rituals",
+      "to": "cog",
+      "label": "回路三 · 判断登记（解冻待设计）",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        1010,
+        470
+      ]
+    },
+    {
+      "from": "cog",
+      "to": "console",
+      "label": "登记处可见",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelAt": [
+        1350,
+        250
+      ]
+    },
+    {
+      "from": "roles",
+      "to": "rituals",
+      "label": "方法论支援",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "right",
+      "route": "straight"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "slate",
+      "title": "这张图怎么读",
+      "items": [
+        "左半边是今天的系统（回路一）：你发东西 → 摄入管线 → memory/，一个箭头都没动",
+        "右边虚线框是 Atelier 车间（思考层）：仪式命令是干活的，15 角色+23 框架是弹药库",
+        "三条虚线/彩线就是三条回路：回路二=车间只读库、产物落 reflections/；回路三=判断登记进 cognition/",
+        "定时器/飞书/控制台三个触发通道，车间不自己乱跑——你点或到点才跑"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "三条回路（方案核心）",
+      "items": [
+        "回路一（已在跑）：信息流主干，本方案一行不改",
+        "回路二（半通→强化）：回顾仪式只读引用 memory/wiki/cognition，产物落 reflections/ 进 wiki 展示；把日反思/月回顾/决策都挂到定时器和飞书表单上（表单卡技术已验证）",
+        "回路三（冻结→解冻）：仪式与 /decision 产生的判断按 schema 落 cognition/ 判断登记处，控制台可见、永不衰减——思考留下痕迹",
+        "铁律不破：Atelier 永不直接改 memory/ 你的笔记；它只写自己的目录（reflections/、cognition/ 经审批）"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "设计原则与成本",
+      "items": [
+        "文件级解耦不破：车间与管线只靠库目录对视，删掉任何一边另一边照跑",
+        "成本闸：Atelier 会话是重 LLM（Claude/Codex runtime），只按仪式周期或你点名跑，绝不逐笔记跑",
+        "隐私红线延续：车间产物进公开仓库前过 privacy 门禁（它自带的规矩）",
+        "触发三通道：定时器（到点）、飞书（随手）、控制台（预谋）——三种启动方式对应三种心境"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "落地顺序建议（聊完再定）",
+      "items": [
+        "第一步（小）：周日周回顾定时化+飞书表单作答——回路二闭环，今晚就有条件做",
+        "第二步（中）：/decision 决策日志接 cognition/ 登记（schema 设计要先过你）——回路三解冻",
+        "第三步（中）：控制台挂「车间」区：口令入口 + 判断登记处 Dataview 视图 + 最新反思",
+        "第四步（后议）：autoevo 夜间巡检从 macOS launchd 移植到 systemd（它是 Mac 原生的，要移植）",
+        "每步独立可停：做完一步系统就是完整的，不做后头也不欠账"
+      ]
+    }
+  ]
+}
