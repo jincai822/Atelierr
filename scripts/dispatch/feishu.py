@@ -81,6 +81,7 @@ from scripts.utils.state_store import read_json, write_json
 from scripts.dispatch.archive import derive_archive_dir
 from scripts.dispatch.feishu_cards import (
     confirmed_with_remark_card,
+    pending_digest_card,
     prompt_form_card,
     send_resurface_feishu,
     send_todo_feishu,
@@ -319,6 +320,11 @@ class FeishuBridge:
             return {"toast": {"type": "error", "content": "回调解析失败"}}
         action_name = str(value.get("action") or "")
         filename = str(value.get("note") or "").strip()
+        # 清单卡批次（pending_digest_card 注入）：点掉一条后用剩余条目
+        # 重建清单卡——平台回调的卡片更新是整卡替换，不重建其余条目
+        # 会从视图上"消失"（2026-09-13 真机实测；笔记无损）
+        batch_raw = value.get("batch")
+        batch = [str(item) for item in batch_raw] if isinstance(batch_raw, list) else None
         chat_id = self._event_chat_id(data)
         # 顺带识别用户 open_id（回调 operator 带身份，零额外权限）；
         # 已识别主人后，其他人的按钮点击一律忽略（单租户加固）
@@ -339,20 +345,20 @@ class FeishuBridge:
         if open_id:
             record_user_open_id(self.tree.state_dir, open_id)
         if action_name == CONFIRM_ACTION:
-            return self._handle_confirm(filename, chat_id)
+            return self._handle_confirm(filename, chat_id, batch)
         if action_name == ARCHIVE_PICK_ACTION:
             return self._handle_archive_pick(filename, chat_id)
         if action_name == ARCHIVE_CANCEL_ACTION:
             return self._handle_archive_cancel(filename, chat_id)
         if action_name == ARCHIVE_ACTION:
             target_dir = str(value.get("dir") or "").strip() or None
-            return self._handle_archive(filename, chat_id, target_dir)
+            return self._handle_archive(filename, chat_id, target_dir, batch)
         if action_name == TODO_DONE_ACTION:
             return self._handle_todo_done(filename, chat_id)
         if action_name == PROMPT_SUBMIT_ACTION:
             return self._handle_prompt_submit(action, chat_id)
         if action_name == DISCARD_ACTION:
-            return self._handle_discard(filename, chat_id)
+            return self._handle_discard(filename, chat_id, batch)
         if action_name == NOTE_REMARK_ACTION:
             return self._handle_note_remark(action, filename, chat_id)
         return {}
@@ -382,7 +388,12 @@ class FeishuBridge:
                 return str(value)
         return None
 
-    def _handle_confirm(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
+    def _handle_confirm(
+        self,
+        filename: str,
+        chat_id: Optional[str] = None,
+        batch: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """「✅ 确认」：只删待确认标签；失败只 toast，不中断守护。"""
         try:
             ok, detail = self._confirm_note(filename)
@@ -401,9 +412,28 @@ class FeishuBridge:
             "toast": {"type": "success", "content": "已确认"},
             "card": {
                 "type": "raw",
-                "data": confirmed_with_remark_card(filename, "已移除「待确认」标签"),
+                "data": self._completion_card(
+                    filename, "已移除「待确认」标签", "✅ 已确认", batch
+                ),
             },
         }
+
+    @staticmethod
+    def _completion_card(
+        filename: str,
+        note_line: str,
+        header: str,
+        batch: Optional[List[str]],
+    ) -> Dict[str, Any]:
+        """操作完成卡：清单卡批次场景（batch 非空）重建剩余条目的清单卡
+        ——平台回调的卡片更新是整卡替换，不重建会让其余条目从视图上消失
+        （2026-09-13 真机实测）；单卡场景给带「顺手记一句」表单的完成卡
+        （批次点到最后一条时同样回到表单完成卡）。"""
+        if batch:
+            remaining = [item for item in batch if item != filename]
+            if remaining:
+                return pending_digest_card(remaining)
+        return confirmed_with_remark_card(filename, note_line, header)
 
     def _handle_archive_pick(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
         """「📁 归档…」：弹目录选择卡（不移动文件；点定目录才移）。
@@ -504,7 +534,8 @@ class FeishuBridge:
         }
 
     def _handle_archive(self, filename: str, chat_id: Optional[str] = None,
-                        target_dir: Optional[str] = None) -> Dict[str, Any]:
+                        target_dir: Optional[str] = None,
+                        batch: Optional[List[str]] = None) -> Dict[str, Any]:
         """「📁 确认并归档」：归档移动 + 删待确认标签；失败只 toast。"""
         try:
             ok, detail = self._archive_note(filename, target_dir)
@@ -527,9 +558,11 @@ class FeishuBridge:
                 "toast": {"type": "success", "content": "已确认（留在收件箱）"},
                 "card": {
                     "type": "raw",
-                    "data": confirmed_with_remark_card(
+                    "data": self._completion_card(
                         filename,
                         "已移除「待确认」标签；推导不出归档目录，留在收件箱",
+                        "✅ 已确认",
+                        batch,
                     ),
                 },
             }
@@ -544,8 +577,11 @@ class FeishuBridge:
                 },
                 "card": {
                     "type": "raw",
-                    "data": confirmed_with_remark_card(
-                        filename, "已归档；「待确认」标签请手动摘除"
+                    "data": self._completion_card(
+                        filename,
+                        "已归档；「待确认」标签请手动摘除",
+                        "✅ 已确认",
+                        batch,
                     ),
                 },
             }
@@ -553,8 +589,9 @@ class FeishuBridge:
         self._send_feedback(chat_id, f"📁 已确认并归档到 {detail}/：{title}")
         card = {
             "type": "raw",
-            "data": confirmed_with_remark_card(
-                filename, f"已归档到 {detail}/ 并移除「待确认」标签"
+            "data": self._completion_card(
+                filename, f"已归档到 {detail}/ 并移除「待确认」标签",
+                "✅ 已确认", batch
             ),
         }
         return {
@@ -652,7 +689,12 @@ class FeishuBridge:
             },
         }
 
-    def _handle_discard(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
+    def _handle_discard(
+        self,
+        filename: str,
+        chat_id: Optional[str] = None,
+        batch: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """「🗑 不要了」：只标 pending_delete（不动文件），删除仍走
         review → purge → trash/ 人工链路（2026-09-13 环节三评审毛病 1：
         垃圾卡有即时出口，丢弃有缓冲，误点可捞回）。"""
@@ -684,10 +726,11 @@ class FeishuBridge:
             "toast": {"type": "success", "content": "已标记待删"},
             "card": {
                 "type": "raw",
-                "data": self._confirmed_card(
+                "data": self._completion_card(
                     filename,
-                    note_line="不会自动删：review → 你点头 → 回收站（可恢复）",
-                    header="🗑 已标记待删",
+                    "不会自动删：review → 你点头 → 回收站（可恢复）",
+                    "🗑 已标记待删",
+                    batch,
                 ),
             },
         }

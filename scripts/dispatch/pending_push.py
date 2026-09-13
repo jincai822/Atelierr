@@ -72,9 +72,10 @@ def enqueue(state_dir: Path, rel: str, kind: str = "link") -> None:
     _save(state_dir, items)
 
 
-def _still_pending(notes_dir: Path, rel: str) -> bool:
-    """文件在且仍带「待确认」标签才推（用户可能已在 Obsidian 处理过）。"""
-    path = Path(notes_dir) / rel
+def _still_pending(tree, rel: str) -> bool:
+    """文件在、仍带「待确认」、且未标 pending_delete 才推（用户可能已在
+    Obsidian 处理过，或已点过 🗑 进了待删通道——待删的不该再上确认清单）。"""
+    path = Path(tree.notes_dir) / rel
     if not path.exists():
         return False
     try:
@@ -82,7 +83,7 @@ def _still_pending(notes_dir: Path, rel: str) -> bool:
     except Exception:  # noqa: BLE001 - 损坏文件不推，但也不留着占队
         return False
     tags = [str(tag) for tag in (post.get("tags") or [])]
-    return "待确认" in tags
+    return "待确认" in tags and not tree.is_pending_delete(path)
 
 
 def flush(tree, send_card=None) -> Dict[str, Any]:
@@ -102,7 +103,7 @@ def flush(tree, send_card=None) -> Dict[str, Any]:
     still = [
         item["file"]
         for item in items
-        if _still_pending(tree.notes_dir, item["file"])
+        if _still_pending(tree, item["file"])
     ]
     pending = still[:MAX_ITEMS]
     overflow = still[MAX_ITEMS:]

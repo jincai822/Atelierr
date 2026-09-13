@@ -210,39 +210,28 @@ def send_resurface_feishu(
 
 
 
-def send_pending_digest_feishu(
-    filenames: List[str], chat_id: Optional[str] = None
-) -> bool:
-    """晚间待确认清单卡（2026-09-13 用户裁决：无评论的捕获不单独推卡，
-    攒成一张批量处理——确认端减负）。
+def pending_digest_card(filenames: List[str]) -> Dict[str, Any]:
+    """待确认清单卡（纯组装，不发送——回调重建同构卡片也用它）。
 
-    每条笔记一节：标题 + 「✅ 确认并归档」按钮（callback 复用
-    FeishuBridge 的 archive_note 分支：推导目录直接移动+删标签，
-    推不出平台时退化为仅确认）。想细看/换目录：点标题到 Obsidian。
-
-    Args:
-        filenames: 仍带「待确认」的笔记相对路径列表（最多 20 条，
-            由 pending_push.MAX_ITEMS 截断）。
-        chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID``。
-
-    Returns:
-        bool: 发送成功返回 True；空列表/未配置静默 False。
+    每个按钮的回调 value 带 ``batch``（整张卡的条目清单）：点掉一条后
+    FeishuBridge 用「batch 减去已处理项」重建本卡——清单卡是单卡多条，
+    平台回调的卡片更新是**整卡替换**，不重建会让其余条目"消失"
+    （2026-09-13 真机实测：点一条另外两条不见了；笔记无损，仅视图）。
     """
-    if not filenames:
-        return False
     elements: List[Dict[str, Any]] = [
         {
             "tag": "div",
             "text": {
                 "tag": "lark_md",
                 "content": (
-                    "今天无评论的捕获攒成这一张（写了评论的已即时单推）。"
-                    "逐条点「✅ 确认并归档」，或到 Obsidian 细看再处理。"
+                    "无评论的捕获攒成这一张（写了评论的已即时单推）。"
+                    "逐条点「✅ 确认并归档」，或「打开细看」后再定。"
                 ),
             },
         }
     ]
-    for index, rel in enumerate(filenames[:20], 1):
+    batch = list(filenames[:20])
+    for index, rel in enumerate(batch, 1):
         stem = Path(rel).stem
         elements.append(
             {
@@ -261,7 +250,11 @@ def send_pending_digest_feishu(
                         "behaviors": [
                             {
                                 "type": "callback",
-                                "value": {"action": ARCHIVE_ACTION, "note": rel},
+                                "value": {
+                                    "action": ARCHIVE_ACTION,
+                                    "note": rel,
+                                    "batch": batch,
+                                },
                             }
                         ],
                     },
@@ -279,25 +272,50 @@ def send_pending_digest_feishu(
                         "behaviors": [
                             {
                                 "type": "callback",
-                                "value": {"action": DISCARD_ACTION, "note": rel},
+                                "value": {
+                                    "action": DISCARD_ACTION,
+                                    "note": rel,
+                                    "batch": batch,
+                                },
                             }
                         ],
                     },
                 ],
             }
         )
-    card = {
+    return {
         "config": {"wide_screen_mode": True},
         "header": {
             "title": {
                 "tag": "plain_text",
-                "content": f"📋 今日待确认清单（{len(filenames[:20])} 条）",
+                "content": f"📋 待确认清单（{len(batch)} 条）",
             },
             "template": "blue",
         },
         "elements": elements,
     }
-    return send_feishu_card(card, chat_id)
+
+
+def send_pending_digest_feishu(
+    filenames: List[str], chat_id: Optional[str] = None
+) -> bool:
+    """晚间待确认清单卡（2026-09-13 用户裁决：无评论的捕获不单独推卡，
+    攒成一张批量处理——确认端减负）。
+
+    每条笔记一节：标题 + 「✅ 确认并归档」（archive_note 回调）+
+    「打开细看」（URI）+「🗑」（discard_note 标 pending_delete）。
+
+    Args:
+        filenames: 仍带「待确认」的笔记相对路径列表（最多 20 条，
+            由 pending_push.MAX_ITEMS 截断）。
+        chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID``。
+
+    Returns:
+        bool: 发送成功返回 True；空列表/未配置静默 False。
+    """
+    if not filenames:
+        return False
+    return send_feishu_card(pending_digest_card(filenames), chat_id)
 
 
 def confirmed_with_remark_card(

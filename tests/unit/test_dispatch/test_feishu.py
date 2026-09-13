@@ -2100,3 +2100,62 @@ def test_confirmed_with_remark_card_shape():
         "action": "note_remark",
         "note": "x.md",
     }
+
+
+def test_batch_archive_rebuilds_digest_card(memory_tree):
+    """清单卡点一条「✅ 确认并归档」：整卡替换为**剩余条目**的清单卡——
+    其余条目不消失（2026-09-13 真机实测缺陷：点一条整卡变完成卡）。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("ma.md", "正文\n", source="media", tags=["待确认", "媒体"])
+    memory_tree.create_note("mb.md", "正文\n", source="media", tags=["待确认", "媒体"])
+
+    resp = bridge.handle_card_action(
+        _card_action(
+            {"action": "archive_note", "note": "ma.md", "batch": ["ma.md", "mb.md"]}
+        )
+    )
+
+    assert resp["toast"]["type"] == "success"
+    card = resp["card"]["data"]
+    assert "1 条" in card["header"]["title"]["content"]
+    texts = [
+        el["text"]["content"]
+        for el in card["elements"]
+        if el["tag"] == "div"
+    ]
+    assert any("mb" in text for text in texts)  # 剩余条目还在
+    assert not any("ma" in text and "💭" not in text for text in texts if "ma" in text)
+    # ma.md 本身已归档
+    assert (memory_tree.notes_dir / "媒体" / "ma.md").exists()
+
+
+def test_batch_last_item_gets_remark_completion_card(memory_tree):
+    """批次点到最后一条：回到带「顺手记一句」表单的完成卡。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("only.md", "正文\n", source="media", tags=["待确认", "媒体"])
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "archive_note", "note": "only.md", "batch": ["only.md"]})
+    )
+
+    card = resp["card"]["data"]
+    assert card["schema"] == "2.0"  # 带表单的完成卡
+    assert card["body"]["elements"][1]["tag"] == "form"
+
+
+def test_batch_discard_rebuilds_digest_card(memory_tree):
+    """清单卡点「🗑」：标记待删 + 重建剩余清单卡。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("da.md", "正文\n", source="media", tags=["待确认", "媒体"])
+    memory_tree.create_note("db.md", "正文\n", source="media", tags=["待确认", "媒体"])
+
+    resp = bridge.handle_card_action(
+        _card_action(
+            {"action": "discard_note", "note": "da.md", "batch": ["da.md", "db.md"]}
+        )
+    )
+
+    assert resp["toast"]["type"] == "success"
+    assert memory_tree.is_pending_delete(memory_tree.notes_dir / "da.md")
+    card = resp["card"]["data"]
+    assert "1 条" in card["header"]["title"]["content"]

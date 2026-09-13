@@ -98,15 +98,18 @@ def test_pending_digest_card_shape(memory_tree, monkeypatch):
         for action in el["actions"]
     ]
     callbacks = [b for b in buttons if "behaviors" in b]
-    # 每条两个回调按钮：✅ 确认并归档 + 🗑 不要了（「打开细看」是 URI 按钮）
+    # 每条两个回调按钮：✅ 确认并归档 + 🗑 不要了（「打开细看」是 URI 按钮）；
+    # value 带 batch（整卡条目清单）——点掉一条后靠它重建剩余清单卡
     assert len(callbacks) == 4
     assert callbacks[0]["behaviors"][0]["value"] == {
         "action": "archive_note",
         "note": "抖音-a.md",
+        "batch": ["抖音-a.md", "clip-b.md"],
     }
     assert callbacks[1]["behaviors"][0]["value"] == {
         "action": "discard_note",
         "note": "抖音-a.md",
+        "batch": ["抖音-a.md", "clip-b.md"],
     }
     texts = [
         el["text"]["content"]
@@ -121,3 +124,21 @@ def test_pending_digest_empty_list_no_send():
     from scripts.dispatch import feishu_cards
 
     assert feishu_cards.send_pending_digest_feishu([]) is False
+
+
+def test_flush_excludes_pending_delete(memory_tree):
+    """已标 pending_delete 的（点过 🗑）不再上确认清单——待删通道与
+    确认通道互斥（2026-09-13 真机复验发现）。"""
+    path = _note(memory_tree, "doomed.md")
+    _note(memory_tree, "alive.md")
+    entry = memory_tree._entry(path)
+    entry["pending_delete"] = True
+    memory_tree._save_index()
+    for rel in ("doomed.md", "alive.md"):
+        pending_push.enqueue(memory_tree.state_dir, rel)
+
+    sent = []
+    report = pending_push.flush(memory_tree, send_card=lambda names: sent.append(names) or True)
+
+    assert sent == [["alive.md"]]
+    assert report["resolved"] == 1
