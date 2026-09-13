@@ -2,8 +2,8 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "方案 A：Atelier 作思考层——3 个约定接入，零代码耦合",
-    "subtitle": "信息流一行不改 · 车间只读库、只写自己目录 · 触发三通道 · 2026-09-13",
+    "title": "方案 A（修正版 v2）：Atelier 作思考层——3 个约定接入，零代码耦合",
+    "subtitle": "自审修正：refl 不进 wiki（出口收敛）· 口令是指示牌 · 答案机械落盘 · 问题由当周数据生成",
     "output": "atelierr-option-a.html"
   },
   "components": [
@@ -40,7 +40,7 @@
       "id": "weekly",
       "type": "backend",
       "label": "周回顾定时器",
-      "sublabel": "周日自动唤起（atelierr-weekly.timer）",
+      "sublabel": "周日唤起 · 问题由当周数据生成（捕获/滞留/复习/待删）",
       "pos": [
         730,
         120
@@ -68,7 +68,7 @@
       "id": "console",
       "type": "frontend",
       "label": "控制台·车间区",
-      "sublabel": "20 命令口令表 · 判断登记处视图",
+      "sublabel": "车间指示牌（口令到会话跑）· 判断登记处视图 · 最新反思",
       "pos": [
         1200,
         120
@@ -139,7 +139,7 @@
       "id": "wiki",
       "type": "database",
       "label": "wiki/ 知识总库",
-      "sublabel": "摘录卡/concept · 不衰减",
+      "sublabel": "摘录卡/concept · 不衰减 · 人工提炼才进",
       "pos": [
         990,
         600
@@ -223,7 +223,7 @@
     {
       "from": "form",
       "to": "rituals",
-      "label": "随手答",
+      "label": "随手答（答案先机械落 reflections/）",
       "variant": "dashed",
       "fromSide": "bottom",
       "toSide": "top",
@@ -235,7 +235,7 @@
     {
       "from": "console",
       "to": "rituals",
-      "label": "预谋（口令一键进）",
+      "label": "预谋（看口令到会话跑）",
       "variant": "dashed",
       "fromSide": "bottom",
       "toSide": "right",
@@ -259,7 +259,7 @@
     {
       "from": "rituals",
       "to": "refl",
-      "label": "约定② 回顾产物落盘",
+      "label": "约定② 产物落盘（答案原样+会话综合）",
       "variant": "emphasis",
       "fromSide": "bottom",
       "toSide": "top",
@@ -267,19 +267,6 @@
       "labelAt": [
         845,
         480
-      ]
-    },
-    {
-      "from": "refl",
-      "to": "wiki",
-      "label": "提炼进 wiki",
-      "variant": "emphasis",
-      "fromSide": "right",
-      "toSide": "left",
-      "route": "straight",
-      "labelAt": [
-        955,
-        585
       ]
     },
     {
@@ -318,6 +305,18 @@
         1010,
         285
       ]
+    },
+    {
+      "from": "rituals",
+      "to": "wiki",
+      "label": "约定②b /promote 提炼（人工命令）",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        1080,
+        470
+      ]
     }
   ],
   "cards": [
@@ -336,7 +335,7 @@
       "title": "三个约定（全部耦合面）",
       "items": [
         "约定① 读：仪式只读引用 memory/wiki/cognition（MemoryTree 只读桥，今天已在跑）",
-        "约定② 写：回顾产物只落 reflections/（机器产物区），提炼后进 wiki——永不碰你的笔记",
+        "约定② 写：回顾产物只落 reflections/（机器产物区）——控制台直接读它呈现最新反思，不物理搬进 wiki（出口收敛裁决）；wiki 只经 /promote 人工提炼进入",
         "约定③ 登记：/decision 决策按 cognition 已有 schema 落判断登记处，控制台可见、永不衰减",
         "除这三条外没有任何接触：Atelier 不进管道、不改管道、不被管道调用"
       ]
@@ -345,10 +344,11 @@
       "dot": "amber",
       "title": "改什么 / 明确不改",
       "items": [
-        "改 1：加 atelierr-weekly.timer——周日早上把周回顾问题推成飞书表单卡",
-        "改 2：控制台加「车间」区（口令表+判断登记处视图+最新反思 3 条）——控制台本来就是机器产物",
+        "改 1：加 atelierr-weekly.timer——周日唤起周回顾；问题由当周数据生成（捕获统计/滞留/复习/待删清单），不是固定四问（防仪式疲劳）",
+        "改 1 附则：你的答案机械落盘 reflections/（零自动 LLM），综合成周报发生在你下次会话——headless 自动跑明确不做（与 autoevo 不移植同理由）",
+        "改 2：控制台加「车间」区——口令指示牌（不是按钮，口令到会话里跑）+ 判断登记处视图 + 最新反思 3 条",
         "改 3：/decision 产物登记进 cognition/（schema 草案动手前给你过目）",
-        "明确不做：autoevo 移植（自动写库+自动提交，与稳定可靠相悖）；逐笔记 LLM（成本爆炸）；/hi 路由进飞书（过度工程）"
+        "明确不做：autoevo 移植；逐笔记 LLM；/hi 路由进飞书"
       ]
     },
     {
@@ -357,7 +357,7 @@
       "items": [
         "优势：故障面只多 1 个定时器+1 块静态内容+1 条登记路径；全部可逆；零代码耦合；成本有闸",
         "彻底性：三条回路全通——信息流原样、回顾回流闭环、判断沉淀落地",
-        "代价 1：cognition 登记 schema 要一次定好（类型/状态/确信度/依据/来源），动手前评审",
+        "代价 1：cognition 登记 schema 要一次定好（类型/状态/确信度/依据/来源），且要预留「来源=周回顾」扩展位，动手前评审",
         "代价 2：定时周回顾的提问质量要观察一周，不行调提示词",
         "代价 3：控制台口令是半自动（点开一个会话跑命令）——这是故意的成本闸，不是缺陷"
       ]
