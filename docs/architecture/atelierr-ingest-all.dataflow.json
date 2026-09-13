@@ -1,0 +1,693 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "摄入模块全景：从入口到沉淀（一图细到每一步）",
+    "subtitle": "箭头上的 ①②③ 是阅读顺序 · 2026-09-13（含 media 直发视频修复 + large-v3 切换 + 超限回执）",
+    "output": "atelierr-ingest-all.html",
+    "viewBox": [
+      1400,
+      800
+    ]
+  },
+  "stages": [
+    {
+      "label": "① 入口 · 你怎么发"
+    },
+    {
+      "label": "② 落地 · 文件进库"
+    },
+    {
+      "label": "③ 分发 · 15 分钟班次"
+    },
+    {
+      "label": "④ 加工 · 引擎逐步"
+    },
+    {
+      "label": "⑤ 产物 · 入库形态"
+    },
+    {
+      "label": "⑥ 去向 · 你确认之后"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "feishu",
+      "type": "frontend",
+      "label": "飞书（手机主入口）",
+      "sublabel": "链接+评论/截图/语音/直发视频/PDF/文字",
+      "stage": 0,
+      "row": 0
+    },
+    {
+      "id": "quickadd",
+      "type": "frontend",
+      "label": "手机 QuickAdd",
+      "sublabel": "想法/灵感 · 一键速记自动起名",
+      "stage": 0,
+      "row": 1
+    },
+    {
+      "id": "obsidian",
+      "type": "frontend",
+      "label": "电脑 Obsidian",
+      "sublabel": "直写笔记 · 大文件拖 attachments",
+      "stage": 0,
+      "row": 2
+    },
+    {
+      "id": "clipper",
+      "type": "frontend",
+      "label": "Chrome 剪藏",
+      "sublabel": "网页长文一键剪藏 · 备注框可选",
+      "stage": 0,
+      "row": 3
+    },
+    {
+      "id": "diary",
+      "type": "database",
+      "label": "日记 YYYY-MM-DD.md",
+      "sublabel": "文字/链接追加一行 · 处理后补 →[[回链]]",
+      "stage": 1,
+      "row": 0
+    },
+    {
+      "id": "vault",
+      "type": "database",
+      "label": "memory/ 根·裸笔记",
+      "sublabel": "速记/直写/剪藏全文 · 捕获时刻不加工",
+      "stage": 1,
+      "row": 1,
+      "tag": "零摩擦"
+    },
+    {
+      "id": "sync",
+      "type": "cloud",
+      "label": "Syncthing",
+      "sublabel": "手机↔电脑实时双向 · 断线积压追平",
+      "stage": 1,
+      "row": 2
+    },
+    {
+      "id": "attm",
+      "type": "database",
+      "label": "attachments 媒体/·书籍/",
+      "sublabel": "截图/语音/视频·PDF 原件（视频取 file_key 本体）",
+      "stage": 1,
+      "row": 3,
+      "width": 170
+    },
+    {
+      "id": "watcher",
+      "type": "backend",
+      "label": "watcher 归一化",
+      "sublabel": "裸 md 补一次性 frontmatter · os.utime 还原 mtime",
+      "stage": 1,
+      "row": 4
+    },
+    {
+      "id": "links",
+      "type": "backend",
+      "label": "links 链接分发",
+      "sublabel": "扫正文抓 URL · processed_links 幂等",
+      "stage": 2,
+      "row": 0
+    },
+    {
+      "id": "clips",
+      "type": "backend",
+      "label": "clips 剪藏分发",
+      "sublabel": "新剪藏识别 · 同 url 查重",
+      "stage": 2,
+      "row": 1
+    },
+    {
+      "id": "media",
+      "type": "backend",
+      "label": "media 附件分发",
+      "sublabel": "扫 媒体/书籍/ · mtime>30s · 3 次熔断",
+      "stage": 2,
+      "row": 2
+    },
+    {
+      "id": "todos",
+      "type": "backend",
+      "label": "todos 意图分发",
+      "sublabel": "扫行动意图 · 分享样板过滤（P1）",
+      "stage": 2,
+      "row": 3
+    },
+    {
+      "id": "ytdlp",
+      "type": "backend",
+      "label": "yt-dlp 下载",
+      "sublabel": "借浏览器 cookie 过反爬（自愈）· B站限 480p",
+      "stage": 3,
+      "row": 0
+    },
+    {
+      "id": "whisper",
+      "type": "backend",
+      "label": "Whisper 转写",
+      "sublabel": "GPU · 标点提示词 · 链接/视频 large-v3，语音 base",
+      "stage": 3,
+      "row": 1
+    },
+    {
+      "id": "llm",
+      "type": "cloud",
+      "label": "DeepSeek 整理",
+      "sublabel": "摘要/分观点 5-8 条/金句/中图法标签/判待办",
+      "stage": 3,
+      "row": 2,
+      "tag": "每篇≤1次"
+    },
+    {
+      "id": "ocr",
+      "type": "backend",
+      "label": "OCR 引擎",
+      "sublabel": "PaddleOCR 截图文字 · rapidocr 备选",
+      "stage": 3,
+      "row": 3
+    },
+    {
+      "id": "ffmpeg",
+      "type": "backend",
+      "label": "ffmpeg 480p",
+      "sublabel": "H.264 crf30 · 直发视频替换原件（压坏留原件）",
+      "stage": 3,
+      "row": 4
+    },
+    {
+      "id": "cardnote",
+      "type": "database",
+      "label": "待确认卡笔记",
+      "sublabel": "memory/ 根 · 标题+摘要+内嵌原件+全文链接",
+      "stage": 4,
+      "row": 0,
+      "tag": "机器不改写"
+    },
+    {
+      "id": "orig",
+      "type": "database",
+      "label": "原资料 attachments/平台/",
+      "sublabel": "480p 单份 + >800字全文外置 .md（方案 B）",
+      "stage": 4,
+      "row": 1,
+      "width": 180,
+      "tag": "只增不减"
+    },
+    {
+      "id": "checklist",
+      "type": "database",
+      "label": "划重点清单",
+      "sublabel": "系统/ · ≤20 条复选框候选",
+      "stage": 4,
+      "row": 2
+    },
+    {
+      "id": "todonote",
+      "type": "database",
+      "label": "待办笔记",
+      "sublabel": "tags=[待办] · 单向同步飞书任务/日历",
+      "stage": 4,
+      "row": 3
+    },
+    {
+      "id": "sidecar",
+      "type": "database",
+      "label": "sidecar 状态",
+      "sublabel": "index.json + processed_×3 幂等 · 每日 git 快照",
+      "stage": 4,
+      "row": 4
+    },
+    {
+      "id": "card",
+      "type": "external",
+      "label": "飞书确认卡",
+      "sublabel": "✅确认 / 📁归档… / 删除 · 评论备注上卡",
+      "stage": 5,
+      "row": 0
+    },
+    {
+      "id": "arch",
+      "type": "database",
+      "label": "归档 平台/",
+      "sublabel": "点按钮才移动 · 平铺（唯 书籍/ 留子目录）",
+      "stage": 5,
+      "row": 1
+    },
+    {
+      "id": "wiki",
+      "type": "database",
+      "label": "wiki/ 知识总库",
+      "sublabel": "摘录卡/concept · 不衰减不 purge",
+      "stage": 5,
+      "row": 2
+    },
+    {
+      "id": "decay",
+      "type": "backend",
+      "label": "decay 遗忘",
+      "sublabel": "每日 03:00 · 方案 C：机器 3x 速（15天/45天）",
+      "stage": 5,
+      "row": 3
+    },
+    {
+      "id": "digest",
+      "type": "backend",
+      "label": "晨报/周报",
+      "sublabel": "07:53 统计+复习推送 · 周日详细节",
+      "stage": 5,
+      "row": 4
+    }
+  ],
+  "flows": [
+    {
+      "from": "feishu",
+      "to": "diary",
+      "label": "① 文字/链接入日记",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        207,
+        142
+      ]
+    },
+    {
+      "from": "feishu",
+      "to": "attm",
+      "label": "② 图/音/视频/PDF",
+      "variant": "emphasis",
+      "labelAt": [
+        185,
+        352
+      ]
+    },
+    {
+      "from": "quickadd",
+      "to": "sync",
+      "label": "③ 速记",
+      "variant": "emphasis",
+      "labelAt": [
+        207,
+        296
+      ]
+    },
+    {
+      "from": "sync",
+      "to": "vault",
+      "label": "④ 实时同步落根",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "from": "obsidian",
+      "to": "vault",
+      "label": "⑤ 直写笔记",
+      "variant": "emphasis",
+      "labelAt": [
+        207,
+        322
+      ]
+    },
+    {
+      "from": "obsidian",
+      "to": "attm",
+      "label": "⑥ 拖大文件",
+      "variant": "emphasis",
+      "labelAt": [
+        190,
+        460
+      ]
+    },
+    {
+      "from": "clipper",
+      "to": "vault",
+      "label": "⑦ 剪藏全文 md",
+      "variant": "emphasis",
+      "labelAt": [
+        250,
+        228
+      ]
+    },
+    {
+      "from": "vault",
+      "to": "watcher",
+      "label": "归一化（异步）",
+      "variant": "default",
+      "fromSide": "left",
+      "toSide": "left",
+      "route": "vertical-channel",
+      "channelX": 230,
+      "labelAt": [
+        222,
+        540
+      ]
+    },
+    {
+      "from": "diary",
+      "to": "links",
+      "label": "⑧ 扫出链接",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        422,
+        142
+      ]
+    },
+    {
+      "from": "vault",
+      "to": "clips",
+      "label": "⑨ 发现新剪藏",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        422,
+        256
+      ]
+    },
+    {
+      "from": "attm",
+      "to": "media",
+      "label": "⑩ 发现新附件/PDF",
+      "variant": "emphasis",
+      "labelAt": [
+        440,
+        445
+      ]
+    },
+    {
+      "from": "vault",
+      "to": "todos",
+      "label": "⑪ 行动意图",
+      "variant": "emphasis",
+      "labelAt": [
+        415,
+        370
+      ]
+    },
+    {
+      "from": "links",
+      "to": "ytdlp",
+      "label": "⑫ 下载视频/页面",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        637,
+        142
+      ]
+    },
+    {
+      "from": "clips",
+      "to": "llm",
+      "label": "⑬ 剪藏摘要",
+      "variant": "emphasis",
+      "labelAt": [
+        627,
+        308
+      ]
+    },
+    {
+      "from": "media",
+      "to": "ocr",
+      "label": "⑭ 截图 OCR",
+      "variant": "emphasis",
+      "labelAt": [
+        637,
+        455
+      ]
+    },
+    {
+      "from": "media",
+      "to": "whisper",
+      "label": "⑮ 音视频转写",
+      "variant": "emphasis",
+      "labelAt": [
+        632,
+        350
+      ]
+    },
+    {
+      "from": "media",
+      "to": "llm",
+      "label": "⑯ PDF 代读",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "from": "todos",
+      "to": "llm",
+      "label": "⑰ 判行动意图",
+      "variant": "emphasis",
+      "labelAt": [
+        640,
+        418
+      ]
+    },
+    {
+      "from": "ytdlp",
+      "to": "whisper",
+      "label": "⑱ 抽音轨",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        765,
+        218
+      ]
+    },
+    {
+      "from": "ytdlp",
+      "to": "ffmpeg",
+      "label": "⑲ 原视频送压",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "right",
+      "route": "vertical-channel",
+      "channelX": 1080,
+      "labelAt": [
+        1080,
+        440
+      ]
+    },
+    {
+      "from": "whisper",
+      "to": "llm",
+      "label": "⑳ 转写送整理",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        790,
+        340
+      ]
+    },
+    {
+      "from": "whisper",
+      "to": "cardnote",
+      "label": "㉑ 音视频成稿",
+      "variant": "emphasis",
+      "labelAt": [
+        840,
+        190
+      ]
+    },
+    {
+      "from": "ocr",
+      "to": "cardnote",
+      "label": "㉒ OCR 成稿",
+      "variant": "emphasis"
+    },
+    {
+      "from": "llm",
+      "to": "cardnote",
+      "label": "㉓ 整理成卡",
+      "variant": "emphasis",
+      "labelAt": [
+        835,
+        240
+      ]
+    },
+    {
+      "from": "ffmpeg",
+      "to": "orig",
+      "label": "㉔ 存 480p 单份",
+      "variant": "emphasis",
+      "labelAt": [
+        830,
+        560
+      ]
+    },
+    {
+      "from": "orig",
+      "to": "cardnote",
+      "label": "内嵌引用",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "route": "straight",
+      "labelAt": [
+        910,
+        214
+      ]
+    },
+    {
+      "from": "llm",
+      "to": "checklist",
+      "label": "㉕ 出候选清单",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "from": "llm",
+      "to": "todonote",
+      "label": "㉖ 建待办",
+      "variant": "emphasis",
+      "labelAt": [
+        830,
+        440
+      ]
+    },
+    {
+      "from": "cardnote",
+      "to": "sidecar",
+      "label": "登记（异步）",
+      "variant": "default",
+      "fromSide": "right",
+      "toSide": "right",
+      "route": "vertical-channel",
+      "channelX": 1080,
+      "labelAt": [
+        1050,
+        455
+      ]
+    },
+    {
+      "from": "cardnote",
+      "to": "card",
+      "label": "㉗ 推确认卡",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        1067,
+        142
+      ]
+    },
+    {
+      "from": "todonote",
+      "to": "card",
+      "label": "㉘ 推待办卡",
+      "variant": "emphasis",
+      "labelAt": [
+        1050,
+        320
+      ]
+    },
+    {
+      "from": "card",
+      "to": "arch",
+      "label": "㉙ 点归档才移动",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        1225,
+        212
+      ]
+    },
+    {
+      "from": "checklist",
+      "to": "wiki",
+      "label": "㉚ 勾[x] 转 wiki 卡",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        1060,
+        345
+      ]
+    },
+    {
+      "from": "cardnote",
+      "to": "decay",
+      "label": "03:00 衰减（异步）",
+      "variant": "default",
+      "labelAt": [
+        1045,
+        425
+      ]
+    },
+    {
+      "from": "cardnote",
+      "to": "digest",
+      "label": "统计/复习（异步）",
+      "variant": "default",
+      "labelAt": [
+        1060,
+        545
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "slate",
+      "title": "箭头怎么读（先看这个）",
+      "items": [
+        "粗绿线 = 主数据流（内容本体在流动）；箭头上的 ①-㉚ 是阅读顺序，跟着编号走",
+        "细灰线 = 异步后台批处理（watcher 登记/decay/统计，不占主故事线）",
+        "紫虚线 = 引用关系（笔记内嵌原资料，不搬运内容）",
+        "蓝框 = 你的入口设备；紫框 = 文件/目录；绿框 = 程序；黄框 = 外部服务（Syncthing/DeepSeek）"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "① 入口细则（四个入口逐条）",
+      "items": [
+        "飞书：链接[抖音/小红书/B站]+随手评论/截图/语音/直发视频(media 消息，取 file_key 本体)/PDF/文字——看到什么发什么",
+        "大视频撞飞书上限（234037）会收到回执两条出路：① 发链接 ② 电脑拖 attachments/媒体/；小视频（30MB 内）直发畅通",
+        "QuickAdd：只记想法灵感，一键记下自动起名，零摩擦 ≤3 秒",
+        "电脑 Obsidian：直写落 memory/ 根即登记；手动拖 attachments 按文件类型路由，投错子目录也认得（唯一硬要求：视频投 媒体/）",
+        "Chrome 剪藏：网页长文专用，备注框可填可空（填了上确认卡），同 url 查重"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "② 落地红线（捕获时刻机器做什么、不做什么）",
+      "items": [
+        "零摩擦第一：想记到记下 ≤3 秒，无必填项；落地即裸 md/原件，人可读、脱离系统可打开",
+        "机器只接不判断：不分类/不摘要/不改写/不写 frontmatter（watcher 事后一次性补，mtime 还原不破坏同步）",
+        "捕获期零 API：LLM/OCR/Whisper 全在 15 分钟班次里跑，不在你发送的瞬间",
+        "原件只增不减：机器永不移动/删除原文件（G7）；日记行处理后机器补 →[[卡]] 回链（唯一行尾追加例外）"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "③ 分发纪律（无人值守 15 分钟一轮）",
+      "items": [
+        "顺序有意：links → media → todos → highlights，当轮产出同轮被捡到",
+        "幂等：processed_links/media/todos.json 记状态，同一 URL/文件只成功处理一次（重发/重跑不出重复笔记）",
+        "防护：失败 3 次熔断（模型不为空转反复加载）；mtime<30s 不动（防读半文件）；flock 互斥防并发",
+        "todos 分享样板过滤（P1）：链接标题/口令/时间戳不进 LLM，垃圾待办不再产生"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "④ 引擎与成本护栏",
+      "items": [
+        "Whisper：GPU 优先（先 CPU 加载再 .to(cuda) 防 9GB 瞬时 OOM）；带标点 initial_prompt；链接/直发视频 large-v3（2026-09-13 切），语音仍 base",
+        "DeepSeek：每篇至多一次调用；转写超 6000 字跳过；失败降级不阻塞入库；确认卡不含正文全文",
+        "yt-dlp：借浏览器 cookie 过抖音反爬，失效时无头 Chrome 自愈刷新；B站 DASH 限高 480p",
+        "ffmpeg 480p：H.264 crf30 + AAC 96k + faststart，全系统唯一实现（processors/video.py）；直发视频压完替换原件，压失败留原件保底"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "⑤⑥ 入库铁律与确认后去向",
+      "items": [
+        "笔记创建后机器绝不改写/移动/删除——动态状态只进 sidecar（confidence/layer/pending_delete）",
+        "方案 B：长全文 >800 字外置 attachments/平台/<同名>.md（原子写同名跳过），卡留「## 全文」链接节；搜索分笔记/资料两组",
+        "三人工例外：你点按钮机器才动手——删「待确认」/删「待办」/归档移动单篇",
+        "归档：平台/根目录平铺、不建中图法子目录（分类全走标签），唯 书籍/ 保留类型子目录；wiki/ 真沉淀不衰减不 purge",
+        "decay 方案 C：机器转写 3x 速衰减（约 15 天触及待删 vs 人写 45 天）；pending_delete → review → 你 CLI 点头 → trash/ 可恢复",
+        "晨报 07:53 一行简数+复习卡，周报周日详细节（含本周遗忘数）；待办单向同步飞书任务，点 ✅ 回写完成，截止日上日历"
+      ]
+    }
+  ]
+}
