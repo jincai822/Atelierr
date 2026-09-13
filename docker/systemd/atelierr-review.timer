@@ -1,0 +1,16 @@
+# Atelierr 周回顾定时器（与 atelierr-review.service 配套）
+#
+# 方案 A 改 1（2026-09-13 用户批准）：每周日 09:13 把周回顾问题推成
+# 飞书表单卡——问题由当周数据生成（捕获统计/滞留/待删清单），答案
+# 在表单提交（或回「完成」）时机械落盘 memory/wiki/reflections/
+# （零自动 LLM，综合成文在你下次会话）。
+
+[Unit]
+Description=Atelierr weekly review ritual timer (Sunday 09:13)
+
+[Timer]
+OnCalendar=Sun *-*-* 09:13:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

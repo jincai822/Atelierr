@@ -1,0 +1,16 @@
+# Atelierr 周回顾服务（oneshot，与 atelierr-review.timer 配套）
+
+[Unit]
+Description=Atelierr weekly review ritual (Sunday)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/workspaces/Atelierr
+Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+EnvironmentFile=-%h/.config/atelierr/env
+ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli review open --kind weekly
+StandardOutput=append:%h/atelierr-data/state/logs/review.log
+StandardError=append:%h/atelierr-data/state/logs/review.log

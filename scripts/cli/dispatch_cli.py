@@ -468,6 +468,39 @@ class DispatchCLI:
                     f"已解决 {report['resolved']} 条）"
                 )
 
+        @cli.command(name="review")
+        @click.argument("action", type=click.Choice(["open", "collect"]))
+        @click.option(
+            "--kind",
+            "kind",
+            type=click.Choice(["weekly", "monthly"]),
+            default="weekly",
+            help="weekly=周回顾（周日定时）；monthly=月回顾轻脉冲（每月 1 日）",
+        )
+        def review_command(action: str, kind: str) -> None:
+            """回顾仪式（方案 A）：open 推表单（问题由当期数据生成）；
+            collect 把答案机械落盘 reflections/（零自动 LLM）。"""
+            from scripts.dispatch import review_ritual
+
+            tree = self._build_tree()
+            full_kind = (
+                review_ritual.KIND_WEEKLY
+                if kind == "weekly"
+                else review_ritual.KIND_MONTHLY
+            )
+            if action == "open":
+                report = review_ritual.open_ritual(tree, full_kind)
+                if report["opened"]:
+                    click.echo(f"已开启回顾会话并推送表单：{len(report['questions'])} 问")
+                else:
+                    click.echo("已有进行中的问答会话，跳过")
+            else:
+                report = review_ritual.collect_ritual(tree)
+                if report["collected"]:
+                    click.echo(f"答案已落盘: {report['path']}")
+                else:
+                    click.echo("无会话或无答案")
+
         @cli.command(name="prompt-open")
         @click.argument("kind")
         @click.argument("message")

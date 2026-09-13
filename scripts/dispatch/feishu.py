@@ -688,8 +688,15 @@ class FeishuBridge:
             return {"toast": {"type": "info", "content": "未收到内容，问答仍在进行"}}
         for text in answers:
             store.append(text)
-        store.close()
+        closed = store.close()
         print(f"[feishu] prompt form submit: {len(answers)} answers", flush=True)
+        # 回顾仪式（review-* kind）：答案机械落盘 reflections/（方案 A）
+        if closed and str(closed.get("kind") or "").startswith("review"):
+            from scripts.dispatch import review_ritual
+
+            written = review_ritual.write_answers(self.tree, closed)
+            if written is not None:
+                self._send_feedback(chat_id, f"答案已存进 {written.name}（下次会话综合成文）")
         self._send_feedback(chat_id, f"已收到全部 {len(answers)} 条回答，问答结束 ✅")
         return {
             "toast": {"type": "success", "content": f"已提交 {len(answers)} 条回答"},
@@ -1396,7 +1403,16 @@ class FeishuBridge:
         store = PromptStore(Path(self.tree.state_dir))
         if store.is_open():
             if text.lower() in CLOSE_WORDS:
-                store.close()
+                closed = store.close()
+                # 回顾仪式（review-* kind）：答案机械落盘 reflections/
+                if closed and str(closed.get("kind") or "").startswith("review"):
+                    from scripts.dispatch import review_ritual
+
+                    written = review_ritual.write_answers(self.tree, closed)
+                    if written is not None:
+                        self._send_feedback(
+                            chat_id, f"答案已存进 {written.name}（下次会话综合成文）"
+                        )
                 self._send_feedback(chat_id, "好的，本次问答已结束 ✅")
             else:
                 count = store.append(text)
