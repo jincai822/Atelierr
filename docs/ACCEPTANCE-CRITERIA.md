@@ -590,7 +590,7 @@ pytest tests/unit/test_processors/test_pdf.py -v
 ### 模块 4: 认知模块 (scripts/cognition/manager.py)
 
 正式数据模型、状态流转、API 与 CLI 以
-`docs/prd/COGNITION-SPEC.md` v1.0 为准。本节为 Phase 5 的可执行验收契约。
+`docs/prd/COGNITION-SPEC.md` v1.2 为准。本节为 Phase 5 的可执行验收契约。
 
 #### 4.1 文件与 Schema（COG-SCHEMA）
 
@@ -862,6 +862,7 @@ def test_cognition_capacity_correctness_at_10000_entries(): ... # COG-SCALE-01
 | 规格要求 | 主测试文件 | 对应测试 |
 |---|---|---|
 | COG-SCHEMA-01..06 | `tests/unit/test_memory/test_cognition.py` | `test_create_belief_in_flat_cognition_root` 至 `test_supersedes_cycle_is_rejected` |
+| COG-DECISION-01..04 | `tests/unit/test_cognition/test_cognition.py` | `test_create_decision_without_certainty` 至 `test_review_at_rejected_on_belief` |
 | COG-CERTAINTY-01..05 | `tests/unit/test_memory/test_cognition.py` | `test_cognition_rejects_confidence_field` 至 `test_memory_decay_does_not_change_certainty` |
 | COG-PROMOTION-01..05 | `tests/integration/test_cognition_memory.py` | `test_nomination_has_no_cognition_side_effect` 至 `test_purge_review_reports_cognition_dependency` |
 | COG-CHALLENGE-01..05 | `tests/e2e/test_cognition_lifecycle.py` | `test_challenge_proposal_does_not_mutate_entry` 至 `test_question_answer_requires_summary_or_relation` |

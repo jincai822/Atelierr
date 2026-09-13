@@ -32,14 +32,14 @@ import frontmatter
 from scripts.memory.core import generate_id
 from scripts.utils.config import load_config
 
-CognitionType = Literal["belief", "question", "hypothesis"]
+CognitionType = Literal["belief", "question", "hypothesis", "decision"]
 EvidenceRelation = Literal["supports", "challenges", "context"]
 ChallengeResolution = Literal["reject", "defer", "accept"]
 
 #: 当前锁定的 schema 主版本；未知主版本拒绝写入
 SCHEMA_VERSION = 1
 
-COGNITION_TYPES: Tuple[str, str, str] = ("belief", "question", "hypothesis")
+COGNITION_TYPES: Tuple[str, ...] = ("belief", "question", "hypothesis", "decision")
 EVIDENCE_KINDS: Tuple[str, str, str] = ("memory", "url", "manual")
 EVIDENCE_RELATIONS: Tuple[str, str, str] = ("supports", "challenges", "context")
 CERTAINTY_SOURCES: Tuple[str, str] = (
@@ -59,6 +59,9 @@ STATUS_BY_TYPE: Dict[str, Tuple[str, ...]] = {
         "archived",
     ),
     "question": ("open", "answered", "superseded", "archived"),
+    # v1.2：decision 生命周期——草拟→生效→（到 review_at）复盘→确认回
+    # 生效 / 被继任 / 归档；任何状态可归档
+    "decision": ("draft", "active", "reviewing", "superseded", "archived"),
 }
 
 #: 创建/继任时各类型的默认"在研"状态
@@ -66,6 +69,7 @@ DEFAULT_STATUS: Dict[str, str] = {
     "belief": "active",
     "hypothesis": "testing",
     "question": "open",
+    "decision": "active",
 }
 
 #: 默认列表隐藏的非活动状态（显式 --status 查询不受限）
@@ -556,6 +560,15 @@ class CognitionManager:
         if status not in STATUS_BY_TYPE[entry_type]:
             raise CognitionError(f"{path.name}: {entry_type} 不允许 status {status!r}")
 
+        # v1.2：review_at 仅 decision 可用，必须是合法 ISO 8601 时间
+        review_at = meta.get("review_at")
+        if review_at is not None:
+            if entry_type != "decision":
+                raise CognitionError(
+                    f"{path.name}: review_at 仅 decision 类型可用"
+                )
+            _aware_iso(review_at, "review_at")
+
         certainty_raw = meta.get("certainty")
         certainty_updated_at = meta.get("certainty_updated_at")
         certainty_source = meta.get("certainty_source")
@@ -574,6 +587,15 @@ class CognitionManager:
                     f"{path.name}: question 必须省略 {', '.join(present)}"
                 )
             certainty = None
+        elif entry_type == "decision":
+            # v1.2：decision 的 certainty 一律可选（决策可以没有量化把握）
+            if certainty_raw is None:
+                certainty = None
+            else:
+                certainty = _round_certainty(certainty_raw)
+                certainty_updated_at = _aware_iso(
+                    certainty_updated_at, "certainty_updated_at"
+                )
         else:
             if certainty_raw is None:
                 raise CognitionError(f"{path.name}: {entry_type} 必须有 certainty")
@@ -901,6 +923,9 @@ class CognitionManager:
         ]
         if entry_type == "hypothesis":
             parts += ["## 验证 / 证伪条件", "", "（待补充）", ""]
+        if entry_type == "decision":
+            parts += ["## 备选方案与否决理由", "", "（待补充）", ""]
+            parts += ["## 复盘记录", "", "（无）", ""]
         parts += ["## 修订历史", ""]
         parts += history or ["（无）"]
         return "\n".join(parts).rstrip() + "\n"
@@ -957,6 +982,8 @@ class CognitionManager:
             if certainty is not None:
                 raise CognitionError("question 必须省略 certainty")
             return None
+        if entry_type == "decision" and certainty is None:
+            return None  # v1.2：decision 允许无量化把握
         if certainty is None:
             raise CognitionError(f"{entry_type} 必须有 certainty")
         return _round_certainty(certainty)
@@ -1067,7 +1094,7 @@ class CognitionManager:
         if new_certainty is _UNSET:
             certainty = entry.certainty
         elif new_certainty is None:
-            if entry.entry_type != "question":
+            if entry.entry_type not in ("question", "decision"):
                 raise CognitionError(f"{entry.entry_type} 必须有 certainty")
             certainty = None
         else:
@@ -1499,7 +1526,7 @@ class CognitionManager:
                 history_note=f"挑战 {proposal_id} 暂缓",
             )
         else:  # accept
-            if entry.entry_type != "question" and certainty is None:
+            if entry.entry_type not in ("question", "decision") and certainty is None:
                 raise CognitionError("accept 挑战必须由用户指定新 certainty")
             plan = self._plan_update(
                 entry,

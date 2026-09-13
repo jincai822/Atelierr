@@ -193,7 +193,7 @@ def test_type_specific_status_validation(manager):
         _belief(manager, status="testing")  # testing 属 hypothesis
     with pytest.raises(ValueError, match="type"):
         manager.create_entry(
-            entry_type="decision",
+            entry_type="outcome",  # v1.2 后 decision 合法；outcome 仍非法
             title="d",
             statement="s",
             status="active",
@@ -580,3 +580,67 @@ def test_no_delete_api(manager):
     for name in ("create_entry", "reassess_entry", "approve_promotion"):
         params = inspect.signature(getattr(CognitionManager, name)).parameters
         assert "approval" in params
+
+
+# ---------------------------------------------------------------------
+# COG-DECISION（v1.2 回路三：decision 类型）
+# ---------------------------------------------------------------------
+
+
+def test_create_decision_without_certainty(manager):
+    """COG-DECISION-01：decision 允许 certainty=None（决策可以没有量化把握）。"""
+    entry = manager.create_entry(
+        entry_type="decision",
+        title="每周日做周回顾",
+        statement="我决定每周日 09:13 用飞书表单做周回顾。",
+        status="active",
+        certainty=None,
+        approval=APPROVAL,
+    )
+    assert entry.entry_type == "decision"
+    assert entry.certainty is None
+    assert entry.path.exists()
+    text = entry.path.read_text(encoding="utf-8")
+    assert "## 备选方案与否决理由" in text
+    assert "## 复盘记录" in text
+
+
+def test_decision_with_certainty_and_review_at(manager):
+    """COG-DECISION-02：decision 可带 certainty（走 human 校验）与 review_at。"""
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    meta = {
+        "type": "decision",
+        "statement": "我决定用飞书作为手机主入口。",
+        "title": "手机主入口用飞书",
+        "status": "active",
+        "certainty": 0.9,
+        "review_at": now,
+    }
+    path = _hand_file(manager, "d1.md", meta)
+    entries = [e for e in manager.list_entries(include_inactive=True)]
+    assert any(e.path == path for e in entries)
+    report = manager.validate()
+    assert not report.errors
+
+
+def test_decision_status_set(manager):
+    """COG-DECISION-03：decision 状态集校验（reviewing 合法、bogus 拒绝）。"""
+    with pytest.raises(CognitionError):
+        _belief(manager, entry_type="decision", status="bogus")
+    entry = _belief(
+        manager,
+        entry_type="decision",
+        status="reviewing",
+        certainty=None,
+        title="复盘中的决策",
+        statement="我决定 X。",
+    )
+    assert entry.status == "reviewing"
+
+
+def test_review_at_rejected_on_belief(manager):
+    """COG-DECISION-04：review_at 仅 decision 可用；belief 带它必须拒绝。"""
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    _hand_file(manager, "b1.md", {"type": "belief", "review_at": now})
+    report = manager.validate()
+    assert any("review_at" in err for err in report.errors)

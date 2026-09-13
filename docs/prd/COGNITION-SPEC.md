@@ -1,6 +1,6 @@
 # Atelierr 认知模块规格
 
-**版本**: v1.1
+**版本**: v1.2
 
 **状态**: 🔒 已锁定
 
@@ -15,7 +15,7 @@
 本文档是 Atelierr Phase 5 认知模块的正式规格，与以下现行契约共同生效：
 
 1. 架构：`docs/prd/ARCHITECTURE-LOCKED-V1.md` v1.3
-2. 认知模块：`docs/prd/COGNITION-SPEC.md` v1.1（本文档）
+2. 认知模块：`docs/prd/COGNITION-SPEC.md` v1.2（本文档）
 3. 验收：`docs/ACCEPTANCE-CRITERIA.md` v1.1
 4. 应用层边界：`docs/AGENT-ONBOARDING.md`
 
@@ -77,6 +77,10 @@ outcome 不属于本版本；如需引入，必须另行制定生命周期与验
   certainty。
 - `hypothesis`：尚未被接受、但具有验证方法或证伪条件的陈述；验证后可以经人工
   批准生成或继任一个 belief。
+- `decision`（v1.2 新增）：已被接受的行动选择——一句"我决定 X"的陈述，
+  含可选把握度与可选复盘日期；复盘可以确认（继续 active）、继任
+  （superseded 指向新决策）或归档。decision 的 certainty 一律可选
+  （允许 None）：决策可以没有量化的把握度。
 
 每个条目必须只表达一个主要陈述或问题。一个 memory 笔记可以产生多个认知条目；
 认知类型也不能仅由数值阈值自动转换。
@@ -142,6 +146,8 @@ supersedes: null                # 新条目继任旧陈述时填写旧 cognition
 ✅ relation: belief/hypothesis 使用 supports/challenges/context；
    question 通常只使用 context
 ✅ supersedes: 只指向已存在的 cognition id，禁止形成环
+✅ review_at（v1.2，仅 decision，可选）：带时区 ISO 8601 的复盘时间；
+   其它类型出现该字段必须拒绝写入
 ```
 
 `evidence[].kind` 只允许 `memory | url | manual`，且所有 evidence 都必须包含
@@ -169,6 +175,7 @@ supersedes: null                # 新条目继任旧陈述时填写旧 cognition
 | belief | `draft`、`active`、`questioned`、`refuted`、`superseded`、`archived` | `refuted` 保留被证伪记录；陈述实质变化用 `superseded` |
 | hypothesis | `draft`、`testing`、`supported`、`refuted`、`superseded`、`archived` | `supported` 不自动变成 belief |
 | question | `open`、`answered`、`superseded`、`archived` | 回答问题可以另建 belief，但不得自动转换 |
+| decision（v1.2） | `draft`、`active`、`reviewing`、`superseded`、`archived` | 到 `review_at` 进 `reviewing`（晨报/控制台提醒）；复盘确认回 `active`；被新决策取代用 `superseded` |
 
 正文使用统一骨架；不适用的章节可以省略：
 
@@ -811,6 +818,15 @@ Phase 5 使用 10,000 条 cognition 做容量正确性测试，必须验证结�
 ---
 
 ## 9. 版本历史
+
+### v1.2 (2026-09-13) - decision 类型（回路三解冻）
+
+用户裁决（路线 2）：决策与信念不同构——决策有自己的生命周期（到期复盘、
+继任、推翻）。新增 `decision` 类型：状态集 `draft/active/reviewing/
+superseded/archived`，certainty 一律可选（允许 None），可选 `review_at`
+复盘日期字段；正文骨架加 `## 备选方案与否决理由` 与 `## 复盘记录` 两节。
+回路三最小接通：/decision 会话产物经 nominate → 人工 approve 登记进
+判断登记处（机器只提名不直写，红线不破）。
 
 ### v1.1 (2026-09-02) - 同库分间迁移
 
