@@ -139,14 +139,18 @@ def open_ritual(tree, kind: str, send: bool = True) -> Dict[str, Any]:
 
 
 def write_answers(tree, data: Dict[str, Any]) -> Optional[Path]:
-    """把已关闭会话的答案机械落盘到 reflections/（同名跳过，幂等）。
+    """把已关闭会话的答案机械落盘到 reflections/。
+
+    当天文件已存在则**追加**新答案（同一话题分次作答不丢——
+    2026-09-13 实测：验证卡先收了一条真答案，正式卡的补充回答
+    必须能续上），不写重复答案（幂等：完全相同的回答文本不重复落）。
 
     Args:
         tree: MemoryTree 实例。
         data: PromptStore.close() 返回的会话状态（含 questions/answers）。
 
     Returns:
-        Optional[Path]: 写入的文件路径；无答案/已写过返回 None。
+        Optional[Path]: 写入的文件路径；无答案/无新答案返回 None。
     """
     answers = [a for a in (data.get("answers") or []) if str(a.get("text") or "").strip()]
     if not answers:
@@ -157,9 +161,23 @@ def write_answers(tree, data: Dict[str, Any]) -> Optional[Path]:
     refl_dir = Path(tree.notes_dir) / "wiki" / "reflections"
     refl_dir.mkdir(parents=True, exist_ok=True)
     target = refl_dir / f"{today}-{kind.replace('review-', '')}.md"
-    if target.exists():
-        return None
     questions = [str(q) for q in (data.get("questions") or [])]
+    new_blocks: List[str] = []
+    for index, answer in enumerate(answers):
+        question = questions[index] if index < len(questions) else ""
+        block = ""
+        if question:
+            block += f"## 问：{question}\n\n"
+        block += str(answer["text"]).strip() + "\n"
+        new_blocks.append(block)
+    if target.exists():
+        existing = target.read_text(encoding="utf-8")
+        fresh = [block for block in new_blocks if block.strip() not in existing]
+        if not fresh:
+            return None
+        with target.open("a", encoding="utf-8") as fh:
+            fh.write("\n---\n\n" + "\n".join(fresh))
+        return target
     lines = [
         "---",
         f"created: {datetime.now().astimezone().isoformat(timespec='seconds')}",

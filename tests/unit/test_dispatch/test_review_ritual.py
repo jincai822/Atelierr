@@ -118,3 +118,26 @@ def test_bridge_submit_writes_review_answers(memory_tree, monkeypatch):
     files = list(refl.glob("*-weekly.md"))
     assert len(files) == 1
     assert "挺好" in files[0].read_text(encoding="utf-8")
+
+
+def test_write_answers_appends_new_answers(memory_tree):
+    """当天文件已存在：新答案追加（分次作答不丢）；完全相同的答案不重复落。"""
+    store = PromptStore(memory_tree.state_dir)
+    store.open(review_ritual.KIND_WEEKLY, ["问一", "问二"])
+    store.append("答一")
+    data = store.close()
+    first = review_ritual.write_answers(memory_tree, data)
+    assert first is not None
+
+    # 完全相同的内容：幂等跳过
+    assert review_ritual.write_answers(memory_tree, data) is None
+
+    store.open(review_ritual.KIND_WEEKLY, ["问一", "问二"])
+    store.append("答一")
+    store.append("答二（后补）")
+    data2 = store.close()
+    second = review_ritual.write_answers(memory_tree, data2)
+    assert second is not None
+    text = second.read_text(encoding="utf-8")
+    assert text.count("答一") == 1  # 不重复落
+    assert "答二（后补）" in text
