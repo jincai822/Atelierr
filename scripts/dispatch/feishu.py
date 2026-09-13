@@ -1306,7 +1306,8 @@ class FeishuBridge:
         type 只有 image/file 两类：语音按 file 拉取。
 
         下载失败（含飞书 234037 文件超限）不再静默：打日志并回执
-        用户原因与出路（2026-09-12 实测：手机直出视频超限无任何反馈）。
+        用户原因与两条出路（2026-09-12 实测：手机直出视频超限无任何
+        反馈；2026-09-13 回执升级为编号出路清单）。
         """
         key = content.get("image_key") or content.get("file_key")
         if not key:
@@ -1317,9 +1318,12 @@ class FeishuBridge:
             name = str(content.get("file_name") or "附件").strip() or "附件"
             self._send_feedback(
                 chat_id,
-                f"⚠️ 附件下载失败：{name}。"
-                "如是手机直出的大视频（飞书接口限制），"
-                "请改发短片段、发链接，或在电脑端直接拖入 attachments/媒体/",
+                f"⚠️ 附件下载失败：{name}。\n"
+                "飞书限制：大文件无法经机器人转发（实测手机直出视频超限）。\n"
+                "两条出路：\n"
+                "① 发链接——抖音/B站/小红书链接直接发来，视频自动下载入库；\n"
+                "② 电脑投递——把文件拖进库的 attachments/媒体/ 目录，自动接手。\n"
+                "小视频（30MB 内）可直接重发。",
             )
             return None
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")

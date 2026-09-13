@@ -1922,3 +1922,6 @@ def test_resource_download_failure_sends_feedback(memory_tree, monkeypatch):
     assert len(feedback) == 1
     assert "SVID_1.mp4" in feedback[0]
     assert "下载失败" in feedback[0]
+    # 回执必须给两条出路（2026-09-13 升级）：发链接 + 电脑投递
+    assert "发链接" in feedback[0]
+    assert "attachments/媒体" in feedback[0]
