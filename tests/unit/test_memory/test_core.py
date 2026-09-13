@@ -322,3 +322,36 @@ def test_concurrent_writers_no_lost_updates(tmp_path):
     tree_c = MemoryTree(notes, state_dir=state)
     assert tree_c.is_pending_delete(note_b)
     assert tree_c._entry(note_a)["last_accessed"] is not None
+
+
+def test_attachments_dir_configurable(tmp_path):
+    """attachments_dir 可在配置里覆盖；缺省推导 notes_dir 平级。"""
+    config = tmp_path / "memory.yaml"
+    config.write_text(
+        f"memory:\n  root: {tmp_path}/memory\n  state_dir: {tmp_path}/state\n"
+        f"  attachments_dir: {tmp_path}/raw\n",
+        encoding="utf-8",
+    )
+    tree = MemoryTree.from_config(str(config))
+    assert tree.attachments_dir == tmp_path / "raw"
+
+    config.write_text(
+        f"memory:\n  root: {tmp_path}/memory\n  state_dir: {tmp_path}/state\n",
+        encoding="utf-8",
+    )
+    tree = MemoryTree.from_config(str(config))
+    assert tree.attachments_dir == tmp_path / "attachments"
+
+
+def test_abs_inbox_prefix_prefers_inbox(tmp_path):
+    """inbox/ 前缀解析到中转站；中转站没有而 memory/inbox/（误建的保留名
+    子目录）有，回退 memory/ 侧不丢数据；两侧都没有返回中转站路径。"""
+    tree = MemoryTree(tmp_path / "memory", state_dir=tmp_path / "state")
+    assert tree._abs("inbox/x.md") == tree.inbox_dir / "x.md"
+    (tree.inbox_dir / "x.md").write_text("中转卡", encoding="utf-8")
+    assert tree._abs("inbox/x.md") == tree.inbox_dir / "x.md"
+
+    real_subdir = tree.notes_dir / "inbox"
+    real_subdir.mkdir()
+    (real_subdir / "y.md").write_text("误建目录里的真笔记", encoding="utf-8")
+    assert tree._abs("inbox/y.md") == real_subdir / "y.md"

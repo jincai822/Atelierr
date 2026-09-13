@@ -9,7 +9,7 @@
 > v1.2 修订：平面存储（Flatnotes 兼容）+ sidecar 状态索引 + 无状态 confidence 重算 + 访问信号契约 + trash/purge 流程。
 > v1.3 修订：锁定 Phase 5 认知模块；认知确信度使用 `certainty`，与 memory `confidence` 从字段名上隔离；正式 schema 与状态流转见 `docs/prd/COGNITION-SPEC.md` v1.0。
 > v1.4 修订（2026-09-12 用户特批，方案 C）：confidence 公式引入来源因子 `source_factor`——自动管线转写（source=link/media）闲置时间轴 ×3 加速衰减（约 15 天触及待删，人写笔记 45 天），工作记忆自我清洁；公式仍是无状态纯函数，人写来源与 webclip/highlights 按原速，缺省行为与 v1.2 完全等价。
-> v1.5 修订（2026-09-13 用户裁决，存储拆分）：`memory/` 只存真记忆（人写笔记+确认归档+wiki/）；新增 `$OV/inbox/` 中转站（机器产出卡的唯一落点：确认归档→移进 memory/ 平台目录；decay 照常覆盖，约 15 天没人碰标待删）；`attachments/` 源文件区挪至数据根平级 `$OV/attachments/`（Obsidian 库根在数据根，wikilink 后缀匹配不断链）。sidecar 索引 path 对 inbox 文件加 `inbox/` 虚拟前缀；所有索引写入走 flock 事务（多进程写者防丢更新）。平面存储、sidecar 索引、无状态 confidence、机器不改写笔记等核心不变量全部保持。
+> v1.5 修订（2026-09-13 用户裁决，存储拆分）：`memory/` 只存真记忆（人写笔记+确认归档+wiki/）；新增 `$OV/inbox/` 中转站（机器产出卡的唯一落点：确认归档→移进 memory/ 平台目录；decay 照常覆盖，约 15 天没人碰标待删）；`attachments/` 源文件区挪至数据根平级 `$OV/attachments/`（Obsidian 库根在数据根，wikilink 后缀匹配不断链）。sidecar 索引 path 对 inbox 文件加 `inbox/` 虚拟前缀（保留名：memory/ 下禁止建名为 `inbox/` 的子目录；`_abs` 对冲突做存在性回退兜底）；`attachments_dir`/`inbox_dir` 均可在 memory.yaml 配置（缺省为数据根平级推导）。所有索引写入走 flock 事务（多进程写者防丢更新）。平面存储、sidecar 索引、无状态 confidence、机器不改写笔记等核心不变量全部保持。
 
 ---
 

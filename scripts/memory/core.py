@@ -175,6 +175,7 @@ class MemoryTree:
         ov_path: str,
         state_dir: Optional[str] = None,
         inbox_dir: Optional[str] = None,
+        attachments_dir: Optional[str] = None,
     ) -> None:
         """初始化平面笔记目录、中转站目录与 sidecar 状态目录（不存在则创建）。
 
@@ -187,6 +188,8 @@ class MemoryTree:
                 移进 memory/ 平台目录）；未给时默认 notes_dir.parent /
                 "inbox"（2026-09-13 用户裁决：memory/ 只存真记忆，
                 中转与源文件拆出）。
+            attachments_dir: 源文件区目录；未给时默认 notes_dir.parent /
+                "attachments"。
         """
         self.notes_dir = Path(ov_path).expanduser()
         self.state_dir = (
@@ -204,7 +207,11 @@ class MemoryTree:
         self.inbox_dir.mkdir(parents=True, exist_ok=True)
         # 源文件区（attachments/）2026-09-13 起挪到数据根平级：
         # memory/ 只存真记忆；Obsidian 库根在数据根，链接后缀匹配不断
-        self.attachments_dir = self.notes_dir.parent / "attachments"
+        self.attachments_dir = (
+            Path(attachments_dir).expanduser()
+            if attachments_dir
+            else self.notes_dir.parent / "attachments"
+        )
         self.settings = MemorySettings()
         self.index_path = self.state_dir / "index.json"
         self._index: Optional[Dict[str, dict]] = None
@@ -298,15 +305,25 @@ class MemoryTree:
             return path.name
 
     def _abs(self, rel: str) -> Path:
-        """索引相对 key → 绝对路径（``inbox/`` 前缀解析到中转站目录）。
+        """索引相对 key → 绝对路径。
 
-        无前缀的纯文件名（如分发报告的 created 列表）按存在性探测：
-        memory/ 优先，其次 inbox/；都不存在时返回 memory/ 侧路径
-        （让调用方得到一致的"不存在"语义）。
+        - ``inbox/`` 前缀解析到中转站目录；若该文件不在中转站、却在
+          memory/inbox/ 真实子目录里存在（用户误建了保留名子目录），
+          回退到 memory/ 侧（契约保留名：memory/ 下禁止建 inbox/ 子目录，
+          此回退仅为不丢数据的兜底）；
+        - 无前缀的纯文件名（如分发报告的 created 列表）按存在性探测：
+          memory/ 优先，其次 inbox/；都不存在时返回 memory/ 侧路径
+          （让调用方得到一致的"不存在"语义）。
         """
         rel = str(rel)
         if rel.startswith("inbox/"):
-            return self.inbox_dir / rel[len("inbox/"):]
+            primary = self.inbox_dir / rel[len("inbox/"):]
+            if primary.exists():
+                return primary
+            alt = self.notes_dir / rel
+            if alt.exists():
+                return alt
+            return primary
         candidate = self.notes_dir / rel
         if candidate.exists() or "/" in rel:
             return candidate
@@ -806,6 +823,7 @@ class MemoryTree:
             memory.get("root", "~/atelierr-data/memory"),
             state_dir=memory.get("state_dir", "~/atelierr-data/state"),
             inbox_dir=memory.get("inbox_dir"),
+            attachments_dir=memory.get("attachments_dir"),
         )
         layers = memory.get("layers", {}) or {}
         decay = memory.get("decay", {}) or {}
