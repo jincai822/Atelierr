@@ -202,7 +202,7 @@ class MediaDispatcher:
         inbox = Path(self._inbox).expanduser()
         if not inbox.is_dir():
             return
-        dest_dir = Path(self.tree.notes_dir) / ATTACHMENTS_DIR / MEDIA_SUBDIR
+        dest_dir = self.tree.attachments_dir / MEDIA_SUBDIR
         for path in sorted(inbox.iterdir()):
             if not path.is_file() or path.name.startswith("."):
                 continue
@@ -229,7 +229,7 @@ class MediaDispatcher:
         480p 原视频会被产出卡内嵌引用，是"产物"不是"输入"，跳过即防
         "自产自吃"循环；见 _referenced_attachments）。
         """
-        attach_dir = Path(self.tree.notes_dir) / ATTACHMENTS_DIR
+        attach_dir = self.tree.attachments_dir
         if not attach_dir.is_dir():
             return []
         now = time.time()
@@ -244,7 +244,8 @@ class MediaDispatcher:
                 continue
             suffix = path.suffix.lower()
             if suffix in _VIDEO_EXTS:
-                rel = path.relative_to(self.tree.notes_dir).as_posix()
+                # attachments/ 在数据根平级：相对数据根取 "attachments/…" 形式
+                rel = path.relative_to(self.tree.attachments_dir.parent).as_posix()
                 if rel in referenced:
                     continue
             elif suffix not in _KIND_BY_EXT and suffix not in _PDF_EXTS:
@@ -318,7 +319,7 @@ class MediaDispatcher:
             body = self._build_note(path, kind, result.text, Path(filename).stem)
             source, tags = "media", [REVIEW_TAG, kind]
             try:
-                self.tree.create_note(filename, body, source=source, tags=tags)
+                self.tree.create_note(filename, body, source=source, tags=tags, inbox=True)
             except (ValueError, FileExistsError):
                 # 同名笔记已存在（状态丢失后的重跑）：视为已处理
                 pass
@@ -377,8 +378,13 @@ class MediaDispatcher:
         return f"划重点-{cleaned}-{digest}.md"
 
     def _key(self, path: Path) -> str:
-        """状态键：附件相对笔记根目录的路径（如 attachments/媒体/IMG_001.jpg）。"""
-        return self.tree._rel_key(path)
+        """状态键：附件相对数据根的路径（如 attachments/媒体/IMG_001.jpg）。
+
+        2026-09-13 拆分后 attachments/ 在数据根平级（与 notes_dir 平级），
+        键格式不变（相对 attachments_dir 的父目录）——历史
+        processed_media.json 记录在迁移后照常有效，不重处理。
+        """
+        return path.relative_to(self.tree.attachments_dir.parent).as_posix()
 
     def _note_filename(self, path: Path) -> str:
         """产出笔记文件名：media-<文件日期>-<相对路径哈希前6>.md。
@@ -407,7 +413,7 @@ class MediaDispatcher:
         body = (text or "").strip()
         if len(body) > INLINE_BODY_MAX:
             rel = f"{ATTACHMENTS_DIR}/{MEDIA_SUBDIR}/{note_stem}.md"
-            target = self.tree.notes_dir / rel
+            target = self.tree.attachments_dir.parent / rel
             wrote = write_text_skip_existing(target, body)
             if wrote or target.exists():
                 return (

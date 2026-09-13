@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 import frontmatter
 
 from scripts.memory.confidence import ConfidenceCalculator
-from scripts.memory.core import MACHINE_DECAY_SOURCES, iter_note_files
+from scripts.memory.core import MACHINE_DECAY_SOURCES
 from scripts.utils.date_utils import local_timezone, parse_date
 
 if TYPE_CHECKING:
@@ -62,7 +62,7 @@ class DecayManager:
 
     def _list_md_files(self) -> List[Path]:
         """递归列出全部笔记 .md（排除 wiki/attachments/trash 与隐藏项）。"""
-        return list(iter_note_files(self.tree.notes_dir))
+        return list(self.tree.iter_all_note_files())
 
     @staticmethod
     def _note_source(path: Path) -> Optional[str]:
@@ -174,7 +174,7 @@ class DecayManager:
             "pending_delete": 0,
         }
         for entry in self.tree._load_index().values():
-            path = self.tree.notes_dir / entry["path"]
+            path = self.tree._abs(entry["path"])
             if not path.exists():
                 continue
             source = self._note_source(path) or ""

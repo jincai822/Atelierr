@@ -223,7 +223,7 @@ class ClipDispatcher:
     ) -> None:
         """同 url 重复剪藏：sidecar 标 pending_delete（不动文件）+ 信息卡。"""
         # 多进程安全的公共 API（flock 事务；直改条目+缓存回写会丢更新）
-        self.tree.set_pending_delete(self.tree.notes_dir / clip["rel"])
+        self.tree.set_pending_delete(self.tree._abs(clip["rel"]))
         state[clip["id"]] = {
             "path": clip["rel"],
             "url": clip["url"],

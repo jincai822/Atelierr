@@ -99,7 +99,7 @@ def test_links_skips_when_lock_held(cli, memory_tree, monkeypatch, capsys):
 
     assert SKIP_MESSAGE in capsys.readouterr().out
     assert _FakeLinkProcessor.calls == []
-    assert not (memory_tree.notes_dir / "douyin-vid123.md").exists()
+    assert not (memory_tree.inbox_dir / "douyin-vid123.md").exists()
 
 
 def test_links_shared_lock_blocks_media(cli, memory_tree, monkeypatch, capsys):
@@ -123,7 +123,7 @@ def test_links_runs_when_lock_free(cli, memory_tree, monkeypatch, capsys):
     assert cli.main(["links"]) == 0
 
     assert _FakeLinkProcessor.calls == [DOUYIN_URL]
-    assert (memory_tree.notes_dir / "douyin-vid123.md").exists()
+    assert (memory_tree.inbox_dir / "douyin-vid123.md").exists()
     assert SKIP_MESSAGE not in capsys.readouterr().out
 
 
@@ -138,7 +138,7 @@ def test_lock_released_after_run_allows_next(cli, memory_tree, monkeypatch):
     assert cli.main(["links"]) == 0
 
     assert len(_FakeLinkProcessor.calls) == 1
-    assert (memory_tree.notes_dir / "douyin-vid123.md").exists()
+    assert (memory_tree.inbox_dir / "douyin-vid123.md").exists()
 
 
 def test_digest_not_locked(cli, memory_tree, monkeypatch, pushes, capsys):

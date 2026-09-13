@@ -150,7 +150,7 @@ def test_image_message_saved_to_attachments(memory_tree, monkeypatch):
     bridge = _bridge(memory_tree)
     bridge.handle_event(_event("m6", "image", {"image_key": "img_v3_1"}))
 
-    files = list((memory_tree.notes_dir / "attachments" / "媒体").glob("feishu-*.png"))
+    files = list((memory_tree.attachments_dir / "媒体").glob("feishu-*.png"))
     assert len(files) == 1
     assert files[0].read_bytes() == b"\x89PNG fake"
 
@@ -168,7 +168,7 @@ def test_file_message_keeps_sanitized_name(memory_tree, monkeypatch):
         _event("m7", "file", {"file_key": "fk1", "file_name": "季度报告: 9月.pdf"})
     )
 
-    files = list((memory_tree.notes_dir / "attachments" / "书籍").glob("feishu-*.pdf"))
+    files = list((memory_tree.attachments_dir / "书籍").glob("feishu-*.pdf"))
     assert len(files) == 1
     assert "季度报告- 9月" in files[0].name
     assert files[0].read_bytes() == b"%PDF-1.4 fake"
@@ -184,7 +184,7 @@ def test_resource_download_failure_skips(memory_tree, monkeypatch):
     bridge.handle_event(_event("m8", "image", {"image_key": "img_bad"}))
     bridge.handle_event(_event("m8", "image", {"image_key": "img_bad"}))
 
-    assert not (memory_tree.notes_dir / "attachments").exists()
+    assert not (memory_tree.attachments_dir).exists()
 
 
 def test_from_env_missing_credentials(memory_tree, monkeypatch):
@@ -1382,7 +1382,7 @@ def test_audio_message_saved_as_ogg(memory_tree, monkeypatch):
     )
 
     assert downloads == [("voice_key", "file")]
-    attach_dir = memory_tree.notes_dir / "attachments" / "媒体"
+    attach_dir = memory_tree.attachments_dir / "媒体"
     saved = list(attach_dir.glob("feishu-*.ogg"))
     assert len(saved) == 1
     assert saved[0].read_bytes() == b"OggS"
@@ -1402,7 +1402,7 @@ def test_audio_message_without_key_skipped(memory_tree, monkeypatch):
     bridge.handle_event(_event("m-audio-2", "audio", {"duration": 3}))
 
     assert downloads == []
-    ogg_dir = memory_tree.notes_dir / "attachments" / "媒体"
+    ogg_dir = memory_tree.attachments_dir / "媒体"
     assert not ogg_dir.exists() or not list(ogg_dir.glob("feishu-*.ogg"))
 
 
@@ -1926,7 +1926,7 @@ def test_resource_download_failure_sends_feedback(memory_tree, monkeypatch):
         _event("m-big", "file", {"file_key": "fk-big", "file_name": "SVID_1.mp4"})
     )
 
-    assert not (memory_tree.notes_dir / "attachments").exists()
+    assert not (memory_tree.attachments_dir).exists()
     assert len(feedback) == 1
     assert "SVID_1.mp4" in feedback[0]
     assert "下载失败" in feedback[0]
@@ -1967,7 +1967,7 @@ def test_media_message_saved_as_mp4(memory_tree, monkeypatch):
     # 必须下载视频本体（file_key），不是封面图（image_key）——
     # 2026-09-13 实测：先取 image_key 会把 12KB 封面当视频存成假 mp4
     assert downloads == [("video_key", "file")]
-    attach_dir = memory_tree.notes_dir / "attachments" / "媒体"
+    attach_dir = memory_tree.attachments_dir / "媒体"
     saved = list(attach_dir.glob("feishu-*.mp4"))
     assert len(saved) == 1
     assert "clip.mp4" in saved[0].name
@@ -1987,7 +1987,7 @@ def test_media_message_without_filename_defaults_mp4(memory_tree, monkeypatch):
         _event("m-media-2", "media", {"file_key": "video_key", "duration": 5})
     )
 
-    attach_dir = memory_tree.notes_dir / "attachments" / "媒体"
+    attach_dir = memory_tree.attachments_dir / "媒体"
     saved = list(attach_dir.glob("feishu-*.mp4"))
     assert len(saved) == 1
 

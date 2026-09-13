@@ -114,7 +114,7 @@ from scripts.dispatch.feishu_io import (
     send_feishu,
     send_feishu_card,
 )
-from scripts.dispatch.media import ATTACHMENTS_DIR, BOOK_SUBDIR, MEDIA_SUBDIR
+from scripts.dispatch.media import BOOK_SUBDIR, MEDIA_SUBDIR
 from scripts.memory.core import NOTE_EXCLUDED_DIRS, SYSTEM_DIRNAME, MemoryTree
 
 #: re-export 门脸（__all__ 声明即"有意再导出"，ruff F401 不误报）：
@@ -1234,11 +1234,9 @@ class FeishuBridge:
             or not filename.endswith(".md")
         ):
             return None, "非法路径"
-        from scripts.memory.core import iter_note_files
-
         matches = [
             path
-            for path in iter_note_files(self.tree.notes_dir)
+            for path in self.tree.iter_all_note_files()
             if path.name == filename
         ]
         if not matches:
@@ -1509,7 +1507,7 @@ class FeishuBridge:
             ).strip(". ")
             filename = f"feishu-{stamp}-{original}"
         subdir = BOOK_SUBDIR if filename.lower().endswith(".pdf") else MEDIA_SUBDIR
-        attach_dir = Path(self.tree.notes_dir) / ATTACHMENTS_DIR / subdir
+        attach_dir = self.tree.attachments_dir / subdir
         attach_dir.mkdir(parents=True, exist_ok=True)
         target = attach_dir / filename
         self._atomic_write(target, blob)

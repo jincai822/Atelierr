@@ -170,13 +170,23 @@ class MemoryTree:
     笔记文件永不被机器移动/改写；一切动态状态存于 sidecar。
     """
 
-    def __init__(self, ov_path: str, state_dir: Optional[str] = None) -> None:
-        """初始化平面笔记目录与 sidecar 状态目录（不存在则创建）。
+    def __init__(
+        self,
+        ov_path: str,
+        state_dir: Optional[str] = None,
+        inbox_dir: Optional[str] = None,
+    ) -> None:
+        """初始化平面笔记目录、中转站目录与 sidecar 状态目录（不存在则创建）。
 
         Args:
-            ov_path: 平面笔记目录（即 $OV/memory）。
+            ov_path: 平面笔记目录（即 $OV/memory，真记忆：你写的+你确认
+                归档的）。
             state_dir: 状态目录（sidecar/报告/回收站）；未给时默认
                 notes_dir.parent / "state"（仅为便利默认值）。
+            inbox_dir: 中转站目录（机器产出卡的落点：待确认→确认归档后
+                移进 memory/ 平台目录）；未给时默认 notes_dir.parent /
+                "inbox"（2026-09-13 用户裁决：memory/ 只存真记忆，
+                中转与源文件拆出）。
         """
         self.notes_dir = Path(ov_path).expanduser()
         self.state_dir = (
@@ -184,8 +194,17 @@ class MemoryTree:
             if state_dir
             else self.notes_dir.parent / "state"
         )
+        self.inbox_dir = (
+            Path(inbox_dir).expanduser()
+            if inbox_dir
+            else self.notes_dir.parent / "inbox"
+        )
         self.notes_dir.mkdir(parents=True, exist_ok=True)
         self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.inbox_dir.mkdir(parents=True, exist_ok=True)
+        # 源文件区（attachments/）2026-09-13 起挪到数据根平级：
+        # memory/ 只存真记忆；Obsidian 库根在数据根，链接后缀匹配不断
+        self.attachments_dir = self.notes_dir.parent / "attachments"
         self.settings = MemorySettings()
         self.index_path = self.state_dir / "index.json"
         self._index: Optional[Dict[str, dict]] = None
@@ -261,17 +280,40 @@ class MemoryTree:
                 fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
 
     def _rel_key(self, note_path: Path) -> str:
-        """notes_dir 内路径 → 索引相对 key（POSIX / 分隔，含子目录前缀）。
+        """笔记绝对路径 → 索引相对 key（POSIX / 分隔，含子目录前缀）。
 
-        notes_dir 之外的路径退回纯文件名（维持旧顶层行为）；索引里
-        存的 path 一律由此产生，保证 ``notes_dir / entry["path"]``
-        可还原出原文件。
+        双根（2026-09-13 用户裁决拆分）：memory/ 内是相对 notes_dir
+        的原样路径；inbox/ 内（中转站）加 ``inbox/`` 虚拟前缀；
+        两根之外的路径退回纯文件名（维持旧顶层行为）。索引里存的
+        path 一律由此产生，``_abs(entry["path"])`` 可还原出原文件。
         """
         path = Path(note_path)
         try:
             return path.relative_to(self.notes_dir).as_posix()
         except ValueError:
+            pass
+        try:
+            return "inbox/" + path.relative_to(self.inbox_dir).as_posix()
+        except ValueError:
             return path.name
+
+    def _abs(self, rel: str) -> Path:
+        """索引相对 key → 绝对路径（``inbox/`` 前缀解析到中转站目录）。
+
+        无前缀的纯文件名（如分发报告的 created 列表）按存在性探测：
+        memory/ 优先，其次 inbox/；都不存在时返回 memory/ 侧路径
+        （让调用方得到一致的"不存在"语义）。
+        """
+        rel = str(rel)
+        if rel.startswith("inbox/"):
+            return self.inbox_dir / rel[len("inbox/"):]
+        candidate = self.notes_dir / rel
+        if candidate.exists() or "/" in rel:
+            return candidate
+        inbox_candidate = self.inbox_dir / rel
+        if inbox_candidate.exists():
+            return inbox_candidate
+        return candidate
 
     def _entry(self, note_path: Path) -> Optional[dict]:
         """按相对路径反查 sidecar 条目，未登记返回 None。"""
@@ -357,8 +399,9 @@ class MemoryTree:
         content: str,
         source: str = "unknown",
         tags: Optional[List[str]] = None,
+        inbox: bool = False,
     ) -> Path:
-        """创建新笔记（平面目录根层），写一次性 frontmatter，登记 sidecar。
+        """创建新笔记，写一次性 frontmatter，登记 sidecar。
 
         content 自带合法 frontmatter 时复用其元数据，缺失的
         id/title/created/source/tags 补默认值。
@@ -368,6 +411,10 @@ class MemoryTree:
             content: 笔记正文（可含合法 frontmatter）。
             source: 来源（web/obsidian/lark/agent/reflection 等）。
             tags: 标签列表。
+            inbox: True 时落中转站（inbox/）：机器产出卡的落点
+                （2026-09-13 用户裁决拆分：memory/ 只存真记忆，
+                中转卡确认归档后才移进 memory/ 平台目录）；缺省 False
+                落 memory/ 根。
 
         Returns:
             Path: 新笔记的绝对路径。
@@ -380,9 +427,12 @@ class MemoryTree:
             raise ValueError(f"文件名不能包含目录分量: {filename!r}")
         if not filename.endswith(".md"):
             raise ValueError(f"文件名必须以 .md 结尾: {filename!r}")
-        target = self.notes_dir / filename
-        if target.exists():
-            raise FileExistsError(f"笔记已存在: {target}")
+        target = (self.inbox_dir if inbox else self.notes_dir) / filename
+        # 同名检查跨双根（2026-09-13 拆分）：中转卡名撞上 memory/ 里的
+        # 既有笔记同样拒绝——两个同名文件散在两个目录比报错更糟
+        other = (self.notes_dir if inbox else self.inbox_dir) / filename
+        if target.exists() or other.exists():
+            raise FileExistsError(f"笔记已存在: {filename}")
 
         post = self._parse_or_build_post(content, filename, source, tags)
         target.write_text(frontmatter.dumps(post), encoding="utf-8")
@@ -412,6 +462,15 @@ class MemoryTree:
         for key, value in defaults.items():
             post.metadata.setdefault(key, value)
         return post
+
+    def iter_all_note_files(self) -> Iterator[Path]:
+        """双根扫描：memory/（真记忆）+ inbox/（中转站）的全部笔记 .md。
+
+        2026-09-13 用户裁决拆分后，watcher/decay/search/确认回调一律
+        走这里（单根的 iter_note_files 仅保留给明确的单域场景）。
+        """
+        yield from iter_note_files(self.notes_dir)
+        yield from iter_note_files(self.inbox_dir)
 
     def read_note(self, note_path: Path) -> str:
         """读取笔记正文（去掉 frontmatter，.strip()）。
@@ -504,7 +563,7 @@ class MemoryTree:
         result = []
         for entry in self._load_index().values():
             if entry.get("layer") == layer:
-                path = self.notes_dir / entry["path"]
+                path = self._abs(entry["path"])
                 if path.exists():
                     result.append(path)
         return sorted(result)
@@ -603,7 +662,7 @@ class MemoryTree:
         result = []
         for entry in self._load_index().values():
             if entry.get("pending_delete"):
-                path = self.notes_dir / entry["path"]
+                path = self._abs(entry["path"])
                 if path.exists():
                     result.append(path)
         return sorted(result)
@@ -704,7 +763,7 @@ class MemoryTree:
         total = 0
         confidence_sum = 0.0
         for entry in self._load_index().values():
-            path = self.notes_dir / entry["path"]
+            path = self._abs(entry["path"])
             if not path.exists():
                 continue
             total += 1
@@ -740,9 +799,13 @@ class MemoryTree:
         """
         config = load_config(config_path)
         memory = (config or {}).get("memory", {}) or {}
+        # inbox_dir 缺省不显式给生产路径：None 时由 __init__ 取
+        # root.parent/"inbox"（测试的临时 root 不会扫到生产 inbox——
+        # 2026-09-13 实证：硬编码默认值让测试 watcher 把生产库登记进来）
         tree = cls(
             memory.get("root", "~/atelierr-data/memory"),
             state_dir=memory.get("state_dir", "~/atelierr-data/state"),
+            inbox_dir=memory.get("inbox_dir"),
         )
         layers = memory.get("layers", {}) or {}
         decay = memory.get("decay", {}) or {}

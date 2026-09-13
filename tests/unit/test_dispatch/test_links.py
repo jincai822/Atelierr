@@ -60,7 +60,7 @@ def test_processes_douyin_link(memory_tree):
 
     assert report["found"] == 1
     assert report["created"] == ["douyin-vid123.md"]
-    created = memory_tree.notes_dir / "douyin-vid123.md"
+    created = memory_tree.inbox_dir / "douyin-vid123.md"
     assert created.exists()
     post = frontmatter.loads(created.read_text(encoding="utf-8"))
     assert post["tags"] == ["待确认", "抖音"]
@@ -168,7 +168,7 @@ def test_cli_links_command(memory_tree, tmp_path, monkeypatch):
     code = DispatchCLI(config_path=str(config)).main(["links"])
 
     assert code == 0
-    assert (memory_tree.notes_dir / "douyin-vid123.md").exists()
+    assert (memory_tree.inbox_dir / "douyin-vid123.md").exists()
 
 
 XHS_URL = "https://xhslink.cn/o/2Vhl2blNpHM"
@@ -195,7 +195,7 @@ def test_processes_xhs_link(memory_tree):
 
     assert report["found"] == 1
     assert report["created"] == ["xhs-n123.md"]
-    created = memory_tree.notes_dir / "xhs-n123.md"
+    created = memory_tree.inbox_dir / "xhs-n123.md"
     assert created.exists()
     post = frontmatter.loads(created.read_text(encoding="utf-8"))
     assert post["tags"] == ["待确认", "小红书"]
@@ -276,7 +276,7 @@ def test_title_based_filename(memory_tree):
     report = LinkDispatcher(memory_tree, processor_factory=_TitledProcessor).run()
 
     assert report["created"] == ["抖音-健脑小课堂-运动篇.md"]
-    assert (memory_tree.notes_dir / "抖音-健脑小课堂-运动篇.md").exists()
+    assert (memory_tree.inbox_dir / "抖音-健脑小课堂-运动篇.md").exists()
 
 
 def test_title_fallback_to_id(memory_tree):
@@ -306,7 +306,7 @@ def test_title_collision_appends_doc_id(memory_tree):
     report = LinkDispatcher(memory_tree, processor_factory=_CollisionProcessor).run()
 
     assert report["created"] == ["抖音-撞名-v789.md"]
-    assert (memory_tree.notes_dir / "抖音-撞名-v789.md").exists()
+    assert (memory_tree.inbox_dir / "抖音-撞名-v789.md").exists()
 
 
 def test_video_blob_saved_to_platform_dir(memory_tree):
@@ -330,7 +330,7 @@ def test_video_blob_saved_to_platform_dir(memory_tree):
     report = LinkDispatcher(memory_tree, processor_factory=_VideoProcessor).run()
 
     assert report["created"]
-    saved = memory_tree.notes_dir / "attachments" / "抖音" / "抖音-t-v1.mp4"
+    saved = memory_tree.attachments_dir / "抖音" / "抖音-t-v1.mp4"
     assert saved.read_bytes() == b"480p-bytes"
     # metadata 里的 blob 不泄漏进状态文件（bytes 不可 JSON 序列化）
     state = json.loads((memory_tree.state_dir / "processed_links.json").read_text())
@@ -340,7 +340,7 @@ def test_video_blob_saved_to_platform_dir(memory_tree):
 def test_video_blob_existing_not_overwritten(memory_tree):
     """同路径视频已存在：跳过写入（同内容重跑幂等，绝不覆盖原件）。"""
     memory_tree.create_note("daily.md", f"链接 {DOUYIN_URL}", source="test")
-    saved = memory_tree.notes_dir / "attachments" / "抖音" / "抖音-t-v1.mp4"
+    saved = memory_tree.attachments_dir / "抖音" / "抖音-t-v1.mp4"
     saved.parent.mkdir(parents=True)
     saved.write_bytes(b"original")
 
@@ -440,7 +440,7 @@ def test_processes_bilibili_link(memory_tree):
     report = LinkDispatcher(memory_tree, processor_factory=_BiliProcessor).run()
 
     assert report["created"] == ["B站-认知科学入门.md"]
-    created = memory_tree.notes_dir / "B站-认知科学入门.md"
+    created = memory_tree.inbox_dir / "B站-认知科学入门.md"
     assert created.exists()
     post = frontmatter.loads(created.read_text(encoding="utf-8"))
     assert post["tags"] == ["待确认", "B站"]
@@ -475,7 +475,7 @@ def test_transcript_saved_to_attachments(memory_tree):
     report = dispatcher.run()
 
     assert report["created"] == ["抖音-标题.md"]
-    full = memory_tree.notes_dir / "attachments/抖音/抖音-标题-vid123.md"
+    full = memory_tree.attachments_dir / "抖音/抖音-标题-vid123.md"
     assert full.exists()
     assert full.read_text(encoding="utf-8") == "这是很长的转写全文"
     # 同名跳过（幂等）：已有内容不被覆盖

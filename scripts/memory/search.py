@@ -133,6 +133,9 @@ class MemorySearcher:
 
         found: Dict[str, Any] = {}
         _walk(self.tree.notes_dir, "")
+        # 双根（2026-09-13 拆分）：inbox/ 中转站的卡同样可搜，
+        # 键带 inbox/ 前缀（与 sidecar path 编码一致）
+        _walk(self.tree.inbox_dir, "inbox/")
         if len(found) != len(self._raw_cache):
             for name in list(self._raw_cache):
                 if name not in found:
@@ -163,7 +166,7 @@ class MemorySearcher:
         if cached is not None and cached[0] == key[0] and cached[1] == key[1]:
             return cached[2]
         try:
-            text = (self.tree.notes_dir / name).read_text(encoding="utf-8")
+            text = self.tree._abs(name).read_text(encoding="utf-8")
         except OSError:
             return None
         self._raw_cache[name] = (key[0], key[1], text, text.lower())
@@ -268,7 +271,7 @@ class MemorySearcher:
                 ),
             }
             self._object_cache[name] = (cache_key[0], cache_key[1], static)
-        path = self.tree.notes_dir / name
+        path = self.tree._abs(name)
         return Memory(path=path, confidence=confidence, layer=layer, **static)
 
     # ------------------------------------------------------------------
@@ -366,7 +369,7 @@ class MemorySearcher:
         """
         if not query_lower:
             return []
-        attach = self.tree.notes_dir / "attachments"
+        attach = self.tree.attachments_dir
         if not attach.is_dir():
             return []
         results: List[Memory] = []

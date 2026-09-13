@@ -90,7 +90,7 @@ def test_links_success_no_push(cli, memory_tree, pushes, monkeypatch):
     memory_tree.create_note("daily.md", f"链接 {DOUYIN_URL}", source="test")
 
     assert cli.main(["links"]) == 0
-    assert (memory_tree.notes_dir / "douyin-vid123.md").exists()
+    assert (memory_tree.inbox_dir / "douyin-vid123.md").exists()
     assert pushes == []
 
 
@@ -103,7 +103,7 @@ def test_todos_created_pushes_done_card(cli, memory_tree, pushes, monkeypatch):
     )
 
     assert cli.main(["todos"]) == 0
-    created = list(memory_tree.notes_dir.glob("todo-*.md"))
+    created = list(memory_tree.inbox_dir.glob("todo-*.md"))
     assert created
     assert pushes == []  # 双通道摘要仍不推（防马后炮噪音）
     assert sent == [created[0].name]
@@ -231,7 +231,7 @@ class _FakeMediaProcessor:
 
 def _add_attachment(tree, name="IMG_001.png"):
     """在 attachments/ 落一个假附件并回拨 mtime（避开 30s 守卫）。"""
-    attach = Path(tree.notes_dir) / "attachments"
+    attach = Path(tree.attachments_dir)
     attach.mkdir(parents=True, exist_ok=True)
     path = attach / name
     path.write_bytes(b"\x89PNG fake-bytes")
@@ -260,7 +260,7 @@ def test_media_success_no_push(cli, memory_tree, pushes, monkeypatch):
     _add_attachment(memory_tree)
 
     assert cli.main(["media"]) == 0
-    assert list(memory_tree.notes_dir.glob("media-*.md"))
+    assert list(memory_tree.inbox_dir.glob("media-*.md"))
     assert pushes == []
 
 

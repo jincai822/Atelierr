@@ -401,7 +401,7 @@ class TodoDispatcher:
             return filename
         tags = [TODO_TAG] + ([REVIEW_TAG] if review else [])
         try:
-            self.tree.create_note(filename, markdown, source="todo", tags=tags)
+            self.tree.create_note(filename, markdown, source="todo", tags=tags, inbox=True)
         except (ValueError, FileExistsError):
             return None
         return filename

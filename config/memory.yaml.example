@@ -6,6 +6,10 @@ memory:
   # *.md，wiki/、templates/、attachments/、trash/、系统/ 与隐藏目录、
   # Syncthing 冲突副本除外——系统/ 是摘要/控制台等机器产物区）
   root: ~/atelierr-data/memory
+  # 中转站目录（机器产出卡的落点；2026-09-13 v1.5 拆分：memory/ 只存
+  # 真记忆，待确认卡确认归档后才移进 memory/ 平台目录）；缺省 root 平级
+  # inbox/。源文件区在数据根平级 attachments/（不再位于 memory/ 内）
+  inbox_dir: ~/atelierr-data/inbox
 
   # 机器状态目录（sidecar 索引 index.json、衰减报告 reports/、回收站 trash/）
   # 与笔记目录分离：笔记文件创建后机器绝不改写

@@ -90,8 +90,10 @@ def _dispatcher(tree):
 
 
 def _add_attachment(tree, name="IMG_001.png", age_seconds=60, subdir=""):
-    """在 attachments/ 落一个假附件并回拨 mtime（避开 30s 防半文件守卫）。"""
-    attach = Path(tree.notes_dir) / "attachments"
+    """在 attachments/ 落一个假附件并回拨 mtime（避开 30s 防半文件守卫）。
+
+    attachments/ 2026-09-13 起在数据根平级（tree.attachments_dir）。"""
+    attach = Path(tree.attachments_dir)
     if subdir:
         attach = attach / subdir
     attach.mkdir(parents=True, exist_ok=True)
@@ -103,7 +105,8 @@ def _add_attachment(tree, name="IMG_001.png", age_seconds=60, subdir=""):
 
 
 def _created_note(tree):
-    notes = list(Path(tree.notes_dir).glob("media-*.md"))
+    # 产出卡落中转站（2026-09-13 拆分：memory/ 只存真记忆）
+    notes = list(Path(tree.inbox_dir).glob("media-*.md"))
     assert len(notes) == 1
     return notes[0]
 
@@ -234,7 +237,7 @@ def test_dry_run_creates_nothing(memory_tree):
     assert report["found"] == 1
     assert report["created"] == []
     assert constructed == []
-    assert not list(Path(memory_tree.notes_dir).glob("media-*.md"))
+    assert not list(Path(memory_tree.inbox_dir).glob("media-*.md"))
     assert not (memory_tree.state_dir / "processed_media.json").exists()
 
 
@@ -291,7 +294,7 @@ def test_same_name_in_two_subdirs_both_processed(memory_tree):
 
     assert report["found"] == 2
     assert len(report["created"]) == 2
-    assert len(list(Path(memory_tree.notes_dir).glob("media-*.md"))) == 2
+    assert len(list(Path(memory_tree.inbox_dir).glob("media-*.md"))) == 2
 
 
 def test_video_in_platform_dir_referenced_skipped(memory_tree):
@@ -356,7 +359,7 @@ def test_inbox_imports_images(memory_tree, tmp_path):
 
     assert report["imported"] == 1
     assert report["found"] == 1
-    copied = memory_tree.notes_dir / "attachments" / "媒体" / "shot_a.png"
+    copied = memory_tree.attachments_dir / "媒体" / "shot_a.png"
     assert copied.read_bytes() == b"\x89PNG inbox-bytes"
     assert (inbox / "shot_a.png").exists()  # 复制不移动
     note = _created_note(memory_tree)
@@ -367,7 +370,7 @@ def test_inbox_imports_images(memory_tree, tmp_path):
 def test_inbox_only_images_and_no_overwrite(memory_tree, tmp_path):
     """非图片不导入；目标已存在绝不覆盖（同内容重跑幂等）。"""
     inbox = _make_inbox(tmp_path, files=("shot_b.png", "notes.txt", ".hidden.png"))
-    dest = memory_tree.notes_dir / "attachments" / "媒体" / "shot_b.png"
+    dest = memory_tree.attachments_dir / "媒体" / "shot_b.png"
     dest.parent.mkdir(parents=True)
     dest.write_bytes(b"existing")
     dispatcher = MediaDispatcher(
@@ -411,7 +414,7 @@ def test_inbox_dry_run_no_copy(memory_tree, tmp_path):
     report = dispatcher.run(dry_run=True)
 
     assert report["imported"] == 1
-    assert not (memory_tree.notes_dir / "attachments" / "媒体").exists()
+    assert not (memory_tree.attachments_dir / "媒体").exists()
 
 
 def test_inbox_disabled_by_default(memory_tree, tmp_path):
@@ -547,12 +550,12 @@ def test_long_text_externalized_to_attachments(memory_tree):
     assert "![[attachments/IMG_001.png]]" in post.content
     rel = f"attachments/媒体/{note.stem}.md"
     assert f"## 全文\n\n[[{rel}|查看OCR 全文]]" in post.content
-    full = memory_tree.notes_dir / rel
+    full = memory_tree.attachments_dir.parent / rel
     assert full.exists()
     assert full.read_text(encoding="utf-8") == long_text
     # 同名跳过（幂等）：再调一次不改写既有全文
     dispatcher._build_note(
-        memory_tree.notes_dir / "attachments/IMG_001.png",
+        memory_tree.attachments_dir / "IMG_001.png",
         "截图",
         "另一份全文",
         note.stem,

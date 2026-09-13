@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import frontmatter
 
-from scripts.memory.core import generate_id, iter_note_files
+from scripts.memory.core import generate_id
 from scripts.utils.date_utils import local_timezone
 
 if TYPE_CHECKING:
@@ -89,14 +89,14 @@ class MemoryWatcher:
         }
         with self.tree._index_transaction() as index:
             indexed = {str(entry.get("path")) for entry in index.values()}
-            for path in iter_note_files(self.tree.notes_dir):
+            for path in self.tree.iter_all_note_files():
                 rel = self.tree._rel_key(path)
                 if rel in indexed:
                     continue
                 self._process_new_file(path, rel, index, result)
             # 注销：sidecar 有条目但文件已消失（迁移过的旧路径在此清理）
             for note_id, entry in list(index.items()):
-                if not (self.tree.notes_dir / entry["path"]).exists():
+                if not (self.tree._abs(entry["path"])).exists():
                     del index[note_id]
                     result["deregistered"].append(entry["path"])
         return result

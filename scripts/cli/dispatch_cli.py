@@ -124,6 +124,7 @@ def _notify_created_notes(
     created: List[str],
     *,
     notes_dir: Path,
+    tree: Optional[Any] = None,
     skip_prefix: str = "",
     extras: Optional[Dict[str, str]] = None,
     defer_queue: Optional[Path] = None,
@@ -161,7 +162,8 @@ def _notify_created_notes(
         body = f"{message}：{filename}"
         if comment:
             body = f"{body}\n你的评论：{comment}"
-        hint = _archive_hint(notes_dir / filename)
+        note_path = tree._abs(filename) if tree is not None else notes_dir / filename
+        hint = _archive_hint(note_path)
         if hint:
             body = f"{body}\n{hint}"
         send_dispatch_notice(title, body, confirm_note=filename)
@@ -178,7 +180,7 @@ def _notify_todos(created: List[str], tree: MemoryTree, limit: int = 5) -> None:
 
     for filename in created[:limit]:
         send_todo_feishu(filename)
-        title, due = _parse_todo_task(tree.notes_dir / filename)
+        title, due = _parse_todo_task(tree._abs(filename))
         if not title:
             continue
         create_task_for_todo(tree.state_dir, filename, title, due)
@@ -329,6 +331,7 @@ class DispatchCLI:
                             "链接笔记已转写入库",
                             report["created"],
                             notes_dir=tree.notes_dir,
+                            tree=tree,
                             extras=report.get("comments"),
                             defer_queue=tree.state_dir,
                         )
@@ -415,6 +418,7 @@ class DispatchCLI:
                             "已识别入库",
                             report["created"],
                             notes_dir=tree.notes_dir,
+                            tree=tree,
                             skip_prefix="划重点-",
                         )
                 if dry_run:

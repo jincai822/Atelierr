@@ -240,6 +240,7 @@ class LinkDispatcher:
                     result.markdown,
                     source="link",
                     tags=[REVIEW_TAG, _PLATFORM_TAGS.get(platform, "链接")],
+                    inbox=True,
                 )
             except FileExistsError:
                 # 同名不同源（标题撞车）：追加内容 id 短码再试一次；
@@ -254,6 +255,7 @@ class LinkDispatcher:
                         result.markdown,
                         source="link",
                         tags=[REVIEW_TAG, _PLATFORM_TAGS.get(platform, "链接")],
+                        inbox=True,
                     )
                 except (ValueError, FileExistsError):
                     pass
@@ -323,7 +325,8 @@ class LinkDispatcher:
         markdown 里的 ``![[...]]`` 内嵌与之为同一字符串）；绝不覆盖既有
         文件（同路径=同内容，跳过即幂等）。
         """
-        target = self.tree.notes_dir / rel
+        # attachments/ 已挪数据根平级（2026-09-13 拆分）；rel 不变
+        target = self.tree.attachments_dir.parent / rel
         if target.exists():
             return
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -347,7 +350,7 @@ class LinkDispatcher:
         :func:`scripts.utils.file_utils.write_text_skip_existing`（与
         media 管线共用唯一实现）。
         """
-        write_text_skip_existing(self.tree.notes_dir / rel, text)
+        write_text_skip_existing(self.tree.attachments_dir.parent / rel, text)
 
     @staticmethod
     def _note_filename(url: str, platform: str, doc_id: str, title: str = "") -> str:

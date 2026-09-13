@@ -64,7 +64,8 @@ def llm_ok(monkeypatch):
 
 
 def _read_note(tree, filename):
-    return frontmatter.loads((tree.notes_dir / filename).read_text(encoding="utf-8"))
+    # 待办卡落中转站（2026-09-13 拆分）
+    return frontmatter.loads((tree._abs(filename)).read_text(encoding="utf-8"))
 
 
 def _state(tree):
@@ -327,7 +328,7 @@ def test_dry_run_creates_nothing(memory_tree, llm_ok):
     assert report["created"] == []
     assert llm_ok == []
     assert not (memory_tree.state_dir / "processed_todos.json").exists()
-    assert list(memory_tree.notes_dir.glob("todo-*.md")) == []
+    assert list(memory_tree.inbox_dir.glob("todo-*.md")) == []
 
 
 def test_cli_todos_command(memory_tree, tmp_path):
@@ -344,7 +345,7 @@ def test_cli_todos_command(memory_tree, tmp_path):
     code = DispatchCLI(config_path=str(config)).main(["todos"])
 
     assert code == 0
-    assert list(memory_tree.notes_dir.glob("todo-*.md"))
+    assert list(memory_tree.inbox_dir.glob("todo-*.md"))
 
 
 def test_douyin_link_summary_fed_as_context(memory_tree, monkeypatch):

@@ -56,8 +56,12 @@ def test_search_ignores_special_dirs(memory_tree, make_note):
     attachments 命中只进资料全文组（2026-09-12 方案 B），wiki/trash/隐藏
     目录连资料组也不进。"""
     make_note(memory_tree, filename="real.md", content="真笔记的独特词")
-    for rel in ("wiki/摘录-概念.md", "attachments/x.md", "trash/旧.md", ".sync/隐藏.md"):
+    for rel in ("wiki/摘录-概念.md", "trash/旧.md", ".sync/隐藏.md"):
         _write_excluded_md(memory_tree, rel, "特殊目录独特词")
+    # attachments 2026-09-13 起在数据根平级（不在 notes_dir 下）
+    attach = memory_tree.attachments_dir
+    attach.mkdir(parents=True, exist_ok=True)
+    (attach / "x.md").write_text("特殊目录独特词", encoding="utf-8")
 
     results = MemorySearcher(memory_tree).search("特殊目录独特词")
     assert [r for r in results if r.group == "notes"] == []

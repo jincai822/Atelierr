@@ -75,7 +75,7 @@ def enqueue(state_dir: Path, rel: str, kind: str = "link") -> None:
 def _still_pending(tree, rel: str) -> bool:
     """文件在、仍带「待确认」、且未标 pending_delete 才推（用户可能已在
     Obsidian 处理过，或已点过 🗑 进了待删通道——待删的不该再上确认清单）。"""
-    path = Path(tree.notes_dir) / rel
+    path = tree._abs(rel)
     if not path.exists():
         return False
     try:

@@ -46,7 +46,7 @@ def _dispatcher(tree):
 
 
 def _add_pdf(tree, name="测试书.pdf", age_seconds=60):
-    attach = Path(tree.notes_dir) / "attachments"
+    attach = Path(tree.attachments_dir)
     attach.mkdir(parents=True, exist_ok=True)
     path = attach / name
     path.write_bytes(b"%PDF fake-bytes")
