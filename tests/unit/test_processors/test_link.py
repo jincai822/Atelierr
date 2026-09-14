@@ -1320,3 +1320,62 @@ def test_bare_category_code_dropped(fake_pipeline, monkeypatch):
     assert result.success, result.error
     post = frontmatter.loads(result.markdown)
     assert "G79" not in (post.metadata.get("tags") or [])
+
+
+def test_xhs_text_note_preserves_images_with_ocr(fake_xhs_page, monkeypatch):
+    """图文多图笔记：图片保藏为原件 + 逐张 OCR 进正文 + 图集内嵌（2026-09-14 裁决）。"""
+    fake_xhs_page["note"] = {
+        **_XHS_NOTE_TEXT,
+        "imageList": [
+            {"urlDefault": "http://cdn.example/a.jpg"},
+            {"urlDefault": "http://cdn.example/b.jpg"},
+        ],
+    }
+
+    def _fake_dl(url):
+        return f"bytes-{url.rsplit('/', 1)[-1]}".encode()
+
+    class _FakeOCR:
+        def process(self, path):
+            return ProcessResult(success=True, text="书单第一页", metadata={})
+
+    monkeypatch.setattr(LinkProcessor, "_download_xhs_file", staticmethod(_fake_dl))
+    monkeypatch.setattr(link_module, "ImageProcessor", lambda: _FakeOCR())
+
+    result = LinkProcessor().process(XHS_SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "![[attachments/小红书/小红书-图文笔记标题-txt456-01.jpg]]" in result.markdown
+    assert "![[attachments/小红书/小红书-图文笔记标题-txt456-02.jpg]]" in result.markdown
+    assert "图片里的文字：" in result.markdown
+    assert "【图 1】" in result.markdown
+    assert len(result.metadata["image_blobs"]) == 2
+    assert result.metadata["images"] == 2
+
+
+def test_xhs_text_note_image_failure_tolerated(fake_xhs_page, monkeypatch):
+    """单张图下载失败：跳过该张，其余照常；整篇不阻塞。"""
+    fake_xhs_page["note"] = {
+        **_XHS_NOTE_TEXT,
+        "imageList": [
+            {"urlDefault": "http://cdn.example/a.jpg"},
+            {"urlDefault": "http://cdn.example/b.jpg"},
+        ],
+    }
+    monkeypatch.setattr(
+        LinkProcessor,
+        "_download_xhs_file",
+        staticmethod(lambda url: b"img" if "a.jpg" in url else None),
+    )
+
+    class _FakeOCR:
+        def process(self, path):
+            return ProcessResult(success=True, text="字", metadata={})
+
+    monkeypatch.setattr(link_module, "ImageProcessor", lambda: _FakeOCR())
+
+    result = LinkProcessor().process(XHS_SHARE_TEXT)
+
+    assert result.success, result.error
+    assert result.markdown.count("![[attachments/小红书/") == 1
+    assert result.metadata["images"] == 1

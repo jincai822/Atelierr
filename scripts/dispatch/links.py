@@ -271,6 +271,11 @@ class LinkDispatcher:
             video_rel = result.metadata.get("video_rel")
             if video_blob and video_rel:
                 self._save_video(str(video_rel), video_blob)
+            # 图文笔记图集落盘（2026-09-14 裁决：图是原件必须保藏）；
+            # 同 _save_video 规：同名跳过幂等、失败只记日志不阻断建卡
+            image_blobs = result.metadata.pop("image_blobs", None) or []
+            for image_rel, image_blob in image_blobs:
+                self._save_video(str(image_rel), image_blob)
             # 全文外置（2026-09-12 方案 B 用户裁决）：>INLINE_BODY_MAX 的
             # 正文由处理器经 metadata 交回，卡上只留「## 全文」链接节；
             # 落盘失败只记日志，不阻断建卡

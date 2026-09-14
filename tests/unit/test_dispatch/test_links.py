@@ -642,3 +642,30 @@ def test_numeric_leading_comment_kept(memory_tree):
 
     body = f"{DOUYIN_URL} 3 点感悟都适用"
     assert extract_comment(body, DOUYIN_URL) == "3 点感悟都适用"
+
+
+def test_image_blobs_saved_to_attachments(memory_tree):
+    """图文图集字节由 dispatch 落盘 attachments/（与视频同规：同名幂等）。"""
+
+    class _ImageNoteProcessor(_FakeLinkProcessor):
+        def process(self, url):
+            return ProcessResult(
+                success=True,
+                text="正文",
+                markdown="# 图文\n\n> 来源：小红书 u\n\n正文",
+                metadata={
+                    "video_id": "img1",
+                    "image_blobs": [
+                        ("attachments/小红书/小红书-t-img1-01.jpg", b"img-a"),
+                        ("attachments/小红书/小红书-t-img1-02.jpg", b"img-b"),
+                    ],
+                },
+            )
+
+    memory_tree.create_note("daily.md", f"看看 {DOUYIN_URL}", source="test")
+
+    LinkDispatcher(memory_tree, processor_factory=_ImageNoteProcessor).run()
+
+    base = memory_tree.attachments_dir.parent
+    assert (base / "attachments/小红书/小红书-t-img1-01.jpg").read_bytes() == b"img-a"
+    assert (base / "attachments/小红书/小红书-t-img1-02.jpg").read_bytes() == b"img-b"

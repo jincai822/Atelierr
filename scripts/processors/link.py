@@ -51,6 +51,7 @@ httpx 页面获取，无真实网络与模型下载。
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -64,7 +65,10 @@ import opencc
 import yt_dlp
 
 from scripts.processors.base import INLINE_BODY_MAX, BaseProcessor, ProcessResult
+from scripts.processors.image import ImageProcessor
 from scripts.processors.video import VideoProcessor, compress_to_480p
+
+logger = logging.getLogger(__name__)
 
 #: 抖音域名（短链 / 视频页 / 分享页）
 _DOUYIN_HOSTS: Tuple[str, ...] = (
@@ -618,16 +622,24 @@ class LinkProcessor(BaseProcessor):
             "title": title,
         }
         if not video_url:
-            # 图文笔记：正文即内容，无转写
+            # 图文笔记：正文即内容，无转写；图片是原件必须保藏（2026-09-14
+            # 用户裁决：图文的图就是内容本体——书单/截图类图文的知识全在
+            # 图里，丢了等于没存），并 OCR 出文字参与摘要（可搜索）。
             if not title and not desc:
                 return self._fail("小红书笔记无有效内容（无标题无正文）")
-            summary, llm_status = self._summarize(desc)
+            images, ocr_parts = self._fetch_xhs_images(
+                note, download_dir, "小红书", title or note_id, note_id
+            )
+            ocr_text = "\n\n".join(ocr_parts)
+            full_text = desc + (f"\n\n图片里的文字：\n\n{ocr_text}" if ocr_text else "")
+            summary, llm_status = self._summarize(full_text)
             title = _semantic_title(title, summary)  # 空标题用 LLM 语义标题兜底
             metadata["title"] = title
-            body = self._compose_body(desc, raw_body=True)
+            body = self._compose_body(full_text, raw_body=True)
             transcript_rel = None
             if len(body) > INLINE_BODY_MAX:
                 transcript_rel = self._transcript_rel("小红书", title, note_id)
+            image_rels = [rel for rel, _blob in images]
             markdown = self._build_markdown(
                 title or note_id or "小红书笔记",
                 author,
@@ -637,11 +649,14 @@ class LinkProcessor(BaseProcessor):
                 source_label="小红书",
                 body_label="笔记正文",
                 transcript_rel=transcript_rel,
+                image_rels=image_rels,
             )
             metadata["engine"] = "xhs-page"
             metadata["llm"] = {"status": llm_status, "model": self.llm_model}
             metadata["transcript_rel"] = transcript_rel
             metadata["transcript_text"] = body if transcript_rel else None
+            metadata["image_blobs"] = images
+            metadata["images"] = len(images)
             return ProcessResult(
                 success=True,
                 text=desc,
@@ -749,6 +764,82 @@ class LinkProcessor(BaseProcessor):
                 if master:
                     return master
         return None
+
+    @staticmethod
+    def _xhs_image_urls(note: Dict[str, Any]) -> List[str]:
+        """图文笔记的图片地址列表（imageList 各项 urlDefault/url 优先，
+        infoList 兜底）；去重、保序、封顶 9 张。"""
+        urls: List[str] = []
+        for item in note.get("imageList") or []:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("urlDefault") or item.get("url") or "")
+            if not url:
+                infos = item.get("infoList") or []
+                if infos and isinstance(infos[0], dict):
+                    url = str(infos[0].get("url") or "")
+            if url and url not in urls:
+                urls.append(url)
+        return urls[:9]
+
+    @staticmethod
+    def _download_xhs_file(file_url: str) -> Optional[bytes]:
+        """下载小红书 CDN 文件（图片等）返回字节；cdn 校验 Referer。
+
+        失败返回 None（调用方跳过该件，不阻塞整篇图文）。
+        """
+        try:
+            response = httpx.get(
+                file_url,
+                headers={"User-Agent": _XHS_UA, "Referer": "https://www.xiaohongshu.com/"},
+                timeout=60,
+                follow_redirects=True,
+            )
+            response.raise_for_status()
+            return response.content
+        except Exception:  # noqa: BLE001 - 单件失败不阻塞
+            return None
+
+    def _fetch_xhs_images(
+        self,
+        note: Dict[str, Any],
+        download_dir: str,
+        source_label: str,
+        title: str,
+        doc_id: str,
+    ) -> Tuple[List[Tuple[str, bytes]], List[str]]:
+        """图文笔记：下载全部图片 + 逐张 OCR（2026-09-14 裁决：图是原件
+        必须保藏；图里的文字是知识本体，OCR 才可搜可摘要）。
+
+        单张下载/OCR 失败只跳过该张（记 warning），不阻塞整篇；OCR 引擎
+        本方法内懒构造一次（模型加载昂贵）。字节交 dispatch 层落盘
+        （分层纪律：处理器不感知存储位置）。
+
+        Returns:
+            Tuple[List[Tuple[str, bytes]], List[str]]:（[(rel, blob)]，
+            [逐图 OCR 文本（带【图 N】标记）]）。
+        """
+        images: List[Tuple[str, bytes]] = []
+        ocr_parts: List[str] = []
+        ocr_engine: Any = None
+        stem = self._artifact_stem(source_label, title, doc_id)
+        for index, image_url in enumerate(self._xhs_image_urls(note), 1):
+            blob = self._download_xhs_file(image_url)
+            if blob is None:
+                continue
+            rel = f"attachments/{source_label}/{stem}-{index:02d}.jpg"
+            images.append((rel, blob))
+            tmp = Path(download_dir) / f"xhs-img-{doc_id}-{index:02d}.jpg"
+            try:
+                tmp.write_bytes(blob)
+                if ocr_engine is None:
+                    ocr_engine = ImageProcessor()
+                ocr_result = ocr_engine.process(tmp)
+                if ocr_result.success and ocr_result.text.strip():
+                    ocr_parts.append(f"【图 {index}】\n{ocr_result.text.strip()}")
+            except Exception as exc:  # noqa: BLE001 - 单图 OCR 失败不阻塞
+                logger.warning("小红书图片 OCR 失败 %s: %s", rel, exc)
+        return images, ocr_parts
 
     @staticmethod
     def _download_xhs_video(video_url: str, dest: Path) -> Optional[str]:
@@ -1105,6 +1196,7 @@ class LinkProcessor(BaseProcessor):
         video_rel: Optional[str] = None,
         transcript_rel: Optional[str] = None,
         transcription_confidence: float = 0.0,
+        image_rels: Optional[List[str]] = None,
     ) -> str:
         """组装最终卡 Markdown：标题 + 来源行 +（可选）内嵌原视频 + 摘要各节 + 正文。
 
@@ -1167,6 +1259,9 @@ class LinkProcessor(BaseProcessor):
             ]
         if video_rel:
             sections += [f"![[{video_rel}]]", ""]
+        if image_rels:
+            # 图文笔记图集（2026-09-14 裁决：图是原件，逐张内嵌可翻看）
+            sections += [f"![[{rel}]]" for rel in image_rels] + [""]
         if summary:
             sections += ["## 观点总结", "", summary["summary"]]
             if summary.get("points"):
