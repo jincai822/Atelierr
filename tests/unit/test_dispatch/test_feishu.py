@@ -925,7 +925,10 @@ def test_console_url_env_override_and_fallback(monkeypatch):
 
 
 def test_console_url_custom_vault_drops_memory_prefix(monkeypatch):
-    """自定义库名（手机端库根=memory/ 文件夹）：不带 memory/ 前缀。"""
+    """自定义库名的缺省前缀为空（仅适用库根即 memory/ 的旧布局；
+
+    本机手机端库根=数据根，须显式设 FEISHU_NOTE_PREFIX=memory/，
+    见 feishu_io.py ENV_NOTE_PREFIX 注释）。"""
     monkeypatch.delenv("FEISHU_CONSOLE_URL", raising=False)
     monkeypatch.delenv("FEISHU_NOTE_PREFIX", raising=False)
     monkeypatch.setenv("FEISHU_VAULT_NAME", "memory")
@@ -943,6 +946,18 @@ def test_console_url_note_prefix_env_override(monkeypatch):
     monkeypatch.delenv("FEISHU_VAULT_NAME", raising=False)
     monkeypatch.setenv("FEISHU_NOTE_PREFIX", "notes/")
     assert feishu_module._console_url("x.md").endswith("file=notes/x")
+
+
+def test_console_url_inbox_path_skips_memory_prefix(monkeypatch):
+    """双根拆分（契约 v1.5）：inbox/ 与 memory/ 平级，inbox 路径不加 memory/ 前缀。"""
+    monkeypatch.delenv("FEISHU_CONSOLE_URL", raising=False)
+    monkeypatch.delenv("FEISHU_VAULT_NAME", raising=False)
+    monkeypatch.delenv("FEISHU_NOTE_PREFIX", raising=False)
+
+    url = feishu_module._console_url("inbox/抖音-x.md")
+
+    assert "file=inbox" in url
+    assert "memory" not in url.split("file=")[1]
 
 
 # ----------------------------------------------------------------------

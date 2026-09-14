@@ -27,7 +27,10 @@ ENV_CONSOLE_URL = "FEISHU_CONSOLE_URL"
 ENV_VAULT_NAME = "FEISHU_VAULT_NAME"
 DEFAULT_VAULT_NAME = "atelierr-data"
 #: 库内笔记路径前缀（FEISHU_NOTE_PREFIX 覆盖；库根=atelierr-data 时
-#: 缺省 "memory/"，自定义库名（如手机端库根即 memory/ 文件夹）缺省空）
+#: 缺省 "memory/"，自定义库名缺省空——该缺省只适用于"库根即 memory/
+#: 文件夹"的旧布局。本机实际布局（2026-09-14 核实）：手机端库名
+#: atelierr-memory，库根与桌面同为数据根（memory/ 是其子目录），故
+#: 本机 env 必须显式设 FEISHU_NOTE_PREFIX=memory/，不能用缺省空）
 ENV_NOTE_PREFIX = "FEISHU_NOTE_PREFIX"
 
 DEFAULT_CONSOLE_URL = "obsidian://"
@@ -80,12 +83,18 @@ def _console_url(confirm_note: Optional[str]) -> str:
     直达本条笔记（percent-encode 防中文/井号/空格截断）。库名用
     ``FEISHU_VAULT_NAME`` 覆盖（缺省 atelierr-data=桌面端库）；路径
     前缀用 ``FEISHU_NOTE_PREFIX`` 覆盖，缺省跟随库名：库根是
-    atelierr-data 时为 ``memory/``，自定义库名时为空。无目标笔记
-    （digest 等汇总通知）时落到控制台门面页（系统/控制台）——bare
-    ``obsidian://`` 只开应用不定位，属反人机交互，任何按钮都不再用
-    裸 scheme。注意库名必须与设备实际库名完全一致（本机手机端为
-    ``atelierr-memory``）：库名不匹配时 Obsidian 静默退回最近打开页，
-    表现为"链接指错笔记"。
+    atelierr-data 时为 ``memory/``，自定义库名时为空。**前缀必须与
+    该设备库的真实结构一致**：本机手机端库名 ``atelierr-memory``、
+    库根与桌面同为数据根（memory/ 是其子目录，2026-09-14 按真机
+    截图核实），故本机 env 显式设 ``FEISHU_NOTE_PREFIX=memory/``——
+    2026-09-14 曾误判"手机库根即 memory/ 文件夹"把前缀置空，导致
+    手机端全部按钮静默打不开，当天改回。双根（契约 v1.5）：
+    ``inbox/`` 与 memory/ 平级，带 ``inbox/`` 虚拟前缀的路径一律
+    不再加 memory/ 前缀。无目标笔记（digest 等汇总通知）时落到
+    控制台门面页（系统/控制台）——bare ``obsidian://`` 只开应用
+    不定位，属反人机交互，任何按钮都不再用裸 scheme。注意库名必须
+    与设备实际库名完全一致（本机手机端为 ``atelierr-memory``）：
+    库名不匹配时 Obsidian 静默退回最近打开页，表现为"链接指错笔记"。
     """
     console_url = os.environ.get(ENV_CONSOLE_URL, "").strip()
     if console_url:
@@ -100,6 +109,9 @@ def _console_url(confirm_note: Optional[str]) -> str:
         # 汇总通知无对应笔记：落控制台门面（精确子目录路径 系统/控制台；
         # 库名必须与实际一致——库名错了 Obsidian 静默退回最近打开页）
         stem = f"{SYSTEM_DIRNAME}/控制台"
+    if stem.startswith("inbox/"):
+        # 双根（契约 v1.5）：inbox/ 是 memory/ 的平级目录，不是其子目录
+        prefix = ""
     return f"obsidian://open?vault={quote(vault)}&file={quote(prefix + stem)}"
 
 
