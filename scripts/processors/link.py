@@ -1106,6 +1106,11 @@ class LinkProcessor(BaseProcessor):
                 #（2026-09-14 实证：LLM 会截断表内条目；prompt 已加禁令，
                 # 此处程序兜底）
                 category = ""
+            elif category:
+                # 表内条目无短横（R15营养·饮食）：归档推导（CCLASS_RE
+                # ^[A-Z]{1,3}\d*-）要求字母数字后带短横——统一补上
+                #（2026-09-14 第三次形状变种，规范化收敛到一处）
+                category = re.sub(r"^([A-Z]{1,3}\d+)(?![-\d])", r"\1-", category)
             llm_title = _sanitize_title(str(data.get("title") or ""))
             if not summary_text:
                 return None, "failed:empty-summary"

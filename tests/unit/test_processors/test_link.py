@@ -1379,3 +1379,18 @@ def test_xhs_text_note_image_failure_tolerated(fake_xhs_page, monkeypatch):
     assert result.success, result.error
     assert result.markdown.count("![[attachments/小红书/") == 1
     assert result.metadata["images"] == 1
+
+
+def test_category_dash_normalized_for_archive(fake_pipeline, monkeypatch):
+    """表内条目无短横（R15营养·饮食）→ 统一补横线成 R15-营养·饮食，
+    归档推导（derive_archive_dir 二级）认得出。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _fixed_llm(monkeypatch, _llm_payload(extra={"category": "R15营养·饮食"}))
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    post = frontmatter.loads(result.markdown)
+    assert "R15-营养·饮食" in (post.metadata.get("tags") or [])
+    from scripts.dispatch.archive import derive_archive_dir
+    assert derive_archive_dir(post)[1] == "R15-营养·饮食"
