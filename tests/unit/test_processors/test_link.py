@@ -812,7 +812,7 @@ def test_video_preserved_compressed(fake_pipeline, monkeypatch):
     assert result.success, result.error
     assert result.metadata["video_blob"] == b"480p-bytes"
     rel = result.metadata["video_rel"]
-    assert rel == "attachments/抖音/抖音-信息标题-vid123.mp4"
+    assert rel == "attachments/抖音/抖音-信息标题-vid123/视频.mp4"
     assert f"![[{rel}]]" in result.markdown
     # 内嵌在来源行之后、摘要之前
     assert result.markdown.index("> 来源：") < result.markdown.index(f"![[{rel}]]")
@@ -834,10 +834,10 @@ def test_video_preserved_original_on_compress_failure(fake_pipeline, monkeypatch
 def test_video_rel_naming_rules():
     """相对路径命名：平台目录 + 标题净化 + id 短码（防撞名/幂等）。"""
     rel = LinkProcessor._video_rel("抖音", "健脑小课堂/运动篇", "vid123456789")
-    assert rel == "attachments/抖音/抖音-健脑小课堂-运动篇-vid123.mp4"
+    assert rel == "attachments/抖音/抖音-健脑小课堂-运动篇-vid123/视频.mp4"
     # 无标题回退平台+id；无 id 不带短码
-    assert LinkProcessor._video_rel("小红书", "", "n1") == "attachments/小红书/小红书-n1.mp4"
-    assert LinkProcessor._video_rel("抖音", "标题", "") == "attachments/抖音/抖音-标题.mp4"
+    assert LinkProcessor._video_rel("小红书", "", "n1") == "attachments/小红书/小红书-n1/视频.mp4"
+    assert LinkProcessor._video_rel("抖音", "标题", "") == "attachments/抖音/抖音-标题/视频.mp4"
 
 
 def test_compress_480p_command_and_failure(monkeypatch, tmp_path):
@@ -983,7 +983,7 @@ def test_long_body_externalized_to_transcript_rel(fake_pipeline, monkeypatch):
     assert result.success, result.error
     assert "## 转写全文" not in result.markdown
     rel = result.metadata["transcript_rel"]
-    assert rel == "attachments/抖音/抖音-信息标题-vid123.md"
+    assert rel == "attachments/抖音/抖音-信息标题-vid123/全文.md"
     assert f"## 全文\n\n[[{rel}|查看转写全文]]" in result.markdown
     assert result.metadata["transcript_text"] == long_body
 
@@ -1033,7 +1033,7 @@ def test_xhs_long_text_note_externalized(fake_xhs_page, monkeypatch):
     assert result.success, result.error
     assert "## 笔记正文" not in result.markdown
     rel = result.metadata["transcript_rel"]
-    assert rel == "attachments/小红书/小红书-图文笔记标题-txt456.md"
+    assert rel == "attachments/小红书/小红书-图文笔记标题-txt456/全文.md"
     assert f"[[{rel}|查看笔记正文]]" in result.markdown
     assert result.metadata["transcript_text"] == long_desc
 
@@ -1069,7 +1069,7 @@ def test_machine_title_replaced_by_llm_title(fake_pipeline, monkeypatch):
     assert result.markdown.startswith("# 经济危机是社会关系的危机\n")
     assert (
         result.metadata["video_rel"]
-        == "attachments/抖音/抖音-经济危机是社会关系的危机-vid123.mp4"
+        == "attachments/抖音/抖音-经济危机是社会关系的危机-vid123/视频.mp4"
     )
 
 
@@ -1250,7 +1250,7 @@ def test_topic_tail_title_cleaned_end_to_end(fake_pipeline, monkeypatch):
     )
     assert "人文星闪耀计划" not in result.metadata["title"]
     assert result.metadata["video_rel"].endswith(
-        "抖音-遇事的第一反应，会暴露每个人的三观，找寻并认识自己的哲学之路-vid123.mp4"
+        "抖音-遇事的第一反应，会暴露每个人的三观，找寻并认识自己的哲学之路-vid123/视频.mp4"
     )
 
 
@@ -1345,8 +1345,8 @@ def test_xhs_text_note_preserves_images_with_ocr(fake_xhs_page, monkeypatch):
     result = LinkProcessor().process(XHS_SHARE_TEXT)
 
     assert result.success, result.error
-    assert "![[attachments/小红书/小红书-图文笔记标题-txt456-01.jpg]]" in result.markdown
-    assert "![[attachments/小红书/小红书-图文笔记标题-txt456-02.jpg]]" in result.markdown
+    assert "![[attachments/小红书/小红书-图文笔记标题-txt456/01.jpg]]" in result.markdown
+    assert "![[attachments/小红书/小红书-图文笔记标题-txt456/02.jpg]]" in result.markdown
     assert "图片里的文字：" in result.markdown
     assert "【图 1】" in result.markdown
     assert len(result.metadata["image_blobs"]) == 2

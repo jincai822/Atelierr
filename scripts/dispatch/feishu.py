@@ -356,7 +356,7 @@ class FeishuBridge:
             target_dir = str(value.get("dir") or "").strip() or None
             return self._handle_archive(filename, chat_id, target_dir, batch)
         if action_name == TODO_DONE_ACTION:
-            return self._handle_todo_done(filename, chat_id)
+            return self._handle_todo_done(filename, chat_id, batch)
         if action_name == PROMPT_SUBMIT_ACTION:
             return self._handle_prompt_submit(action, chat_id)
         if action_name == DISCARD_ACTION:
@@ -618,8 +618,18 @@ class FeishuBridge:
             "card": card,
         }
 
-    def _handle_todo_done(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
-        """「✅ 已完成」待办：删待办标签 + 收进 待办/；失败只 toast，不中断守护。"""
+    def _handle_todo_done(
+        self,
+        filename: str,
+        chat_id: Optional[str] = None,
+        batch: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """「✅ 已完成」待办：删待办标签 + 收进 待办/；失败只 toast，不中断守护。
+
+        批量卡场景（batch 非空且有剩余）：用剩余条目重建批量卡——平台
+        回调的卡片更新是整卡替换，不重建其余条目会从视图上"消失"
+        （与清单卡/复习卡同规）。
+        """
         try:
             ok, detail = self._todo_done(filename)
         except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
@@ -644,6 +654,20 @@ class FeishuBridge:
         self._send_feedback(
             chat_id, f"✅ 待办已完成{'并收进 待办/' if moved else ''}：{title}"
         )
+        if batch:
+            # 批量卡：重建剩余条目（标题按名定位重读，失败的退回文件名）
+            remaining = [item for item in batch if item != filename]
+            if remaining:
+                from scripts.dispatch.feishu_cards import todo_batch_card
+
+                items = [
+                    {"filename": name, "title": self._feedback_title(name)}
+                    for name in remaining
+                ]
+                return {
+                    "toast": {"type": "success", "content": "已完成"},
+                    "card": {"type": "raw", "data": todo_batch_card(items)},
+                }
         return {
             "toast": {"type": "success", "content": "已完成"},
             "card": {

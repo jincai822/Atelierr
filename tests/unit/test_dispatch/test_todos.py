@@ -530,3 +530,36 @@ def test_pure_share_line_drops_to_empty():
     )
 
     assert _llm_input(body, "lark") == ""
+
+
+def test_notify_todos_batches_multiple(memory_tree, monkeypatch):
+    """多条新待办合并一张批量卡；单条仍推单卡（2026-09-15 卡片管理裁决）。"""
+    import scripts.cli.dispatch_cli as cli_module
+    from scripts.dispatch import feishu_io
+
+    sent = []
+    monkeypatch.setattr(
+        cli_module, "send_todo_feishu", lambda fn: sent.append(("single", fn))
+    )
+    monkeypatch.setattr(
+        feishu_io,
+        "send_feishu_card",
+        lambda card, chat_id=None: sent.append(("batch", card)) or True,
+    )
+    monkeypatch.setattr(
+        "scripts.dispatch.task_sync.create_task_for_todo", lambda *a, **k: None
+    )
+    for name, title in (("todo-a.md", "任务甲"), ("todo-b.md", "任务乙")):
+        memory_tree.create_note(
+            name, f"---\ntitle: {title}\n---\n- [ ] {title}\n",
+            source="todo", tags=["待办"], inbox=True,
+        )
+
+    cli_module._notify_todos(["todo-a.md", "todo-b.md"], memory_tree)
+
+    assert len(sent) == 1 and sent[0][0] == "batch"
+    assert sent[0][1]["header"]["title"]["content"] == "Atelierr 新待办 2 条"
+
+    sent.clear()
+    cli_module._notify_todos(["todo-a.md"], memory_tree)
+    assert sent == [("single", "todo-a.md")]

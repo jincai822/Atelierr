@@ -827,7 +827,7 @@ class LinkProcessor(BaseProcessor):
             blob = self._download_xhs_file(image_url)
             if blob is None:
                 continue
-            rel = f"attachments/{source_label}/{stem}-{index:02d}.jpg"
+            rel = f"attachments/{source_label}/{stem}/{index:02d}.jpg"
             images.append((rel, blob))
             tmp = Path(download_dir) / f"xhs-img-{doc_id}-{index:02d}.jpg"
             try:
@@ -1376,18 +1376,19 @@ class LinkProcessor(BaseProcessor):
 
     @classmethod
     def _video_rel(cls, source_label: str, title: str, doc_id: str) -> str:
-        """原视频库内相对路径：attachments/<平台>/<平台>-<标题>-<id前6>.mp4。
+        """原视频库内相对路径：``attachments/<平台>/<主名>/视频.mp4``。
 
-        attachments 根目录名与 dispatch/media.py ATTACHMENTS_DIR 是同一
-        约定（dispatch 层按此串原样落盘）。
+        2026-09-15 用户裁决：**一条内容一个文件夹**——视频/全文/图集
+        都收进以内容主名命名的文件夹，平台目录第一层一行一条内容，
+        不再平铺。旧平铺文件机器不搬（只改新内容的落法）。
         """
-        return f"attachments/{source_label}/{cls._artifact_stem(source_label, title, doc_id)}.mp4"
+        return f"attachments/{source_label}/{cls._artifact_stem(source_label, title, doc_id)}/视频.mp4"
 
     @classmethod
     def _transcript_rel(cls, source_label: str, title: str, doc_id: str) -> str:
-        """全文库内相对路径（2026-09-12 方案 B）：与 _video_rel 同主名、
-        .md 成对——同内容的 480p 视频与全文天然同名相邻。"""
-        return f"attachments/{source_label}/{cls._artifact_stem(source_label, title, doc_id)}.md"
+        """全文库内相对路径：与视频同文件夹的 ``全文.md``（一条内容一个
+        文件夹，2026-09-15 用户裁决）。"""
+        return f"attachments/{source_label}/{cls._artifact_stem(source_label, title, doc_id)}/全文.md"
 
     @staticmethod
     def _compress_to_480p(src: Path, dst: Path) -> bool:

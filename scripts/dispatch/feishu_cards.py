@@ -146,6 +146,70 @@ def send_todo_feishu(filename: str, chat_id: Optional[str] = None) -> bool:
     return send_feishu_card(card, chat_id)
 
 
+def todo_batch_card(items: List[Dict[str, str]]) -> Dict[str, Any]:
+    """新待办批量卡（纯组装）：多条待办合并一张，防逐条刷屏（2026-09-15
+    用户裁决，卡片管理评审）。
+
+    每条一节：标题 + 「打开」（URI）+「✅ 已完成」（callback）。回调
+    value 带 ``batch``（全部条目）：点掉一条后桥用剩余条目重建本卡
+    （与清单卡/复习卡同规——平台回调的卡片更新是整卡替换）。
+
+    Args:
+        items: [{"filename": 待办笔记文件名, "title": 任务标题}]。
+    """
+    batch = [str(item["filename"]) for item in items]
+    elements: List[Dict[str, Any]] = [
+        {
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": "本轮提取出的行动项，逐条「打开」看详情、办完点「✅」。",
+            },
+        }
+    ]
+    for index, item in enumerate(items, 1):
+        filename = str(item["filename"])
+        title = str(item.get("title") or Path(filename).stem)
+        elements.append(
+            {"tag": "div", "text": {"tag": "lark_md", "content": f"**{index}. {title}**"}}
+        )
+        elements.append(
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "打开"},
+                        "type": "primary",
+                        "url": _console_url(filename),
+                    },
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "✅ 已完成"},
+                        "type": "default",
+                        "behaviors": [
+                            {
+                                "type": "callback",
+                                "value": {
+                                    "action": TODO_DONE_ACTION,
+                                    "note": filename,
+                                    "batch": batch,
+                                },
+                            }
+                        ],
+                    },
+                ],
+            }
+        )
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": f"Atelierr 新待办 {len(items)} 条"},
+            "template": "orange",
+        },
+        "elements": elements,
+    }
+
 
 def resurface_card(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     """今日复习卡（纯组装，不发送——回调重建同构卡片也用它）。

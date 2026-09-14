@@ -2266,3 +2266,50 @@ def test_todo_done_moves_from_inbox_to_todo_dir(memory_tree, monkeypatch):
     assert resp2["toast"]["type"] == "success"
     assert (memory_tree.notes_dir / "todo-root.md").exists()
     assert not (memory_tree.notes_dir / "待办" / "todo-root.md").exists()
+
+
+def test_todo_batch_card_shape_and_done_rebuild(memory_tree, monkeypatch):
+    """批量待办卡（2026-09-15 裁决）：多条一卡；点完成一条→重建剩余。"""
+    from scripts.dispatch.feishu_cards import todo_batch_card
+
+    card = todo_batch_card([
+        {"filename": "todo-a.md", "title": "任务甲"},
+        {"filename": "todo-b.md", "title": "任务乙"},
+    ])
+    assert card["header"]["title"]["content"] == "Atelierr 新待办 2 条"
+    text = json.dumps(card, ensure_ascii=False)
+    assert "任务甲" in text and "任务乙" in text
+    # 每个完成按钮回调带 batch（供重建）
+    for element in card["elements"]:
+        if element.get("tag") != "action":
+            continue
+        for action in element["actions"]:
+            if action.get("behaviors"):
+                assert action["behaviors"][0]["value"]["batch"] == ["todo-a.md", "todo-b.md"]
+
+    # 点掉任务甲 → 桥重建剩余（任务乙），任务甲从视图消失
+    memory_tree.create_note(
+        "todo-a.md", "---\ntitle: 任务甲\n---\n- [ ] 任务甲\n",
+        source="todo", tags=["待办"], inbox=True,
+    )
+    memory_tree.create_note(
+        "todo-b.md", "---\ntitle: 任务乙\n---\n- [ ] 任务乙\n",
+        source="todo", tags=["待办"], inbox=True,
+    )
+    bridge = _bridge(memory_tree)
+    monkeypatch.setattr(bridge, "_send_feedback", lambda chat, text: None)
+
+    resp = bridge.handle_card_action(
+        _card_action(
+            {"action": "todo_done", "note": "todo-a.md",
+             "batch": ["todo-a.md", "todo-b.md"]}
+        )
+    )
+
+    assert resp["toast"]["type"] == "success"
+    rebuilt = resp["card"]["data"]
+    assert rebuilt["header"]["title"]["content"] == "Atelierr 新待办 1 条"
+    rebuilt_text = json.dumps(rebuilt, ensure_ascii=False)
+    assert "任务乙" in rebuilt_text and "任务甲" not in rebuilt_text
+    # 完成的待办已收进 待办/（与归档规则闭环）
+    assert (memory_tree.notes_dir / "待办" / "todo-a.md").exists()

@@ -170,22 +170,32 @@ def _notify_created_notes(
 
 
 def _notify_todos(created: List[str], tree: MemoryTree, limit: int = 5) -> None:
-    """新建待办：逐条推「✅ 已完成」卡片 + 同步建飞书任务（失败均静默）。
+    """新建待办：单条推单卡、多条合并一张批量卡（2026-09-15 用户裁决，
+    防逐条刷屏）+ 逐条同步建飞书任务（失败均静默）。
 
     任务同步是单向的（Obsidian → 飞书）：标题/截止取自待办笔记的
     ``- [ ]`` 任务行；点卡片「✅ 已完成」时回写任务完成
     （FeishuBridge._handle_todo_done）。上限防刷屏。
     """
+    from scripts.dispatch.feishu_cards import todo_batch_card
+    from scripts.dispatch.feishu_io import send_feishu_card
     from scripts.dispatch.task_sync import create_task_for_todo
 
+    items: List[Dict[str, str]] = []
     for filename in created[:limit]:
-        send_todo_feishu(filename)
         title, due = _parse_todo_task(tree._abs(filename))
+        items.append({"filename": filename, "title": title or Path(filename).stem})
         if not title:
             continue
         create_task_for_todo(tree.state_dir, filename, title, due)
         if due:
             _add_todo_due_event(tree, title, due)
+    if not items:
+        return
+    if len(items) == 1:
+        send_todo_feishu(items[0]["filename"])
+    else:
+        send_feishu_card(todo_batch_card(items))
 
 
 def _add_todo_due_event(tree: MemoryTree, title: str, due: str) -> None:
