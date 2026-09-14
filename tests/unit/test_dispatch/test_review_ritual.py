@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import frontmatter
 
@@ -141,3 +142,25 @@ def test_write_answers_appends_new_answers(memory_tree):
     text = second.read_text(encoding="utf-8")
     assert text.count("答一") == 1  # 不重复落
     assert "答二（后补）" in text
+
+
+def test_weekly_intro_names_new_excerpt_cards(memory_tree):
+    """周回顾摘要点名本期新勾摘录卡（KM 评审 P1① 防收藏谬误）；老卡不出现。"""
+    wiki = Path(memory_tree.notes_dir) / "wiki"
+    wiki.mkdir()
+    now_iso = datetime.now().astimezone().isoformat(timespec="seconds")
+    old_iso = (datetime.now().astimezone() - timedelta(days=30)).isoformat(timespec="seconds")
+    (wiki / "摘录-概念甲-abc123.md").write_text(
+        frontmatter.dumps(frontmatter.Post("正文\n", title="概念甲", created=now_iso)),
+        encoding="utf-8",
+    )
+    (wiki / "摘录-老卡-def456.md").write_text(
+        frontmatter.dumps(frontmatter.Post("正文\n", title="老卡", created=old_iso)),
+        encoding="utf-8",
+    )
+
+    intro = review_ritual.build_intro(memory_tree, review_ritual.KIND_WEEKLY)
+
+    assert "新勾摘录卡 1 张" in intro
+    assert "概念甲" in intro
+    assert "老卡" not in intro

@@ -213,6 +213,9 @@ class HighlightsDispatcher:
             "",
             f"> 来源：[[{checklist_stem}]]（划重点清单{anchor}，人工勾选）",
             "",
+            # 勾的瞬间想法最新鲜（2026-09-14 KM 评审 P2）：引导顺手写一句
+            "> 我的想法：",
+            "",
         ]
         lines += details or ["（清单中未附详情行）"]
         return "\n".join(lines) + "\n"

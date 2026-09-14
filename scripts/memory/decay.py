@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 import frontmatter
 
 from scripts.memory.confidence import ConfidenceCalculator
-from scripts.memory.core import MACHINE_DECAY_SOURCES, is_daily_note
+from scripts.memory.core import MACHINE_DECAY_SOURCES, is_book_card, is_daily_note
 from scripts.utils.date_utils import local_timezone, parse_date
 
 if TYPE_CHECKING:
@@ -213,6 +213,7 @@ class DecayManager:
         skipped: List[Path] = []
         system_notes: List[Path] = []
         daily_notes: List[Path] = []  # 日记豁免（2026-09-13 用户裁决）
+        book_cards: List[Path] = []  # 书籍档案卡豁免（2026-09-14 KM 评审 P4）
         counts = {"short_term": 0, "mid_term": 0, "long_term": 0}
         total = 0
 
@@ -240,6 +241,11 @@ class DecayManager:
                 # 不置待删、不进复习窗口（confidence 保持登记初值，自然
                 # 落在复习窗口之外）；照常登记、照常可搜
                 daily_notes.append(path)
+                continue
+            if is_book_card(path):
+                # 书籍档案卡是藏书记录（书架而非记忆，2026-09-14 裁决）：
+                # 同日记豁免——不因久未翻阅而降权/置待删
+                book_cards.append(path)
                 continue
             rel = self.tree._rel_key(path)
             entry = next(
@@ -299,7 +305,12 @@ class DecayManager:
         report_path: Optional[Path] = None
         if not dry_run:
             report_path = self._write_report(
-                counts, transitions, pending_paths, total, daily_exempt=len(daily_notes)
+                counts,
+                transitions,
+                pending_paths,
+                total,
+                daily_exempt=len(daily_notes),
+                book_exempt=len(book_cards),
             )
 
         result: Dict = {
@@ -313,6 +324,7 @@ class DecayManager:
             "pending": [str(path) for path in pending_paths],
             "skipped": [str(path) for path in skipped],
             "daily_exempt": len(daily_notes),
+            "book_exempt": len(book_cards),
             "system": [str(path) for path in system_notes],
             "dry_run": dry_run,
         }
@@ -334,6 +346,7 @@ class DecayManager:
         pending_paths: List[Path],
         total: int,
         daily_exempt: int = 0,
+        book_exempt: int = 0,
     ) -> Path:
         """写衰减报告到 state_dir/reports/decay-YYYY-MM-DD.md。"""
         reports_dir = self.tree.state_dir / "reports"
@@ -352,6 +365,7 @@ class DecayManager:
                 "relayered": len(transitions),
                 "pending": len(pending_paths),
                 "daily_exempt": daily_exempt,
+                "book_exempt": book_exempt,
             },
         )
 

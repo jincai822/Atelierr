@@ -216,3 +216,15 @@ def test_checklist_in_system_dir_processed(memory_tree):
     card = _wiki_dir(memory_tree) / report["created"][0]
     assert card.exists()
     assert frontmatter.loads(card.read_text(encoding="utf-8"))["source"] == "highlight"
+
+
+def test_card_body_has_my_thoughts_placeholder(memory_tree):
+    """摘录卡带「我的想法」占位行（2026-09-14 KM 评审 P2：勾的瞬间想法最新鲜）。"""
+    path = _make_checklist(memory_tree)
+    _tick(memory_tree, path, "概念甲")
+
+    report = HighlightsDispatcher(memory_tree).run()
+
+    card = _wiki_dir(memory_tree) / report["created"][0]
+    text = card.read_text(encoding="utf-8")
+    assert "> 我的想法：" in text

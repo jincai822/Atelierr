@@ -262,3 +262,33 @@ def test_daily_dir_also_exempt(memory_tree, make_note):
     entry = memory_tree._entry(path)
     assert entry["pending_delete"] is False
     assert report["daily_exempt"] == 1
+
+
+def test_book_cards_exempt_from_decay(memory_tree, make_note):
+    """书籍档案卡豁免 decay（2026-09-14 KM 评审 P4：藏书记录是书架不是记忆）：
+    闲置 60 天的书籍卡不降权、不置待删；同批普通笔记照常衰减。"""
+    import os
+    import time
+
+    from scripts.memory.watcher import MemoryWatcher
+
+    book_dir = memory_tree.notes_dir / "书籍" / "B84-心理学"
+    book_dir.mkdir(parents=True)
+    card = book_dir / "书籍-认知觉醒-abc123.md"
+    card.write_text(
+        "---\ntitle: 《认知觉醒》\ntype: Book\n---\n\n档案\n", encoding="utf-8"
+    )
+    normal = make_note(memory_tree, filename="普通笔记-书籍豁免对照.md", content="内容")
+    old_ns = int((time.time() - 60 * 86400) * 1e9)
+    for path in (card, normal):
+        os.utime(path, ns=(old_ns, old_ns))
+    MemoryWatcher(memory_tree).process_pending()
+
+    report = DecayManager(memory_tree).run()
+
+    entry_card = memory_tree._entry(card)
+    entry_normal = memory_tree._entry(normal)
+    assert entry_card["confidence"] == 1.0
+    assert entry_card["pending_delete"] is False
+    assert entry_normal["pending_delete"] is True
+    assert report["book_exempt"] == 1

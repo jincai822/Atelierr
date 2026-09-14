@@ -12,9 +12,9 @@ FeishuBridge 自动把答案落盘（kind 以 review- 开头）。
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import frontmatter
 
@@ -22,6 +22,7 @@ from scripts.dispatch.feishu_cards import prompt_form_card
 from scripts.dispatch.feishu_io import send_feishu_card
 from scripts.dispatch.prompt import PromptStore
 from scripts.dispatch.stats import capture_stats
+from scripts.wiki.manager import WIKI_DIRNAME
 
 #: 会话类型前缀（与 Codex $weekly 的会话区分；桥按此前缀识别落盘）
 KIND_WEEKLY = "review-weekly"
@@ -58,6 +59,29 @@ def _stale_pending_count(tree) -> int:
     return count
 
 
+def _new_excerpt_cards(tree, days: int) -> Tuple[int, List[str]]:
+    """当期新增 wiki 摘录卡（按 frontmatter created 判），返回 (总数, 前5标题)。
+
+    2026-09-14 KM 评审 P1①：摘录卡勾中即沉底（不进任何回顾回路）是
+    收藏谬误温床——回顾仪式点名提醒"提炼成自己话的概念卡"。
+    """
+    wiki_dir = Path(tree.notes_dir) / WIKI_DIRNAME
+    if not wiki_dir.is_dir():
+        return 0, []
+    cutoff = datetime.now().astimezone() - timedelta(days=days)
+    seen: List[Tuple[str, str]] = []
+    for path in wiki_dir.glob("摘录-*.md"):
+        try:
+            post = frontmatter.loads(path.read_text(encoding="utf-8"))
+            created = datetime.fromisoformat(str(post.get("created") or ""))
+        except Exception:  # noqa: BLE001 - 损坏/无日期跳过
+            continue
+        if created >= cutoff:
+            seen.append((created.isoformat(), str(post.get("title") or path.stem)))
+    seen.sort(reverse=True)
+    return len(seen), [title for _, title in seen[:5]]
+
+
 def build_intro(tree, kind: str) -> str:
     """卡片正文的数据摘要（Markdown）：数字放正文，问题才能保持短句
     （2026-09-13 用户反馈：数据塞问题里当输入框标签，手机上没法看——
@@ -78,6 +102,13 @@ def build_intro(tree, kind: str) -> str:
     stale = _stale_pending_count(tree)
     if stale:
         lines.append(f"⏰ 滞留待确认超 7 天：{stale} 条")
+    excerpt_total, excerpt_titles = _new_excerpt_cards(tree, days)
+    if excerpt_total:
+        # KM 评审 P1①：点名本期新勾的摘录卡，提醒提炼（防收藏谬误）
+        lines.append(
+            f"📚 {span}新勾摘录卡 {excerpt_total} 张——记得提炼成自己话的概念卡："
+        )
+        lines += [f"　· {title}" for title in excerpt_titles]
     pending_delete = len(tree.list_pending_delete())
     if pending_delete:
         lines.append(f"🗑 待删清单等你过目：{pending_delete} 条")

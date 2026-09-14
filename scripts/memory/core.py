@@ -81,6 +81,16 @@ def is_daily_note(note_path: Path) -> bool:
     return bool(DAILY_NOTE_RE.match(path.name)) or path.parent.name == DAILY_NOTE_DIR
 
 
+#: 书籍档案卡目录（2026-09-14 用户裁决 KM 评审 P4）：藏书记录是书架
+#: 不是记忆——不因久未翻阅而在搜索里降权，与日记同款豁免 decay
+BOOK_NOTE_DIR = "书籍"
+
+
+def is_book_card(note_path: Path) -> bool:
+    """是否书籍档案卡：位于 书籍/ 目录树内（含中图法子目录）。"""
+    return BOOK_NOTE_DIR in Path(note_path).parts
+
+
 #: Crockford base32 字母表（ULID 用，去除 I/L/O/U）
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
