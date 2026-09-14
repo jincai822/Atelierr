@@ -408,6 +408,21 @@ def test_llm_summary_inserted(fake_pipeline, monkeypatch):
 def test_llm_v4_full_fields_rendered_with_tags(fake_pipeline, monkeypatch):
     """v4 JSON 全字段：金句/实体两节按序渲染，frontmatter tags 含分类与主题词。"""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+
+    class _RichTranscriptVideo(_FakeVideoProcessor):
+        """转写全文包含金句原文（金句回溯机检要求逐字出自原文）。"""
+
+        def process(self, path):
+            assert Path(path).exists()
+            return ProcessResult(
+                success=True,
+                text="开场白。这句话是最反常识的判断。结束语。",
+                markdown="# vid123\n\n## 转写文字\n\n- [00:00] 你好",
+                confidence=0.9,
+                metadata={"segments": 1},
+            )
+
+    monkeypatch.setattr(link_module, "VideoProcessor", _RichTranscriptVideo)
     payload = _llm_payload(
         summary="核心观点总结。",
         points=("观点一。", "观点二。"),
@@ -1183,14 +1198,18 @@ def test_sanitize_title_caps_at_30():
 
 
 def test_summarize_caps_points_and_insights(fake_pipeline, monkeypatch):
-    """LLM 超契约（9 条分观点/7 条金句）：程序兜底截到 8/5。"""
+    """LLM 超契约（9 条分观点/7 条金句）：程序兜底截到 8/5。
+
+    金句须过原文回溯机检——假转写全文是「转写全文」，金句取其
+    子串（机检只认逐字出自原文的摘录）。
+    """
     monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
     _fixed_llm(
         monkeypatch,
         _llm_payload(
             extra={
                 "points": [f"观点{i}。" for i in range(1, 10)],
-                "insights": [f"金句{i}" for i in range(1, 8)],
+                "insights": ["转", "写", "全", "文", "转写", "写全", "全文"],
             }
         ),
     )
@@ -1200,8 +1219,12 @@ def test_summarize_caps_points_and_insights(fake_pipeline, monkeypatch):
     assert result.success, result.error
     assert "8. 观点8。" in result.markdown
     assert "9. 观点9。" not in result.markdown
-    quotes = [ln for ln in result.markdown.splitlines() if ln.startswith("> 金句")]
-    assert len(quotes) == 5
+    quote_lines = [
+        ln
+        for ln in result.markdown.split("## 金句摘录")[1].splitlines()
+        if ln.startswith("> ") and "（" not in ln
+    ]
+    assert len(quote_lines) == 5
 
 
 def test_topic_tail_title_cleaned_end_to_end(fake_pipeline, monkeypatch):
@@ -1229,3 +1252,59 @@ def test_topic_tail_title_cleaned_end_to_end(fake_pipeline, monkeypatch):
     assert result.metadata["video_rel"].endswith(
         "抖音-遇事的第一反应，会暴露每个人的三观，找寻并认识自己的哲学之路-vid123.mp4"
     )
+
+
+def test_insights_fabricated_quote_dropped(fake_pipeline, monkeypatch):
+    """金句回溯机检：原文不存在的"金句"被剔除，卡面如实标注剔除数。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _fixed_llm(
+        monkeypatch,
+        _llm_payload(extra={"insights": ["转写", "这句原文根本没说过"]}),
+    )
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "## 金句摘录\n\n> 转写\n" in result.markdown
+    assert "这句原文根本没说过" not in result.markdown
+    assert "1 条候选金句未通过原文回溯校验" in result.markdown
+
+
+def test_insights_punctuation_normalization(fake_pipeline, monkeypatch):
+    """机检对标点/空白宽容（规范化后比对）：金句少标点但文字一致仍通过。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _fixed_llm(
+        monkeypatch,
+        _llm_payload(extra={"insights": ["转写全文"]}),  # 原文"转写全文"逐字在
+    )
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "> 转写全文" in result.markdown
+    assert "未通过原文回溯校验" not in result.markdown
+
+
+def test_low_confidence_warning_rendered(fake_pipeline, monkeypatch):
+    """转写置信度偏低（<0.70）：卡面加人工回放警告行；正常置信不加。"""
+
+    class _LowConfVideo(_FakeVideoProcessor):
+        def process(self, path):
+            assert Path(path).exists()
+            return ProcessResult(
+                success=True,
+                text="转写全文",
+                markdown="# vid123\n\n## 转写文字\n\n- [00:00] 你好",
+                confidence=0.5,
+                metadata={"segments": 1},
+            )
+
+    monkeypatch.setattr(link_module, "VideoProcessor", _LowConfVideo)
+    low = LinkProcessor().process(SHARE_TEXT)
+    assert low.success, low.error
+    assert "转写置信度 50% 偏低" in low.markdown
+
+    monkeypatch.setattr(link_module, "VideoProcessor", _FakeVideoProcessor)
+    normal = LinkProcessor().process(SHARE_TEXT)
+    assert normal.success, normal.error
+    assert "偏低" not in normal.markdown

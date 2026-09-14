@@ -414,6 +414,56 @@ def _tag_clean(text: str) -> str:
     return cleaned
 
 
+#: 金句回溯机检的相似度阈值（去空白与标点后最长公共子串占比）
+_QUOTE_MATCH_MIN = 0.85
+
+#: 转写置信度低于该值时在卡片加警告行（avg_logprob 指数均值；
+#: 实测正常转写普遍 >0.75）
+_LOW_CONFIDENCE = 0.70
+
+
+def _verify_insights(
+    insights: List[str], transcript: str
+) -> Tuple[List[str], int]:
+    """金句回溯机检（2026-09-14 KM 评审裁决：把"逐字照抄"从 prompt
+    请求升级为机器强制校验）。
+
+    每条金句规范化（去掉一切空白与标点，只留文字）后，必须在转写
+    原文里找到覆盖率 ≥ 阈值的连续匹配；找不到的剔除（它是 LLM 的
+    转述或编造，不是摘录）并计数，供卡片正文如实标注。
+
+    Args:
+        insights: LLM 交出的金句列表。
+        transcript: 转写原文（或剪藏文章全文）。
+
+    Returns:
+        Tuple[List[str], int]:（通过校验的金句，被剔除条数）。
+    """
+    import difflib
+
+    def _norm(text: str) -> str:
+        return re.sub(r"[^\w]", "", text, flags=re.UNICODE)
+
+    corpus = _norm(transcript)
+    if not corpus:
+        return list(insights), 0
+    kept: List[str] = []
+    dropped = 0
+    for quote in insights:
+        needle = _norm(quote)
+        if not needle:
+            dropped += 1
+            continue
+        match = difflib.SequenceMatcher(None, needle, corpus).find_longest_match(
+            0, len(needle), 0, len(corpus)
+        )
+        if match.size / len(needle) >= _QUOTE_MATCH_MIN:
+            kept.append(quote)
+        else:
+            dropped += 1
+    return kept, dropped
+
+
 class LinkProcessor(BaseProcessor):
     """链接抓取处理器（支持抖音/小红书的分享文本或链接）。
 
@@ -515,6 +565,7 @@ class LinkProcessor(BaseProcessor):
                 source_label=source_label,
                 video_rel=video_rel,
                 transcript_rel=transcript_rel,
+                transcription_confidence=video_result.confidence,
             )
             metadata = {
                 "engine": "yt-dlp+whisper",
@@ -630,6 +681,7 @@ class LinkProcessor(BaseProcessor):
             source_label="小红书",
             video_rel=video_rel,
             transcript_rel=transcript_rel,
+            transcription_confidence=video_result.confidence,
         )
         metadata["engine"] = "xhs-page+whisper"
         metadata["model"] = self.model
@@ -945,6 +997,8 @@ class LinkProcessor(BaseProcessor):
                 for item in (data.get("insights") or [])
                 if str(item).strip()
             ][:5]
+            # 金句回溯机检：必须在原文里找得到（2026-09-14 KM 评审裁决）
+            insights, insights_dropped = _verify_insights(insights, transcript)
             entities = [
                 str(item).strip()
                 for item in (data.get("entities") or [])
@@ -963,6 +1017,7 @@ class LinkProcessor(BaseProcessor):
                 "summary": summary_text,
                 "points": points,
                 "insights": insights,
+                "insights_dropped": insights_dropped,
                 "entities": entities,
                 "category": category,
                 "topics": topics,
@@ -1044,6 +1099,7 @@ class LinkProcessor(BaseProcessor):
         body_label: str = "转写全文",
         video_rel: Optional[str] = None,
         transcript_rel: Optional[str] = None,
+        transcription_confidence: float = 0.0,
     ) -> str:
         """组装最终卡 Markdown：标题 + 来源行 +（可选）内嵌原视频 + 摘要各节 + 正文。
 
@@ -1096,6 +1152,14 @@ class LinkProcessor(BaseProcessor):
                 "",
             ]
         sections += [f"# {_T2S.convert(title)}", "", source, ""]
+        if 0.0 < transcription_confidence < _LOW_CONFIDENCE:
+            # 转写低置信警告（2026-09-14 KM 评审裁决）：同音错字靠这层
+            # 信号 + 人工回放兜底；无信号（0.0）不噪音
+            sections += [
+                f"> ⚠️ 转写置信度 {transcription_confidence:.0%} 偏低，"
+                "关键处建议回放原视频核对。",
+                "",
+            ]
         if video_rel:
             sections += [f"![[{video_rel}]]", ""]
         if summary:
@@ -1108,6 +1172,12 @@ class LinkProcessor(BaseProcessor):
             if summary.get("insights"):
                 sections += ["", "## 金句摘录", ""]
                 sections += [f"> {item}" for item in summary["insights"]]
+            if summary.get("insights_dropped"):
+                sections += [
+                    "",
+                    f"> （{summary['insights_dropped']} 条候选金句未通过"
+                    "原文回溯校验，已剔除——摘录必须逐字出自原文）",
+                ]
             if summary.get("entities"):
                 sections += ["", "## 提到的人·书·概念", ""]
                 sections += [f"- {item}" for item in summary["entities"]]

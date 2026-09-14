@@ -113,6 +113,9 @@ _KIND_BY_EXT.update({ext: "录音" for ext in AUDIO_EXTS})
 
 _PDF_ILLEGAL_RE = re.compile(r'[\\/:*?"<>|]')
 
+#: 转写置信度警告阈值（与 processors/link.py _LOW_CONFIDENCE 同值）
+_LOW_CONFIDENCE = 0.70
+
 
 class MediaDispatcher:
     """扫描 attachments/ 目录，把新截图/录音分发给 OCR/Whisper 处理器。
@@ -333,7 +336,13 @@ class MediaDispatcher:
                 # 文件名/时间戳读取的即处理当下）
                 self._compress_in_place(path)
             filename = self._note_filename(path)
-            body = self._build_note(path, kind, result.text, Path(filename).stem)
+            body = self._build_note(
+                path,
+                kind,
+                result.text,
+                Path(filename).stem,
+                getattr(result, "confidence", 0.0),
+            )
             source, tags = "media", [REVIEW_TAG, kind]
             try:
                 self.tree.create_note(filename, body, source=source, tags=tags, inbox=True)
@@ -521,7 +530,12 @@ class MediaDispatcher:
         return f"media-{date}-{digest}.md"
 
     def _build_note(
-        self, path: Path, kind: str, text: str, note_stem: str
+        self,
+        path: Path,
+        kind: str,
+        text: str,
+        note_stem: str,
+        confidence: float = 0.0,
     ) -> str:
         """组装卡正文：内嵌原附件 + 提取全文（短内联，长外置留链接节）。
 
@@ -529,12 +543,20 @@ class MediaDispatcher:
         ``attachments/媒体/<笔记同名>.md``（同名跳过幂等；实现与链接
         管线共用 write_text_skip_existing），卡上只留「## 全文」链接节；
         写入失败降级为内联保底——卡绝不丢内容。
+        转写置信度偏低（>0 且 <0.70）时卡面加警告行（2026-09-14 KM
+        评审裁决：同音错字靠这层信号 + 人工回放兜底）。
         """
         stamp = datetime.fromtimestamp(path.stat().st_mtime).strftime(
             "%Y-%m-%d %H:%M"
         )
         section = "OCR 全文" if kind == "截图" else "转写全文"
         body = (text or "").strip()
+        warn = ""
+        if kind in ("视频", "录音") and 0.0 < confidence < _LOW_CONFIDENCE:
+            warn = (
+                f"> ⚠️ 转写置信度 {confidence:.0%} 偏低，"
+                "关键处建议回放原件核对。\n\n"
+            )
         if len(body) > INLINE_BODY_MAX:
             rel = f"{ATTACHMENTS_DIR}/{MEDIA_SUBDIR}/{note_stem}.md"
             target = self.tree.attachments_dir.parent / rel
@@ -543,6 +565,7 @@ class MediaDispatcher:
                 return (
                     f"# {kind} {stamp}\n\n"
                     f"![[{self._key(path)}]]\n\n"
+                    f"{warn}"
                     f"## 全文\n\n"
                     f"[[{rel}|查看{section}]]\n"
                 )
@@ -550,6 +573,7 @@ class MediaDispatcher:
         return (
             f"# {kind} {stamp}\n\n"
             f"![[{self._key(path)}]]\n\n"
+            f"{warn}"
             f"## {section}\n\n"
             f"{body}\n"
         )

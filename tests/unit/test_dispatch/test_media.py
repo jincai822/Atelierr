@@ -590,3 +590,29 @@ def test_externalize_write_failure_falls_back_inline(memory_tree, monkeypatch):
     post = frontmatter.loads(note.read_text(encoding="utf-8"))
     assert "## OCR 全文" in post.content
     assert long_text in post.content
+
+
+def test_build_note_low_confidence_warning(memory_tree):
+    """转写置信度偏低：视频/录音卡面加警告行；截图（OCR）与正常置信不加。"""
+    import os
+    import time
+
+    dispatcher = MediaDispatcher(memory_tree)
+    attach = Path(memory_tree.attachments_dir) / "媒体"
+    attach.mkdir(parents=True, exist_ok=True)
+    path = attach / "clip.mp4"
+    path.write_bytes(b"fake")
+    old = time.time() - 60
+    os.utime(path, (old, old))
+
+    low = dispatcher._build_note(path, "视频", "转写内容", "stem-x", confidence=0.5)
+    assert "转写置信度 50% 偏低" in low
+
+    normal = dispatcher._build_note(path, "视频", "转写内容", "stem-x", confidence=0.9)
+    assert "偏低" not in normal
+
+    no_signal = dispatcher._build_note(path, "录音", "转写内容", "stem-x", confidence=0.0)
+    assert "偏低" not in no_signal
+
+    ocr = dispatcher._build_note(path, "截图", "OCR内容", "stem-x", confidence=0.5)
+    assert "偏低" not in ocr
