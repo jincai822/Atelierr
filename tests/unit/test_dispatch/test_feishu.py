@@ -897,14 +897,19 @@ def test_card_feedback_archive_tag_fail_hint(memory_tree, monkeypatch):
 
 
 def test_console_url_points_at_note(monkeypatch):
-    """「在 Obsidian 中打开」缺省直达本条笔记（percent-encode + 库内路径）。"""
+    """「在 Obsidian 中打开」缺省直达本条笔记（percent-encode + 库内路径）。
+
+    裸文件名 = 机器刚产出的中转站笔记 → 按 inbox/ 解析（2026-09-14
+    待办卡指空实证后的规则，见 feishu_io.py docstring）。
+    """
     monkeypatch.delenv("FEISHU_CONSOLE_URL", raising=False)
     monkeypatch.delenv("FEISHU_VAULT_NAME", raising=False)
+    monkeypatch.delenv("FEISHU_NOTE_PREFIX", raising=False)
 
     url = feishu_module._console_url("抖音-内核稳定 #标签.md")
 
-    assert url.startswith("obsidian://open?vault=atelierr-data&file=memory%2F") or (
-        "file=memory/" in url
+    assert url.startswith("obsidian://open?vault=atelierr-data&file=inbox%2F") or (
+        "file=inbox/" in url
     )
     assert "%23" in url  # 井号必须编码，否则 Obsidian 解析截断
     assert url.endswith(".md") is False
@@ -928,16 +933,21 @@ def test_console_url_custom_vault_drops_memory_prefix(monkeypatch):
     """自定义库名的缺省前缀为空（仅适用库根即 memory/ 的旧布局；
 
     本机手机端库根=数据根，须显式设 FEISHU_NOTE_PREFIX=memory/，
-    见 feishu_io.py ENV_NOTE_PREFIX 注释）。"""
+    见 feishu_io.py ENV_NOTE_PREFIX 注释）。带目录的 memory 内路径
+    不加前缀；裸文件名仍按 inbox/ 解析（与库名无关）。"""
     monkeypatch.delenv("FEISHU_CONSOLE_URL", raising=False)
     monkeypatch.delenv("FEISHU_NOTE_PREFIX", raising=False)
     monkeypatch.setenv("FEISHU_VAULT_NAME", "memory")
 
-    url = feishu_module._console_url("抖音-x.md")
+    url = feishu_module._console_url("日记/2026-09-14.md")
 
     assert "vault=memory" in url
-    assert "file=%E6%8A%96" in url  # file 直接是笔记名（编码后），无前缀
+    assert "file=%E6%97%A5%E8%AE%B0" in url  # file 直接是 日记/…（编码后），无前缀
     assert "memory%2F" not in url and "file=memory/" not in url
+
+    # 裸文件名：机器中转站笔记，即使自定义库也按 inbox/ 解析
+    bare = feishu_module._console_url("todo-20260914-x.md")
+    assert "file=inbox%2F" in bare or "file=inbox/" in bare
 
 
 def test_console_url_note_prefix_env_override(monkeypatch):
@@ -945,7 +955,26 @@ def test_console_url_note_prefix_env_override(monkeypatch):
     monkeypatch.delenv("FEISHU_CONSOLE_URL", raising=False)
     monkeypatch.delenv("FEISHU_VAULT_NAME", raising=False)
     monkeypatch.setenv("FEISHU_NOTE_PREFIX", "notes/")
-    assert feishu_module._console_url("x.md").endswith("file=notes/x")
+    assert feishu_module._console_url("sub/x.md").endswith("file=notes%2Fsub%2Fx") or (
+        feishu_module._console_url("sub/x.md").endswith("file=notes/sub/x")
+    )
+
+
+def test_console_url_bare_name_resolves_inbox_under_phone_env(monkeypatch):
+    """生产配置回归：手机库名 + FEISHU_NOTE_PREFIX=memory/ 时，裸文件名
+    （待办/确认卡的产出笔记）必须指到 inbox/——2026-09-14 待办卡指空、
+    Obsidian 静默退回控制台页的实证修复。"""
+    monkeypatch.delenv("FEISHU_CONSOLE_URL", raising=False)
+    monkeypatch.setenv("FEISHU_VAULT_NAME", "atelierr-memory")
+    monkeypatch.setenv("FEISHU_NOTE_PREFIX", "memory/")
+
+    url = feishu_module._console_url("todo-20260914-bd9669.md")
+
+    assert "vault=atelierr-memory" in url
+    assert "file=inbox%2Ftodo-20260914-bd9669" in url or (
+        "file=inbox/todo-20260914-bd9669" in url
+    )
+    assert "memory" not in url.split("file=")[1]
 
 
 def test_console_url_inbox_path_skips_memory_prefix(monkeypatch):

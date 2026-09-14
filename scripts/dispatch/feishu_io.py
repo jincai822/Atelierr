@@ -95,6 +95,13 @@ def _console_url(confirm_note: Optional[str]) -> str:
     不定位，属反人机交互，任何按钮都不再用裸 scheme。注意库名必须
     与设备实际库名完全一致（本机手机端为 ``atelierr-memory``）：
     库名不匹配时 Obsidian 静默退回最近打开页，表现为"链接指错笔记"。
+    路径三档规则：① 裸文件名（无 ``/``）只会是机器刚产出的中转站
+    笔记（链接/媒体/待办产出卡一律 ``create_note(inbox=True)``），
+    一律按 ``inbox/`` 解析——2026-09-14 实证：待办卡按
+    ``memory/<裸名>`` 指空、Obsidian 静默退回控制台页；② 带
+    ``inbox/`` 虚拟前缀的路径不再加前缀（inbox/ 与 memory/ 平级）；
+    ③ 其余带目录的路径（系统/控制台、抖音/B-哲学/x 等 memory/ 内
+    路径）加库前缀。
     """
     console_url = os.environ.get(ENV_CONSOLE_URL, "").strip()
     if console_url:
@@ -109,7 +116,14 @@ def _console_url(confirm_note: Optional[str]) -> str:
         # 汇总通知无对应笔记：落控制台门面（精确子目录路径 系统/控制台；
         # 库名必须与实际一致——库名错了 Obsidian 静默退回最近打开页）
         stem = f"{SYSTEM_DIRNAME}/控制台"
-    if stem.startswith("inbox/"):
+    if "/" not in stem:
+        # 裸文件名只会是机器刚产出的中转站笔记（链接/媒体/待办产出卡
+        # 一律 create_note(inbox=True)）——按中转站解析。2026-09-14 实证：
+        # 待办卡曾按 memory/<裸名> 指空，Obsidian 静默退回最近打开页
+        # （控制台）。memory/ 根层散文件没有任何卡片会指过来。
+        stem = f"inbox/{stem}"
+        prefix = ""
+    elif stem.startswith("inbox/"):
         # 双根（契约 v1.5）：inbox/ 是 memory/ 的平级目录，不是其子目录
         prefix = ""
     return f"obsidian://open?vault={quote(vault)}&file={quote(prefix + stem)}"
