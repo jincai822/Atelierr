@@ -221,3 +221,24 @@ def test_reader_context_reads_goals_and_todos(memory_tree):
 
     assert "目标：今年减重十斤" in lines
     assert "待办：写九月月报" in lines
+
+
+def test_pdf_book_card_dedupes_after_archival(memory_tree):
+    """档案卡归档进 书籍/中图法/ 子目录后，查重仍命中（递归扫描）+报人工。"""
+    _add_pdf(memory_tree, name="认知觉醒.pdf")
+    dispatcher = MediaDispatcher(memory_tree, highlights_factory=_FakeBookProcessor)
+    dispatcher.run()
+    card = _book_card_paths(memory_tree)[0]
+    # 模拟 ✅ 确认归档：移进 memory/书籍/B84-心理学/
+    target_dir = Path(memory_tree.notes_dir) / "书籍" / "B84-心理学"
+    target_dir.mkdir(parents=True)
+    card.rename(target_dir / card.name)
+
+    # 状态丢失重跑同一 PDF：查重必须命中已归档的卡，不再建、且报人工
+    dispatcher2 = MediaDispatcher(memory_tree, highlights_factory=_FakeBookProcessor)
+    dispatcher2.state_path.unlink()
+    report = dispatcher2.run()
+
+    assert _book_card_paths(memory_tree) == []  # inbox 没有新卡
+    assert report.get("deduped") == ["认知觉醒"]
+    assert len(list(target_dir.glob("书籍-*.md"))) == 1  # 原卡原地不动

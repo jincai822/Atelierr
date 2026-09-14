@@ -416,3 +416,27 @@ def test_context_provider_injected_into_prompt(tmp_path, monkeypatch):
     calls.clear()
     HighlightsProcessor().process(path)
     assert all("目标：减脂" not in prompt for prompt in calls)
+
+
+def test_merge_orders_challenge_first_among_recommended(tmp_path, monkeypatch):
+    """推荐项内「挑战」排最前（US-001 §7.9：对着待决策、挑战认知的优先）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    items = [
+        _item(title="支持项", nature="支持", recommend=True, anchor=2),
+        _item(title="挑战项", nature="挑战", recommend=True, anchor=9),
+        _item(title="路人项", nature="待验", recommend=False, anchor=1),
+    ]
+    monkeypatch.setattr(
+        hl_module.httpx, "post",
+        lambda *a, **kw: _FakeLLMResponse(_payload(items)),
+    )
+    path = _make_pdf(tmp_path, ["正文。" * 300], monkeypatch)
+
+    result = HighlightsProcessor().process(path)
+
+    checkboxes = [
+        line for line in result.markdown.splitlines() if line.startswith("- [ ]")
+    ]
+    assert "**挑战项**" in checkboxes[0]
+    assert "**支持项**" in checkboxes[1]
+    assert "**路人项**" in checkboxes[2]

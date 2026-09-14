@@ -319,7 +319,9 @@ class MediaDispatcher:
                 # 档案卡进 inbox 待确认，✅ 一步归档进 memory/书籍/[中图法/]
                 book = (result.metadata or {}).get("book")
                 if book:
-                    card = self._create_book_card(path, book, Path(filename).stem)
+                    card = self._create_book_card(
+                        path, book, Path(filename).stem, report
+                    )
                     if card:
                         report["created"].append(card)
                 return
@@ -414,20 +416,26 @@ class MediaDispatcher:
         return lines
 
     def _create_book_card(
-        self, path: Path, book: Dict[str, Any], checklist_stem: str
+        self,
+        path: Path,
+        book: Dict[str, Any],
+        checklist_stem: str,
+        report: Dict[str, Any],
     ) -> Optional[str]:
         """书籍档案卡（2026-09-14 用户裁决：对齐 Cognitive OS 准入协议）。
 
         落 inbox 带「待确认/书籍/(中图法)」标签 → 走确认卡推送，✅ 一步
         归档进 ``memory/书籍/[中图法/]``。查重按 书名+作者+版次 哈希
-        （book_key）：同一份不建卡；同名不同版建卡但正文加警示行，
-        交人工定夺（US-001 §3.4）。
+        （book_key）：同一份不建卡并记 report["deduped"]（US-001 §3.4
+        "报人工一句"，由 dispatch_cli 推送）；同名不同版建卡但正文加
+        警示行，交人工定夺。
         """
         key_src = f"{book['title']}|{book['author']}|{book['edition']}"
         book_key = hashlib.sha1(key_src.encode("utf-8")).hexdigest()[:6]
         dup = self._find_book_card(book_key, book["title"])
         if dup and dup[0] == book_key:
             logger.info("书籍档案卡已存在，查重跳过: %s", book["title"])
+            report.setdefault("deduped", []).append(book["title"])
             return None
         tags = [REVIEW_TAG, BOOK_SUBDIR] + ([book["clc"]] if book["clc"] else [])
         lines = [
@@ -479,7 +487,9 @@ class MediaDispatcher:
         for dirpath in dirs:
             if not dirpath.is_dir():
                 continue
-            for card in sorted(dirpath.glob("书籍-*.md")):
+            # 书籍目录递归扫：确认归档后卡在中图法子目录（书籍/B84-心理学/）
+            pattern = "书籍-*.md" if dirpath.name != BOOK_SUBDIR else "**/书籍-*.md"
+            for card in sorted(dirpath.glob(pattern)):
                 try:
                     post = frontmatter.loads(card.read_text(encoding="utf-8"))
                 except (OSError, ValueError):

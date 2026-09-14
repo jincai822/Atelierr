@@ -408,10 +408,19 @@ class DispatchCLI:
                     # 清单在 系统/ 下（created 带前缀），按文件名判断
                     suffix = "" if Path(filename).name.startswith("划重点-") else "（待确认）"
                     click.echo(f"  已创建: {filename}{suffix}")
+                for title in report.get("deduped") or []:
+                    click.echo(f"  查重跳过: 《{title}》已有档案卡（US-001 §3.4）")
                 for failure in report["failed"]:
                     click.echo(f"  失败: {failure['file']} — {failure['error']}")
                 if not dry_run:
                     _notify_media_failures(report["failed"])
+                    if report.get("deduped"):
+                        # 书籍查重命中"报人工一句"（US-001 §3.4）
+                        titles = "、".join(f"《{t}》" for t in report["deduped"])
+                        send_dispatch_notice(
+                            "Atelierr 书籍查重",
+                            f"{titles}已有档案卡，未重复建档；同名不同版请人工定夺",
+                        )
                     if report["created"]:
                         _notify_created_notes(
                             "Atelierr 附件笔记待确认",

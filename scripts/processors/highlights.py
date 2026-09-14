@@ -393,7 +393,9 @@ class HighlightsProcessor(BaseProcessor):
                 old["anchor"] = item["anchor"]
         ordered = sorted(
             seen.values(),
-            key=lambda c: (not c["recommend"], c["anchor"] or 10**9),
+            # 推荐优先；推荐项里「挑战」排最前（US-001 §7.9：对着待决策
+            # 事项、挑战已有认知的排最前）；同档内页码升序
+            key=lambda c: (not c["recommend"], c["nature"] != "挑战", c["anchor"] or 10**9),
         )
         return ordered[: self.max_candidates]
 
