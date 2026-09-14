@@ -71,6 +71,9 @@ processors:
     chunk_chars: 6000   # 每个 LLM 片段的正文上限（按页聚合，不切断单页）
     max_chunks: 80      # 成本护栏：片段数上限（约 48 万字），超出截断记 warning
     max_candidates: 20  # 清单候选上限（防确认疲劳，宁缺毋滥）
+    book_min_pages: 60  # 书籍模式页数门槛：达到才产档案元数据+导读
+                        #（2026-09-14 裁决：书籍走建档+查重+导读+筛查清单，
+                        # 档案卡由 dispatch/media.py 建进 inbox 待确认）
     llm:                # 代读挑候选（必需；key 缺失处理失败并进熔断重试，
                         # 不会像 link 那样降级——清单的产品就是候选本身）
       base_url: https://api.deepseek.com

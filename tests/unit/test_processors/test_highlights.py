@@ -23,8 +23,9 @@ class _FakePage:
 
 
 class _FakeDoc:
-    def __init__(self, texts):
+    def __init__(self, texts, toc=None):
         self._pages = [_FakePage(t) for t in texts]
+        self._toc = toc or []
 
     def __enter__(self):
         return self
@@ -38,10 +39,13 @@ class _FakeDoc:
     def __getitem__(self, index):
         return self._pages[index]
 
+    def get_toc(self):
+        return self._toc
 
-def _install_fake_fitz(monkeypatch, page_texts):
+
+def _install_fake_fitz(monkeypatch, page_texts, toc=None):
     """注册假 fitz 模块：open() 返回固定页文本的假文档。"""
-    fake = types.SimpleNamespace(open=lambda _path: _FakeDoc(page_texts))
+    fake = types.SimpleNamespace(open=lambda _path: _FakeDoc(page_texts, toc))
     monkeypatch.setitem(sys.modules, "fitz", fake)
 
 
@@ -80,8 +84,8 @@ def _item(title="概念甲", anchor=3, recommend=True, nature="支持"):
     }
 
 
-def _make_pdf(tmp_path, page_texts, monkeypatch, name="book.pdf"):
-    _install_fake_fitz(monkeypatch, page_texts)
+def _make_pdf(tmp_path, page_texts, monkeypatch, name="book.pdf", toc=None):
+    _install_fake_fitz(monkeypatch, page_texts, toc)
     path = tmp_path / name
     path.write_bytes(b"%PDF fake")
     return path
@@ -268,3 +272,147 @@ def test_unsupported_extension_fails(tmp_path, monkeypatch):
 
     assert not result.success
     assert "扩展名" in result.error
+
+
+# ----------------------------------------------------------------------
+# 书籍模式（2026-09-14 裁决，对齐 Cognitive OS 准入协议：建档+导读+筛查）
+# ----------------------------------------------------------------------
+
+
+def _book_payload(book):
+    return {
+        "choices": [
+            {"message": {"content": json.dumps({"book": book}, ensure_ascii=False)}}
+        ]
+    }
+
+
+def _book(title="认知觉醒", clc="B84-心理学", level="L2"):
+    return {
+        "title": title,
+        "author": "周岭",
+        "edition": "第1版",
+        "isbn": "",
+        "clc": clc,
+        "level": level,
+        "level_reason": "方法论可复用",
+        "mainline": "用认知科学解释成长",
+        "chapter_advice": [{"chapter": "第三章 专注力", "why": "对着你的目标"}],
+    }
+
+
+def _post_book_mode(book, candidates, calls=None):
+    """按提示词路由假 LLM 应答：建档/导读 vs 挑候选。"""
+    def _post(url, **kwargs):
+        prompt = kwargs["json"]["messages"][0]["content"]
+        if calls is not None:
+            calls.append(prompt)
+        if "书籍建档与导读" in prompt:
+            return _FakeLLMResponse(_book_payload(book))
+        return _FakeLLMResponse(_payload(candidates))
+    return _post
+
+
+def test_book_mode_profile_and_guide(tmp_path, monkeypatch):
+    """页数达标：进书籍模式——标题升级、导读节齐全、档案进 metadata。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        hl_module.httpx, "post", _post_book_mode(_book(), [_item()])
+    )
+    toc = [(1, "第一章 大脑", 1), (1, "第三章 专注力", 40)]
+    path = _make_pdf(tmp_path, ["甲" * 300, "乙" * 300], monkeypatch, toc=toc)
+
+    result = HighlightsProcessor({"book_min_pages": 2}).process(path)
+
+    assert result.success
+    assert result.markdown.startswith("# 《认知觉醒》导读与筛查清单")
+    assert "## 导读（机器代读）" in result.markdown
+    assert "主线：用认知科学解释成长" in result.markdown
+    assert "第一章 大脑（第 1 页）" in result.markdown  # 章节地图
+    assert "第三章 专注力——对着你的目标" in result.markdown  # 值得细读
+    assert "级别建议 L2" in result.markdown
+    assert "- [ ] **概念甲**（第 3 页）" in result.markdown  # 复选框格式不变
+    book = result.metadata["book"]
+    assert book["title"] == "认知觉醒"
+    assert book["author"] == "周岭"
+    assert book["clc"] == "B84-心理学"
+
+
+def test_short_doc_skips_book_mode(tmp_path, monkeypatch):
+    """页数不达门槛：无导读、无档案，且不多花一次建档 LLM 调用。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    calls = []
+    monkeypatch.setattr(
+        hl_module.httpx, "post", _post_book_mode(_book(), [_item()], calls)
+    )
+    path = _make_pdf(tmp_path, ["正文。" * 300], monkeypatch)
+
+    result = HighlightsProcessor().process(path)
+
+    assert result.success
+    assert result.markdown.startswith("# 划重点清单：book")
+    assert "## 导读" not in result.markdown
+    assert result.metadata["book"] is None
+    assert all("书籍建档与导读" not in prompt for prompt in calls)
+
+
+def test_book_profile_failure_degrades(tmp_path, monkeypatch):
+    """建档/导读调用失败：只记 warning，清单与候选照常产出。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+
+    def _post(url, **kwargs):
+        prompt = kwargs["json"]["messages"][0]["content"]
+        if "书籍建档与导读" in prompt:
+            raise RuntimeError("api down")
+        return _FakeLLMResponse(_payload([_item()]))
+
+    monkeypatch.setattr(hl_module.httpx, "post", _post)
+    path = _make_pdf(tmp_path, ["甲" * 300, "乙" * 300], monkeypatch)
+
+    result = HighlightsProcessor({"book_min_pages": 2}).process(path)
+
+    assert result.success
+    assert result.metadata["book"] is None
+    assert any("导读/档案生成失败" in w for w in result.metadata["warnings"])
+    assert "- [ ] **概念甲**（第 3 页）" in result.markdown
+
+
+def test_book_profile_normalization(tmp_path, monkeypatch):
+    """档案脏字段：clc 不合中图法形状丢弃、level 非 L1/L2 兜底 L1、书名兜底文件名。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    dirty = _book(title="", clc="心理学", level="L3")  # L3 非法（机器永不建议）
+    monkeypatch.setattr(
+        hl_module.httpx, "post", _post_book_mode(dirty, [_item()])
+    )
+    path = _make_pdf(tmp_path, ["甲" * 300, "乙" * 300], monkeypatch)
+
+    result = HighlightsProcessor({"book_min_pages": 2}).process(path)
+
+    book = result.metadata["book"]
+    assert book["title"] == "book"  # 回退文件名
+    assert book["clc"] == ""
+    assert book["level"] == "L1"
+
+
+def test_context_provider_injected_into_prompt(tmp_path, monkeypatch):
+    """读者上下文（目标/待办）注入挑候选提示词；无提供者时不出现。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    calls = []
+    monkeypatch.setattr(
+        hl_module.httpx, "post", _post_book_mode(_book(), [], calls)
+    )
+    path = _make_pdf(tmp_path, ["正文。" * 300], monkeypatch)
+
+    processor = HighlightsProcessor(
+        context_provider=lambda: ["目标：减脂", "待办：写月报"]
+    )
+    result = processor.process(path)
+
+    assert result.success
+    assert any(
+        "目标：减脂" in prompt and "待办：写月报" in prompt for prompt in calls
+    )
+
+    calls.clear()
+    HighlightsProcessor().process(path)
+    assert all("目标：减脂" not in prompt for prompt in calls)

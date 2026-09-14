@@ -1,6 +1,9 @@
 """附件自动路由：attachments/ 里的截图/录音/直发视频 → OCR/Whisper →
 建"待确认"笔记；PDF（书籍/长文）→ 划重点清单笔记（机器代读出可勾选
 候选，勾中条目由 :mod:`scripts.dispatch.highlights` 转为 wiki 摘录卡）。
+页数达标的书籍另产「书籍档案卡」进 inbox 待确认（2026-09-14 裁决，
+对齐 Cognitive OS 准入协议：建档 + 查重 + 分级建议；✅ 一步归档进
+``memory/书籍/[中图法/]``）。
 
 定位：与 links/todos 同源的 dispatch 顶层组合模块（memory 与 processors
 之间唯一的接线点）。触发由 systemd 定时器驱动
@@ -54,7 +57,9 @@ import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import frontmatter
 
 from scripts.dispatch.highlights import CHECKLIST_SOURCE, ITEM_TAG
 from scripts.utils.file_utils import write_text_skip_existing
@@ -145,7 +150,10 @@ class MediaDispatcher:
         self.tree = tree
         self._image_factory = image_factory or ImageProcessor
         self._audio_factory = audio_factory or AudioProcessor
-        self._highlights_factory = highlights_factory or HighlightsProcessor
+        self._highlights_factory = highlights_factory or (
+            # 书籍筛查的「对着什么」素材：读者真实目标/待办（2026-09-14 裁决）
+            lambda: HighlightsProcessor(context_provider=self._reader_context)
+        )
         self._video_factory = video_factory or VideoProcessor
         self._inbox = screenshot_inbox
         self._image: Optional[ImageProcessor] = None
@@ -307,6 +315,13 @@ class MediaDispatcher:
                 entry["status"] = "done"
                 entry["note"] = rel
                 report["created"].append(rel)
+                # 书籍模式（2026-09-14 裁决，对齐 Cognitive OS 准入协议）：
+                # 档案卡进 inbox 待确认，✅ 一步归档进 memory/书籍/[中图法/]
+                book = (result.metadata or {}).get("book")
+                if book:
+                    card = self._create_book_card(path, book, Path(filename).stem)
+                    if card:
+                        report["created"].append(card)
                 return
             suffix = path.suffix.lower()
             kind = "视频" if suffix in _VIDEO_EXTS else _KIND_BY_EXT[suffix]
@@ -376,6 +391,105 @@ class MediaDispatcher:
         cleaned = _PDF_ILLEGAL_RE.sub("-", path.stem).strip(". ")[:40] or "未命名"
         digest = hashlib.sha1(path.name.encode("utf-8")).hexdigest()[:6]
         return f"划重点-{cleaned}-{digest}.md"
+
+    def _reader_context(self) -> List[str]:
+        """书籍筛查的「对着什么」素材：目标/待办笔记标题（每目录至多 10 条）。
+
+        直读人工目录（量小），不走 sidecar 索引；读取失败静默跳过——
+        素材缺失不阻塞代读（target 退回「待读者判断」）。
+        """
+        lines: List[str] = []
+        for dirname, label in (("目标", "目标"), ("待办", "待办")):
+            dirpath = Path(self.tree.notes_dir) / dirname
+            if not dirpath.is_dir():
+                continue
+            for path in sorted(dirpath.glob("*.md"))[:10]:
+                title = path.stem
+                try:
+                    post = frontmatter.loads(path.read_text(encoding="utf-8"))
+                    title = str(post.get("title") or path.stem)
+                except (OSError, ValueError):
+                    pass
+                lines.append(f"{label}：{title}")
+        return lines
+
+    def _create_book_card(
+        self, path: Path, book: Dict[str, Any], checklist_stem: str
+    ) -> Optional[str]:
+        """书籍档案卡（2026-09-14 用户裁决：对齐 Cognitive OS 准入协议）。
+
+        落 inbox 带「待确认/书籍/(中图法)」标签 → 走确认卡推送，✅ 一步
+        归档进 ``memory/书籍/[中图法/]``。查重按 书名+作者+版次 哈希
+        （book_key）：同一份不建卡；同名不同版建卡但正文加警示行，
+        交人工定夺（US-001 §3.4）。
+        """
+        key_src = f"{book['title']}|{book['author']}|{book['edition']}"
+        book_key = hashlib.sha1(key_src.encode("utf-8")).hexdigest()[:6]
+        dup = self._find_book_card(book_key, book["title"])
+        if dup and dup[0] == book_key:
+            logger.info("书籍档案卡已存在，查重跳过: %s", book["title"])
+            return None
+        tags = [REVIEW_TAG, BOOK_SUBDIR] + ([book["clc"]] if book["clc"] else [])
+        lines = [
+            f"# 《{book['title']}》档案",
+            "",
+            f"- 作者：{book['author'] or '（未识别）'}　版次：{book['edition'] or '（未识别）'}"
+            f"　ISBN：{book['isbn'] or '（未识别）'}",
+            f"- 原件：[[{self._key(path)}]]",
+            f"- 筛查清单：[[{checklist_stem}]]（勾中条目转 wiki 摘录卡）",
+            f"- 级别建议：{book['level']}——{book['level_reason'] or '机器建议'}"
+            "（机器只能建议 L1/L2；L3 定级永远是人工权力）",
+            "- 阅读状态：想读（读完手动改 在读/读完）",
+        ]
+        if dup:
+            lines += [
+                "",
+                f"⚠️ 已有同名书的不同版本档案：[[{dup[1]}]]——请人工定夺是否合并。",
+            ]
+        metadata = {
+            "type": "Book",
+            "title": f"《{book['title']}》",
+            "book_key": book_key,
+            "book_author": book["author"],
+            "book_edition": book["edition"],
+            "book_isbn": book["isbn"],
+            "level_suggestion": book["level"],
+            "reading_status": "想读",
+            "source": "book",
+            "tags": tags,
+        }
+        content = frontmatter.dumps(frontmatter.Post("\n".join(lines) + "\n", **metadata))
+        cleaned = _PDF_ILLEGAL_RE.sub("-", book["title"]).strip(". ")[:40] or "未命名"
+        filename = f"书籍-{cleaned}-{book_key}.md"
+        try:
+            self.tree.create_note(filename, content, inbox=True)
+        except (ValueError, FileExistsError):
+            # 同名档案卡已存在（状态丢失后的重跑）：视为已建
+            return None
+        return f"inbox/{filename}"
+
+    def _find_book_card(self, book_key: str, title: str) -> Optional[Tuple[str, str]]:
+        """书籍档案查重：扫 inbox/ 与 memory/书籍/ 的既有档案卡。
+
+        Returns:
+            (book_key, stem) 完全同一份；("", stem) 同名不同版本；
+            None 无重复。
+        """
+        dirs = [Path(self.tree.inbox_dir), Path(self.tree.notes_dir) / BOOK_SUBDIR]
+        for dirpath in dirs:
+            if not dirpath.is_dir():
+                continue
+            for card in sorted(dirpath.glob("书籍-*.md")):
+                try:
+                    post = frontmatter.loads(card.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if str(post.get("book_key") or "") == book_key:
+                    return book_key, card.stem
+                card_title = str(post.get("title") or "").strip("《》")
+                if card_title and card_title == title:
+                    return "", card.stem
+        return None
 
     def _key(self, path: Path) -> str:
         """状态键：附件相对数据根的路径（如 attachments/媒体/IMG_001.jpg）。

@@ -101,3 +101,123 @@ def test_pdf_idempotent_second_run(memory_tree):
     assert report["created"] == []
     assert report["skipped"] == 1
     assert len(_FakeHighlightsProcessor.calls) == 1
+
+
+# ----------------------------------------------------------------------
+# 书籍档案卡（2026-09-14 裁决：建档 + 查重 + 归档路由到 书籍/[中图法/]）
+# ----------------------------------------------------------------------
+
+
+class _FakeBookProcessor:
+    """假划重点处理器：返回带书籍档案元数据的结果。"""
+
+    def __init__(self, book=None):
+        self._book = book if book is not None else {
+            "title": "认知觉醒",
+            "author": "周岭",
+            "edition": "第1版",
+            "isbn": "",
+            "clc": "B84-心理学",
+            "level": "L2",
+            "level_reason": "方法论可复用",
+            "mainline": "用认知科学解释成长",
+            "chapter_advice": [{"chapter": "第三章 专注力", "why": "对着目标"}],
+        }
+
+    def process(self, path):
+        return ProcessResult(
+            success=True,
+            markdown="# 《认知觉醒》导读与筛查清单\n\n- [ ] **概念甲**（第 3 页）\n",
+            metadata={"candidates": 1, "book": self._book},
+        )
+
+
+def _book_card_paths(tree):
+    return sorted(Path(tree.inbox_dir).glob("书籍-*.md"))
+
+
+def test_pdf_book_creates_card_in_inbox(memory_tree):
+    """书籍模式：清单照进 系统/，档案卡进 inbox 带 待确认/书籍/中图法 标签。"""
+    _add_pdf(memory_tree, name="认知觉醒.pdf")
+
+    report = MediaDispatcher(
+        memory_tree, highlights_factory=_FakeBookProcessor
+    ).run()
+
+    created = report["created"]
+    assert any(name.startswith("系统/划重点-") for name in created)
+    card_rel = next(name for name in created if name.startswith("inbox/书籍-认知觉醒-"))
+    cards = _book_card_paths(memory_tree)
+    assert len(cards) == 1
+    post = frontmatter.loads(cards[0].read_text(encoding="utf-8"))
+    assert post["type"] == "Book"
+    assert post["title"] == "《认知觉醒》"
+    assert post["source"] == "book"
+    assert post["reading_status"] == "想读"
+    assert post["level_suggestion"] == "L2"
+    assert post["tags"] == ["待确认", "书籍", "B84-心理学"]
+    assert post["book_key"]
+    assert "[[attachments/书籍/认知觉醒.pdf]]" not in post.content  # 附件在顶层
+    assert "[[attachments/认知觉醒.pdf]]" in post.content
+    assert "[[划重点-认知觉醒-" in post.content  # 清单双链
+    # 归档路由：书籍/[中图法/]（derive_archive_dir 单一规则源）
+    from scripts.dispatch.archive import derive_archive_dir
+    assert derive_archive_dir(post) == ("书籍", "B84-心理学")
+    assert (memory_tree.notes_dir / card_rel[len("inbox/"):]).exists() is False  # 在 inbox 不在 memory
+
+
+def test_pdf_book_card_dedupes_same_book(memory_tree):
+    """同书名+作者+版次（同 book_key）：不重复建卡。"""
+    _add_pdf(memory_tree, name="认知觉醒.pdf")
+    dispatcher = MediaDispatcher(memory_tree, highlights_factory=_FakeBookProcessor)
+    dispatcher.run()
+    # 抹掉处理状态逼它重跑同一 PDF（档案卡仍在 inbox）
+    dispatcher.state_path.unlink()
+    _FakeBookProcessor  # noqa: B018 - 保持引用
+    dispatcher2 = MediaDispatcher(
+        memory_tree,
+        highlights_factory=_FakeBookProcessor,
+    )
+    dispatcher2.run()
+
+    assert len(_book_card_paths(memory_tree)) == 1
+
+
+def test_pdf_book_card_warns_on_different_edition(memory_tree):
+    """同名不同版：建新卡，但正文带「疑似不同版本」警示行交人工定夺。"""
+    first = _FakeBookProcessor()
+    _add_pdf(memory_tree, name="认知觉醒.pdf")
+    MediaDispatcher(memory_tree, highlights_factory=lambda: first).run()
+    assert len(_book_card_paths(memory_tree)) == 1
+
+    # 第二版进来（不同版次 → 不同 book_key）
+    second_book = dict(first._book, edition="第2版")
+    _add_pdf(memory_tree, name="认知觉醒-第2版.pdf")
+    MediaDispatcher(
+        memory_tree, highlights_factory=lambda: _FakeBookProcessor(second_book)
+    ).run()
+
+    cards = _book_card_paths(memory_tree)
+    assert len(cards) == 2
+    posts = [frontmatter.loads(c.read_text(encoding="utf-8")) for c in cards]
+    second = next(p for p in posts if p.get("book_edition") == "第2版")
+    assert "已有同名书的不同版本档案" in second.content
+
+
+def test_reader_context_reads_goals_and_todos(memory_tree):
+    """「对着什么」素材：读 目标/ 与 待办/ 笔记标题（frontmatter title 优先）。"""
+    goals = Path(memory_tree.notes_dir) / "目标"
+    goals.mkdir(parents=True)
+    (goals / "今年减重十斤.md").write_text(
+        "---\ntitle: 今年减重十斤\n---\n正文\n", encoding="utf-8"
+    )
+    todos = Path(memory_tree.notes_dir) / "待办"
+    todos.mkdir(parents=True)
+    (todos / "todo-001.md").write_text(
+        "---\ntitle: 写九月月报\n---\n正文\n", encoding="utf-8"
+    )
+
+    lines = MediaDispatcher(memory_tree)._reader_context()
+
+    assert "目标：今年减重十斤" in lines
+    assert "待办：写九月月报" in lines
