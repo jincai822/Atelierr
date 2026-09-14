@@ -569,3 +569,49 @@ def test_extract_comment_no_cross_line_contamination():
     assert extract_comment(diary, XHS_URL) == "每个家庭不一样，要具体分析"
     # 独立文字行不属于任何链接
     assert "纯测试" not in extract_comment(diary, DOUYIN_URL)
+
+
+def test_comment_injected_into_note_body(memory_tree):
+    """链接评论注入产出卡正文（2026-09-14 裁决）：紧跟来源行、压在机器
+    摘要前——用户原创必须沉淀进笔记，不许只活在通知卡上。"""
+
+    class _SourceLineProcessor(_FakeLinkProcessor):
+        def process(self, url):
+            return ProcessResult(
+                success=True,
+                text="转写全文",
+                markdown=(
+                    "# 视频标题\n\n> 来源：抖音 @作者 "
+                    f"{DOUYIN_URL}\n\n## 转写全文\n\n你好"
+                ),
+                confidence=0.9,
+                metadata={"video_id": "vid123", "segments": 1},
+            )
+
+    memory_tree.create_note(
+        "daily.md",
+        f"{DOUYIN_URL} 这个讲得真好，回头细看",
+        source="test",
+    )
+
+    LinkDispatcher(memory_tree, processor_factory=_SourceLineProcessor).run()
+
+    card = memory_tree.inbox_dir / "douyin-vid123.md"
+    text = card.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    source_idx = next(i for i, ln in enumerate(lines) if ln.startswith("> 来源："))
+    assert lines[source_idx + 1] == "> 💬 我的评论：这个讲得真好，回头细看"
+    # 评论节压在第一个 ## 摘要/正文节之前
+    first_section = next(i for i, ln in enumerate(lines) if ln.startswith("## "))
+    assert source_idx + 1 < first_section
+
+
+def test_inject_comment_edge_cases():
+    """无评论原样返回；无来源行（异常形态）不硬凑。"""
+    from scripts.dispatch.links import _inject_comment
+
+    md = "# 标题\n\n> 来源：抖音 u\n\n## 正文\n\nx"
+    assert _inject_comment(md, "") == md
+    assert "> 💬 我的评论：好" in _inject_comment(md, "好")
+    no_source = "# 标题\n\n## 正文\n\nx"
+    assert _inject_comment(no_source, "好") == no_source

@@ -115,6 +115,32 @@ def extract_comment(body: str, url: str) -> str:
     return comment[:_COMMENT_MAX_CHARS]
 
 
+def _inject_comment(markdown: str, comment: str) -> str:
+    """把用户评论注入产出卡正文：紧跟来源行、压在机器摘要节前。
+
+    2026-09-14 用户裁决（KM 评审"价值倒挂"修复）：评论是整条笔记里
+    唯一用户原创——意图、理解、未来检索措辞都在里面，**必须沉淀进
+    笔记**，不许只活在看完即焚的通知卡上。只在新建时注入；既有笔记
+    机器绝不改写（红线）。
+
+    Args:
+        markdown: 处理器产出的卡 Markdown。
+        comment: 用户评论（extract_comment 产物；空串原样返回）。
+
+    Returns:
+        str: 注入后的 Markdown；找不到来源行（异常形态）原样返回，
+        不硬凑。
+    """
+    if not comment:
+        return markdown
+    lines = markdown.splitlines(keepends=True)
+    for index, text in enumerate(lines):
+        if text.startswith("> 来源："):
+            lines.insert(index + 1, f"> 💬 我的评论：{comment}\n")
+            return "".join(lines)
+    return markdown
+
+
 class LinkDispatcher:
     """扫描全部笔记，把未处理的抖音链接分发给 LinkProcessor。
 
@@ -238,10 +264,14 @@ class LinkDispatcher:
             if transcript_rel and transcript_text:
                 self._save_transcript(str(transcript_rel), str(transcript_text))
             filename = self._note_filename(url, platform, doc_id, title)
+            # 评论先于建卡提取并注入正文（2026-09-14 用户裁决：评论是
+            # 本条笔记里唯一用户原创，必须沉淀进库，不许只活在通知卡上）
+            comment = self._comment_for(url)
+            note_markdown = _inject_comment(result.markdown, comment)
             try:
                 self.tree.create_note(
                     filename,
-                    result.markdown,
+                    note_markdown,
                     source="link",
                     tags=[REVIEW_TAG, _PLATFORM_TAGS.get(platform, "链接")],
                     inbox=True,
@@ -256,7 +286,7 @@ class LinkDispatcher:
                 try:
                     self.tree.create_note(
                         filename,
-                        result.markdown,
+                        note_markdown,
                         source="link",
                         tags=[REVIEW_TAG, _PLATFORM_TAGS.get(platform, "链接")],
                         inbox=True,
@@ -267,7 +297,6 @@ class LinkDispatcher:
                 pass
             entry["status"] = "done"
             entry["note"] = filename
-            comment = self._comment_for(url)
             if comment:
                 entry["comment"] = comment
                 report["comments"][filename] = comment
