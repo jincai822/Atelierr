@@ -2236,3 +2236,33 @@ def test_note_remark_duplicate_skipped(memory_tree):
     assert resp1["toast"]["type"] == "success"
     assert resp2["toast"]["type"] == "info"
     assert path.read_text(encoding="utf-8").count("同一句话") == 1
+
+
+def test_todo_done_moves_from_inbox_to_todo_dir(memory_tree, monkeypatch):
+    """点「✅ 已完成」：inbox 里的待办摘标签 + 收进 memory/待办/（2026-09-14
+    审计裁决）；不在 inbox 的（人手动挪过）只摘标签不移动。"""
+    # inbox 里的待办：摘标签 + 移动
+    memory_tree.create_note(
+        "todo-in.md", "---\ntitle: 收件箱里的待办\n---\n行动\n",
+        source="todo", tags=["待办"], inbox=True,
+    )
+    bridge = _bridge(memory_tree)
+    monkeypatch.setattr(bridge, "_send_feedback", lambda chat, text: None)
+
+    resp = bridge.handle_card_action(_card_todo_done("todo-in.md"))
+
+    assert resp["toast"]["type"] == "success"
+    moved = memory_tree.notes_dir / "待办" / "todo-in.md"
+    assert moved.exists()
+    assert not (memory_tree.inbox_dir / "todo-in.md").exists()
+    assert "待办" not in frontmatter.loads(moved.read_text(encoding="utf-8")).get("tags", [])
+
+    # memory/ 根层（人已挪过/旧布局）：只摘标签不移动
+    memory_tree.create_note(
+        "todo-root.md", "---\ntitle: 根层待办\n---\n行动\n",
+        source="todo", tags=["待办"],
+    )
+    resp2 = bridge.handle_card_action(_card_todo_done("todo-root.md"))
+    assert resp2["toast"]["type"] == "success"
+    assert (memory_tree.notes_dir / "todo-root.md").exists()
+    assert not (memory_tree.notes_dir / "待办" / "todo-root.md").exists()

@@ -619,7 +619,7 @@ class FeishuBridge:
         }
 
     def _handle_todo_done(self, filename: str, chat_id: Optional[str] = None) -> Dict[str, Any]:
-        """「✅ 已完成」待办：只删待办标签；失败只 toast，不中断守护。"""
+        """「✅ 已完成」待办：删待办标签 + 收进 待办/；失败只 toast，不中断守护。"""
         try:
             ok, detail = self._todo_done(filename)
         except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
@@ -639,26 +639,52 @@ class FeishuBridge:
         except Exception as exc:  # noqa: BLE001 - 回写失败不影响回调
             print(f"[feishu] task complete hook fail: {exc}", flush=True)
         title = self._feedback_title(filename)
-        self._send_feedback(chat_id, f"✅ 待办已完成：{title}")
+        moved = detail == "ok_moved"
+        done_line = "已移除「待办」标签，收进 待办/ 目录" if moved else "已移除「待办」标签"
+        self._send_feedback(
+            chat_id, f"✅ 待办已完成{'并收进 待办/' if moved else ''}：{title}"
+        )
         return {
             "toast": {"type": "success", "content": "已完成"},
             "card": {
                 "type": "raw",
                 "data": self._confirmed_card(
                     filename,
-                    note_line="已移除「待办」标签",
+                    note_line=done_line,
                     header="✅ 已完成",
                 ),
             },
         }
 
     def _todo_done(self, filename: str) -> Tuple[bool, str]:
-        """「✅ 已完成」核心：定位笔记 + 移除待办标签（与确认同构）。"""
+        """「✅ 已完成」核心：定位笔记 + 移除待办标签 + 收进 待办/ 目录。
+
+        2026-09-14 审计裁决：此前只摘标签、文件永远滞留 inbox（洗完的
+        衣服不叠进衣柜）——点 ✅ 即把 inbox 里的待办归档进
+        ``memory/待办/``（与确认归档同属人工点动例外；sidecar 即时迁移
+        同 _archive_note）。用户已手动挪走的（不在 inbox）尊重现状只摘
+        标签；目标重名/移动失败不回滚（摘标签为主），log 留痕。
+        """
         note_path, err = self._locate_note(filename)
         if err:
             return False, err
         stripped = self._strip_tag(note_path, TODO_TAG)
-        return True, "ok" if stripped else "noop"
+        if not self.tree._rel_key(note_path).startswith("inbox/"):
+            return True, "ok" if stripped else "noop"
+        target = Path(self.tree.notes_dir) / TODO_TAG / note_path.name
+        if target.exists():
+            print(f"[feishu] todo done move clash, kept in place: {target}", flush=True)
+            return True, "ok"
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            note_path.rename(target)
+        except OSError as exc:
+            print(f"[feishu] todo done move fail (tag stripped): {exc}", flush=True)
+            return True, "ok"
+        note_id = self.tree._read_note_id(target)
+        if note_id is not None:
+            self.tree.relocate_entry(note_id, self.tree._rel_key(target))
+        return True, "ok_moved"
 
     def _handle_prompt_submit(self, action: Any, chat_id: Optional[str]) -> Dict[str, Any]:
         """问答表单卡「提交回答」：form_value 按问题序收进会话并关闭。
