@@ -80,6 +80,15 @@ _COMMENT_MAX_CHARS = 200
 #: 时间前缀；纯时间行剥完为空自然跳过，同行带人话的取出干净评论）
 _TIME_PREFIX_RE = re.compile(r"^[-*\s]*\d{1,2}:\d{2}(?::\d{2})?\s+")
 
+#: 分享模板残留清洗（2026-09-14 小红书真实样本：评论被模板文字埋住）：
+#: 含平台名的【标题 - 作者 | 平台 - 标语】方括号块
+_SHARE_BLOCK_RE = re.compile(r"【[^】]*(?:小红书|抖音|B站|bilibili)[^】]*】")
+#: emoji 夹着的分享码（😆 6BATqBI2pevQVyh 😆）
+_SHARE_CODE_RE = re.compile(r"[😀-🙏]*\s*[A-Za-z0-9]{10,}\s*[😀-🙏]*")
+#: 行首孤立数字（小红书分享文本的条目号，如 "18 【…"——只在后面紧跟
+#: 方括号块或 emoji 时剥，用户以数字开头的真评论（"3 点感悟"）不动）
+_LEADING_NUM_RE = re.compile(r"^\d+\s+(?=【|[😀-🙏])")
+
 #: 日记文件名（2026-09-12.md）：链接回链只追加在日记行尾——其他笔记
 #: 机器绝不改写（红线），日记追加已有用户批准先例（飞书文字并入）
 # 日记判定正则收敛在 scripts/memory/core.py（DAILY_NOTE_RE）
@@ -108,7 +117,13 @@ def extract_comment(body: str, url: str) -> str:
         if _BOILERPLATE_RE.search(line):
             continue
         text = URL_RE.sub("", line)
-        text = _TIME_PREFIX_RE.sub("", text).strip(" \t，。：:;；")
+        text = _TIME_PREFIX_RE.sub("", text)
+        # 分享模板残留清洗（小红书/抖音样本，2026-09-14 实证）；
+        # 行首条目号须在方括号块剥离之前剥（剥离后 lookahead 失效）
+        text = _LEADING_NUM_RE.sub("", text)
+        text = _SHARE_BLOCK_RE.sub("", text)
+        text = _SHARE_CODE_RE.sub("", text)
+        text = text.strip(" \t，。：:;；")
         if len(text) >= 2 and text not in _POINTER_WORDS:
             fragments.append(text)
     comment = "；".join(fragments).strip()

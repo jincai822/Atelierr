@@ -615,3 +615,30 @@ def test_inject_comment_edge_cases():
     assert "> 💬 我的评论：好" in _inject_comment(md, "好")
     no_source = "# 标题\n\n## 正文\n\nx"
     assert _inject_comment(no_source, "好") == no_source
+
+
+def test_xhs_share_template_stripped_from_comment(memory_tree):
+    """小红书分享样板清洗（2026-09-14 真实样本）：条目号/【标题块】/
+    😆分享码😆 全剥掉，只留下真评论。"""
+    xhs_url = "https://www.xiaohongshu.com/discovery/item/abc123"
+    memory_tree.create_note(
+        "2026-09-14.md",
+        f"- 22:24 18 【头等舱采访：AI是未来必备能力！ - 艾维奇Vic | 小红书 - "
+        f"你的生活兴趣社区】 😆 6BATqBI2pevQVyh 😆 {xhs_url}  AI 是必备技能",
+        source="test",
+    )
+
+    from scripts.dispatch.links import extract_comment
+
+    comment = extract_comment(memory_tree.read_note(
+        memory_tree.notes_dir / "2026-09-14.md"
+    ), xhs_url)
+    assert comment == "AI 是必备技能"
+
+
+def test_numeric_leading_comment_kept(memory_tree):
+    """用户以数字开头的真评论（"3 点感悟"）不被模板清洗误伤。"""
+    from scripts.dispatch.links import extract_comment
+
+    body = f"{DOUYIN_URL} 3 点感悟都适用"
+    assert extract_comment(body, DOUYIN_URL) == "3 点感悟都适用"

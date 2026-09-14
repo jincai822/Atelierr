@@ -1308,3 +1308,15 @@ def test_low_confidence_warning_rendered(fake_pipeline, monkeypatch):
     normal = LinkProcessor().process(SHARE_TEXT)
     assert normal.success, normal.error
     assert "偏低" not in normal.markdown
+
+
+def test_bare_category_code_dropped(fake_pipeline, monkeypatch):
+    """LLM 给裸编号（G79 无类名）：归档推导不认，程序兜底丢弃（2026-09-14 实证）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _fixed_llm(monkeypatch, _llm_payload(extra={"category": "G79"}))
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    post = frontmatter.loads(result.markdown)
+    assert "G79" not in (post.metadata.get("tags") or [])
