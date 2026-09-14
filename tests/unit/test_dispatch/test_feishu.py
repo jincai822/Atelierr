@@ -2219,3 +2219,20 @@ def test_batch_discard_rebuilds_digest_card(memory_tree):
     assert memory_tree.is_pending_delete(memory_tree.notes_dir / "da.md")
     card = resp["card"]["data"]
     assert "1 条" in card["header"]["title"]["content"]
+
+
+def test_note_remark_duplicate_skipped(memory_tree):
+    """同一句话重复提交（客户端报错后重试/平台重发）：不追加第二遍。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note("n3.md", "正文\n", source="link", tags=["抖音"])
+    path = memory_tree.notes_dir / "n3.md"
+    action = _card_action_with_form(
+        {"action": "note_remark", "note": "n3.md"}, {"q1": "同一句话"}
+    )
+
+    resp1 = bridge.handle_card_action(action)
+    resp2 = bridge.handle_card_action(action)
+
+    assert resp1["toast"]["type"] == "success"
+    assert resp2["toast"]["type"] == "info"
+    assert path.read_text(encoding="utf-8").count("同一句话") == 1

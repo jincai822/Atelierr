@@ -796,6 +796,12 @@ class FeishuBridge:
                 self._send_feedback(chat_id, f"⚠️ {err}：{filename}")
                 return {"toast": {"type": "error", "content": err}}
             text = note_path.read_text(encoding="utf-8")
+            if f"）：{remark}" in text:
+                # 幂等：同一句话已记过（客户端报错后用户重试/平台重发
+                # 回调都会再进这里——2026-09-14 实证客户端报错但后端
+                # 实际成功），不再追加第二遍
+                self._send_feedback(chat_id, f"💭 这句已记过，不重复追加：{filename}")
+                return {"toast": {"type": "info", "content": "这句已记过"}}
             stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
             addition = f"> 💭 顺手记一句（{stamp}）：{remark}\n"
             self._atomic_write(
