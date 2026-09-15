@@ -408,9 +408,7 @@ class FeishuBridge:
             return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
         print(f"[feishu] confirm note={filename} {'ok' if ok else 'fail'}", flush=True)
         if not ok:
-            reason = self._error_reason(detail)
-            self._send_feedback(chat_id, f"⚠️ {reason}：{filename}")
-            return {"toast": {"type": "error", "content": reason}}
+            return self._fail_response(chat_id, filename, detail)
         title = self._feedback_title(filename)
         self._send_feedback(chat_id, f"✅ 已确认：{title}")
         return {
@@ -461,9 +459,7 @@ class FeishuBridge:
         """
         note_path, err = self._locate_note(filename)
         if err:
-            reason = self._error_reason(err)
-            self._send_feedback(chat_id, f"⚠️ {reason}：{filename}")
-            return {"toast": {"type": "error", "content": reason}}
+            return self._fail_response(chat_id, filename, err)
         derived = None
         try:
             post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
@@ -562,9 +558,7 @@ class FeishuBridge:
             return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
         print(f"[feishu] archive note={filename} {'ok' if ok else 'fail'}", flush=True)
         if not ok:
-            reason = self._error_reason(detail)
-            self._send_feedback(chat_id, f"⚠️ {reason}：{filename}")
-            return {"toast": {"type": "error", "content": reason}}
+            return self._fail_response(chat_id, filename, detail)
         if detail == "confirm_only":
             # 推导不出归档目录：只确认不移动（留在收件箱由人日后归类）
             title = self._feedback_title(filename)
@@ -638,9 +632,7 @@ class FeishuBridge:
             return {"toast": {"type": "error", "content": "处理失败，请稍后重试"}}
         print(f"[feishu] todo done note={filename} {'ok' if ok else 'fail'}", flush=True)
         if not ok:
-            reason = self._error_reason(detail)
-            self._send_feedback(chat_id, f"⚠️ {reason}：{filename}")
-            return {"toast": {"type": "error", "content": reason}}
+            return self._fail_response(chat_id, filename, detail)
         # 回写飞书任务完成（单向同步；失败只 log，绝不影响标签操作）
         try:
             from scripts.dispatch.task_sync import complete_task_for_todo
@@ -785,8 +777,7 @@ class FeishuBridge:
         try:
             note_path, err = self._locate_note(filename)
             if err:
-                self._send_feedback(chat_id, f"⚠️ {err}：{filename}")
-                return {"toast": {"type": "error", "content": err}}
+                return self._fail_response(chat_id, filename, err)
             entry = self.tree._entry(note_path)
             if entry is None:
                 self._send_feedback(chat_id, f"⚠️ 笔记未登记：{filename}")
@@ -952,9 +943,28 @@ class FeishuBridge:
             return False
         return parts[0] not in NOTE_EXCLUDED_DIRS
 
+    def _fail_response(
+        self, chat_id: Optional[str], filename: str, detail: str
+    ) -> Dict[str, Any]:
+        """操作失败的统一应答（确认/归档/丢弃/选目录四处共用）。
+
+        死卡——笔记已不在库里（已回收/已归档/已在 Obsidian 手移）——是
+        正常终态不是错误：给 info 提示，不弹红色报错（2026-09-15 实测：
+        复验重跑回收旧卡后，用户点旧卡一片"处理失败"报错）。真错误
+        （重名/歧义/移动失败等）保持 error toast。
+        """
+        reason = self._error_reason(detail)
+        if detail == "笔记不存在":
+            self._send_feedback(chat_id, f"ℹ️ {reason}：{filename}")
+            return {"toast": {"type": "info", "content": reason}}
+        self._send_feedback(chat_id, f"⚠️ {reason}：{filename}")
+        return {"toast": {"type": "error", "content": reason}}
+
     @staticmethod
     def _error_reason(detail: str) -> str:
         """把失败详情串映射成给用户看的原因短语（toast 与反馈消息共用）。"""
+        if detail == "笔记不存在":
+            return "卡片已失效（笔记已回收或归档），无需操作"
         if detail == "歧义":
             return "存在多篇同名笔记，请到 Obsidian 处理"
         if detail == "目标重名":

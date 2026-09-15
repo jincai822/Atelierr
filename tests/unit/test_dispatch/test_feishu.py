@@ -357,13 +357,16 @@ def test_card_action_invalid_path_refused(memory_tree):
 
 
 def test_card_action_missing_note_returns_error(memory_tree):
-    """笔记不存在：error toast，不抛异常。"""
+    """笔记不存在（死卡：已回收/已归档）：info 提示不报错，不抛异常。"""
     bridge = _bridge(memory_tree)
     resp = bridge.handle_card_action(
         _card_action({"action": "confirm_note", "note": "nope.md"})
     )
 
-    assert resp["toast"] == {"type": "error", "content": "笔记不存在或路径非法"}
+    assert resp["toast"] == {
+        "type": "info",
+        "content": "卡片已失效（笔记已回收或归档），无需操作",
+    }
 
 
 def _archive_note(memory_tree, filename, subdir):
@@ -451,7 +454,10 @@ def test_card_action_file_only_in_trash_not_found(memory_tree):
         _card_action({"action": "confirm_note", "note": "gone.md"})
     )
 
-    assert resp["toast"] == {"type": "error", "content": "笔记不存在或路径非法"}
+    assert resp["toast"] == {
+        "type": "info",
+        "content": "卡片已失效（笔记已回收或归档），无需操作",
+    }
     assert "待确认" in frontmatter.loads(
         (trash / "gone.md").read_text(encoding="utf-8")
     ).metadata["tags"]
@@ -702,10 +708,13 @@ def test_card_archive_target_collision_no_overwrite(memory_tree):
 
 
 def test_card_archive_missing_and_ambiguous(memory_tree):
-    """0 匹配 → 笔记不存在；多匹配（跨目录同名）→ 歧义，绝不乱动。"""
+    """0 匹配 → 死卡 info 提示；多匹配（跨目录同名）→ 歧义 error，绝不乱动。"""
     bridge = _bridge(memory_tree)
     resp = bridge.handle_card_action(_card_archive("nope.md"))
-    assert resp["toast"] == {"type": "error", "content": "笔记不存在或路径非法"}
+    assert resp["toast"] == {
+        "type": "info",
+        "content": "卡片已失效（笔记已回收或归档），无需操作",
+    }
 
     top = memory_tree.create_note(
         "douyin-x.md", "甲\n", source="link", tags=["待确认", "抖音"]
@@ -815,10 +824,13 @@ def test_card_feedback_confirm_failure_reason_and_toast(memory_tree, monkeypatch
         _card_action({"action": "confirm_note", "note": "nope.md"})
     )
 
-    assert resp["toast"] == {"type": "error", "content": "笔记不存在或路径非法"}
+    assert resp["toast"] == {
+        "type": "info",
+        "content": "卡片已失效（笔记已回收或归档），无需操作",
+    }
     assert "card" not in resp
     assert len(sent) == 1
-    assert _sent_text(sent) == "⚠️ 笔记不存在或路径非法：nope.md"
+    assert _sent_text(sent) == "ℹ️ 卡片已失效（笔记已回收或归档），无需操作：nope.md"
 
 
 def test_card_feedback_send_exception_swallowed(memory_tree, monkeypatch):
@@ -868,7 +880,10 @@ def test_card_feedback_no_target_skipped_silently(memory_tree, monkeypatch):
         _card_action({"action": "confirm_note", "note": "nope.md"})
     )
 
-    assert resp["toast"] == {"type": "error", "content": "笔记不存在或路径非法"}
+    assert resp["toast"] == {
+        "type": "info",
+        "content": "卡片已失效（笔记已回收或归档），无需操作",
+    }
     assert sent == []
 
 
@@ -1328,7 +1343,7 @@ def test_card_todo_done_feedback_and_idempotent(memory_tree, monkeypatch):
 
 
 def test_card_todo_done_missing_note(memory_tree, monkeypatch):
-    """笔记不存在 → error toast + 文字反馈（不中断守护）。"""
+    """笔记不存在（死卡）→ info 提示 + 文字反馈（不中断守护）。"""
     bridge = _bridge(memory_tree)
     sent = []
     monkeypatch.setattr(
@@ -1337,8 +1352,8 @@ def test_card_todo_done_missing_note(memory_tree, monkeypatch):
 
     result = bridge.handle_card_action(_card_todo_done("ghost.md"))
 
-    assert result["toast"]["type"] == "error"
-    assert sent and "不存在" in sent[0]
+    assert result["toast"]["type"] == "info"
+    assert sent and "卡片已失效" in sent[0]
 
 
 def test_send_todo_feishu_card_buttons(monkeypatch):
@@ -1567,7 +1582,7 @@ def test_archive_cancel_restores_confirm_card(memory_tree):
 
 
 def test_archive_pick_missing_note_errors(memory_tree, monkeypatch):
-    """笔记不存在：error toast + 文字反馈，不出选择卡。"""
+    """笔记不存在（死卡）：info 提示 + 文字反馈，不出选择卡。"""
     bridge = _bridge(memory_tree)
     sent = []
     monkeypatch.setattr(
@@ -1576,9 +1591,9 @@ def test_archive_pick_missing_note_errors(memory_tree, monkeypatch):
 
     result = bridge.handle_card_action(_card_archive_pick("ghost.md"))
 
-    assert result["toast"]["type"] == "error"
+    assert result["toast"]["type"] == "info"
     assert "card" not in result
-    assert sent and "不存在" in sent[0]
+    assert sent and "卡片已失效" in sent[0]
 
 
 # ----------------------------------------------------------------------
@@ -2075,14 +2090,14 @@ def test_discard_marks_pending_delete(memory_tree):
 
 
 def test_discard_missing_note_errors(memory_tree):
-    """待删目标不存在：toast 报错，不中断。"""
+    """待删目标不存在（死卡）：info 提示，不中断。"""
     bridge = _bridge(memory_tree)
 
     resp = bridge.handle_card_action(
         _card_action({"action": "discard_note", "note": "ghost.md"})
     )
 
-    assert resp["toast"]["type"] == "error"
+    assert resp["toast"]["type"] == "info"
 
 
 def test_confirm_card_has_discard_button(memory_tree):
