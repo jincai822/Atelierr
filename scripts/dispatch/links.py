@@ -40,7 +40,12 @@ from scripts.memory.core import DAILY_NOTE_RE, LAYERS, MemoryTree
 from scripts.utils.file_utils import write_text_skip_existing
 from scripts.utils.state_store import read_json, write_json
 from scripts.memory.watcher import MemoryWatcher
-from scripts.processors.link import LinkProcessor, URL_RE, detect_platform
+from scripts.processors.link import (
+    LinkProcessor,
+    URL_RE,
+    detect_platform,
+    probe_video_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +86,13 @@ _COMMENT_MAX_CHARS = 200
 _TIME_PREFIX_RE = re.compile(r"^[-*\s]*\d{1,2}:\d{2}(?::\d{2})?\s+")
 
 #: 分享模板残留清洗（2026-09-14 小红书真实样本：评论被模板文字埋住）：
-#: 含平台名的【标题 - 作者 | 平台 - 标语】方括号块
-_SHARE_BLOCK_RE = re.compile(r"【[^】]*(?:小红书|抖音|B站|bilibili)[^】]*】")
+#: 含平台名的【标题 - 作者 | 平台 - 标语】方括号块；B站模板是嵌套括号
+#: 【【系列】标题-哔哩哔哩】且关键词写作"哔哩哔哩"（2026-09-15 真实样本），
+#: 故允许一层嵌套并补上该关键词
+_SHARE_BLOCK_RE = re.compile(
+    r"【(?:[^【】]|【[^】]*】)*?(?:小红书|抖音|B站|bilibili|哔哩哔哩)"
+    r"(?:[^【】]|【[^】]*】)*?】"
+)
 #: emoji 夹着的分享码（😆 6BATqBI2pevQVyh 😆）
 _SHARE_CODE_RE = re.compile(r"[😀-🙏]*\s*[A-Za-z0-9]{10,}\s*[😀-🙏]*")
 #: 行首孤立数字（小红书分享文本的条目号，如 "18 【…"——只在后面紧跟
@@ -200,6 +210,7 @@ class LinkDispatcher:
             "failed": [],
             "skipped": 0,
             "comments": {},
+            "duplicates": [],
         }
         for url in self._collect_urls(report):
             entry = state.get(url)
@@ -255,6 +266,25 @@ class LinkDispatcher:
     ) -> None:
         """处理单个链接：成功建笔记，失败计次数（3 次熔断）。"""
         entry = state.setdefault(url, {"attempts": 0})
+        # 同内容幂等（2026-09-15 实证：同一 BV 视频换短链重发被处理两遍，
+        # 重复下载 39MB+重复转写）：尽力解析内容 id 与已登记 video_id 比对，
+        # 命中直接跳过——不下载、不转写、不建卡；解析失败按无证据继续
+        # 正常处理（best-effort，不阻塞管线）
+        known_ids = {
+            str(item.get("video_id"))
+            for item in state.values()
+            if isinstance(item, dict)
+            and item.get("status") == "done"
+            and item.get("video_id")
+        }
+        probed_id = probe_video_id(url)
+        if probed_id and probed_id in known_ids:
+            entry["status"] = "done"
+            entry["video_id"] = probed_id
+            entry["duplicate"] = True
+            report["skipped"] += 1
+            report["duplicates"].append(url)
+            return
         entry["attempts"] += 1
         result = self._factory().process(url)
         entry["last_attempt"] = datetime.now(timezone.utc).isoformat()
@@ -317,6 +347,9 @@ class LinkDispatcher:
                 pass
             entry["status"] = "done"
             entry["note"] = filename
+            if doc_id:
+                # 登记内容 id 供同内容幂等（换短链重发时拦截）
+                entry["video_id"] = doc_id
             if comment:
                 entry["comment"] = comment
                 report["comments"][filename] = comment

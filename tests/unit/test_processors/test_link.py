@@ -582,11 +582,126 @@ def test_llm_skipped_too_long(fake_pipeline, monkeypatch):
         link_module.httpx, "post", lambda *a, **k: called.append(1) or None
     )
 
-    result = LinkProcessor({"llm": {"max_transcript_chars": 2}}).process(SHARE_TEXT)
+    result = LinkProcessor(
+        {"llm": {"max_transcript_chars": 2, "format_max_chars": 2}}
+    ).process(SHARE_TEXT)
 
     assert result.success, result.error
     assert result.metadata["llm"]["status"] == "skipped:too-long"
     assert not called
+
+
+def test_summarize_default_limit_raised_to_20000(fake_pipeline, monkeypatch):
+    """默认总结上限 20000（2026-09-15 由 6000 上调：B站长视频是常态，
+    6000 会把 B站通道的总结全部静默关掉）；6001 字照常总结，超 20000
+    才跳过。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        link_module.httpx, "post", lambda *a, **k: _FakeLLMResponse(_llm_payload())
+    )
+    proc = LinkProcessor()
+
+    summary, status = proc._summarize("字" * 6001)
+    assert status == "ok"
+    assert summary is not None
+
+    summary, status = proc._summarize("字" * 20001)
+    assert status == "skipped:too-long"
+    assert summary is None
+
+
+def test_format_transcript_keeps_own_limit(fake_pipeline, monkeypatch):
+    """转写整理保留独立护栏（默认 6000）：整理输出受 max_tokens 限制，
+    长文会截断——超出降级 Whisper 原稿，不影响总结（2026-09-15 拆分）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    proc = LinkProcessor()
+
+    _text, status = proc._format_transcript("字" * 6001)
+
+    assert status == "skipped:too-long"
+
+
+def test_llm_note_rendered_when_summary_skipped(fake_pipeline, monkeypatch):
+    """总结被护栏跳过时卡面必须标注原因（2026-09-15 裁决：不许静默
+    降级）；正常总结时不渲染该行。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+
+    skipped = LinkProcessor(
+        {"llm": {"max_transcript_chars": 2, "format_max_chars": 2}}
+    ).process(SHARE_TEXT)
+    assert skipped.success, skipped.error
+    assert "⚠️ 转写" in skipped.markdown
+    assert "自动总结上限" in skipped.markdown
+    assert "## 观点总结" not in skipped.markdown
+
+    monkeypatch.setattr(
+        link_module.httpx, "post", lambda *a, **k: _FakeLLMResponse(_llm_payload())
+    )
+    ok = LinkProcessor().process(SHARE_TEXT)
+    assert ok.success, ok.error
+    assert "自动总结上限" not in ok.markdown
+    assert "## 观点总结" in ok.markdown
+
+
+def test_llm_note_rendered_on_summarize_failure(fake_pipeline, monkeypatch):
+    """LLM 调用失败同样在卡面标注（不静默）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    payload = {"choices": [{"message": {"content": "这不是 JSON"}}]}
+    monkeypatch.setattr(
+        link_module.httpx, "post", lambda *a, **k: _FakeLLMResponse(payload)
+    )
+
+    result = LinkProcessor().process(SHARE_TEXT)
+
+    assert result.success, result.error
+    assert "⚠️ 自动总结失败" in result.markdown
+
+
+def test_probe_video_id_success(monkeypatch):
+    """元数据解析（不下载）返回平台内容 id；播放列表形态取第一集。"""
+
+    class _ProbeYDL:
+        def __init__(self, opts):
+            assert opts["skip_download"] is True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download=False):
+            assert download is False
+            return {"id": "BV1abc"}
+
+    class _ListYDL(_ProbeYDL):
+        def extract_info(self, url, download=False):
+            return {"entries": [{"id": "BV1first"}]}
+
+    monkeypatch.setattr(link_module.yt_dlp, "YoutubeDL", _ProbeYDL)
+    assert link_module.probe_video_id("https://b23.tv/xyz") == "BV1abc"
+    monkeypatch.setattr(link_module.yt_dlp, "YoutubeDL", _ListYDL)
+    assert link_module.probe_video_id("https://b23.tv/xyz") == "BV1first"
+
+
+def test_probe_video_id_failure_returns_none(monkeypatch):
+    """解析失败（不支持的平台/网络错误）→ None，不抛异常。"""
+
+    class _BoomYDL:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download=False):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(link_module.yt_dlp, "YoutubeDL", _BoomYDL)
+    assert link_module.probe_video_id("https://xhslink.cn/o/xyz") is None
 
 
 def test_llm_bad_json_degrades(fake_pipeline, monkeypatch):

@@ -372,6 +372,68 @@ def detect_platform(url: str) -> Optional[str]:
     return None
 
 
+def probe_video_id(url: str, timeout: float = 20.0) -> Optional[str]:
+    """尽力解析链接指向的平台内容 id（只取元数据，不下载），供同内容幂等。
+
+    同一视频的不同分享短链（b23.tv 按次生成）字符串不同，仅靠 URL 去重
+    拦不住（2026-09-15 实证：同一 BV 视频两个短链被处理两遍，重复下载
+    39MB + 重复转写）。任何解析失败返回 None——调用方按"查无此证"
+    继续正常处理，不阻塞管线。
+
+    Args:
+        url: 视频链接（短链亦可，yt-dlp 跟随跳转）。
+        timeout: 网络超时秒数。
+
+    Returns:
+        Optional[str]: 平台内容 id（如 BV 号）；失败为 None。
+    """
+    options: Dict[str, Any] = {
+        "quiet": True,
+        "no_warnings": True,
+        "socket_timeout": timeout,
+        "skip_download": True,
+        # B站多分 P 只认当前这一集（与下载同规）
+        "noplaylist": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception:  # noqa: BLE001 - 尽力而为，失败不阻塞
+        return None
+    if not isinstance(info, dict):
+        return None
+    entries = info.get("entries")
+    if isinstance(entries, list):  # 保险：播放列表形态取第一集
+        info = next((e for e in entries if isinstance(e, dict)), {})
+    vid = str(info.get("id") or "").strip()
+    return vid or None
+
+
+def _llm_skip_note(status: str, chars: int, limit: int) -> Optional[str]:
+    """LLM 总结未产出时的卡面说明（2026-09-15 裁决：不许静默降级）。
+
+    只标注 too-long / failed 两类；no-key 是配置态、空转写无内容可
+    总结，不噪音。
+
+    Args:
+        status: _summarize 的状态串（ok / skipped:* / failed:*）。
+        chars: 转写全文字符数。
+        limit: 总结护栏（max_transcript_chars）。
+
+    Returns:
+        Optional[str]: 卡面警示语；无需标注时返回 None。
+    """
+    if status == "skipped:too-long":
+        return (
+            f"⚠️ 转写 {chars} 字超出自动总结上限（{limit} 字），"
+            "本卡无观点总结与分类标签；需要时可调高 "
+            "processors.link.llm.max_transcript_chars。"
+        )
+    if status.startswith("failed:"):
+        return f"⚠️ 自动总结失败（{status}），本卡无观点总结与分类标签。"
+    return None
+
+
 def _parse_share_text(text: str) -> Tuple[str, str]:
     """从抖音分享文本解析 (标题, 作者)；解析失败返回空串。
 
@@ -503,7 +565,13 @@ class LinkProcessor(BaseProcessor):
         self.llm_api_key_env = str(llm_cfg.get("api_key_env", "DEEPSEEK_API_KEY"))
         self.llm_max_tokens = int(llm_cfg.get("max_tokens", 2500))
         self.llm_timeout = float(llm_cfg.get("timeout", 60))
-        self.llm_max_chars = int(llm_cfg.get("max_transcript_chars", 6000))
+        # 总结护栏默认 20000 字（约 2 小时视频；2026-09-15 由 6000 上调——
+        # B站长视频是常态，6000 会把 B站通道的总结全部静默关掉；DeepSeek
+        # 总结一次约一分钱，成本可忽略）
+        self.llm_max_chars = int(llm_cfg.get("max_transcript_chars", 20000))
+        # 转写整理单独护栏：整理输出受模型 max_tokens 限制，长文会截断，
+        # 超出降级为 Whisper 原稿（已有分段标点，可读），不影响总结
+        self.llm_format_max_chars = int(llm_cfg.get("format_max_chars", 6000))
         self.llm_format_max_tokens = int(llm_cfg.get("format_max_tokens", 8000))
 
     def process(self, input_path: Union[str, Path]) -> ProcessResult:
@@ -546,6 +614,7 @@ class LinkProcessor(BaseProcessor):
                 _T2S.convert(video_result.text).strip()
             )
             summary, llm_status = self._summarize(transcript_text)
+            llm_note = _llm_skip_note(llm_status, len(transcript_text), self.llm_max_chars)
             # 平台占位标题（「Douyin video #id」）换 LLM 语义标题——须在
             # _preserve_video/_transcript_rel 之前（附件主名随标题定）
             title = _semantic_title(title, summary)
@@ -570,6 +639,7 @@ class LinkProcessor(BaseProcessor):
                 video_rel=video_rel,
                 transcript_rel=transcript_rel,
                 transcription_confidence=video_result.confidence,
+                llm_note=llm_note,
             )
             metadata = {
                 "engine": "yt-dlp+whisper",
@@ -633,6 +703,7 @@ class LinkProcessor(BaseProcessor):
             ocr_text = "\n\n".join(ocr_parts)
             full_text = desc + (f"\n\n图片里的文字：\n\n{ocr_text}" if ocr_text else "")
             summary, llm_status = self._summarize(full_text)
+            llm_note = _llm_skip_note(llm_status, len(full_text), self.llm_max_chars)
             title = _semantic_title(title, summary)  # 空标题用 LLM 语义标题兜底
             metadata["title"] = title
             body = self._compose_body(full_text, raw_body=True)
@@ -650,6 +721,7 @@ class LinkProcessor(BaseProcessor):
                 body_label="笔记正文",
                 transcript_rel=transcript_rel,
                 image_rels=image_rels,
+                llm_note=llm_note,
             )
             metadata["engine"] = "xhs-page"
             metadata["llm"] = {"status": llm_status, "model": self.llm_model}
@@ -675,6 +747,7 @@ class LinkProcessor(BaseProcessor):
             _T2S.convert(video_result.text).strip()
         )
         summary, llm_status = self._summarize(transcript_text)
+        llm_note = _llm_skip_note(llm_status, len(transcript_text), self.llm_max_chars)
         title = _semantic_title(title, summary)  # 空标题用 LLM 语义标题兜底
         metadata["title"] = title
         formatted, fmt_status = self._format_transcript(transcript_text)
@@ -697,6 +770,7 @@ class LinkProcessor(BaseProcessor):
             video_rel=video_rel,
             transcript_rel=transcript_rel,
             transcription_confidence=video_result.confidence,
+            llm_note=llm_note,
         )
         metadata["engine"] = "xhs-page+whisper"
         metadata["model"] = self.model
@@ -1130,7 +1204,9 @@ class LinkProcessor(BaseProcessor):
     def _format_transcript(self, transcript: str) -> Tuple[Optional[str], str]:
         """调 LLM 把口语转写整理为分段书面文本；失败/跳过返回 (None, 状态)。
 
-        跳过条件与 _summarize 相同。整理指令要求逐字保留内容、只分段补
+        跳过条件：API key 环境变量未设置、转写为空、转写超过
+        format_max_chars（整理输出受 max_tokens 限制，长文会截断；
+        与总结的护栏分开，2026-09-15 拆分）。整理指令要求逐字保留内容、只分段补
         标点；返回为空或不足原文一半（疑似被改写成摘要）视为失败，降级
         为机械分段，绝不阻塞管线。
 
@@ -1144,7 +1220,7 @@ class LinkProcessor(BaseProcessor):
             return None, f"skipped:no-{self.llm_api_key_env}"
         if not transcript:
             return None, "skipped:empty-transcript"
-        if len(transcript) > self.llm_max_chars:
+        if len(transcript) > self.llm_format_max_chars:
             return None, "skipped:too-long"
         prompt = (
             "以下是一段语音转写的原始文字（无标点、无分段）。"
@@ -1202,6 +1278,7 @@ class LinkProcessor(BaseProcessor):
         transcript_rel: Optional[str] = None,
         transcription_confidence: float = 0.0,
         image_rels: Optional[List[str]] = None,
+        llm_note: Optional[str] = None,
     ) -> str:
         """组装最终卡 Markdown：标题 + 来源行 +（可选）内嵌原视频 + 摘要各节 + 正文。
 
@@ -1223,6 +1300,8 @@ class LinkProcessor(BaseProcessor):
             下方内嵌 ``![[...]]``（Obsidian 内可直接播放）。
             transcript_rel: 全文外置的库内相对路径（2026-09-12 方案 B）；
             提供时正文不进卡，只留 ``## 全文`` 链接节。
+            llm_note: 总结被跳过/失败时的卡面说明（_llm_skip_note 的产物，
+            2026-09-15 裁决：不许静默降级）；None 不渲染。
 
         Returns:
             str: 完整 Markdown。
@@ -1262,6 +1341,9 @@ class LinkProcessor(BaseProcessor):
                 "关键处建议回放原视频核对。",
                 "",
             ]
+        if llm_note:
+            # 总结被跳过/失败必须明示（2026-09-15 裁决：不许静默降级）
+            sections += [f"> {llm_note}", ""]
         if video_rel:
             sections += [f"![[{video_rel}]]", ""]
         if image_rels:

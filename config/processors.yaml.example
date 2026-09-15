@@ -61,7 +61,12 @@ processors:
       max_tokens: 2500                # v4 元数据 JSON 的输出上限（原 800
                                       # 放不下 250 字摘要+全量分观点+金句等）
       timeout: 60
-      max_transcript_chars: 6000      # 成本护栏：转写超过此长度跳过摘要与整理（约 10 分钟视频）
+      max_transcript_chars: 20000     # 总结护栏：转写超过此长度跳过观点总结/分类
+                                      #（约 2 小时视频；2026-09-15 由 6000 上调——
+                                      # B站长视频是常态，DeepSeek 总结一次约一分钱；
+                                      # 跳过时卡面会标注原因，不静默）
+      format_max_chars: 6000          # 转写整理护栏：超过则保留 Whisper 原稿
+                                      #（整理输出受模型 max_tokens 限制，长文易截断）
       format_max_tokens: 8000         # 转写整理的输出上限（需容纳整理后全文）
 
   highlights:           # 划重点清单（书籍/长文 PDF → 可勾选候选清单，

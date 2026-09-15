@@ -48,6 +48,12 @@ def _reset_fake():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _no_probe_network(monkeypatch):
+    """单测不触网：同内容查重的元数据解析默认查无此证（None）。"""
+    monkeypatch.setattr(links_module, "probe_video_id", lambda url: None)
+
+
 def _dispatcher(tree):
     return LinkDispatcher(tree, processor_factory=_FakeLinkProcessor)
 
@@ -642,6 +648,82 @@ def test_numeric_leading_comment_kept(memory_tree):
 
     body = f"{DOUYIN_URL} 3 点感悟都适用"
     assert extract_comment(body, DOUYIN_URL) == "3 点感悟都适用"
+
+
+def test_bilibili_nested_share_block_stripped():
+    """B站分享模板的嵌套方括号块整块剥掉（2026-09-15 真实样本：
+    【【系列】标题-哔哩哔哩】——关键词写作"哔哩哔哩"且括号嵌套，
+    旧正则既不认这个词也跨不过内层 】）。"""
+    from scripts.dispatch.links import extract_comment
+
+    url = "https://b23.tv/z9jwrj8"
+    body = (
+        f"- 08:39 【【DFMEA案例分享】DFMEA中的客户需求识别与分解-上-哔哩哔哩】"
+        f" {url}  dfmea"
+    )
+    assert extract_comment(body, url) == "dfmea"
+
+
+def test_bilibili_simple_share_block_stripped():
+    """B站单层模板同样剥掉；真评论里的书名号/方括号观感词不误伤。"""
+    from scripts.dispatch.links import extract_comment
+
+    url = "https://b23.tv/abc123"
+    assert (
+        extract_comment(f"【认知科学入门-哔哩哔哩】 {url} 值得二刷", url)
+        == "值得二刷"
+    )
+    assert extract_comment(f"{url} 想看《心理学与生活》", url) == "想看《心理学与生活》"
+
+
+def test_video_id_registered_on_success(memory_tree):
+    """处理成功后 state 登记 video_id（同内容幂等的比对依据）。"""
+    memory_tree.create_note("daily.md", f"学习 {DOUYIN_URL}", source="test")
+
+    _dispatcher(memory_tree).run()
+
+    state = json.loads((memory_tree.state_dir / "processed_links.json").read_text())
+    assert state[DOUYIN_URL]["video_id"] == "vid123"
+
+
+def test_same_video_new_shortlink_skipped(memory_tree, monkeypatch):
+    """同一视频换短链重发：命中已登记 video_id → 跳过，不下载不转写
+    不建卡（2026-09-15 实证：同一 BV 视频两个 b23 短链被处理两遍，
+    重复下载 39MB+重复转写）。"""
+    monkeypatch.setattr(links_module, "probe_video_id", lambda url: "vid123")
+    memory_tree.create_note("daily.md", f"学习 {DOUYIN_URL}", source="test")
+    first = _dispatcher(memory_tree).run()
+    assert first["created"] == ["douyin-vid123.md"]
+
+    other = "https://v.douyin.com/anotherShare/"
+    memory_tree.create_note("daily2.md", f"再看 {other}", source="test")
+    _FakeLinkProcessor.calls = []
+    report = _dispatcher(memory_tree).run()
+
+    assert report["duplicates"] == [other]
+    assert report["created"] == []
+    assert not _FakeLinkProcessor.calls  # 处理器根本没被调用
+    state = json.loads((memory_tree.state_dir / "processed_links.json").read_text())
+    assert state[other]["status"] == "done"
+    assert state[other]["duplicate"] is True
+    assert state[other]["video_id"] == "vid123"
+
+
+def test_different_video_processes_normally(memory_tree, monkeypatch):
+    """内容 id 不同（或解析不到）→ 查重不拦，照常处理。"""
+    memory_tree.create_note("daily.md", f"学习 {DOUYIN_URL}", source="test")
+    _dispatcher(memory_tree).run()
+
+    other = "https://v.douyin.com/anotherShare/"
+    monkeypatch.setattr(links_module, "probe_video_id", lambda url: "vid999")
+    memory_tree.create_note("daily2.md", f"再看 {other}", source="test")
+    _FakeLinkProcessor.calls = []
+    report = _dispatcher(memory_tree).run()
+
+    assert _FakeLinkProcessor.calls == [other]
+    assert report["duplicates"] == []
+    state = json.loads((memory_tree.state_dir / "processed_links.json").read_text())
+    assert state[other]["status"] == "done"
 
 
 def test_image_blobs_saved_to_attachments(memory_tree):
