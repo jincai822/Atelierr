@@ -768,20 +768,45 @@ def test_audio_card_summarize_failure_annotated(memory_tree):
     assert "## 观点总结" not in post.content
 
 
-def test_screenshot_card_not_summarized(memory_tree):
-    """截图卡不走总结（OCR 全文即内容），总结函数不被调用。"""
-    called = []
+def test_screenshot_card_summarized(memory_tree):
+    """截图同权总结（2026-09-15 裁决 B 扩展：OCR 全文即内容本体）：
+    卡面带观点总结，tags 追加中图法+主题词。"""
 
-    def _spy_summarize(text):
-        called.append(text)
+    def _fake_summarize(text):
+        assert text == "OCR 识别文本"
         return _summary_dict(), "ok"
 
     _add_attachment(memory_tree, "IMG_009.png", subdir="媒体")
     dispatcher = MediaDispatcher(
-        memory_tree, image_factory=_FakeImageProcessor, summarize_fn=_spy_summarize
+        memory_tree, image_factory=_FakeImageProcessor, summarize_fn=_fake_summarize
     )
     dispatcher.run()
 
-    assert not called
     note = _created_note(memory_tree)
-    assert "## 观点总结" not in note.read_text(encoding="utf-8")
+    post = frontmatter.loads(note.read_text(encoding="utf-8"))
+    assert post["tags"] == ["待确认", "截图", "B84-心理学", "认知负荷"]
+    assert "## 观点总结" in post.content
+
+
+def test_batch_card_summarized(memory_tree):
+    """图集卡以分页 OCR 汇总参与总结：摘要节进卡、tags 追加分类。"""
+    seen = []
+
+    def _fake_summarize(text):
+        seen.append(text)
+        return _summary_dict(), "ok"
+
+    _add_feishu_image(memory_tree, "20260915-104900", "aaaa01")
+    _add_feishu_image(memory_tree, "20260915-104905", "aaaa02")
+    dispatcher = MediaDispatcher(
+        memory_tree, image_factory=_FakeImageProcessor, summarize_fn=_fake_summarize
+    )
+    report = dispatcher.run()
+
+    assert len(report["created"]) == 1
+    note = _created_note(memory_tree)
+    post = frontmatter.loads(note.read_text(encoding="utf-8"))
+    assert post["tags"] == ["待确认", "截图", "B84-心理学", "认知负荷"]
+    assert "## 观点总结" in post.content
+    # 总结输入是分页 OCR 汇总（含页码标记）
+    assert seen and "—— 第 1 页 ——" in seen[0] and "—— 第 2 页 ——" in seen[0]
