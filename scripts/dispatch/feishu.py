@@ -292,6 +292,12 @@ class FeishuBridge:
                     content,
                     chat_id=str(getattr(message, "chat_id", "") or "") or None,
                 )
+            elif msg_type == "post":
+                self._receive_post(
+                    message_id,
+                    content,
+                    chat_id=str(getattr(message, "chat_id", "") or "") or None,
+                )
         finally:
             self._mark_seen(message_id)
 
@@ -1601,6 +1607,80 @@ class FeishuBridge:
             fh.write(f"{sep}{entry}\n")
         self.tree.on_note_accessed(diary)
         return diary
+
+    def _receive_post(
+        self, message_id: str, content: Dict[str, Any], chat_id: Optional[str] = None
+    ) -> None:
+        """图文混排消息（msg_type=post）：文字抽出并入日记（含链接照常进
+        链接管线），内嵌图片逐张下载进 attachments/媒体/（与单图同路）。
+
+        2026-09-15 评审 P0：post 类型此前被静默吞掉——不报错、不记录、
+        不处理。下载失败的配图在日记行尾注明，并在会话里回执，不静默。
+        """
+        text, images = self._post_text_and_images(content)
+        failed = 0
+        for key in images:
+            blob = self._download_resource(message_id, key, "image")
+            if blob is None:
+                failed += 1
+                continue
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+            suffix = hashlib.sha1(f"{message_id}:{key}".encode("utf-8")).hexdigest()[:6]
+            target = (
+                self.tree.attachments_dir / MEDIA_SUBDIR / f"feishu-{stamp}-{suffix}.png"
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self._atomic_write(target, blob)
+        if text:
+            if failed:
+                text += f"（{failed} 张配图下载失败）"
+            self._receive_text(message_id, text, chat_id=chat_id)
+        elif images:
+            self._add_reaction(message_id)  # 纯图 post：图已存，给回执
+        if failed:
+            self._send_feedback(chat_id, f"⚠️ 图文消息里 {failed} 张配图下载失败")
+
+    @staticmethod
+    def _post_text_and_images(content: Dict[str, Any]) -> Tuple[str, List[str]]:
+        """从 post 消息 content 提取纯文本与内嵌图片 image_key 列表。
+
+        post 结构：``{"title": str, "content": [[{"tag": "text"/"a"/"at"/
+        "img", ...}]]}``；兼容本地化包装（zh_cn/en_us）。链接段展开为
+        ``文字 URL`` 两段俱全（链接管线扫日记正文能抓到）。
+        """
+        body = content
+        if "content" not in body:
+            for locale in ("zh_cn", "en_us", "ja_jp"):
+                if isinstance(body.get(locale), dict):
+                    body = body[locale]
+                    break
+        texts: List[str] = []
+        images: List[str] = []
+        title = str(body.get("title") or "").strip()
+        if title:
+            texts.append(title)
+        for row in body.get("content") or []:
+            if not isinstance(row, list):
+                continue
+            parts: List[str] = []
+            for seg in row:
+                if not isinstance(seg, dict):
+                    continue
+                tag = seg.get("tag")
+                if tag == "text":
+                    parts.append(str(seg.get("text") or ""))
+                elif tag == "a":
+                    label = str(seg.get("text") or "").strip()
+                    href = str(seg.get("href") or "").strip()
+                    parts.append(f"{label} {href}".strip())
+                elif tag in ("img", "image"):
+                    key = str(seg.get("image_key") or "").strip()
+                    if key:
+                        images.append(key)
+            line = "".join(parts).strip()
+            if line:
+                texts.append(line)
+        return "\n".join(texts).strip(), images
 
     def _receive_resource(
         self,

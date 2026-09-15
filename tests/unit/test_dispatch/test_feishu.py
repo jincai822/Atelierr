@@ -2328,3 +2328,51 @@ def test_todo_batch_card_shape_and_done_rebuild(memory_tree, monkeypatch):
     assert "任务乙" in rebuilt_text and "任务甲" not in rebuilt_text
     # 完成的待办已收进 待办/（与归档规则闭环）
     assert (memory_tree.notes_dir / "待办" / "todo-a.md").exists()
+
+
+def test_post_message_text_and_images_captured(memory_tree, monkeypatch):
+    """图文混排（post）不再静默吞：文字进日记（链接段展开 URL 供链接
+    管线捡），内嵌图逐张存 attachments/媒体/；下载失败的图在日记注明。"""
+    bridge = _bridge(memory_tree)
+    monkeypatch.setattr(
+        bridge,
+        "_download_resource",
+        lambda mid, key, mtype: b"img-bytes" if key == "img_k1" else None,
+    )
+    content = {
+        "title": "这篇文章不错",
+        "content": [
+            [
+                {"tag": "text", "text": "看这个："},
+                {"tag": "a", "text": "链接", "href": "https://v.douyin.com/abc/"},
+            ],
+            [
+                {"tag": "img", "image_key": "img_k1"},
+                {"tag": "img", "image_key": "img_k2"},
+            ],
+        ],
+    }
+
+    bridge.handle_event(_event("mp1", "post", content))
+
+    diary = (memory_tree.notes_dir / f"{_today()}.md").read_text(encoding="utf-8")
+    assert "这篇文章不错" in diary
+    assert "https://v.douyin.com/abc/" in diary
+    assert "1 张配图下载失败" in diary
+    saved = list((memory_tree.attachments_dir / "媒体").glob("feishu-*.png"))
+    assert len(saved) == 1  # img_k1 存下，img_k2 失败
+
+
+def test_post_locale_wrapper_pure_images(memory_tree, monkeypatch):
+    """post 本地化包装（zh_cn）兼容；纯图 post 不写日记、图照存、给回执。"""
+    bridge = _bridge(memory_tree)
+    monkeypatch.setattr(bridge, "_download_resource", lambda *a: b"img")
+    reactions = []
+    monkeypatch.setattr(bridge, "_add_reaction", lambda mid: reactions.append(mid))
+    content = {"zh_cn": {"title": "", "content": [[{"tag": "img", "image_key": "k9"}]]}}
+
+    bridge.handle_event(_event("mp2", "post", content))
+
+    assert not list(memory_tree.notes_dir.glob(f"{_today()}.md"))
+    assert len(list((memory_tree.attachments_dir / "媒体").glob("feishu-*.png"))) == 1
+    assert reactions == ["mp2"]

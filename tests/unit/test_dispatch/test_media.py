@@ -810,3 +810,51 @@ def test_batch_card_summarized(memory_tree):
     assert "## 观点总结" in post.content
     # 总结输入是分页 OCR 汇总（含页码标记）
     assert seen and "—— 第 1 页 ——" in seen[0] and "—— 第 2 页 ——" in seen[0]
+
+
+def test_semantic_title_from_summary(memory_tree, monkeypatch):
+    """有总结时 H1/frontmatter title 语义化（kind-主题，2026-09-15 P1）；
+    文件名保持哈希不动（幂等锚点）。"""
+    monkeypatch.setattr(media_module, "compress_to_480p", _fake_compress_ok)
+
+    def _fake_summarize(text):
+        s = _summary_dict()
+        s["title"] = "避开低杠杆的机会"
+        return s, "ok"
+
+    _add_attachment(memory_tree, "clip.mp4", subdir="媒体")
+    dispatcher = MediaDispatcher(
+        memory_tree, video_factory=_FakeVideoProcessor, summarize_fn=_fake_summarize
+    )
+    dispatcher.run()
+
+    note = _created_note(memory_tree)
+    post = frontmatter.loads(note.read_text(encoding="utf-8"))
+    assert post["title"] == "视频-避开低杠杆的机会"
+    assert "# 视频-避开低杠杆的机会" in post.content
+    assert note.name.startswith("media-")
+
+
+def test_diary_comment_attached_to_media_card(memory_tree, monkeypatch):
+    """发媒体前后窗口内的日记人话附着为卡的评论；含链接行与超窗行不附着。"""
+    monkeypatch.setattr(media_module, "compress_to_480p", _fake_compress_ok)
+    now = time.time()
+    near = time.strftime("%H:%M", time.localtime(now - 60))
+    far = time.strftime("%H:%M", time.localtime(now - 3600))
+    memory_tree.create_note(
+        f"{time.strftime('%Y-%m-%d')}.md",
+        f"- {far} 早上的旧想法\n- {near} 这个视频讲得透\n"
+        f"- {near} https://v.douyin.com/x/ 链接行不算\n",
+        source="test",
+    )
+    _add_attachment(memory_tree, "clip.mp4", age_seconds=120, subdir="媒体")
+    dispatcher = MediaDispatcher(
+        memory_tree,
+        video_factory=_FakeVideoProcessor,
+        summarize_fn=lambda t: (None, "skipped:test"),
+    )
+    dispatcher.run()
+
+    note = _created_note(memory_tree)
+    post = frontmatter.loads(note.read_text(encoding="utf-8"))
+    assert "> 💬 我的评论：这个视频讲得透" in post.content

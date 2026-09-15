@@ -563,3 +563,19 @@ def test_notify_todos_batches_multiple(memory_tree, monkeypatch):
     sent.clear()
     cli_module._notify_todos(["todo-a.md"], memory_tree)
     assert sent == [("single", "todo-a.md")]
+
+
+def test_prompt_carries_today_for_due_dates(memory_tree, llm_ok):
+    """提示词注入当天日期（2026-09-15 实证：没基准日"明天"推算不出，
+    due 必丢空）；LLM 返回的 due 渲染为 📅 行。"""
+    from datetime import datetime as _dt
+
+    memory_tree.create_note("daily2.md", "明天 把 B 站 dfmea 看完", source="test")
+
+    report = TodoDispatcher(memory_tree).run()
+
+    assert llm_ok, "LLM 未被调用"
+    today = _dt.now().astimezone().strftime("%Y-%m-%d")
+    assert f"今天日期 {today}" in llm_ok[0]
+    created = _read_note(memory_tree, report["created"][0])
+    assert "📅 2026-09-05" in created.content

@@ -61,6 +61,7 @@ media 在同一 service 内串行（flock 互斥），不会插队。转写成�
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -73,6 +74,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import frontmatter
 
 from scripts.dispatch.highlights import CHECKLIST_SOURCE, ITEM_TAG
+from scripts.dispatch.links import (
+    _BACKLINK_RE,
+    _BOILERPLATE_RE,
+    _POINTER_WORDS,
+    _TIME_PREFIX_RE,
+)
 from scripts.utils.file_utils import write_text_skip_existing
 from scripts.utils.state_store import read_json, write_json
 from scripts.dispatch.sysdir import SYSTEM_DIRNAME, write_machine_note
@@ -83,7 +90,12 @@ from scripts.processors.base import INLINE_BODY_MAX
 from scripts.processors.highlights import HighlightsProcessor
 from scripts.processors.image import SUPPORTED_EXTENSIONS as IMAGE_EXTS
 from scripts.processors.image import ImageProcessor
-from scripts.processors.link import LinkProcessor, _llm_skip_note
+from scripts.processors.link import (
+    URL_RE,
+    LinkProcessor,
+    _llm_skip_note,
+    _sanitize_title,
+)
 from scripts.processors.video import SUPPORTED_EXTENSIONS as VIDEO_EXTS
 from scripts.processors.video import VideoProcessor, compress_to_480p
 
@@ -137,6 +149,24 @@ _IMAGE_BATCH_SECONDS = 60
 
 #: 飞书入站附件的文件名时间戳（feishu-YYYYMMDD-HHMMSS-<hash>.<ext>，UTC）
 _FEISHU_NAME_RE = re.compile(r"^feishu-(\d{8}-\d{6})-")
+
+#: 媒体卡的评论附着窗口（2026-09-15 评审 P1）：到达时刻前后该秒数内的
+#: 日记文字行视为对这条媒体的评论（人常先发媒体再补一句人话；含链接的
+#: 行跳过——那是链接管线的评论，各有各的家）
+_COMMENT_WINDOW_SECONDS = 180
+
+
+def _semantic_h1(
+    kind: str, stamp: str, summary: Optional[Dict[str, Any]]
+) -> Tuple[str, str]:
+    """有总结时给语义 H1（kind-主题）与 frontmatter title 块；无则旧形态
+    （kind + 时间戳）与空块。2026-09-15 评审 P1：哈希名一个月后认不出
+    是什么；文件名保持不动（幂等锚点），显示层语义化。"""
+    sem = _sanitize_title(str(summary.get("title") or "")) if summary else ""
+    if not sem:
+        return f"{kind} {stamp}", ""
+    h1 = f"{kind}-{sem}"
+    return h1, f"---\ntitle: {json.dumps(h1, ensure_ascii=False)}\n---\n\n"
 
 
 def _summary_sections(summary: Optional[Dict[str, Any]]) -> str:
@@ -443,11 +473,17 @@ class MediaDispatcher:
         ocr_text = "\n\n".join(
             f"—— 第 {idx} 页 ——\n\n{text}" for idx, text in ocr_parts
         )
-        # 图集同权总结（2026-09-15 裁决 B 扩展：OCR 汇总即内容本体）
+        # 图集同权总结（2026-09-15 裁决 B 扩展：OCR 汇总即内容本体）；
+        # 评论附着用末张图的到达时刻（人常发完图再补一句人话）
         summary, llm_status, llm_limit = self._summarize_transcript(ocr_text)
         llm_note = _llm_skip_note(llm_status, len(ocr_text), llm_limit)
         body = self._build_batch_note(
-            paths, ocr_parts, Path(filename).stem, summary=summary, llm_note=llm_note
+            paths,
+            ocr_parts,
+            Path(filename).stem,
+            summary=summary,
+            llm_note=llm_note,
+            comment=self._diary_comment_near(self._arrival_ts(paths[-1])),
         )
         tags = [REVIEW_TAG, "截图"]
         if summary:
@@ -489,9 +525,10 @@ class MediaDispatcher:
         note_stem: str,
         summary: Optional[Dict[str, Any]] = None,
         llm_note: Optional[str] = None,
+        comment: str = "",
     ) -> str:
-        """图集卡正文：逐张内嵌原件（Obsidian 可翻看）+ （可选）摘要各节
-        + 分页 OCR 全文。
+        """图集卡正文：语义标题（有总结时）+ 评论行 + 逐张内嵌原件
+        （Obsidian 可翻看）+ （可选）摘要各节 + 分页 OCR 全文。
 
         与单图卡同规（方案 B）：OCR 汇总 >INLINE_BODY_MAX 时外置
         ``attachments/媒体/<同名>.md``，卡上只留「## 全文」链接节；
@@ -505,8 +542,10 @@ class MediaDispatcher:
             f"—— 第 {idx} 页 ——\n\n{text}" for idx, text in ocr_parts
         )
         warn = f"> {llm_note}\n\n" if llm_note else ""
+        h1, fm = _semantic_h1("图集", stamp, summary)
+        comment_md = f"> 💬 我的评论：{comment}\n\n" if comment else ""
         head = (
-            f"# 图集 {stamp}（{len(paths)} 张）\n\n{embeds}\n\n"
+            f"{fm}# {h1}（{len(paths)} 张）\n\n{comment_md}{embeds}\n\n"
             f"{warn}{_summary_sections(summary)}"
         )
         if len(ocr_text) > INLINE_BODY_MAX:
@@ -534,6 +573,44 @@ class MediaDispatcher:
             self._link = LinkProcessor()
         summary, status = self._link.summarize_transcript(text)
         return summary, status, self._link.llm_max_chars
+
+    def _diary_comment_near(self, ts: float) -> str:
+        """取到达时刻前后窗口内的日记人话，作媒体卡的评论（无则空串）。
+
+        2026-09-15 评审 P1：发图/发视频配的文字说明此前进不了卡（评论
+        注入只在链接管线）。只读日记绝不改写；含链接的行跳过（链接管线
+        的评论各有各的家）；时间前缀/机器回链/平台样板照常剥掉。窗口内
+        取时间上最近的一条；误粘风险（窗口内无关文字）接受并人工可见。
+        """
+        day = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+        diary = Path(self.tree.notes_dir) / f"{day}.md"
+        if not diary.is_file():
+            return ""
+        try:
+            body = diary.read_text(encoding="utf-8")
+        except OSError:
+            return ""
+        best = ""
+        best_diff = float("inf")
+        for line in body.splitlines():
+            match = re.match(r"^[-*\s]*(\d{1,2}):(\d{2})", line)
+            if not match:
+                continue
+            hh, mm = int(match.group(1)), int(match.group(2))
+            line_dt = datetime.fromtimestamp(ts).replace(
+                hour=hh, minute=mm, second=0, microsecond=0
+            )
+            diff = abs(line_dt.timestamp() - ts)
+            if diff > _COMMENT_WINDOW_SECONDS or diff >= best_diff:
+                continue
+            if URL_RE.search(line) or _BOILERPLATE_RE.search(line):
+                continue
+            text = _BACKLINK_RE.sub("", URL_RE.sub("", line))
+            text = _TIME_PREFIX_RE.sub("", text).strip(" \t，。：:;；")
+            if len(text) < 2 or text in _POINTER_WORDS:
+                continue
+            best, best_diff = text, diff
+        return best
 
     def _process_one(
         self, path: Path, state: Dict[str, Any], report: Dict[str, Any]
@@ -599,6 +676,7 @@ class MediaDispatcher:
                 getattr(result, "confidence", 0.0),
                 summary=summary,
                 llm_note=llm_note,
+                comment=self._diary_comment_near(self._arrival_ts(path)),
             )
             source, tags = "media", [REVIEW_TAG, kind]
             if summary:
@@ -803,9 +881,10 @@ class MediaDispatcher:
         confidence: float = 0.0,
         summary: Optional[Dict[str, Any]] = None,
         llm_note: Optional[str] = None,
+        comment: str = "",
     ) -> str:
-        """组装卡正文：内嵌原附件 + （可选）摘要各节 + 提取全文（短内联，
-        长外置留链接节）。
+        """组装卡正文：语义标题（有总结时）+ 评论行 + 内嵌原附件 +
+        （可选）摘要各节 + 提取全文（短内联，长外置留链接节）。
 
         方案 B（2026-09-12 用户裁决）：全文 >INLINE_BODY_MAX 时原子写入
         ``attachments/媒体/<笔记同名>.md``（同名跳过幂等；实现与链接
@@ -815,6 +894,9 @@ class MediaDispatcher:
         评审裁决：同音错字靠这层信号 + 人工回放兜底）。
         摘要节与链接管线同序（观点总结/分观点/金句/实体，2026-09-15
         裁决 B）；总结被跳过/失败时 llm_note 警示行不缺席。
+        2026-09-15 评审 P1：有总结时 H1/frontmatter title 用语义标题
+        （kind-主题；文件名保持哈希不动——幂等锚点），评论附着见
+        _diary_comment_near。
         """
         stamp = datetime.fromtimestamp(path.stat().st_mtime).strftime(
             "%Y-%m-%d %H:%M"
@@ -830,28 +912,20 @@ class MediaDispatcher:
         if llm_note:
             warn += f"> {llm_note}\n\n"
         summary_md = _summary_sections(summary)
+        h1, fm = _semantic_h1(kind, stamp, summary)
+        comment_md = f"> 💬 我的评论：{comment}\n\n" if comment else ""
+        head = (
+            f"{fm}# {h1}\n\n{comment_md}![[{self._key(path)}]]\n\n"
+            f"{warn}{summary_md}"
+        )
         if len(body) > INLINE_BODY_MAX:
             rel = f"{ATTACHMENTS_DIR}/{MEDIA_SUBDIR}/{note_stem}.md"
             target = self.tree.attachments_dir.parent / rel
             wrote = write_text_skip_existing(target, body)
             if wrote or target.exists():
-                return (
-                    f"# {kind} {stamp}\n\n"
-                    f"![[{self._key(path)}]]\n\n"
-                    f"{warn}"
-                    f"{summary_md}"
-                    f"## 全文\n\n"
-                    f"[[{rel}|查看{section}]]\n"
-                )
+                return f"{head}## 全文\n\n[[{rel}|查看{section}]]\n"
             logger.warning("全文落盘失败，降级为卡内联: %s", target)
-        return (
-            f"# {kind} {stamp}\n\n"
-            f"![[{self._key(path)}]]\n\n"
-            f"{warn}"
-            f"{summary_md}"
-            f"## {section}\n\n"
-            f"{body}\n"
-        )
+        return f"{head}## {section}\n\n{body}\n"
 
     def _load_state(self) -> Dict[str, Any]:
         """加载附件处理状态；文件缺失/损坏返回空表（不抛异常）。"""
