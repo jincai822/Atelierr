@@ -594,3 +594,17 @@ def test_comment_echo_line_stripped_from_llm_input():
     out = _llm_input(body, "media")
     assert "明天把 DFMEA 看完" not in out
     assert "正文还在" in out
+
+
+def test_completed_todo_archive_not_rescanned(memory_tree):
+    """待办/ 目录（已完成待办的归宿）不再扫描：摘掉待办标签的完成笔记
+    里的任务行不重生（2026-09-15 实证：点 ✅ 完成后被显式通道重生）。"""
+    done_dir = memory_tree.notes_dir / "待办"
+    done_dir.mkdir()
+    (done_dir / "todo-x.md").write_text(
+        "---\ntags: []\n---\n- [ ] 看完某视频 📅 2026-09-16\n", encoding="utf-8"
+    )
+
+    report = TodoDispatcher(memory_tree).run()
+
+    assert report["created"] == []

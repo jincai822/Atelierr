@@ -288,6 +288,12 @@ class TodoDispatcher:
         if self.tree.is_pending_delete(note_path):
             report["skipped"] += 1
             return
+        if self.tree._rel_key(note_path).startswith(f"{TODO_TAG}/"):
+            # 已完成待办的归宿目录：_todo_done 摘标签后收进 待办/，防自循环
+            # 的标签规则在那里失效，只能靠路径兜底（2026-09-15 实证：完成的
+            # 待办被显式通道重生，还自产自销出自我引用卡）
+            report["skipped"] += 1
+            return
         try:
             post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
