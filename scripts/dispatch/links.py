@@ -98,6 +98,10 @@ _SHARE_CODE_RE = re.compile(r"[😀-🙏]*\s*[A-Za-z0-9]{10,}\s*[😀-🙏]*")
 #: 行首孤立数字（小红书分享文本的条目号，如 "18 【…"——只在后面紧跟
 #: 方括号块或 emoji 时剥，用户以数字开头的真评论（"3 点感悟"）不动）
 _LEADING_NUM_RE = re.compile(r"^\d+\s+(?=【|[😀-🙏])")
+#: 机器回链注释（`` → [[产出卡]]``，_annotate_source 的产物）：重跑/换短链
+#: 重发时同一行再进评论提取，回链不是用户文字必须剥掉（2026-09-15 实证：
+#: 清登记重跑后「我的评论」被回链污染成 → [[卡名]]）
+_BACKLINK_RE = re.compile(r"→\s*\[\[[^\[\]]*\]\]")
 
 #: 日记文件名（2026-09-12.md）：链接回链只追加在日记行尾——其他笔记
 #: 机器绝不改写（红线），日记追加已有用户批准先例（飞书文字并入）
@@ -133,6 +137,7 @@ def extract_comment(body: str, url: str) -> str:
         text = _LEADING_NUM_RE.sub("", text)
         text = _SHARE_BLOCK_RE.sub("", text)
         text = _SHARE_CODE_RE.sub("", text)
+        text = _BACKLINK_RE.sub("", text)
         text = text.strip(" \t，。：:;；")
         if len(text) >= 2 and text not in _POINTER_WORDS:
             fragments.append(text)
@@ -284,6 +289,20 @@ class LinkDispatcher:
             entry["duplicate"] = True
             report["skipped"] += 1
             report["duplicates"].append(url)
+            # 重复也要给新分享行补回链——日记行不能是死胡同（评论留在
+            # 日记里即是沉淀，不改写已建卡片）
+            twin = next(
+                (
+                    item
+                    for item in state.values()
+                    if isinstance(item, dict)
+                    and str(item.get("video_id")) == probed_id
+                    and item.get("note")
+                ),
+                None,
+            )
+            if twin is not None:
+                self._annotate_source(url, str(twin["note"]))
             return
         entry["attempts"] += 1
         result = self._factory().process(url)

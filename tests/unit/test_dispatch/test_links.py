@@ -676,6 +676,37 @@ def test_bilibili_simple_share_block_stripped():
     assert extract_comment(f"{url} 想看《心理学与生活》", url) == "想看《心理学与生活》"
 
 
+def test_backlink_annotation_stripped_from_comment():
+    """机器回链（`` → [[产出卡]]``）不是用户评论，重跑/换短链重发时必须
+    剥掉（2026-09-15 实证：清登记重跑后「我的评论」被污染成回链）。"""
+    from scripts.dispatch.links import extract_comment
+
+    url = "https://b23.tv/XF2AsZ2"
+    # 无评论、只留回链的行 → 空串（不硬凑）
+    body = f"- 00:01 【【标题】-哔哩哔哩】 {url} → [[B站-标题]]"
+    assert extract_comment(body, url) == ""
+    # 真评论与回链并存 → 只留真评论
+    assert extract_comment(f"- 08:39 {url} dfmea → [[B站-标题]]", url) == "dfmea"
+
+
+def test_duplicate_backlink_annotated_on_diary(memory_tree, monkeypatch):
+    """重复链接（同 video_id）也给新分享行补回链——日记不能是死胡同。"""
+    monkeypatch.setattr(links_module, "probe_video_id", lambda url: "vid123")
+    memory_tree.create_note("2026-09-14.md", f"- 00:01 {DOUYIN_URL}", source="test")
+    _dispatcher(memory_tree).run()
+
+    other = "https://v.douyin.com/anotherShare/"
+    memory_tree.create_note(
+        "2026-09-15.md", f"- 14:11 {other} 再看一遍", source="test"
+    )
+    _FakeLinkProcessor.calls = []
+    report = _dispatcher(memory_tree).run()
+
+    assert report["duplicates"] == [other]
+    diary = memory_tree.read_note(memory_tree.notes_dir / "2026-09-15.md")
+    assert "→ [[douyin-vid123]]" in diary
+
+
 def test_video_id_registered_on_success(memory_tree):
     """处理成功后 state 登记 video_id（同内容幂等的比对依据）。"""
     memory_tree.create_note("daily.md", f"学习 {DOUYIN_URL}", source="test")
