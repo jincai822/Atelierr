@@ -1115,6 +1115,23 @@ class LinkProcessor(BaseProcessor):
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
 
+    def summarize_transcript(
+        self, transcript: str
+    ) -> Tuple[Optional[Dict[str, Any]], str]:
+        """公开的转写总结入口：复用 _summarize 的护栏与提示词契约。
+
+        供 dispatch/media 等其他管线复用（2026-09-15 裁决：直发视频/录音
+        与链接视频同待遇——观点总结/分观点/中图法标签，同一道
+        max_transcript_chars 护栏）。
+
+        Args:
+            transcript: 简体转写全文。
+
+        Returns:
+            Tuple[Optional[Dict[str, Any]], str]: (七键字典或 None, 状态串）。
+        """
+        return self._summarize(transcript)
+
     def _summarize(
         self, transcript: str, prompt: Optional[str] = None
     ) -> Tuple[Optional[Dict[str, Any]], str]:

@@ -616,3 +616,172 @@ def test_build_note_low_confidence_warning(memory_tree):
 
     ocr = dispatcher._build_note(path, "截图", "OCR内容", "stem-x", confidence=0.5)
     assert "偏低" not in ocr
+
+
+# ---- 图集合并（2026-09-15 裁决 A）与直发视频/录音总结（裁决 B）----
+
+
+def _add_feishu_image(tree, stamp, hash6):
+    """落一个飞书命名的假图片（到达时间取自文件名 UTC 时间戳）。"""
+    attach = Path(tree.attachments_dir) / "媒体"
+    attach.mkdir(parents=True, exist_ok=True)
+    path = attach / f"feishu-{stamp}-{hash6}.png"
+    path.write_bytes(b"\x89PNG fake-bytes")
+    old = time.time() - 600  # mtime 只需过 30s 守卫；间隔靠文件名时间戳
+    os.utime(path, (old, old))
+    return path
+
+
+def test_rapid_images_merge_into_one_batch_card(memory_tree):
+    """连发多图（间隔 ≤60s）合并为一张图集卡；间隔超窗的单独成卡。"""
+    for stamp, h in (("20260915-104900", "aaaa01"), ("20260915-104905", "aaaa02"),
+                     ("20260915-104910", "aaaa03")):
+        _add_feishu_image(memory_tree, stamp, h)
+    lone = _add_feishu_image(memory_tree, "20260915-105200", "aaaa04")  # +3 分钟
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["found"] == 4
+    assert len(report["created"]) == 2
+    notes = sorted(Path(memory_tree.inbox_dir).glob("media-*.md"))
+    assert len(notes) == 2
+    batch = max(notes, key=lambda p: p.stat().st_size)
+    post = frontmatter.loads(batch.read_text(encoding="utf-8"))
+    assert post["tags"] == ["待确认", "截图"]
+    assert "（3 张）" in post.content
+    assert post.content.count("![[attachments/媒体/") == 3
+    assert "—— 第 1 页 ——" in post.content
+    assert "—— 第 3 页 ——" in post.content
+    # 每张图逐文件登记，指向同一张图集卡（幂等粒度不变）
+    state = json.loads(
+        (memory_tree.state_dir / "processed_media.json").read_text()
+    )
+    assert state["attachments/媒体/feishu-20260915-104900-aaaa01.png"]["note"] == batch.name
+    assert state["attachments/媒体/feishu-20260915-104910-aaaa03.png"]["note"] == batch.name
+    lone_key = f"attachments/媒体/{lone.name}"
+    assert state[lone_key]["note"] != batch.name
+
+
+def test_batch_partial_ocr_failure_still_one_card(memory_tree):
+    """图集里单页 OCR 失败：卡照建（图是原件全内嵌），失败页标 ocr=failed
+    不再重试（重试只会再造一张重复卡）。"""
+
+    class _FlakyImage:
+        def process(self, path):
+            if "aaaa02" in str(path):
+                return ProcessResult(success=False, error="ocr boom")
+            return ProcessResult(
+                success=True, text="OCR 文本", markdown="", confidence=0.9
+            )
+
+    _add_feishu_image(memory_tree, "20260915-104900", "aaaa01")
+    _add_feishu_image(memory_tree, "20260915-104905", "aaaa02")
+    _add_feishu_image(memory_tree, "20260915-104910", "aaaa03")
+
+    dispatcher = MediaDispatcher(memory_tree, image_factory=_FlakyImage)
+    report = dispatcher.run()
+
+    assert len(report["created"]) == 1
+    note = _created_note(memory_tree)
+    content = note.read_text(encoding="utf-8")
+    assert content.count("![[attachments/媒体/") == 3  # 三张原件全在
+    assert "—— 第 2 页 ——" not in content  # 失败页无 OCR 节
+    state = json.loads(
+        (memory_tree.state_dir / "processed_media.json").read_text()
+    )
+    failed = state["attachments/媒体/feishu-20260915-104905-aaaa02.png"]
+    assert failed["status"] == "done"
+    assert failed["ocr"] == "failed"
+
+
+def test_batch_all_ocr_fail_no_card(memory_tree):
+    """图集 OCR 全失败：不建卡，逐张计次数（3 次熔断同单图规）。"""
+    _FakeImageProcessor.fail_with = "ocr down"
+    _add_feishu_image(memory_tree, "20260915-104900", "aaaa01")
+    _add_feishu_image(memory_tree, "20260915-104905", "aaaa02")
+
+    report = _dispatcher(memory_tree).run()
+
+    assert report["created"] == []
+    assert report["failed"]
+    state = json.loads(
+        (memory_tree.state_dir / "processed_media.json").read_text()
+    )
+    assert state["attachments/媒体/feishu-20260915-104900-aaaa01.png"]["attempts"] == 1
+    assert "status" not in state["attachments/媒体/feishu-20260915-104900-aaaa01.png"]
+
+
+def _summary_dict():
+    return {
+        "summary": "核心观点。",
+        "points": ["观点一。", "观点二。"],
+        "insights": [],
+        "entities": ["某概念"],
+        "category": "B84-心理学",
+        "topics": ["认知负荷"],
+        "title": "t",
+    }
+
+
+def test_video_card_has_summary_and_tags(memory_tree, monkeypatch):
+    """直发视频卡带观点总结/分观点/实体，tags 追加中图法+主题词
+    （与链接视频同待遇）。"""
+    monkeypatch.setattr(media_module, "compress_to_480p", _fake_compress_ok)
+    seen = []
+
+    def _fake_summarize(text):
+        seen.append(text)
+        return _summary_dict(), "ok"
+
+    _add_attachment(memory_tree, "clip.mp4", subdir="媒体")
+    dispatcher = MediaDispatcher(
+        memory_tree, video_factory=_FakeVideoProcessor, summarize_fn=_fake_summarize
+    )
+    report = dispatcher.run()
+
+    assert len(report["created"]) == 1
+    note = _created_note(memory_tree)
+    post = frontmatter.loads(note.read_text(encoding="utf-8"))
+    assert post["tags"] == ["待确认", "视频", "B84-心理学", "认知负荷"]
+    assert "## 观点总结" in post.content
+    assert "1. 观点一。" in post.content
+    assert "- 某概念" in post.content
+    assert seen == ["视频转写文本。"]  # 总结收到的确实是转写全文
+
+
+def test_audio_card_summarize_failure_annotated(memory_tree):
+    """总结失败/被护栏跳过：卡面必须标注（不静默降级），无摘要节。"""
+
+    def _fail_summarize(text):
+        return None, "failed:RuntimeError"
+
+    _add_attachment(memory_tree, "voice.ogg", age_seconds=60, subdir="媒体")
+    dispatcher = MediaDispatcher(
+        memory_tree, audio_factory=_FakeAudioProcessor, summarize_fn=_fail_summarize
+    )
+    dispatcher.run()
+
+    note = _created_note(memory_tree)
+    post = frontmatter.loads(note.read_text(encoding="utf-8"))
+    assert post["tags"] == ["待确认", "录音"]
+    assert "⚠️ 自动总结失败" in post.content
+    assert "## 观点总结" not in post.content
+
+
+def test_screenshot_card_not_summarized(memory_tree):
+    """截图卡不走总结（OCR 全文即内容），总结函数不被调用。"""
+    called = []
+
+    def _spy_summarize(text):
+        called.append(text)
+        return _summary_dict(), "ok"
+
+    _add_attachment(memory_tree, "IMG_009.png", subdir="媒体")
+    dispatcher = MediaDispatcher(
+        memory_tree, image_factory=_FakeImageProcessor, summarize_fn=_spy_summarize
+    )
+    dispatcher.run()
+
+    assert not called
+    note = _created_note(memory_tree)
+    assert "## 观点总结" not in note.read_text(encoding="utf-8")

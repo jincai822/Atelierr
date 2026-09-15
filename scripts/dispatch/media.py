@@ -33,6 +33,16 @@ media 在同一 service 内串行（flock 互斥），不会插队。转写成�
 原件保底，绝不压坏了还丢原件）。其余附件原件只增不减：本模块绝不
 删除/移动附件。
 
+图集合并（2026-09-15 用户裁决 A）：到达间隔 ≤_IMAGE_BATCH_SECONDS 的
+连续图片粘为一张图集卡（逐张内嵌 + 分页 OCR 汇总）——连发的文章
+分页是一条内容，一页一卡会打散（实测 7 页散成 7 卡）。每张图片的
+状态仍逐文件登记，幂等粒度不变。
+
+直发视频/录音总结（2026-09-15 用户裁决 B）：与链接视频同待遇——复用
+LinkProcessor 的总结能力产出观点总结/分观点/中图法标签（追加进
+frontmatter tags），同一道 max_transcript_chars 护栏；跳过/失败卡面
+标注，不静默降级。
+
 纪律（与 links.py 一致）：
 - 只新增笔记，绝不改写/移动/删除既有笔记与附件本身（直发视频的
   480p 替换是唯一例外，见上）；
@@ -72,6 +82,7 @@ from scripts.processors.base import INLINE_BODY_MAX
 from scripts.processors.highlights import HighlightsProcessor
 from scripts.processors.image import SUPPORTED_EXTENSIONS as IMAGE_EXTS
 from scripts.processors.image import ImageProcessor
+from scripts.processors.link import LinkProcessor, _llm_skip_note
 from scripts.processors.video import SUPPORTED_EXTENSIONS as VIDEO_EXTS
 from scripts.processors.video import VideoProcessor, compress_to_480p
 
@@ -116,6 +127,16 @@ _PDF_ILLEGAL_RE = re.compile(r'[\\/:*?"<>|]')
 #: 转写置信度警告阈值（与 processors/link.py _LOW_CONFIDENCE 同值）
 _LOW_CONFIDENCE = 0.70
 
+#: 图集粘合窗口（2026-09-15 用户裁决 A）：相邻图片到达间隔 ≤ 该秒数
+#: 视为同一条内容（连发的文章分页/一组现场照，实测一页几秒），合并为
+#: 一个图集卡；超过则各成单卡。定为 60s 而非更宽：实测两篇文章先后
+#: 相隔 100s 连发，宽窗口会把不同内容粘错。仍可能粘住窗口内的不相关
+#: 连发——概率低，确认环节人工可拆（purge 后分批重投）
+_IMAGE_BATCH_SECONDS = 60
+
+#: 飞书入站附件的文件名时间戳（feishu-YYYYMMDD-HHMMSS-<hash>.<ext>，UTC）
+_FEISHU_NAME_RE = re.compile(r"^feishu-(\d{8}-\d{6})-")
+
 
 class MediaDispatcher:
     """扫描 attachments/ 目录，把新截图/录音分发给 OCR/Whisper 处理器。
@@ -133,6 +154,9 @@ class MediaDispatcher:
         highlights_factory: Optional[Callable[[], HighlightsProcessor]] = None,
         screenshot_inbox: Optional[str] = None,
         video_factory: Optional[Callable[[], VideoProcessor]] = None,
+        summarize_fn: Optional[
+            Callable[[str], Tuple[Optional[Dict[str, Any]], str]]
+        ] = None,
     ) -> None:
         """初始化。
 
@@ -149,6 +173,9 @@ class MediaDispatcher:
             ``processors.media.screenshot_inbox``，由 dispatch_cli 注入）。
             video_factory: 视频处理器工厂（2026-09-11 裁决：直发视频走
             Whisper 转写），缺省为 VideoProcessor；每轮运行最多构造一次。
+            summarize_fn: 总结函数（测试注入）；缺省为 None，运行时惰性
+            构造 LinkProcessor 复用其总结能力与护栏（2026-09-15 裁决 B：
+            直发视频/录音与链接视频同待遇）。
         """
         self.tree = tree
         self._image_factory = image_factory or ImageProcessor
@@ -158,6 +185,8 @@ class MediaDispatcher:
             lambda: HighlightsProcessor(context_provider=self._reader_context)
         )
         self._video_factory = video_factory or VideoProcessor
+        self._summarize_fn = summarize_fn
+        self._link: Optional[LinkProcessor] = None
         self._inbox = screenshot_inbox
         self._image: Optional[ImageProcessor] = None
         self._audio: Optional[AudioProcessor] = None
@@ -185,6 +214,7 @@ class MediaDispatcher:
             "imported": 0,
         }
         self._import_inbox(report, dry_run)
+        pending: List[Path] = []
         for path in self._collect_files(report):
             key = self._key(path)
             entry = state.get(key)
@@ -192,10 +222,13 @@ class MediaDispatcher:
                 report["skipped"] += 1
                 continue
             report["found"] += 1
-            if dry_run:
-                continue
-            self._process_one(path, state, report)
+            pending.append(path)
         if not dry_run:
+            for item in self._group_work(pending):
+                if isinstance(item, list):
+                    self._process_image_batch(item, state, report)
+                else:
+                    self._process_one(item, state, report)
             self._save_state(state)
         return report
 
@@ -290,6 +323,164 @@ class MediaDispatcher:
                     refs.add(match.group(1))
         return refs
 
+    def _group_work(self, files: List[Path]) -> List[Any]:
+        """把工作项按图集规则粘合：连续到达的图片合并为一个批次项。
+
+        2026-09-15 用户裁决 A：手机连发的多图（一篇文章的连续页、一组
+        现场照片）是同一条内容，一页一卡会把内容打散（实测 7 页文章
+        散成 7 张卡）。规则：按到达时间排序后，相邻图片间隔
+        ≤_IMAGE_BATCH_SECONDS 粘为一批（滚动窗口，以与上一张的间隔
+        为准）；**不跨目录粘合**（目录即语境，不同子目录的同名附件
+        仍各自成卡）；非图片与孤立图片保持单项。
+        """
+        items: List[Any] = []
+        batch: List[Path] = []
+        batch_ts = 0.0
+        batch_parent: Optional[Path] = None
+
+        def _flush() -> None:
+            nonlocal batch, batch_parent
+            if batch:
+                items.append(batch[0] if len(batch) == 1 else list(batch))
+                batch = []
+                batch_parent = None
+
+        for path in files:
+            if path.suffix.lower() not in IMAGE_EXTS:
+                _flush()
+                items.append(path)
+                continue
+            ts = self._arrival_ts(path)
+            if (
+                batch
+                and path.parent == batch_parent
+                and ts - batch_ts <= _IMAGE_BATCH_SECONDS
+            ):
+                batch.append(path)
+                batch_ts = ts
+            else:
+                _flush()
+                batch = [path]
+                batch_ts = ts
+                batch_parent = path.parent
+        _flush()
+        return items
+
+    @staticmethod
+    def _arrival_ts(path: Path) -> float:
+        """到达时间（epoch 秒）：飞书文件名时间戳（UTC）优先，回退 mtime。"""
+        match = _FEISHU_NAME_RE.match(path.name)
+        if match:
+            try:
+                return (
+                    datetime.strptime(match.group(1), "%Y%m%d-%H%M%S")
+                    .replace(tzinfo=timezone.utc)
+                    .timestamp()
+                )
+            except ValueError:
+                pass
+        return path.stat().st_mtime
+
+    def _process_image_batch(
+        self, paths: List[Path], state: Dict[str, Any], report: Dict[str, Any]
+    ) -> None:
+        """图集批次：逐张 OCR，合并建一张图集卡。
+
+        ≥1 张 OCR 成功即建卡：全部图片内嵌（图是原件必须保藏），成功页
+        附分页 OCR 全文；OCR 失败的页仍标 done 并记 ocr=failed——图已
+        进卡，重试只会再造一张重复卡。全部失败不建卡，逐张计次数
+        （3 次熔断，与单图同规）。
+        """
+        processor = self._get_processor(paths[0])
+        ocr_parts: List[Tuple[int, str]] = []
+        for idx, path in enumerate(paths, 1):
+            result = processor.process(path)
+            if result.success and (result.text or "").strip():
+                ocr_parts.append((idx, result.text.strip()))
+        now_iso = datetime.now(timezone.utc).isoformat()
+        entries = []
+        for path in paths:
+            entry = state.setdefault(self._key(path), {"attempts": 0})
+            entry["attempts"] += 1
+            entry["last_attempt"] = now_iso
+            entries.append(entry)
+        if not ocr_parts:
+            for entry in entries:
+                if entry["attempts"] >= MAX_ATTEMPTS:
+                    entry["status"] = "failed"
+            report["failed"].append(
+                {"file": f"图集 {len(paths)} 张", "error": "OCR 全部失败"}
+            )
+            return
+        filename = self._batch_note_filename(paths)
+        body = self._build_batch_note(paths, ocr_parts, Path(filename).stem)
+        try:
+            # 图集是多张截图的合并形态，沿用「截图」标签（归档映射不变）
+            self.tree.create_note(
+                filename, body, source="media", tags=[REVIEW_TAG, "截图"], inbox=True
+            )
+        except (ValueError, FileExistsError):
+            # 同名图集卡已存在（状态丢失后的重跑）：视为已处理
+            pass
+        ok_paths = {paths[idx - 1] for idx, _text in ocr_parts}
+        for path, entry in zip(paths, entries):
+            entry["status"] = "done"
+            entry["note"] = filename
+            if path not in ok_paths:
+                entry["ocr"] = "failed"  # 图已进卡，OCR 不再重试
+        report["created"].append(filename)
+
+    def _batch_note_filename(self, paths: List[Path]) -> str:
+        """图集卡文件名：media-<首张日期>-<全部相对路径哈希前6>.md。"""
+        date = datetime.fromtimestamp(paths[0].stat().st_mtime).strftime("%Y%m%d")
+        digest = hashlib.sha1(
+            "\n".join(self._key(p) for p in paths).encode("utf-8")
+        ).hexdigest()[:6]
+        return f"media-{date}-{digest}.md"
+
+    def _build_batch_note(
+        self, paths: List[Path], ocr_parts: List[Tuple[int, str]], note_stem: str
+    ) -> str:
+        """图集卡正文：逐张内嵌原件（Obsidian 可翻看）+ 分页 OCR 全文。
+
+        与单图卡同规（方案 B）：OCR 汇总 >INLINE_BODY_MAX 时外置
+        ``attachments/媒体/<同名>.md``，卡上只留「## 全文」链接节；
+        写入失败降级内联保底——卡绝不丢内容。
+        """
+        stamp = datetime.fromtimestamp(paths[0].stat().st_mtime).strftime(
+            "%Y-%m-%d %H:%M"
+        )
+        embeds = "\n".join(f"![[{self._key(p)}]]" for p in paths)
+        ocr_text = "\n\n".join(
+            f"—— 第 {idx} 页 ——\n\n{text}" for idx, text in ocr_parts
+        )
+        head = f"# 图集 {stamp}（{len(paths)} 张）\n\n{embeds}\n\n"
+        if len(ocr_text) > INLINE_BODY_MAX:
+            rel = f"{ATTACHMENTS_DIR}/{MEDIA_SUBDIR}/{note_stem}.md"
+            target = self.tree.attachments_dir.parent / rel
+            wrote = write_text_skip_existing(target, ocr_text)
+            if wrote or target.exists():
+                return f"{head}## 全文\n\n[[{rel}|查看OCR 全文]]\n"
+            logger.warning("图集 OCR 落盘失败，降级为卡内联: %s", target)
+        return f"{head}## OCR 全文\n\n{ocr_text}\n"
+
+    def _summarize_transcript(
+        self, text: str
+    ) -> Tuple[Optional[Dict[str, Any]], str, int]:
+        """直发视频/录音的总结：复用链接管线 LinkProcessor 的能力与护栏。
+
+        Returns:
+            Tuple[Optional[Dict[str, Any]], str, int]: (summary 或 None,
+            状态串, 生效的字数护栏——注入 summarize_fn 时为 0）。
+        """
+        if self._summarize_fn is not None:
+            summary, status = self._summarize_fn(text)
+            return summary, status, 0
+        if self._link is None:
+            self._link = LinkProcessor()
+        summary, status = self._link.summarize_transcript(text)
+        return summary, status, self._link.llm_max_chars
+
     def _process_one(
         self, path: Path, state: Dict[str, Any], report: Dict[str, Any]
     ) -> None:
@@ -336,14 +527,35 @@ class MediaDispatcher:
                 # 文件名/时间戳读取的即处理当下）
                 self._compress_in_place(path)
             filename = self._note_filename(path)
+            summary = None
+            llm_note = None
+            if kind in ("视频", "录音"):
+                # 2026-09-15 裁决 B：直发视频/录音与链接视频同待遇——
+                # 观点总结/分观点/中图法标签，同一道字数护栏；跳过/失败
+                # 卡面标注，不静默降级
+                text_len = len(result.text or "")
+                summary, llm_status, llm_limit = self._summarize_transcript(
+                    result.text or ""
+                )
+                llm_note = _llm_skip_note(llm_status, text_len, llm_limit)
             body = self._build_note(
                 path,
                 kind,
                 result.text,
                 Path(filename).stem,
                 getattr(result, "confidence", 0.0),
+                summary=summary,
+                llm_note=llm_note,
             )
             source, tags = "media", [REVIEW_TAG, kind]
+            if summary:
+                category = str(summary.get("category") or "").strip()
+                topics = [
+                    str(t).strip()
+                    for t in (summary.get("topics") or [])
+                    if str(t).strip()
+                ]
+                tags += ([category] if category else []) + topics
             try:
                 self.tree.create_note(filename, body, source=source, tags=tags, inbox=True)
             except (ValueError, FileExistsError):
@@ -536,8 +748,11 @@ class MediaDispatcher:
         text: str,
         note_stem: str,
         confidence: float = 0.0,
+        summary: Optional[Dict[str, Any]] = None,
+        llm_note: Optional[str] = None,
     ) -> str:
-        """组装卡正文：内嵌原附件 + 提取全文（短内联，长外置留链接节）。
+        """组装卡正文：内嵌原附件 + （可选）摘要各节 + 提取全文（短内联，
+        长外置留链接节）。
 
         方案 B（2026-09-12 用户裁决）：全文 >INLINE_BODY_MAX 时原子写入
         ``attachments/媒体/<笔记同名>.md``（同名跳过幂等；实现与链接
@@ -545,6 +760,8 @@ class MediaDispatcher:
         写入失败降级为内联保底——卡绝不丢内容。
         转写置信度偏低（>0 且 <0.70）时卡面加警告行（2026-09-14 KM
         评审裁决：同音错字靠这层信号 + 人工回放兜底）。
+        摘要节与链接管线同序（观点总结/分观点/金句/实体，2026-09-15
+        裁决 B）；总结被跳过/失败时 llm_note 警示行不缺席。
         """
         stamp = datetime.fromtimestamp(path.stat().st_mtime).strftime(
             "%Y-%m-%d %H:%M"
@@ -557,6 +774,30 @@ class MediaDispatcher:
                 f"> ⚠️ 转写置信度 {confidence:.0%} 偏低，"
                 "关键处建议回放原件核对。\n\n"
             )
+        if llm_note:
+            warn += f"> {llm_note}\n\n"
+        summary_md = ""
+        if summary:
+            parts = ["## 观点总结", "", str(summary["summary"])]
+            if summary.get("points"):
+                parts += ["", "## 分观点论述", ""]
+                parts += [
+                    f"{i}. {point}"
+                    for i, point in enumerate(summary["points"], 1)
+                ]
+            if summary.get("insights"):
+                parts += ["", "## 金句摘录", ""]
+                parts += [f"> {item}" for item in summary["insights"]]
+            if summary.get("insights_dropped"):
+                parts += [
+                    "",
+                    f"> （{summary['insights_dropped']} 条候选金句未通过"
+                    "原文回溯校验，已剔除——摘录必须逐字出自原文）",
+                ]
+            if summary.get("entities"):
+                parts += ["", "## 提到的人·书·概念", ""]
+                parts += [f"- {item}" for item in summary["entities"]]
+            summary_md = "\n".join(parts) + "\n\n"
         if len(body) > INLINE_BODY_MAX:
             rel = f"{ATTACHMENTS_DIR}/{MEDIA_SUBDIR}/{note_stem}.md"
             target = self.tree.attachments_dir.parent / rel
@@ -566,6 +807,7 @@ class MediaDispatcher:
                     f"# {kind} {stamp}\n\n"
                     f"![[{self._key(path)}]]\n\n"
                     f"{warn}"
+                    f"{summary_md}"
                     f"## 全文\n\n"
                     f"[[{rel}|查看{section}]]\n"
                 )
@@ -574,6 +816,7 @@ class MediaDispatcher:
             f"# {kind} {stamp}\n\n"
             f"![[{self._key(path)}]]\n\n"
             f"{warn}"
+            f"{summary_md}"
             f"## {section}\n\n"
             f"{body}\n"
         )
