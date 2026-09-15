@@ -579,8 +579,12 @@ class MediaDispatcher:
 
         2026-09-15 评审 P1：发图/发视频配的文字说明此前进不了卡（评论
         注入只在链接管线）。只读日记绝不改写；含链接的行跳过（链接管线
-        的评论各有各的家）；时间前缀/机器回链/平台样板照常剥掉。窗口内
-        取时间上最近的一条；误粘风险（窗口内无关文字）接受并人工可见。
+        的评论各有各的家）；时间前缀/机器回链/平台样板照常剥掉。
+        窗口内多条人话的取舍：媒体之后的行优先（评论通常先发媒体再补
+        一句），同分钟日记序即到达序、后来居上（2026-09-15 实测：媒体
+        与意图行同分钟到达，取早者把"明天把X看完"粘成了评论，真正的
+        评论在其后一行）；媒体之前的取最近一条兜底。误粘风险接受并
+        人工可见。
         """
         day = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
         diary = Path(self.tree.notes_dir) / f"{day}.md"
@@ -590,8 +594,10 @@ class MediaDispatcher:
             body = diary.read_text(encoding="utf-8")
         except OSError:
             return ""
-        best = ""
-        best_diff = float("inf")
+        media_minute = datetime.fromtimestamp(ts).replace(second=0, microsecond=0)
+        after_text = ""
+        before_text = ""
+        before_diff = float("inf")
         for line in body.splitlines():
             match = re.match(r"^[-*\s]*(\d{1,2}):(\d{2})", line)
             if not match:
@@ -601,7 +607,7 @@ class MediaDispatcher:
                 hour=hh, minute=mm, second=0, microsecond=0
             )
             diff = abs(line_dt.timestamp() - ts)
-            if diff > _COMMENT_WINDOW_SECONDS or diff >= best_diff:
+            if diff > _COMMENT_WINDOW_SECONDS:
                 continue
             if URL_RE.search(line) or _BOILERPLATE_RE.search(line):
                 continue
@@ -609,8 +615,11 @@ class MediaDispatcher:
             text = _TIME_PREFIX_RE.sub("", text).strip(" \t，。：:;；")
             if len(text) < 2 or text in _POINTER_WORDS:
                 continue
-            best, best_diff = text, diff
-        return best
+            if line_dt >= media_minute:
+                after_text = text  # 同分钟后发制人：后来的覆盖先前的
+            elif diff < before_diff:
+                before_text, before_diff = text, diff
+        return after_text or before_text
 
     def _process_one(
         self, path: Path, state: Dict[str, Any], report: Dict[str, Any]
@@ -620,6 +629,8 @@ class MediaDispatcher:
         entry = state.setdefault(key, {"attempts": 0})
         entry["attempts"] += 1
         is_pdf = path.suffix.lower() in _PDF_EXTS
+        # 评论附着以"到达时刻"为准：直发视频压缩会刷新 mtime，须先取样
+        arrival_ts = self._arrival_ts(path)
         processor = self._get_processor(path)
         result = processor.process(path)
         entry["last_attempt"] = datetime.now(timezone.utc).isoformat()
@@ -676,7 +687,7 @@ class MediaDispatcher:
                 getattr(result, "confidence", 0.0),
                 summary=summary,
                 llm_note=llm_note,
-                comment=self._diary_comment_near(self._arrival_ts(path)),
+                comment=self._diary_comment_near(arrival_ts),
             )
             source, tags = "media", [REVIEW_TAG, kind]
             if summary:

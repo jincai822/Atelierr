@@ -198,9 +198,16 @@ def _strip_share_boilerplate(body: str) -> str:
     return "\n".join(lines)
 
 
+#: 卡面的用户评论行（``> 💬 我的评论：…``）：内容是日记行的复读，
+#: 日记行自己会被扫描——不剥掉会让同一意图在日记与卡上各判一次，
+#: LLM 措辞不同就产出两条待办（2026-09-15 实证："明天把 DFMEA 看完"
+#: 从日记行与媒体卡评论各出一条，文件名哈希去重拦不住不同措辞）
+_COMMENT_LINE_RE = re.compile(r"^>\s*💬 我的评论：.*$", re.M)
+
+
 def _llm_input(body: str, source: str) -> str:
     """构造喂给分类器的文本：链接产出笔记只取摘要两节，其余取全文
-    （先剥平台分享样板行）。
+    （先剥平台分享样板行与卡面评论复读行）。
 
     Args:
         body: 笔记正文。
@@ -209,6 +216,7 @@ def _llm_input(body: str, source: str) -> str:
     Returns:
         str: 截断到 _LLM_MAX_BODY_CHARS 的输入文本。
     """
+    body = _COMMENT_LINE_RE.sub("", body)
     if source == "link":
         picked = _summary_sections(body)
         if picked:

@@ -858,3 +858,48 @@ def test_diary_comment_attached_to_media_card(memory_tree, monkeypatch):
     note = _created_note(memory_tree)
     post = frontmatter.loads(note.read_text(encoding="utf-8"))
     assert "> 💬 我的评论：这个视频讲得透" in post.content
+
+
+def test_comment_prefers_later_line_after_media(memory_tree, monkeypatch):
+    """窗口内多条人话：媒体之后的行后来居上（评论在媒体后补；
+    2026-09-15 实测同分钟先意图后评论，取早者把意图粘成了评论）。"""
+    monkeypatch.setattr(media_module, "compress_to_480p", _fake_compress_ok)
+    now = time.time()
+    minute = time.strftime("%H:%M", time.localtime(now - 120))
+    memory_tree.create_note(
+        f"{time.strftime('%Y-%m-%d')}.md",
+        f"- {minute} 明天把 DFMEA 看完\n- {minute} 教育的建议\n",
+        source="test",
+    )
+    _add_attachment(memory_tree, "clip.mp4", age_seconds=120, subdir="媒体")
+    dispatcher = MediaDispatcher(
+        memory_tree,
+        video_factory=_FakeVideoProcessor,
+        summarize_fn=lambda t: (None, "skipped:test"),
+    )
+    dispatcher.run()
+
+    note = _created_note(memory_tree)
+    assert "> 💬 我的评论：教育的建议" in note.read_text(encoding="utf-8")
+
+
+def test_comment_falls_back_to_nearest_before(memory_tree, monkeypatch):
+    """媒体之后没有人话：取媒体之前窗口内最近的一条兜底。"""
+    monkeypatch.setattr(media_module, "compress_to_480p", _fake_compress_ok)
+    now = time.time()
+    before = time.strftime("%H:%M", time.localtime(now - 150))
+    memory_tree.create_note(
+        f"{time.strftime('%Y-%m-%d')}.md",
+        f"- {before} 先发的人话\n",
+        source="test",
+    )
+    _add_attachment(memory_tree, "clip.mp4", age_seconds=120, subdir="媒体")
+    dispatcher = MediaDispatcher(
+        memory_tree,
+        video_factory=_FakeVideoProcessor,
+        summarize_fn=lambda t: (None, "skipped:test"),
+    )
+    dispatcher.run()
+
+    note = _created_note(memory_tree)
+    assert "> 💬 我的评论：先发的人话" in note.read_text(encoding="utf-8")

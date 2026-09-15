@@ -579,3 +579,18 @@ def test_prompt_carries_today_for_due_dates(memory_tree, llm_ok):
     assert f"今天日期 {today}" in llm_ok[0]
     created = _read_note(memory_tree, report["created"][0])
     assert "📅 2026-09-05" in created.content
+
+
+def test_comment_echo_line_stripped_from_llm_input():
+    """卡面「💬 我的评论」复读行不进待办判定（日记行已覆盖该意图；
+    不剥会在日记与卡上各判一次，措辞不同哈希去重拦不住）。"""
+    from scripts.dispatch.todos import _llm_input
+
+    body = (
+        "## 观点总结\n\n不错。\n\n"
+        "> 💬 我的评论：明天把 DFMEA 看完\n\n"
+        "## 转写全文\n\n正文还在。"
+    )
+    out = _llm_input(body, "media")
+    assert "明天把 DFMEA 看完" not in out
+    assert "正文还在" in out
