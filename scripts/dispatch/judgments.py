@@ -34,8 +34,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from scripts.cognition.manager import ApprovalRecord, CognitionManager
 from scripts.memory.core import MemoryTree
 
-#: 飞书消息的判断前缀（「判断：」「记为判断：」「#判断 」）
-FEISHU_PREFIXES: Tuple[str, ...] = ("判断：", "判断:", "记为判断：", "记为判断:")
+#: 飞书判断消息统一匹配：「判断」或「记为判断」（可带 #）后必须跟
+#: 冒号或空白再跟陈述——「判断力很重要」这类正文不会误命中
+_FEISHU_JUDGMENT_RE = re.compile(r"^#?(?:判断|记为判断)[:：\s]+\s*(\S.*)$", re.S)
 
 #: Obsidian 行内标记：#判断（可带冒号）后同一行即陈述
 _LINE_RE = re.compile(r"^\s*(?:[-*]\s*)?#判断[:：]?\s*(\S.*?)\s*$")
@@ -48,14 +49,13 @@ _SEEN_FILENAME = "judgments_seen.json"
 
 
 def parse_feishu_judgment(text: str) -> Optional[str]:
-    """飞书消息剥离判断前缀，返回陈述；非判断消息返回 None。"""
-    stripped = text.strip()
-    for prefix in FEISHU_PREFIXES:
-        if stripped.startswith(prefix):
-            return stripped[len(prefix):].strip() or None
-    if stripped.startswith("#判断"):
-        return stripped[len("#判断"):].lstrip(" :：").strip() or None
-    return None
+    """飞书消息剥离判断前缀，返回陈述；非判断消息返回 None。
+
+    认「判断：xxx」「判断 xxx」（空格写法）「记为判断：」「#判断 」；
+    「判断」后必须跟冒号或空白——「判断力」「判断一下」不命中。
+    """
+    m = _FEISHU_JUDGMENT_RE.match(text.strip())
+    return m.group(1).strip() if m else None
 
 
 def parse_line(line: str) -> Optional[str]:

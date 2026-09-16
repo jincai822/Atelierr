@@ -238,3 +238,11 @@ def test_feishu_judgment_wins_over_open_session(memory_tree, monkeypatch):
     assert len(list(cog_dir.rglob("*.md"))) == 1
     # 回答会话没被这条占用（仍是 0 条回答）
     assert store.load().get("answers", []) == []
+
+
+def test_parse_feishu_space_and_false_positives():
+    """空格写法认（用户真实输入习惯）；「判断力/判断一下」正文不误命中。"""
+    assert parse_feishu_judgment("判断  每天少吃一点，特别是晚上") == "每天少吃一点，特别是晚上"
+    assert parse_feishu_judgment("记为判断 空格写法") == "空格写法"
+    assert parse_feishu_judgment("判断力很重要") is None
+    assert parse_feishu_judgment("判断一下这个") is None
