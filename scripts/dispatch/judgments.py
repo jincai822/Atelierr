@@ -230,3 +230,138 @@ def registered_since(tree: MemoryTree, date: str) -> int:
         if day <= ts.replace(tzinfo=None) < nxt:
             count += 1
     return count
+
+
+# ---------- 机器提名（只提名，绝不批准；攒晨报安静小节等你批）----------
+
+#: 原子观点提取：优先「## 分观点论述」编号行，缺失退回「## 观点总结」整段
+_VIEWPOINTS_RE = re.compile(r"^## 分观点论述\s*\n(?P<body>.*?)(?=^## |\Z)", re.M | re.S)
+_NUMBERED_RE = re.compile(r"^\s*\d+[.、)]\s*(\S.+?)\s*$")
+_SUMMARY_RE = re.compile(r"^## 观点总结\s*\n+(?P<body>[^#].*?)(?=^## |\Z)", re.M | re.S)
+
+#: 单篇笔记最多提名条数（防一篇长文刷屏候选区）
+MAX_NOMINATE_PER_NOTE = 2
+
+
+def _split_viewpoints(text: str) -> List[str]:
+    """从笔记正文提取原子观点（分观点论述编号行 → 观点总结整段兜底）。"""
+    m = _VIEWPOINTS_RE.search(text)
+    if m:
+        items = [
+            mm.group(1)
+            for line in m.group("body").splitlines()
+            if (mm := _NUMBERED_RE.match(line))
+        ]
+        if items:
+            return items
+    m = _SUMMARY_RE.search(text)
+    if m:
+        para = " ".join(m.group("body").split())
+        if para:
+            return [para]
+    return []
+
+
+def _manager(tree: MemoryTree) -> CognitionManager:
+    """按库的 $OV 根构造 CognitionManager。"""
+    return CognitionManager(tree.notes_dir.parent, state_dir=tree.state_dir)
+
+
+def nominate_from_note(
+    tree: MemoryTree, note_path: Path, *, max_items: int = MAX_NOMINATE_PER_NOTE
+) -> List[Tuple[str, str]]:
+    """机器从已确认笔记的观点节提炼判断候选（**只提名，绝不批准**）。
+
+    与直收同源的去重纪律：同 statement 的活动条目、待批提名已有则跳过
+    （确认→归档两步都触发本函数也不会重复提名）。
+
+    Args:
+        tree: MemoryTree。
+        note_path: 已确认笔记路径。
+        max_items: 单篇最多提名条数（默认 2，防刷屏）。
+
+    Returns:
+        List[Tuple[str, str]]: [(proposal_id, statement)]；无可提名返回空。
+    """
+    try:
+        text = note_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    statements = _split_viewpoints(text)
+    if not statements:
+        return []
+    try:
+        memory_id = tree._find_entry_id(note_path)
+    except Exception:  # noqa: BLE001 - 未登记无法提名
+        return []
+    if not memory_id:
+        return []
+    manager = _manager(tree)
+    pending = {
+        str(p.statement).strip() for p in manager.list_promotion_proposals()
+    }
+    nominated: List[Tuple[str, str]] = []
+    for statement in statements[:max_items]:
+        if statement.strip() in pending or _duplicate_of(manager, statement):
+            continue
+        title = statement if len(statement) <= 30 else statement[:30] + "…"
+        try:
+            proposal = manager.nominate_memory(
+                str(memory_id),
+                entry_type="belief",
+                title=title,
+                statement=statement,
+                rationale="机器摘录自已确认笔记的观点节，待你批准（2026-09-16 回路三）",
+                proposed_status="active",
+                proposed_certainty=DEFAULT_BELIEF_CERTAINTY,
+            )
+        except Exception:  # noqa: BLE001 - 单条提名失败不阻塞其余
+            continue
+        pending.add(statement.strip())
+        nominated.append((str(proposal.id), statement))
+    return nominated
+
+
+def pending_proposals(tree: MemoryTree) -> List[Dict[str, Any]]:
+    """当前待批的机器提名（晨报安静小节用；按创建顺序）。"""
+    return [
+        {"id": str(p.id), "statement": p.statement, "title": p.title}
+        for p in _manager(tree).list_promotion_proposals()
+    ]
+
+
+def decide_by_index(
+    tree: MemoryTree, index: int, accept: bool
+) -> Tuple[bool, str]:
+    """按当前待批列表序号批准/拒绝（飞书「批 N」「略 N」指令）。
+
+    批准即创建 cognition 条目（certainty 用提名建议值，approval 记
+    human_approved_agent_assessment——机器提名、人批准）；拒绝只记
+    理由。序号基于调用时刻的待批列表（与晨报展示同源同序）。
+    """
+    manager = _manager(tree)
+    pending = manager.list_promotion_proposals()
+    if not pending:
+        return False, "判断登记处现在没有待批候选"
+    if index < 1 or index > len(pending):
+        return False, f"待批候选共 {len(pending)} 条，序号取 1..{len(pending)}"
+    proposal = pending[index - 1]
+    head = proposal.statement[:40]
+    if accept:
+        manager.approve_promotion(
+            proposal.id,
+            status=proposal.proposed_status,
+            certainty=proposal.proposed_certainty,
+            approval=ApprovalRecord(
+                action="approve",
+                reason="飞书「批 N」批准",
+                source="human_approved_agent_assessment",
+            ),
+        )
+        return True, f"已收进判断登记处：「{head}」"
+    manager.reject_promotion(
+        proposal.id,
+        reason="飞书「略 N」略过",
+        approval=ApprovalRecord(action="reject", reason="飞书「略 N」略过"),
+    )
+    return True, f"已略过这条候选：「{head}」"

@@ -221,7 +221,7 @@ class DigestDispatcher:
             )
         # 判断直收账（2026-09-16 回路三启用）：昨日新收判断计数，
         # 0 条不出现该行（安静小节，不带按钮不打断）
-        from scripts.dispatch.judgments import registered_since
+        from scripts.dispatch.judgments import pending_proposals, registered_since
 
         judgments_new = registered_since(self.tree, yesterday)
         judgment_line = (
@@ -229,6 +229,8 @@ class DigestDispatcher:
             if judgments_new
             else None
         )
+        # 机器提名待批候选（安静小节：列在摘要里，飞书回复「批 N/略 N」审批）
+        judgment_proposals = pending_proposals(self.tree)
         is_sunday = datetime.strptime(today, "%Y-%m-%d").weekday() == 6
         weekly_lines = (
             render_weekly_stats(capture_stats(self.tree, days=7, today=today))
@@ -242,6 +244,7 @@ class DigestDispatcher:
             failure_line=failure_line, decay_line=decay_line,
             stale_pending_lines=stale_pending, stale_human_lines=stale_human,
             judgment_line=judgment_line,
+            judgment_proposals=judgment_proposals,
         )
         created = None
         if not dry_run:
@@ -264,6 +267,7 @@ class DigestDispatcher:
                 "yesterday_new": len(yesterday_new),
                 "health_stale": health_stale,
                 "stale": len(stale_pending) + len(stale_human),
+                "judgment_proposals": len(judgment_proposals),
             },
             "review": review,
             "markdown": markdown,
@@ -439,6 +443,7 @@ class DigestDispatcher:
         failure_line: Optional[str] = None,
         decay_line: Optional[str] = None,
         judgment_line: Optional[str] = None,
+        judgment_proposals: Optional[List[Dict[str, Any]]] = None,
         stale_pending_lines: Optional[List[str]] = None,
         stale_human_lines: Optional[List[str]] = None,
     ) -> str:
@@ -514,6 +519,22 @@ class DigestDispatcher:
                 "",
             ]
         sections += [*_lines(review), ""]
+        proposals = judgment_proposals or []
+        if proposals:
+            # 判断候选安静小节（2026-09-16 回路三）：机器从你确认过的
+            # 内容里摘的原子断言，只提名不批准；序号与飞书「批 N/略 N」
+            # 指令同源同序
+            sections += [f"## 🧭 判断候选（{len(proposals)}）", ""]
+            sections += [
+                "> 机器从你确认过的内容里摘的判断候选，只提名不批准；",
+                "> 飞书回复「批 1」收第 1 条进登记处、「略 1」拒掉；不理就一直候着。",
+                "",
+            ]
+            sections += [
+                f"{idx}. {item['statement']}"
+                for idx, item in enumerate(proposals, 1)
+            ]
+            sections += [""]
         sections += [
             f"## 📥 昨日新入库（{len(yesterday_new)}）",
             "",

@@ -830,7 +830,13 @@ class CognitionManager:
     # ------------------------------------------------------------------
 
     def _find_memory(self, memory_id: str) -> Tuple[Path, Optional[dict]]:
-        """按稳定 id 在 $OV/memory 根层找笔记。
+        """按稳定 id 在 $OV/memory 树内找笔记。
+
+        v1.5 现实（2026-09-16 修订）：记忆按分类文件夹存放
+        （memory/抖音/、memory/书籍/<中图法>/ 等，契约已是子目录制），
+        中转站 inbox/ 与 memory/ 平级且笔记同样带稳定 id——查找从
+        「memory/ 根层」扩为「memory/ 递归 + inbox/ 递归」，回收站
+        拦截语义不变。
 
         Returns:
             Tuple[Path, Optional[dict]]: (笔记路径, memory sidecar 条目或 None)。
@@ -839,8 +845,10 @@ class CognitionManager:
             CognitionError: 来源在回收站（必须先恢复）。
             KeyError: 找不到该 memory。
         """
-        if self.memory_dir.is_dir():
-            for path in sorted(self.memory_dir.glob("*.md")):
+        for root in (self.memory_dir, self.ov_path / "inbox"):
+            if not root.is_dir():
+                continue
+            for path in sorted(root.rglob("*.md")):
                 try:
                     post = frontmatter.loads(path.read_text(encoding="utf-8"))
                 except Exception:  # noqa: BLE001 - 损坏文件跳过
@@ -849,7 +857,8 @@ class CognitionManager:
                     return path, self._memory_sidecar_entry(memory_id)
         trash_dir = self.state_dir / "trash"
         if trash_dir.is_dir():
-            for path in sorted(trash_dir.glob("*.md")):
+            # trash 按日期分子目录（state/trash/<日期>/），递归查找
+            for path in sorted(trash_dir.rglob("*.md")):
                 try:
                     post = frontmatter.loads(path.read_text(encoding="utf-8"))
                 except Exception:  # noqa: BLE001

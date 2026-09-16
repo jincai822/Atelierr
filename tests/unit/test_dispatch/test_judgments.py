@@ -246,3 +246,181 @@ def test_parse_feishu_space_and_false_positives():
     assert parse_feishu_judgment("记为判断 空格写法") == "空格写法"
     assert parse_feishu_judgment("判断力很重要") is None
     assert parse_feishu_judgment("判断一下这个") is None
+
+
+# ---------- 机器提名（只提名不批准）+ 批量审批 + 晨报小节 ----------
+
+
+def _note_with_viewpoints(tree, *, inbox=False, tags=None):
+    """造一篇带观点总结的链接笔记（与生产格式一致）。"""
+    content = (
+        "---\ntitle: 测试链接\n---\n\n# 测试链接\n\n"
+        "## 观点总结\n\n"
+        "作者认为早起是效率的根基。\n\n"
+        "## 分观点论述\n\n"
+        "1. 早起让一天有掌控感。\n"
+        "2. 晚起的人更容易焦虑。\n"
+        "3. 睡眠时长比入睡时间更关键。\n\n"
+        "## 转写全文\n\n原始转写。\n"
+    )
+    return tree.create_note(
+        "链接-测试.md", content, source="link", inbox=inbox, tags=tags
+    )
+
+
+def test_split_viewpoints_prefers_numbered(memory_tree):
+    from scripts.dispatch.judgments import _split_viewpoints
+
+    note = _note_with_viewpoints(memory_tree)
+    items = _split_viewpoints(note.read_text(encoding="utf-8"))
+    assert items == [
+        "早起让一天有掌控感。",
+        "晚起的人更容易焦虑。",
+        "睡眠时长比入睡时间更关键。",
+    ]
+
+
+def test_split_viewpoints_summary_fallback(memory_tree):
+    from scripts.dispatch.judgments import _split_viewpoints
+
+    note = memory_tree.create_note(
+        "只有总结.md", "## 观点总结\n\n整段总结只有一个观点。\n\n## 转写全文\n\nx\n",
+        source="link",
+    )
+    assert _split_viewpoints(note.read_text(encoding="utf-8")) == ["整段总结只有一个观点。"]
+
+
+def test_nominate_from_note_creates_pending_proposals(memory_tree):
+    from scripts.dispatch.judgments import nominate_from_note, pending_proposals
+
+    note = _note_with_viewpoints(memory_tree)
+    nominated = nominate_from_note(memory_tree, note)
+
+    assert len(nominated) == 2  # 单篇上限 2 条
+    pending = pending_proposals(memory_tree)
+    assert [p["statement"] for p in pending] == [
+        "早起让一天有掌控感。",
+        "晚起的人更容易焦虑。",
+    ]
+    # cognition 目录里还没有正式条目（只提名不批准）
+    cog_dir = memory_tree.notes_dir.parent / "memory" / "wiki" / "cognition"
+    assert not cog_dir.exists() or not list(cog_dir.rglob("*.md"))
+
+
+def test_nominate_dedupes_pending_and_existing(memory_tree):
+    from scripts.dispatch.judgments import nominate_from_note
+
+    register_statement(memory_tree, "早起让一天有掌控感。")
+    note = _note_with_viewpoints(memory_tree)
+    nominated = nominate_from_note(memory_tree, note)
+    # 第 1 条已是活动条目跳过；第 2 条提名成功
+    assert [s for _, s in nominated] == ["晚起的人更容易焦虑。"]
+    # 再跑一遍：待批里的也跳过，不重复提名
+    assert nominate_from_note(memory_tree, note) == []
+
+
+def test_nominate_skips_notes_without_viewpoints(memory_tree):
+    from scripts.dispatch.judgments import nominate_from_note
+
+    note = memory_tree.create_note("日记.md", "今天天气好", source="manual")
+    assert nominate_from_note(memory_tree, note) == []
+
+
+def test_decide_by_index_accept_creates_entry(memory_tree):
+    from scripts.dispatch.judgments import (
+        decide_by_index, nominate_from_note, pending_proposals,
+    )
+
+    note = _note_with_viewpoints(memory_tree)
+    nominate_from_note(memory_tree, note)
+
+    ok, msg = decide_by_index(memory_tree, 1, accept=True)
+    assert ok
+    assert "已收进判断登记处" in msg
+    # 条目已创建、提案已批、待批少一条
+    cog_dir = memory_tree.notes_dir.parent / "memory" / "wiki" / "cognition"
+    assert len(list(cog_dir.rglob("*.md"))) == 1
+    text = next(cog_dir.rglob("*.md")).read_text(encoding="utf-8")
+    assert "早起让一天有掌控感。" in text
+    assert "human_approved_agent_assessment" in text
+    assert len(pending_proposals(memory_tree)) == 1
+
+
+def test_decide_by_index_reject_and_bad_index(memory_tree):
+    from scripts.dispatch.judgments import (
+        decide_by_index, nominate_from_note, pending_proposals,
+    )
+
+    note = _note_with_viewpoints(memory_tree)
+    nominate_from_note(memory_tree, note)
+
+    ok, msg = decide_by_index(memory_tree, 9, accept=True)
+    assert not ok and "1..2" in msg
+    ok, msg = decide_by_index(memory_tree, 1, accept=False)
+    assert ok and "已略过" in msg
+    assert len(pending_proposals(memory_tree)) == 1
+    # 略过不建条目
+    cog_dir = memory_tree.notes_dir.parent / "memory" / "wiki" / "cognition"
+    assert not cog_dir.exists() or not list(cog_dir.rglob("*.md"))
+
+
+def test_feishu_decide_command(memory_tree, monkeypatch):
+    """飞书发「批 1」：待批第 1 条收进登记处并回执。"""
+    from scripts.dispatch.judgments import nominate_from_note
+
+    note = _note_with_viewpoints(memory_tree)
+    nominate_from_note(memory_tree, note)
+    bridge = FeishuBridge(memory_tree, app_id="cli_x", app_secret="secret")
+    feedback = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat_id, text: feedback.append(text)
+    )
+    event = _event("md1", "text", {"text": "批 1"})
+    event.event.message.chat_id = "oc_demo"
+
+    bridge.handle_event(event)
+
+    assert feedback and "已收进判断登记处" in feedback[0]
+    cog_dir = memory_tree.notes_dir.parent / "memory" / "wiki" / "cognition"
+    assert len(list(cog_dir.rglob("*.md"))) == 1
+
+
+def test_confirm_hook_nominates(memory_tree, monkeypatch):
+    """点 ✅ 确认带观点总结的笔记：顺手机器提名候选（只提名不批准）。"""
+    note = _note_with_viewpoints(memory_tree, inbox=True, tags=["待确认"])
+    bridge = FeishuBridge(memory_tree, app_id="cli_x", app_secret="secret")
+    monkeypatch.setattr(bridge, "_send_feedback", lambda chat_id, text: None)
+    monkeypatch.setattr(
+        bridge, "_completion_card", lambda *a, **kw: {}
+    )
+
+    bridge._handle_confirm(note.name, "oc_demo")
+
+    from scripts.dispatch.judgments import pending_proposals
+
+    pending = pending_proposals(memory_tree)
+    assert len(pending) == 2
+    cog_dir = memory_tree.notes_dir.parent / "memory" / "wiki" / "cognition"
+    assert not cog_dir.exists() or not list(cog_dir.rglob("*.md"))
+
+
+def test_digest_quiet_section_renders(memory_tree):
+    """晨报安静小节：有待批候选时列出编号清单与审批提示。"""
+    from scripts.dispatch.digest import DigestDispatcher
+
+    report = DigestDispatcher(memory_tree).run(
+        dry_run=True,
+        today="2099-01-01",
+    )
+    assert "判断候选" not in report["markdown"]  # 无候选不出现
+
+    from scripts.dispatch.judgments import nominate_from_note
+
+    note = _note_with_viewpoints(memory_tree)
+    nominate_from_note(memory_tree, note)
+    report = DigestDispatcher(memory_tree).run(dry_run=True, today="2099-01-01")
+    md = report["markdown"]
+    assert "## 🧭 判断候选（2）" in md
+    assert "1. 早起让一天有掌控感。" in md
+    assert "批 1" in md
+    assert report["counts"]["judgment_proposals"] == 2

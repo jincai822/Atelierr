@@ -428,6 +428,7 @@ class FeishuBridge:
             return self._fail_response(chat_id, filename, detail)
         title = self._feedback_title(filename)
         self._send_feedback(chat_id, f"✅ 已确认：{title}")
+        self._maybe_nominate_judgments(filename, chat_id)
         return {
             "toast": {"type": "success", "content": "已确认"},
             "card": {
@@ -617,6 +618,7 @@ class FeishuBridge:
             }
         title = self._feedback_title(filename)
         self._send_feedback(chat_id, f"📁 已确认并归档到 {detail}/：{title}")
+        self._maybe_nominate_judgments(filename, chat_id)
         card = {
             "type": "raw",
             "data": self._completion_card(
@@ -1411,6 +1413,38 @@ class FeishuBridge:
             return None, "歧义"
         return matches[0], None
 
+    def _maybe_nominate_judgments(
+        self, filename: str, chat_id: Optional[str] = None
+    ) -> None:
+        """确认/归档成功后顺手机器提名判断候选（2026-09-16 回路三）。
+
+        **只提名绝不批准**——机器从你刚确认的内容里摘观点节的原子断言
+        （``nominate_from_note`` 只认「分观点论述/观点总结」两节，待办/
+        日记等无观点节的笔记自然跳过），攒进晨报安静小节等你
+        「批 N 收 / 略 N 拒」。提名失败/无可提名只 log，绝不打断确认
+        主流程。
+        """
+        try:
+            note_path, _err = self._locate_note(filename)
+            if note_path is None:
+                return
+            from scripts.dispatch.judgments import nominate_from_note
+
+            nominated = nominate_from_note(self.tree, note_path)
+            if nominated:
+                print(
+                    f"[feishu] nominated {len(nominated)} judgment proposals"
+                    f" from {filename}",
+                    flush=True,
+                )
+                self._send_feedback(
+                    chat_id,
+                    f"💡 顺手从这条里挑出 {len(nominated)} 条判断候选，"
+                    "明晨报等你批（批 N 收 / 略 N 拒）",
+                )
+        except Exception as exc:  # noqa: BLE001 - 附加动作不阻塞主流程
+            print(f"[feishu] nominate fail {filename}: {exc}", flush=True)
+
     def _strip_review_tag(self, note_path: Path) -> bool:
         """移除单篇笔记的「待确认」标签（2026-09-07 批准的人工例外之一）。"""
         return self._strip_tag(note_path, CONFIRM_TAG)
@@ -1580,6 +1614,22 @@ class FeishuBridge:
                 self._send_feedback(chat_id, "⚠️ 判断登记失败，请稍后重发")
                 return None
             self._append_diary(text)
+            self._send_feedback(chat_id, reply)
+            return None
+        # 机器提名批量审批（2026-09-16 回路三）：「批 N」收第 N 条待批
+        # 候选进登记处（certainty 用提名建议值）、「略 N」拒掉——与菜单
+        # 指令同级，先于问答会话；序号与晨报安静小节同源同序
+        from scripts.dispatch.judgments import decide_by_index
+
+        decide = re.match(r"^(批|略)\s*(\d{1,2})$", text)
+        if decide:
+            try:
+                _ok, reply = decide_by_index(
+                    self.tree, int(decide.group(2)), decide.group(1) == "批"
+                )
+            except Exception as exc:  # noqa: BLE001 - 审批失败不中断守护
+                print(f"[feishu] proposal decide fail: {exc}", flush=True)
+                reply = "⚠️ 审批失败，请稍后重试"
             self._send_feedback(chat_id, reply)
             return None
         store = PromptStore(Path(self.tree.state_dir))

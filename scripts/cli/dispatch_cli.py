@@ -283,6 +283,8 @@ def _notify_digest(
     )
     if counts.get("judgments_new"):
         message += f"，昨日新收判断 {counts['judgments_new']}"
+    if counts.get("judgment_proposals"):
+        message += f"；🧭 判断候选 {counts['judgment_proposals']} 条等你批（批 N 收 / 略 N 拒）"
     if counts.get("stale"):
         message += f"；⏰ 滞留 {counts['stale']} 条"
     if counts.get("health_stale"):
