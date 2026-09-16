@@ -2397,3 +2397,8 @@ def test_post_locale_wrapper_pure_images(memory_tree, monkeypatch):
     assert not list(memory_tree.notes_dir.glob(f"{_today()}.md"))
     assert len(list((memory_tree.attachments_dir / "媒体").glob("feishu-*.png"))) == 1
     assert reactions == ["mp2"]
+
+
+def test_read_receipt_handler_is_noop():
+    """已读回执事件注册空处理器：接住事件、不抛异常、不刷日志。"""
+    assert FeishuBridge.ignore_read_receipt(object()) is None

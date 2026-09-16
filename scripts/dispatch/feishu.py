@@ -234,6 +234,7 @@ class FeishuBridge:
         handler = (
             lark.EventDispatcherHandler.builder("", "")
             .register_p2_im_message_receive_v1(self.handle_event)
+            .register_p2_im_message_message_read_v1(self.ignore_read_receipt)
             .register_p2_card_action_trigger(self.handle_card_action)
             .build()
         )
@@ -244,6 +245,13 @@ class FeishuBridge:
             log_level=lark.LogLevel.WARNING,
         )
         client.start()
+
+    @staticmethod
+    def ignore_read_receipt(data: Any) -> None:
+        """已读回执事件（im.message.message_read_v1）：订阅推送会送达，
+        但系统无需响应——空处理器接住，避免 SDK 刷
+        ``processor not found`` 噪音日志。"""
+        return
 
     def handle_event(self, data: Any) -> None:
         """处理一条消息事件；任何解析失败都只跳过，绝不中断守护。"""

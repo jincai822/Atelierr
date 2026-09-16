@@ -14,10 +14,11 @@ lark = pytest.importorskip("lark_oapi", reason="lark-oapi 未安装")
 
 
 def test_event_dispatch_and_ws_shapes():
-    """长连接：事件分发器注册两个处理器 + ws.Client 可构造（不 start）。"""
+    """长连接：事件分发器注册三个处理器 + ws.Client 可构造（不 start）。"""
     handler = (
         lark.EventDispatcherHandler.builder("", "")
         .register_p2_im_message_receive_v1(lambda data: None)
+        .register_p2_im_message_message_read_v1(lambda data: None)
         .register_p2_card_action_trigger(lambda data: {})
         .build()
     )
