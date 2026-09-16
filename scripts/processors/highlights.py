@@ -26,7 +26,11 @@ target 优先对着这些真实条目；未注入时退回 LLM 泛判「待读�
 - 扫描件兜底（2026-09-16 裁决 C）：无文字层/文字过少时逐页渲染成图
   走图片 OCR 重建正文（``ocr_fallback`` 默认开，页数上限
   ``ocr_max_pages`` 防整本巨著堵死分发循环），引擎复用
-  ``processors.image`` 配置（use_gpu 一把开关）。
+  ``processors.image`` 配置（use_gpu 一把开关）；
+- 结构化重建（同日裁决）：``ocr_structured`` 默认开——有 PP-StructureV3
+  可用时按版面分析重建**书版式**全文（标题层级、段落、插图裁切落
+  assets 目录、页锚 ``<!-- pN -->``），供 media 管线落盘为
+  "像一本书"的 全文.md；引擎缺失/初始化失败自动退回逐页纯文本 OCR。
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -63,6 +68,15 @@ _LEVELS = ("L1", "L2")
 #: B84-心理学 / B-哲学；不符则丢弃，不参与归档推导）
 _CLC_RE = re.compile(r"^[A-Z]{1,3}\d*-.{1,10}$")
 
+#: PP-Structure 输出的居中 div 包裹图片（src 已改写成 图片/ 前缀后匹配）
+_STRUCT_IMG_DIV_RE = re.compile(
+    r'<div[^>]*>\s*<img\s+src="图片/([^"]+)"[^>]*/>\s*</div>', re.S
+)
+#: 残留的裸 img 标签（同上，src 已改写后匹配）
+_STRUCT_IMG_RE = re.compile(r'<img\s+src="图片/([^"]+)"[^>]*/?>')
+#: PP-Structure 输出的居中图注 div → 斜体行
+_STRUCT_CAPTION_RE = re.compile(r'<div\s+style="text-align:\s*center;?"[^>]*>([^<]+)</div>')
+
 
 class HighlightsProcessor(BaseProcessor):
     """书籍/长文 PDF → 划重点候选清单。
@@ -81,6 +95,7 @@ class HighlightsProcessor(BaseProcessor):
         config: Optional[dict] = None,
         context_provider: Optional[Any] = None,
         ocr_factory: Optional[Any] = None,
+        structure_factory: Optional[Any] = None,
     ) -> None:
         """初始化。
 
@@ -93,6 +108,9 @@ class HighlightsProcessor(BaseProcessor):
             ocr_factory: 扫描件兜底的 OCR 处理器工厂（可调用，返回带
                 ``process(path)`` 的处理器）；None 时懒加载图片处理器
                 （复用 processors.image 配置）。测试注入假实现。
+            structure_factory: PP-StructureV3 版面分析工厂（结构化重建
+                用）；None 时懒加载真实引擎，不可用自动退回纯文本 OCR。
+                测试注入假实现。
         """
         super().__init__(config)
         self.chunk_chars = int(self.config.get("chunk_chars", 6000))
@@ -103,8 +121,12 @@ class HighlightsProcessor(BaseProcessor):
         self.ocr_fallback = bool(self.config.get("ocr_fallback", True))
         self.ocr_max_pages = int(self.config.get("ocr_max_pages", 200))
         self.ocr_dpi = int(self.config.get("ocr_dpi", 150))
+        self.ocr_structured = bool(self.config.get("ocr_structured", True))
         self.ocr_factory = ocr_factory
+        self.structure_factory = structure_factory
         self._ocr: Optional[Any] = None
+        self._structure: Optional[Any] = None
+        self._structure_tried = False
         llm = self.config.get("llm") or {}
         self.llm_base_url = str(llm.get("base_url", "https://api.deepseek.com"))
         self.llm_model = str(llm.get("model", "deepseek-v4-flash"))
@@ -133,6 +155,7 @@ class HighlightsProcessor(BaseProcessor):
         warnings: List[str] = []
         pages, toc, error = self._extract_pages(path)
         ocr_used = False
+        ocr_assets: Optional[str] = None
         if error and "无可提取文字" not in error:
             return self._fail(error)
         total_chars = sum(len(text) for _, text in pages)
@@ -143,7 +166,7 @@ class HighlightsProcessor(BaseProcessor):
                     error
                     or f"提取文字过少（{total_chars} 字）：疑似纯扫描件，请先 OCR 再投喂"
                 )
-            pages, toc, ocr_warnings, ocr_error = self._ocr_pages(path)
+            pages, toc, ocr_warnings, ocr_error, ocr_assets = self._ocr_pages(path)
             warnings.extend(ocr_warnings)
             if ocr_error:
                 return self._fail(ocr_error)
@@ -191,6 +214,7 @@ class HighlightsProcessor(BaseProcessor):
                 "candidates": len(merged),
                 "book": profile,
                 "ocr": ocr_used,
+                "ocr_assets": ocr_assets,
                 "warnings": warnings,
                 "elapsed": round(time.time() - started, 2),
             },
@@ -207,6 +231,78 @@ class HighlightsProcessor(BaseProcessor):
                 self._ocr = ImageProcessor(load_processor_config("image"))
         return self._ocr
 
+    def _get_structure(self) -> Optional[Any]:
+        """取 PP-StructureV3 版面分析引擎（懒加载；不可用/初始化失败返回
+        None，调用方退回逐页纯文本 OCR）。"""
+        if not self.ocr_structured:
+            return None
+        if self._structure_tried:
+            return self._structure
+        self._structure_tried = True
+        try:
+            if self.structure_factory is not None:
+                self._structure = self.structure_factory()
+            else:
+                from paddleocr import PPStructureV3
+
+                use_gpu = bool(load_processor_config("image").get("use_gpu"))
+                # 只留 版面检测+OCR+阅读顺序；表格/公式/印章等子模型全关
+                #（书稿场景用不上，省下加载时间与显存）
+                self._structure = PPStructureV3(
+                    device="gpu:0" if use_gpu else "cpu",
+                    use_doc_orientation_classify=False,
+                    use_doc_unwarping=False,
+                    use_textline_orientation=False,
+                    use_table_recognition=False,
+                    use_formula_recognition=False,
+                    use_chart_recognition=False,
+                    use_seal_recognition=False,
+                )
+        except Exception:  # noqa: BLE001 - 引擎不可用退回纯文本路径
+            self._structure = None
+        return self._structure
+
+    @staticmethod
+    def _ocr_page_structured(
+        pipe: Any,
+        image_path: Path,
+        page_no: int,
+        tmp: Path,
+        assets_dir: Path,
+        warnings: List[str],
+    ) -> Optional[str]:
+        """单页结构化重建：版面分析 → 书版式 markdown（标题/段落/插图）。
+
+        插图裁切从 PP-Structure 输出目录搬入 assets_dir（页码前缀命名），
+        引用改写为 Obsidian 内嵌 ``![[图片/pNNNN-xxx.jpg]]``（落夹后由
+        media 管线替换为库内全路径）；居中图注降级为斜体行；页首插
+        ``<!-- pN -->`` 锚点（阅读视图不可见，供 agent 按页定位）。
+        失败记 warning 返回 None（该页缺失，不阻塞整本）。
+        """
+        try:
+            results = pipe.predict(input=str(image_path))
+            out_dir = tmp / f"out-{page_no}"
+            for res in results:
+                res.save_to_markdown(str(out_dir))
+            mds = sorted(out_dir.glob("*.md"))
+            if not mds:
+                warnings.append(f"第 {page_no} 页结构化失败，已跳过")
+                return None
+            text = mds[0].read_text(encoding="utf-8")
+        except Exception as exc:  # noqa: BLE001 - 单页失败不阻塞整本
+            warnings.append(f"第 {page_no} 页结构化失败: {type(exc).__name__}")
+            return None
+        imgs_dir = out_dir / "imgs"
+        if imgs_dir.is_dir():
+            for img in sorted(imgs_dir.iterdir()):
+                named = f"p{page_no:04d}-{img.name}"
+                shutil.move(str(img), str(assets_dir / named))
+                text = text.replace(f"imgs/{img.name}", f"图片/{named}")
+        text = _STRUCT_IMG_DIV_RE.sub(r"![[图片/\1]]", text)
+        text = _STRUCT_IMG_RE.sub(r"![[图片/\1]]", text)
+        text = _STRUCT_CAPTION_RE.sub(r"*\1*", text)
+        return f"<!-- p{page_no} -->\n\n" + text.strip()
+
     def _ocr_pages(
         self, path: Path
     ) -> Tuple[
@@ -214,23 +310,31 @@ class HighlightsProcessor(BaseProcessor):
         List[Tuple[int, str, int]],
         List[str],
         Optional[str],
+        Optional[str],
     ]:
-        """扫描件 OCR 兜底：逐页渲染成图 → 图片 OCR 处理器识别 → 重建页文本。
+        """扫描件 OCR 兜底：逐页渲染成图 → 识别 → 重建页文本。
 
-        页数超过 ``ocr_max_pages`` 时只处理前 N 页并记 warning（成本护栏，
-        防整本巨著堵死 15 分钟一轮的分发循环）；单页 OCR 失败跳过该页记
-        warning，全部失败才返回错误。书签目录照常提取（扫描件也常带）。
+        结构化模式（``ocr_structured`` 开且引擎可用）：PP-StructureV3
+        版面分析直接产出书版式 markdown（标题层级/段落/插图裁切），插图
+        落 ``metadata`` 带回的 assets 目录（调用方负责收编落夹）；
+        否则退回逐页纯文本 OCR。页数超过 ``ocr_max_pages`` 时只处理前
+        N 页并记 warning（成本护栏，防整本巨著堵死 15 分钟一轮的分发
+        循环）；单页失败跳过记 warning，全部失败才返回错误。书签目录
+        照常提取（扫描件也常带）。
 
         Returns:
-            Tuple: (pages, toc, warnings, error)；error 非 None 即失败。
+            Tuple: (pages, toc, warnings, error, assets_dir)；
+            error 非 None 即失败；assets_dir 为插图裁切临时目录
+            （仅结构化模式有值，调用方负责搬走或清理）。
         """
         warnings: List[str] = []
         try:
             import fitz  # PyMuPDF
         except ImportError:
-            return [], [], warnings, "未安装 PyMuPDF（pip install pymupdf）"
+            return [], [], warnings, "未安装 PyMuPDF（pip install pymupdf）", None
         pages: List[Tuple[int, str]] = []
         toc: List[Tuple[int, str, int]] = []
+        assets_dir: Optional[Path] = None
         try:
             with fitz.open(str(path)) as document:
                 get_toc = getattr(document, "get_toc", None)
@@ -249,23 +353,49 @@ class HighlightsProcessor(BaseProcessor):
                     )
                 zoom = self.ocr_dpi / 72.0
                 matrix = fitz.Matrix(zoom, zoom)
+                structure = self._get_structure()
+                if self.ocr_structured and structure is None:
+                    warnings.append("结构化引擎不可用，退回纯文本 OCR")
+                if structure is not None:
+                    assets_dir = Path(
+                        tempfile.mkdtemp(prefix="atelierr-bookimgs-")
+                    )
                 with tempfile.TemporaryDirectory(prefix="atelierr-ocr-") as tmp:
-                    ocr = self._get_ocr()
-                    for index in range(limit):
-                        image_path = Path(tmp) / f"page-{index + 1}.png"
-                        document[index].get_pixmap(matrix=matrix).save(
-                            str(image_path)
-                        )
-                        result = ocr.process(image_path)
-                        if result.success and (result.text or "").strip():
-                            pages.append((index + 1, result.text.strip()))
-                        else:
-                            warnings.append(f"第 {index + 1} 页 OCR 失败，已跳过")
+                    if structure is not None:
+                        for index in range(limit):
+                            image_path = Path(tmp) / f"page-{index + 1}.png"
+                            document[index].get_pixmap(matrix=matrix).save(
+                                str(image_path)
+                            )
+                            md = self._ocr_page_structured(
+                                structure, image_path, index + 1,
+                                Path(tmp), assets_dir, warnings,
+                            )
+                            if md:
+                                pages.append((index + 1, md))
+                    else:
+                        ocr = self._get_ocr()
+                        for index in range(limit):
+                            image_path = Path(tmp) / f"page-{index + 1}.png"
+                            document[index].get_pixmap(matrix=matrix).save(
+                                str(image_path)
+                            )
+                            result = ocr.process(image_path)
+                            if result.success and (result.text or "").strip():
+                                pages.append((index + 1, result.text.strip()))
+                            else:
+                                warnings.append(f"第 {index + 1} 页 OCR 失败，已跳过")
         except Exception as exc:  # noqa: BLE001 - 损坏 PDF 按失败处理
-            return [], [], warnings, f"扫描件 OCR 失败: {type(exc).__name__}: {exc}"
+            if assets_dir is not None:
+                shutil.rmtree(assets_dir, ignore_errors=True)
+            return [], [], warnings, f"扫描件 OCR 失败: {type(exc).__name__}: {exc}", None
         if not pages:
-            return [], [], warnings, "扫描件 OCR 全部失败：无法代读"
-        return pages, toc, warnings, None
+            if assets_dir is not None:
+                shutil.rmtree(assets_dir, ignore_errors=True)
+            return [], [], warnings, "扫描件 OCR 全部失败：无法代读", None
+        return pages, toc, warnings, None, (
+            str(assets_dir) if assets_dir is not None else None
+        )
 
     @staticmethod
     def _extract_pages(

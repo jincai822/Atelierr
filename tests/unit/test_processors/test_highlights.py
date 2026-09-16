@@ -85,11 +85,41 @@ class _FakeOcrProcessor:
 
 @pytest.fixture(autouse=True)
 def _reset_fake_ocr():
-    """每个用例重置假 OCR 的调用记录与失败开关。"""
+    """每个用例重置假 OCR/假版面分析的调用记录与失败开关。"""
     _FakeOcrProcessor.calls = []
     _FakeOcrProcessor.fail = False
     _FakeOcrProcessor.text = "扫描页正文。"
+    _FakeStructure.calls = []
     yield
+
+
+class _FakeStructureResult:
+    """假 PP-Structure 结果：save_to_markdown 写出固定 md + 一张裁切图。"""
+
+    def save_to_markdown(self, out_dir):
+        from pathlib import Path
+
+        out = Path(out_dir)
+        (out / "imgs").mkdir(parents=True, exist_ok=True)
+        (out / "imgs" / "img_in_image_box_1_2_3_4.jpg").write_bytes(b"\xff\xd8fake")
+        (out / "page.md").write_text(
+            '<div style="text-align: center;">'
+            '<img src="imgs/img_in_image_box_1_2_3_4.jpg" alt="Image" width="50%" />'
+            "</div>\n\n"
+            '<div style="text-align: center;">模型结构图</div>\n\n'
+            "## 何为语言？\n\n正文段落" + "。" * 400,
+            encoding="utf-8",
+        )
+
+
+class _FakeStructure:
+    """假版面分析引擎：记录调用，返回固定结果。"""
+
+    calls = []
+
+    def predict(self, input):
+        type(self).calls.append(input)
+        return [_FakeStructureResult()]
 
 
 class _FakeLLMResponse:
@@ -188,7 +218,9 @@ def test_scanned_pdf_ocr_fallback(tmp_path, monkeypatch):
     _FakeOcrProcessor.text = "扫描页正文。" * 60
     path = _make_pdf(tmp_path, ["", "", ""], monkeypatch)  # 三页全无文字
 
-    result = HighlightsProcessor(ocr_factory=_FakeOcrProcessor).process(path)
+    result = HighlightsProcessor(
+        {"ocr_structured": False}, ocr_factory=_FakeOcrProcessor
+    ).process(path)
 
     assert result.success
     assert result.metadata["ocr"] is True
@@ -203,7 +235,9 @@ def test_scanned_pdf_ocr_all_failed(tmp_path, monkeypatch):
     _FakeOcrProcessor.fail = True
     path = _make_pdf(tmp_path, ["", ""], monkeypatch)
 
-    result = HighlightsProcessor(ocr_factory=_FakeOcrProcessor).process(path)
+    result = HighlightsProcessor(
+        {"ocr_structured": False}, ocr_factory=_FakeOcrProcessor
+    ).process(path)
 
     assert not result.success
     assert "OCR 全部失败" in result.error
@@ -220,13 +254,59 @@ def test_scanned_pdf_ocr_page_cap(tmp_path, monkeypatch):
     path = _make_pdf(tmp_path, ["", "", "", ""], monkeypatch)
 
     result = HighlightsProcessor(
-        {"ocr_max_pages": 2}, ocr_factory=_FakeOcrProcessor
+        {"ocr_max_pages": 2, "ocr_structured": False}, ocr_factory=_FakeOcrProcessor
     ).process(path)
 
     assert result.success
     assert len(_FakeOcrProcessor.calls) == 2
     assert result.metadata["pages"] == 2
     assert any("OCR 上限" in w for w in result.metadata["warnings"])
+
+
+def test_scanned_pdf_structured_rebuild(tmp_path, monkeypatch):
+    """结构化重建（2026-09-16 裁决）：书版式 markdown + 插图裁切 + 页锚。"""
+    from pathlib import Path
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        hl_module.httpx, "post",
+        lambda *a, **kw: _FakeLLMResponse(_payload([_item()])),
+    )
+    path = _make_pdf(tmp_path, ["", ""], monkeypatch)
+
+    result = HighlightsProcessor(structure_factory=_FakeStructure).process(path)
+
+    assert result.success
+    assert result.metadata["ocr"] is True
+    assert len(_FakeStructure.calls) == 2
+    assert _FakeOcrProcessor.calls == []  # 结构化接管，纯文本 OCR 未用
+    text = result.text
+    assert "<!-- p1 -->" in text
+    assert "![[图片/p0001-img_in_image_box_1_2_3_4.jpg]]" in text
+    assert "*模型结构图*" in text
+    assert "## 何为语言？" in text
+    assets = result.metadata["ocr_assets"]
+    assert assets and len(list(Path(assets).iterdir())) == 2
+
+
+def test_structured_unavailable_falls_back(tmp_path, monkeypatch):
+    """结构化引擎不可用（工厂返回 None）：退回纯文本 OCR 并记 warning。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        hl_module.httpx, "post",
+        lambda *a, **kw: _FakeLLMResponse(_payload([_item()])),
+    )
+    _FakeOcrProcessor.text = "扫描页正文。" * 60
+    path = _make_pdf(tmp_path, ["", ""], monkeypatch)
+
+    result = HighlightsProcessor(
+        structure_factory=lambda: None, ocr_factory=_FakeOcrProcessor
+    ).process(path)
+
+    assert result.success
+    assert len(_FakeOcrProcessor.calls) == 2
+    assert result.metadata["ocr_assets"] is None
+    assert any("结构化引擎不可用" in w for w in result.metadata["warnings"])
 
 
 def test_chunking_respects_page_boundary(tmp_path, monkeypatch):

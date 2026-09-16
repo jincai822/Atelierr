@@ -11,6 +11,7 @@ python-frontmatter>=1.0.0
 # 注意：torch 2.13 依赖 nvidia-nccl-cu13==2.29.7，paddle 会拉 cu12 旧版
 # 顶掉它导致 torch 加载失败，换装后需 pip install --force-reinstall --no-deps
 # nvidia-nccl-cu13==2.29.7 修复（详见 config/processors.yaml.example image 节）
+# 扫描件 PDF 的书版式结构化重建另需 paddlex 扩展：pip install "paddlex[ocr]"
 paddlepaddle>=2.5.0
 paddleocr>=2.6.0
 pillow>=9.0.0

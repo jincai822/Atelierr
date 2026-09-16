@@ -342,3 +342,27 @@ def test_pdf_shelve_failure_degrades(memory_tree, monkeypatch):
         encoding="utf-8"
     )
     assert "全文" not in checklist
+
+
+def test_pdf_structured_assets_shelved(memory_tree, tmp_path):
+    """结构化全文：插图裁切收进专夹 图片/，全文引用改写为库内全路径。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "p0001-fig.jpg").write_bytes(b"\xff\xd8fake")
+
+    class _Structured(_FakeFulltextProcessor):
+        def process(self, path):
+            result = super().process(path)
+            result.text = "正文。\n\n![[图片/p0001-fig.jpg]]\n"
+            result.metadata["ocr"] = True
+            result.metadata["ocr_assets"] = str(assets)
+            return result
+
+    _add_pdf(memory_tree, name="长文.pdf")
+    MediaDispatcher(memory_tree, highlights_factory=_Structured).run()
+
+    folder = Path(memory_tree.attachments_dir) / "长文"
+    assert (folder / "图片" / "p0001-fig.jpg").exists()  # 裁切收进专夹
+    fulltext = (folder / "全文.md").read_text(encoding="utf-8")
+    assert "![[attachments/长文/图片/p0001-fig.jpg]]" in fulltext  # 全路径改写
+    assert not assets.exists()  # 临时目录已清理

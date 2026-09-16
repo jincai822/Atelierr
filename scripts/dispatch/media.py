@@ -697,7 +697,10 @@ class MediaDispatcher:
                 #（GPU ~1.3s/页），绝不一次性用完就扔
                 book_meta = (result.metadata or {}).get("book") or {}
                 fulltext_rel, shelved = self._shelve_pdf(
-                    path, result.text or "", book_meta
+                    path,
+                    result.text or "",
+                    book_meta,
+                    ocr_assets=(result.metadata or {}).get("ocr_assets"),
                 )
                 path = shelved or path
                 markdown = result.markdown
@@ -838,7 +841,11 @@ class MediaDispatcher:
             tmp.unlink(missing_ok=True)
 
     def _shelve_pdf(
-        self, path: Path, text: str, book: Dict[str, Any]
+        self,
+        path: Path,
+        text: str,
+        book: Dict[str, Any],
+        ocr_assets: Optional[str] = None,
     ) -> Tuple[Optional[str], Optional[Path]]:
         """PDF 原件收进专夹 + 全文落盘（2026-09-16 用户裁决 KM 规格，
         对齐链接管线"一条内容一个文件夹"）：
@@ -854,6 +861,9 @@ class MediaDispatcher:
             path: PDF 当前路径（到达位置，专夹建在其父目录下）。
             text: 全文（文字层提取或 OCR 重建）；空文本直接跳过。
             book: 书籍档案元数据（有题名时专夹按题名命名）。
+            ocr_assets: 结构化重建的插图裁切临时目录（highlights
+                ``metadata["ocr_assets"]``）；给定时搬进专夹 ``图片/``
+                并把全文里的 ``![[图片/…]]`` 引用改写为库内全路径。
 
         Returns:
             Tuple[Optional[str], Optional[Path]]: (全文相对数据根路径,
@@ -873,6 +883,19 @@ class MediaDispatcher:
             else:
                 # 专夹已有同名原件（同名不同版重投）：原件留在原地
                 new_path = path
+            if ocr_assets:
+                # 结构化重建的插图裁切收编进专夹 图片/，引用改写为库内全路径
+                assets_src = Path(ocr_assets)
+                if assets_src.is_dir():
+                    img_dir = folder / "图片"
+                    img_dir.mkdir(exist_ok=True)
+                    for img in sorted(assets_src.iterdir()):
+                        shutil.move(str(img), str(img_dir / img.name))
+                    folder_rel = folder.relative_to(
+                        self.tree.attachments_dir.parent
+                    ).as_posix()
+                    text = text.replace("![[图片/", f"![[{folder_rel}/图片/")
+                    shutil.rmtree(assets_src, ignore_errors=True)
             fulltext = folder / "全文.md"
             if fulltext.exists():
                 digest = hashlib.sha1(path.name.encode("utf-8")).hexdigest()[:6]
