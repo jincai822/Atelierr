@@ -12,8 +12,10 @@ decay 把 confidence 跌破 delete_threshold 的笔记推向 pending_delete
 - 只读笔记与 sidecar 索引，绝不改写笔记文件；
 - 推送冷却时钟只写 ``<state_dir>/resurface.json``；
 - 幂等：同一笔记间隔期内不重复推送；
-- 机器搬运全文（MACHINE_SOURCES）默认不推，被 [[引用]] ≥1 次除外
-  （2026-09-12 信噪比治理：复习位只留给人写与被引用的笔记）。
+- 机器搬运全文（MACHINE_SOURCES）未确认归档前不推，被 [[引用]] ≥1 次
+  除外（2026-09-12 信噪比治理）；**已确认归档出 inbox/ 的机器笔记
+  恢复复习资格**（2026-09-16 用户裁决：点 ✅ = 人认可要吸收的内容，
+  与人写笔记同权——确认→复习→淘汰闭环；实测此前复习队列因此恒空）。
 
 间隔重复（2026-09-13 升级）：复习卡带「想起来了/没想起来」反馈按钮，
 每篇笔记有独立间隔（想起来 ×2、没想起来 ÷2、上限 60 天）——常想起的
@@ -119,11 +121,12 @@ class ResurfaceManager:
         """返回今日复习队列（按 confidence 升序，最该复习的在前）。
 
         只纳入：已登记且文件存在、非 pending_delete、非机器摘要/基础设施
-        （source=digest/system）、非机器搬运全文（MACHINE_SOURCES——复习位
-        是稀缺资源，机器全文靠搜索"拉取"证明自己，2026-09-12 用户裁决；
-        例外：被 [[引用]] ≥1 次的机器笔记恢复资格，反链统计与每日衰减
-        同源）、live confidence 落在 [window_low, window_high)、且距上次
-        推送已满 cooldown_days 的笔记。
+        （source=digest/system）、非滞留中转站的机器搬运全文（inbox/ 内
+        的 MACHINE_SOURCES——复习位是稀缺资源；例外：被 [[引用]] ≥1 次
+        恢复资格，反链统计与每日衰减同源；**已确认归档出 inbox/ 的机器
+        笔记与人写笔记同权**，2026-09-16 用户裁决）、live confidence
+        落在 [window_low, window_high)、且距上次推送已满 cooldown_days
+        的笔记。
 
         Args:
             limit: 条数上限；None 时用 daily_count；<= 0 返回空。
@@ -151,15 +154,20 @@ class ResurfaceManager:
                 if source in ("digest", "system"):
                     continue  # 机器摘要/基础设施笔记（控制台等）不需复习
                 if source in MACHINE_SOURCES:
-                    if backlinks is None:
-                        backlinks = {
-                            p.stem: count
-                            for p, count in DecayManager(self.tree)
-                            .backlink_counts()
-                            .items()
-                        }
-                    if backlinks.get(path.stem, 0) < 1:
-                        continue  # 机器全文：未被引用则不占复习位
+                    if str(self.tree._rel_key(path)).startswith("inbox/"):
+                        # 未确认归档的机器搬运（2026-09-12 信噪比治理）：
+                        # 不占复习位，除非被 [[引用]] ≥1 次
+                        if backlinks is None:
+                            backlinks = {
+                                p.stem: count
+                                for p, count in DecayManager(self.tree)
+                                .backlink_counts()
+                                .items()
+                            }
+                        if backlinks.get(path.stem, 0) < 1:
+                            continue
+                    # else：已确认归档出中转站（2026-09-16 用户裁决）——
+                    # 人点过 ✅ 的机器笔记恢复复习资格，与人写笔记同权；
                 confidence = info["confidence"]
                 if not (self.window_low <= confidence < self.window_high):
                     continue
