@@ -86,6 +86,9 @@ processors:
                         # 档案卡由 dispatch/media.py 建进 inbox 待确认）
     ocr_fallback: true  # 扫描件兜底（2026-09-16 裁决 C）：无文字层/文字过少
                         # 时逐页渲染成图，复用上面 image 节引擎 OCR 重建正文
+    extract_images: true  # 文字层 PDF 插图提取（2026-09-16）：嵌入插图按页
+                        # 抽出，引用追加进页文本末尾，收编进专夹 图片/；
+                        # 小图/跨页重复图（社标）自动过滤，关闭则全文纯文字
     ocr_structured: true  # 结构化重建（同日裁决）：有 PP-StructureV3 时按版面
                         # 分析产出书版式全文（标题层级/段落/插图裁切落 图片/），
                         # 引擎不可用自动退回纯文本 OCR；需 paddlex[ocr] 扩展

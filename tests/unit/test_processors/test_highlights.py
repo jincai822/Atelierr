@@ -728,3 +728,144 @@ def test_polish_merges_adjacent_python_fences():
     out = hl_module._polish_structured_markdown(raw)
     assert out.count("```python") == 1
     assert "```python\nimport numpy as np\nnp.zeros((2,2))\n```" in out
+
+
+# --- 文字层 PDF 插图提取（2026-09-16 backlog 落地）---
+
+
+class _FakeImgPage:
+    """带嵌入插图的假页（文字层 + get_images）。"""
+
+    def __init__(self, text, images=()):
+        self._text = text
+        self._images = images
+
+    def get_text(self, _mode):
+        return self._text
+
+    def get_images(self, full=True):
+        return self._images
+
+
+class _FakeImgDoc:
+    """带 extract_image 的假文档。"""
+
+    def __init__(self, pages, store):
+        self._pages = pages
+        self._store = store  # {xref: (bytes, ext)}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def __len__(self):
+        return len(self._pages)
+
+    def __getitem__(self, index):
+        return self._pages[index]
+
+    def get_toc(self):
+        return []
+
+    def extract_image(self, xref):
+        data, ext = self._store[xref]
+        return {"image": data, "ext": ext}
+
+
+def _install_fake_fitz_images(monkeypatch, pages, store):
+    import sys
+    import types
+
+    fake = types.SimpleNamespace(
+        open=lambda _path: _FakeImgDoc(pages, store),
+        Matrix=lambda *a, **kw: None,
+    )
+    monkeypatch.setitem(sys.modules, "fitz", fake)
+
+
+def _big_png(tag=b"A"):
+    return b"\x89PNG" + tag * 5000  # >4KB，过字节下限
+
+
+def test_textlayer_images_extracted(tmp_path, monkeypatch):
+    """文字层 PDF：嵌入插图按页抽出、引用追加进对应页文本末尾、
+    assets 目录经 metadata 交给 media 收编。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        hl_module.httpx, "post",
+        lambda *a, **kw: _FakeLLMResponse(_payload([_item()])),
+    )
+    store = {7: (_big_png(), "png"), 9: (_big_png(b"B"), "jpeg")}
+    pages = [
+        _FakeImgPage("第一页正文。" * 60, images=[(7, 0, 800, 600, 8, "", "", "", 0, 0)]),
+        _FakeImgPage("第二页正文。" * 60, images=[(9, 0, 900, 700, 8, "", "", "", 0, 0)]),
+    ]
+    _install_fake_fitz_images(monkeypatch, pages, store)
+    path = tmp_path / "book.pdf"
+    path.write_bytes(b"%PDF fake")
+
+    result = HighlightsProcessor().process(path)
+
+    assert result.success
+    assert "![[图片/p0001-img7.png]]" in result.text
+    assert "![[图片/p0002-img9.jpeg]]" in result.text
+    assets = result.metadata.get("ocr_assets")
+    assert assets
+    from pathlib import Path as _P
+
+    names = sorted(p.name for p in _P(assets).iterdir())
+    assert names == ["p0001-img7.png", "p0002-img9.jpeg"]
+
+
+def test_textlayer_images_skip_small_and_duplicates(tmp_path, monkeypatch):
+    """小图（<120px 或 <4KB）与跨页重复 xref（社标）只抽一次。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        hl_module.httpx, "post",
+        lambda *a, **kw: _FakeLLMResponse(_payload([_item()])),
+    )
+    store = {
+        3: (b"\x89PNG" + b"C" * 100, "png"),      # <4KB 跳过
+        5: (_big_png(b"D"), "png"),                # 合格，但两页重复 → 只抽一次
+        6: (_big_png(b"E"), "png"),                # 尺寸 20x20 跳过
+    }
+    logo = (5, 0, 800, 600, 8, "", "", "", 0, 0)
+    pages = [
+        _FakeImgPage("第一页。" * 80, images=[(3, 0, 800, 600, 8, "", "", "", 0, 0), logo, (6, 0, 20, 20, 8, "", "", "", 0, 0)]),
+        _FakeImgPage("第二页。" * 80, images=[logo]),
+    ]
+    _install_fake_fitz_images(monkeypatch, pages, store)
+    path = tmp_path / "book.pdf"
+    path.write_bytes(b"%PDF fake")
+
+    result = HighlightsProcessor().process(path)
+
+    assert result.success
+    assert result.text.count("![[图片/p") == 1
+    assert "![[图片/p0001-img5.png]]" in result.text
+    from pathlib import Path as _P
+
+    assets = _P(result.metadata["ocr_assets"])
+    assert [p.name for p in assets.iterdir()] == ["p0001-img5.png"]
+
+
+def test_textlayer_extract_images_disabled(tmp_path, monkeypatch):
+    """extract_images=False：全文保持纯文字，metadata 无 assets。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        hl_module.httpx, "post",
+        lambda *a, **kw: _FakeLLMResponse(_payload([_item()])),
+    )
+    store = {7: (_big_png(), "png")}
+    pages = [_FakeImgPage("正文。" * 250, images=[(7, 0, 800, 600, 8, "", "", "", 0, 0)])]
+    _install_fake_fitz_images(monkeypatch, pages, store)
+    path = tmp_path / "book.pdf"
+    path.write_bytes(b"%PDF fake")
+
+    result = HighlightsProcessor(config={"extract_images": False}).process(path)
+
+    assert result.success
+    assert "![[图片/" not in result.text
+    assert result.metadata.get("ocr_assets") is None

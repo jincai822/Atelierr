@@ -34,6 +34,10 @@ target 优先对着这些真实条目；未注入时退回 LLM 泛判「待读�
   ``_polish_structured_markdown``（代码段围栏、In/Out 提示符清除、
   伪表格去竖线、空行压缩、被拆块的章节名合并）；引擎缺失/初始化
   失败自动退回逐页纯文本 OCR（polish 同样适用）。
+- 文字层 PDF 插图提取（2026-09-16 backlog 落地）：``extract_images``
+  默认开——正文用精准文字层（不进 PP-Structure，OCR 反而更差），
+  嵌入插图按页抽出、引用追加进页文本末尾，同走 assets→专夹通道；
+  小图/跨页重复图（社标）过滤，失败整体降级纯文字不阻塞。
 """
 
 from __future__ import annotations
@@ -60,6 +64,10 @@ MIN_CHUNK_CHARS = 100
 
 #: 提取总字数低于该值视为"文字过少"（纯扫描件需先 OCR）
 MIN_TOTAL_CHARS = 500
+
+#: 文字层 PDF 插图提取的过滤下限（图标/项目符号/装饰线一律不抽）
+MIN_IMAGE_BYTES = 4096
+MIN_IMAGE_SIDE = 120
 
 _NATURES = ("支持", "挑战", "待验")
 
@@ -277,6 +285,7 @@ class HighlightsProcessor(BaseProcessor):
         self.chunk_chars = int(self.config.get("chunk_chars", 6000))
         self.max_chunks = int(self.config.get("max_chunks", 80))
         self.max_candidates = int(self.config.get("max_candidates", 20))
+        self.extract_images = bool(self.config.get("extract_images", True))
         self.book_min_pages = int(self.config.get("book_min_pages", 60))
         self.context_provider = context_provider
         self.ocr_fallback = bool(self.config.get("ocr_fallback", True))
@@ -344,6 +353,16 @@ class HighlightsProcessor(BaseProcessor):
                 f"片段数 {len(chunks)} 超过护栏 {self.max_chunks}，已截断（成本保护）"
             )
             chunks = chunks[: self.max_chunks]
+
+        # 文字层 PDF 插图提取（2026-09-16 backlog 落地）：正文用精准文字层，
+        # 嵌入插图按页抽出落 assets（media._shelve_pdf 收编进专夹 图片/
+        # 并改写引用）——文字层不进 PP-Structure（OCR 反而比文字层差），
+        # 在分块之后做，LLM 不看见图片引用
+        if not ocr_used and self.extract_images:
+            pages, img_assets, img_warnings = self._extract_images(path, pages)
+            warnings.extend(img_warnings)
+            if img_assets is not None:
+                ocr_assets = str(img_assets)
 
         # 书籍模式（2026-09-14 裁决，对齐 Cognitive OS 准入协议）：
         # 页数达标的书籍额外产出档案元数据 + 导读节；失败只记 warning
@@ -595,6 +614,73 @@ class HighlightsProcessor(BaseProcessor):
         if not pages:
             return [], [], "PDF 无可提取文字（疑似纯扫描件，请先 OCR 再投喂）"
         return pages, toc, None
+
+    @staticmethod
+    def _extract_images(
+        path: Path, pages: List[Tuple[int, str]]
+    ) -> Tuple[List[Tuple[int, str]], Optional[Path], List[str]]:
+        """文字层 PDF 的嵌入插图按页抽出，引用追加进对应页文本末尾。
+
+        跳过小图（图标/装饰：尺寸 <MIN_IMAGE_SIDE 或字节
+        <MIN_IMAGE_BYTES）与跨页重复图（同 xref 只抽一次——社标/页眉
+        Logo 每页重复）。插图引用 ``![[图片/pNNNN-imgNN.ext]]`` 追加在
+        该页文本末尾（专夹收编时由 media._shelve_pdf 改写为库内全路径）。
+        任何失败整体降级为原文 pages（全文保住纯文字，不阻塞）。
+
+        Returns:
+            Tuple: (新 pages, assets 目录或 None, warnings)。
+        """
+        warnings: List[str] = []
+        try:
+            import fitz  # PyMuPDF
+        except ImportError:
+            return pages, None, warnings
+        assets_dir = Path(tempfile.mkdtemp(prefix="atelierr-pdfimgs-"))
+        seen: set = set()
+        extracted = 0
+        new_pages: List[Tuple[int, str]] = []
+        try:
+            with fitz.open(str(path)) as document:
+                for page_no, text in pages:
+                    refs: List[str] = []
+                    try:
+                        page = document[page_no - 1]
+                        for img in page.get_images(full=True):
+                            xref = img[0]
+                            if xref in seen:
+                                continue
+                            seen.add(xref)
+                            if (
+                                int(img[2]) < MIN_IMAGE_SIDE
+                                or int(img[3]) < MIN_IMAGE_SIDE
+                            ):
+                                continue
+                            info = document.extract_image(xref)
+                            data = info.get("image")
+                            ext = str(info.get("ext") or "png")
+                            if not data or len(data) < MIN_IMAGE_BYTES:
+                                continue
+                            name = f"p{page_no:04d}-img{xref}.{ext}"
+                            (assets_dir / name).write_bytes(data)
+                            refs.append(name)
+                            extracted += 1
+                    except Exception as exc:  # noqa: BLE001 - 单页失败不阻塞
+                        warnings.append(
+                            f"第 {page_no} 页插图提取失败: {type(exc).__name__}"
+                        )
+                    if refs:
+                        text = text + "\n\n" + "\n\n".join(
+                            f"![[图片/{name}]]" for name in refs
+                        )
+                    new_pages.append((page_no, text))
+        except Exception as exc:  # noqa: BLE001 - 整体失败降级纯文字
+            shutil.rmtree(assets_dir, ignore_errors=True)
+            warnings.append(f"插图提取失败: {type(exc).__name__}（全文保持纯文字）")
+            return pages, None, warnings
+        if extracted == 0:
+            shutil.rmtree(assets_dir, ignore_errors=True)
+            return pages, None, warnings
+        return new_pages, assets_dir, warnings
 
     def _chunk_pages(self, pages: List[Tuple[int, str]]) -> List[List[Tuple[int, str]]]:
         """按页聚合成不超过 chunk_chars 的片段（不切断单页）。"""
