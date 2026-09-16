@@ -8,10 +8,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from unittest.mock import MagicMock
 
-import scripts.dispatch.feishu as feishu_module
-import scripts.dispatch.feishu_io as feishu_io_module
 from scripts.dispatch.judgments import (
     parse_feishu_judgment,
     parse_line,
