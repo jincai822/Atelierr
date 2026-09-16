@@ -962,6 +962,7 @@ pytest --cov=scripts --cov-report=html --cov-report=term
 计算 Confidence          | < 10ms     | test_confidence_performance
 衰减扫描（1000笔记）      | < 5s       | test_decay_performance
 图片 OCR                 | 截图类 < 5s；整页扫描 ≤ 15s（CPU 实测 12-14s） | test_image_ocr_performance
+扫描件 PDF OCR（2026-09-16 裁决 C） | GPU 实测 ~1.3s/页；200 页上限内整本约 4.5 分钟（含 LLM 代读）；CPU 约 12-14s/页不建议整本 | test_scanned_pdf_ocr_fallback（假引擎验路径，真实耗时为人工实测）
 PDF 处理（10页）          | < 30s      | test_pdf_processing_performance
 视频转文字（1分钟）       | < 60s      | test_video_transcribe_performance
 Cognition（10000条）      | 记录 list/reindex/validate 耗时；v1.1 不设硬阈值 | test_cognition_capacity_correctness_at_10000_entries

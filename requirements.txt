@@ -5,6 +5,12 @@ watchdog>=2.1.0
 python-frontmatter>=1.0.0
 
 # OCR（图片处理）
+# GPU 用户换装 GPU 版（同版本号，官方 cu126 源；2026-09-16 实测可用）：
+#   pip uninstall paddlepaddle && pip install paddlepaddle-gpu==3.3.1 \
+#       --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+# 注意：torch 2.13 依赖 nvidia-nccl-cu13==2.29.7，paddle 会拉 cu12 旧版
+# 顶掉它导致 torch 加载失败，换装后需 pip install --force-reinstall --no-deps
+# nvidia-nccl-cu13==2.29.7 修复（详见 config/processors.yaml.example image 节）
 paddlepaddle>=2.5.0
 paddleocr>=2.6.0
 pillow>=9.0.0

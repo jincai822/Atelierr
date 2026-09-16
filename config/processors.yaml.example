@@ -9,7 +9,12 @@ processors:
                           # 上传到飞书云端识别，敏感截图勿用此引擎——凭证走
                           # FEISHU_APP_ID/SECRET 环境变量）
     lang: ch              # ch / en
-    use_gpu: false
+    use_gpu: false      # true 需 GPU 版 paddle：pip uninstall paddlepaddle &&
+                        # pip install paddlepaddle-gpu==3.3.1 --extra-index-url
+                        # https://www.paddlepaddle.org.cn/packages/stable/cu126/
+                        #（2026-09-16 实测：GPU 版与 torch 2.13 共存需
+                        # nvidia-nccl-cu13==2.29.7 压过 paddle 拉的 cu12 版，
+                        # 否则 torch 加载失败；enable_mkldnn=False 仅影响 CPU）
     timeout_s: 5          # 软目标：截图类 < 5s；paddle 整页扫描图 CPU 实测 12-14s
                           # （对齐 docs/ACCEPTANCE-CRITERIA.md 性能表），实现不做硬中断
     # 实现注记：paddlepaddle 3.3.1 + paddleocr 3.x 的 MKLDNN 推理路径会崩溃
@@ -79,6 +84,11 @@ processors:
     book_min_pages: 60  # 书籍模式页数门槛：达到才产档案元数据+导读
                         #（2026-09-14 裁决：书籍走建档+查重+导读+筛查清单，
                         # 档案卡由 dispatch/media.py 建进 inbox 待确认）
+    ocr_fallback: true  # 扫描件兜底（2026-09-16 裁决 C）：无文字层/文字过少
+                        # 时逐页渲染成图，复用上面 image 节引擎 OCR 重建正文
+    ocr_max_pages: 200  # 成本护栏：超过只 OCR 前 N 页并在清单注明（防整本
+                        # 巨著堵死 15 分钟一轮的分发循环）
+    ocr_dpi: 150        # 渲染分辨率；150 对正文足够，再高贵的是时间
     llm:                # 代读挑候选（必需；key 缺失处理失败并进熔断重试，
                         # 不会像 link 那样降级——清单的产品就是候选本身）
       base_url: https://api.deepseek.com

@@ -10,8 +10,20 @@ import json
 import sys
 import types
 
+import pytest
+
 import scripts.processors.highlights as hl_module
+from scripts.processors.base import ProcessResult
 from scripts.processors.highlights import HighlightsProcessor
+
+
+class _FakePixmap:
+    """假渲染结果：save() 写出占位 PNG（OCR 兜底路径用）。"""
+
+    def save(self, path):
+        from pathlib import Path
+
+        Path(path).write_bytes(b"\x89PNG fake")
 
 
 class _FakePage:
@@ -20,6 +32,9 @@ class _FakePage:
 
     def get_text(self, _mode):
         return self._text
+
+    def get_pixmap(self, matrix=None):
+        return _FakePixmap()
 
 
 class _FakeDoc:
@@ -45,8 +60,36 @@ class _FakeDoc:
 
 def _install_fake_fitz(monkeypatch, page_texts, toc=None):
     """注册假 fitz 模块：open() 返回固定页文本的假文档。"""
-    fake = types.SimpleNamespace(open=lambda _path: _FakeDoc(page_texts, toc))
+    fake = types.SimpleNamespace(
+        open=lambda _path: _FakeDoc(page_texts, toc),
+        Matrix=lambda *a, **kw: None,
+    )
     monkeypatch.setitem(sys.modules, "fitz", fake)
+
+
+class _FakeOcrProcessor:
+    """假 OCR 引擎：逐页返回固定文本；fail 置位时全部失败。"""
+
+    calls = []
+    fail = False
+    text = "扫描页正文。"
+
+    def process(self, path):
+        type(self).calls.append(str(path))
+        if type(self).fail:
+            return ProcessResult(success=False, error="引擎崩溃")
+        return ProcessResult(
+            success=True, text=type(self).text, markdown="", confidence=0.9
+        )
+
+
+@pytest.fixture(autouse=True)
+def _reset_fake_ocr():
+    """每个用例重置假 OCR 的调用记录与失败开关。"""
+    _FakeOcrProcessor.calls = []
+    _FakeOcrProcessor.fail = False
+    _FakeOcrProcessor.text = "扫描页正文。"
+    yield
 
 
 class _FakeLLMResponse:
@@ -125,14 +168,65 @@ def test_no_api_key_fails(tmp_path, monkeypatch):
 
 
 def test_too_little_text_fails(tmp_path, monkeypatch):
-    """总字数低于阈值：判为疑似纯扫描件，失败并提示先 OCR。"""
+    """OCR 兜底关闭时：总字数低于阈值判疑似纯扫描件，失败并提示先 OCR。"""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
     path = _make_pdf(tmp_path, ["只有一点点字"], monkeypatch)
 
-    result = HighlightsProcessor().process(path)
+    result = HighlightsProcessor({"ocr_fallback": False}).process(path)
 
     assert not result.success
     assert "OCR" in result.error
+
+
+def test_scanned_pdf_ocr_fallback(tmp_path, monkeypatch):
+    """无文字层扫描件：逐页渲染走 OCR 重建正文，正常代读（2026-09-16 裁决 C）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        hl_module.httpx, "post",
+        lambda *a, **kw: _FakeLLMResponse(_payload([_item()])),
+    )
+    _FakeOcrProcessor.text = "扫描页正文。" * 60
+    path = _make_pdf(tmp_path, ["", "", ""], monkeypatch)  # 三页全无文字
+
+    result = HighlightsProcessor(ocr_factory=_FakeOcrProcessor).process(path)
+
+    assert result.success
+    assert result.metadata["ocr"] is True
+    assert result.metadata["pages"] == 3
+    assert len(_FakeOcrProcessor.calls) == 3
+    assert "- [ ] **概念甲**（第 3 页）" in result.markdown
+
+
+def test_scanned_pdf_ocr_all_failed(tmp_path, monkeypatch):
+    """OCR 全部失败：明确报错（不静默产出空清单）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    _FakeOcrProcessor.fail = True
+    path = _make_pdf(tmp_path, ["", ""], monkeypatch)
+
+    result = HighlightsProcessor(ocr_factory=_FakeOcrProcessor).process(path)
+
+    assert not result.success
+    assert "OCR 全部失败" in result.error
+
+
+def test_scanned_pdf_ocr_page_cap(tmp_path, monkeypatch):
+    """超过 ocr_max_pages 只 OCR 前 N 页，warnings 注明截断（成本护栏）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        hl_module.httpx, "post",
+        lambda *a, **kw: _FakeLLMResponse(_payload([])),
+    )
+    _FakeOcrProcessor.text = "扫描页正文。" * 60
+    path = _make_pdf(tmp_path, ["", "", "", ""], monkeypatch)
+
+    result = HighlightsProcessor(
+        {"ocr_max_pages": 2}, ocr_factory=_FakeOcrProcessor
+    ).process(path)
+
+    assert result.success
+    assert len(_FakeOcrProcessor.calls) == 2
+    assert result.metadata["pages"] == 2
+    assert any("OCR 上限" in w for w in result.metadata["warnings"])
 
 
 def test_chunking_respects_page_boundary(tmp_path, monkeypatch):

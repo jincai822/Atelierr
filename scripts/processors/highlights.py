@@ -22,7 +22,11 @@ target 优先对着这些真实条目；未注入时退回 LLM 泛判「待读�
 - 单块 LLM 失败只记 warning 继续下一块（部分结果可用，不阻塞整本书）；
 - 成本护栏：``max_chunks`` 限制片段数（默认 80 ≈ 48 万字），超出截断
   并记 warning；候选总数上限 ``max_candidates``（默认 20，防确认疲劳）；
-- 导读/档案是书籍模式的附加一次调用，失败只记 warning，不阻塞清单。
+- 导读/档案是书籍模式的附加一次调用，失败只记 warning，不阻塞清单；
+- 扫描件兜底（2026-09-16 裁决 C）：无文字层/文字过少时逐页渲染成图
+  走图片 OCR 重建正文（``ocr_fallback`` 默认开，页数上限
+  ``ocr_max_pages`` 防整本巨著堵死分发循环），引擎复用
+  ``processors.image`` 配置（use_gpu 一把开关）。
 """
 
 from __future__ import annotations
@@ -30,13 +34,18 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import httpx
 
-from scripts.processors.base import BaseProcessor, ProcessResult
+from scripts.processors.base import (
+    BaseProcessor,
+    ProcessResult,
+    load_processor_config,
+)
 
 #: 单块正文过少（疑似空白页/图片页）时跳过 LLM 的阈值
 MIN_CHUNK_CHARS = 100
@@ -71,6 +80,7 @@ class HighlightsProcessor(BaseProcessor):
         self,
         config: Optional[dict] = None,
         context_provider: Optional[Any] = None,
+        ocr_factory: Optional[Any] = None,
     ) -> None:
         """初始化。
 
@@ -80,6 +90,9 @@ class HighlightsProcessor(BaseProcessor):
                 真实目标/待办标题列表；2026-09-14 裁决：书籍筛查对照
                 读者真实目标与待办）。None 时 target 退回 LLM 泛判
                 （「待读者判断」）。
+            ocr_factory: 扫描件兜底的 OCR 处理器工厂（可调用，返回带
+                ``process(path)`` 的处理器）；None 时懒加载图片处理器
+                （复用 processors.image 配置）。测试注入假实现。
         """
         super().__init__(config)
         self.chunk_chars = int(self.config.get("chunk_chars", 6000))
@@ -87,6 +100,11 @@ class HighlightsProcessor(BaseProcessor):
         self.max_candidates = int(self.config.get("max_candidates", 20))
         self.book_min_pages = int(self.config.get("book_min_pages", 60))
         self.context_provider = context_provider
+        self.ocr_fallback = bool(self.config.get("ocr_fallback", True))
+        self.ocr_max_pages = int(self.config.get("ocr_max_pages", 200))
+        self.ocr_dpi = int(self.config.get("ocr_dpi", 150))
+        self.ocr_factory = ocr_factory
+        self._ocr: Optional[Any] = None
         llm = self.config.get("llm") or {}
         self.llm_base_url = str(llm.get("base_url", "https://api.deepseek.com"))
         self.llm_model = str(llm.get("model", "deepseek-v4-flash"))
@@ -112,17 +130,31 @@ class HighlightsProcessor(BaseProcessor):
             return self._fail(f"未设置 {self.llm_api_key_env}（划重点依赖 LLM 代读）")
 
         path = Path(input_path)
+        warnings: List[str] = []
         pages, toc, error = self._extract_pages(path)
-        if error:
+        ocr_used = False
+        if error and "无可提取文字" not in error:
             return self._fail(error)
         total_chars = sum(len(text) for _, text in pages)
-        if total_chars < MIN_TOTAL_CHARS:
-            return self._fail(
-                f"提取文字过少（{total_chars} 字）：疑似纯扫描件，请先 OCR 再投喂"
-            )
+        if error or total_chars < MIN_TOTAL_CHARS:
+            # 扫描件信号（无文字层或文字过少）：OCR 兜底重建正文（裁决 C）
+            if not self.ocr_fallback:
+                return self._fail(
+                    error
+                    or f"提取文字过少（{total_chars} 字）：疑似纯扫描件，请先 OCR 再投喂"
+                )
+            pages, toc, ocr_warnings, ocr_error = self._ocr_pages(path)
+            warnings.extend(ocr_warnings)
+            if ocr_error:
+                return self._fail(ocr_error)
+            ocr_used = True
+            total_chars = sum(len(text) for _, text in pages)
+            if total_chars < MIN_TOTAL_CHARS:
+                return self._fail(
+                    f"扫描件 OCR 后文字仍过少（{total_chars} 字）：无法代读"
+                )
 
         chunks = self._chunk_pages(pages)
-        warnings: List[str] = []
         if len(chunks) > self.max_chunks:
             warnings.append(
                 f"片段数 {len(chunks)} 超过护栏 {self.max_chunks}，已截断（成本保护）"
@@ -158,10 +190,82 @@ class HighlightsProcessor(BaseProcessor):
                 "chunks": len(chunks),
                 "candidates": len(merged),
                 "book": profile,
+                "ocr": ocr_used,
                 "warnings": warnings,
                 "elapsed": round(time.time() - started, 2),
             },
         )
+
+    def _get_ocr(self) -> Any:
+        """取 OCR 处理器（懒加载，引擎构造昂贵；默认复用 processors.image 配置）。"""
+        if self._ocr is None:
+            if self.ocr_factory is not None:
+                self._ocr = self.ocr_factory()
+            else:
+                from scripts.processors.image import ImageProcessor
+
+                self._ocr = ImageProcessor(load_processor_config("image"))
+        return self._ocr
+
+    def _ocr_pages(
+        self, path: Path
+    ) -> Tuple[
+        List[Tuple[int, str]],
+        List[Tuple[int, str, int]],
+        List[str],
+        Optional[str],
+    ]:
+        """扫描件 OCR 兜底：逐页渲染成图 → 图片 OCR 处理器识别 → 重建页文本。
+
+        页数超过 ``ocr_max_pages`` 时只处理前 N 页并记 warning（成本护栏，
+        防整本巨著堵死 15 分钟一轮的分发循环）；单页 OCR 失败跳过该页记
+        warning，全部失败才返回错误。书签目录照常提取（扫描件也常带）。
+
+        Returns:
+            Tuple: (pages, toc, warnings, error)；error 非 None 即失败。
+        """
+        warnings: List[str] = []
+        try:
+            import fitz  # PyMuPDF
+        except ImportError:
+            return [], [], warnings, "未安装 PyMuPDF（pip install pymupdf）"
+        pages: List[Tuple[int, str]] = []
+        toc: List[Tuple[int, str, int]] = []
+        try:
+            with fitz.open(str(path)) as document:
+                get_toc = getattr(document, "get_toc", None)
+                if callable(get_toc):
+                    # 扫描件也可能带书签目录（实测 268 页书 112 条），照常利用
+                    toc = [
+                        (int(level), str(title).strip(), int(page))
+                        for level, title, page in (get_toc() or [])[:120]
+                    ]
+                total = len(document)
+                limit = min(total, self.ocr_max_pages)
+                if total > self.ocr_max_pages:
+                    warnings.append(
+                        f"扫描件共 {total} 页，超过 OCR 上限 "
+                        f"{self.ocr_max_pages}，仅处理前 {limit} 页"
+                    )
+                zoom = self.ocr_dpi / 72.0
+                matrix = fitz.Matrix(zoom, zoom)
+                with tempfile.TemporaryDirectory(prefix="atelierr-ocr-") as tmp:
+                    ocr = self._get_ocr()
+                    for index in range(limit):
+                        image_path = Path(tmp) / f"page-{index + 1}.png"
+                        document[index].get_pixmap(matrix=matrix).save(
+                            str(image_path)
+                        )
+                        result = ocr.process(image_path)
+                        if result.success and (result.text or "").strip():
+                            pages.append((index + 1, result.text.strip()))
+                        else:
+                            warnings.append(f"第 {index + 1} 页 OCR 失败，已跳过")
+        except Exception as exc:  # noqa: BLE001 - 损坏 PDF 按失败处理
+            return [], [], warnings, f"扫描件 OCR 失败: {type(exc).__name__}: {exc}"
+        if not pages:
+            return [], [], warnings, "扫描件 OCR 全部失败：无法代读"
+        return pages, toc, warnings, None
 
     @staticmethod
     def _extract_pages(
