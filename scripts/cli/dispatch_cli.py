@@ -52,6 +52,13 @@ DEFAULT_ROOT = "~/atelierr-data/memory"
 DEFAULT_STATE_DIR = "~/atelierr-data/state"
 
 
+def _send_and_log(label: str, *args: Any, **kwargs: Any) -> None:
+    """发推送并把结果落日志（2026-09-16：send_* 失败静默返回 False，
+    不回显则定时器日志里完全无痕——书籍卡推送丢失查了一个小时）。"""
+    result = send_dispatch_notice(*args, **kwargs)
+    click.echo(f"  推送[{label}]: {result}")
+
+
 def _notify_failures(failures: List[Dict[str, Any]]) -> None:
     """有抓取失败时双通道推送（未配置/失败静默，不影响主流程）。
 
@@ -59,7 +66,8 @@ def _notify_failures(failures: List[Dict[str, Any]]) -> None:
     否则用户无从知晓系统没抓到。
     """
     if failures:
-        send_dispatch_notice(
+        _send_and_log(
+            "抓取失败",
             "Atelierr 抓取失败",
             f"{len(failures)} 条链接抓取失败，请检查后重新粘贴",
         )
@@ -95,7 +103,7 @@ def _notify_media_failures(failures: List[Dict[str, Any]]) -> None:
             else "将自动重试 2 次"
         )
         lines.append(f"• {name}：{advice}（{tail}）")
-    send_dispatch_notice("Atelierr 处理失败", "\n".join(lines))
+    _send_and_log("处理失败", "Atelierr 处理失败", "\n".join(lines))
 
 
 def _feishu_ready() -> bool:
@@ -190,7 +198,7 @@ def _notify_created_notes(
         hint = _archive_hint(note_path)
         if hint:
             body = f"{body}\n{hint}"
-        send_dispatch_notice(title, body, confirm_note=filename)
+        _send_and_log(f"待确认 {filename}", title, body, confirm_note=filename)
 
 
 def _notify_todos(created: List[str], tree: MemoryTree, limit: int = 5) -> None:
@@ -277,7 +285,8 @@ def _notify_digest(
         message += f"；⏰ 滞留 {counts['stale']} 条"
     if counts.get("health_stale"):
         message += f"；⚠️ 自检异常 {counts['health_stale']} 项"
-    send_dispatch_notice(
+    _send_and_log(
+        "今日摘要",
         "Atelierr 今日摘要",
         message,
         pin=True,
@@ -456,7 +465,8 @@ class DispatchCLI:
                             Path(d["file"]).name
                             for d in report["duplicates"][:5]
                         )
-                        send_dispatch_notice(
+                        _send_and_log(
+                            "内容查重",
                             "Atelierr 内容查重",
                             f"{len(report['duplicates'])} 个附件此前已处理过，"
                             f"未重复处理：{names}",
@@ -464,7 +474,8 @@ class DispatchCLI:
                     if report.get("deduped"):
                         # 书籍查重命中"报人工一句"（US-001 §3.4）
                         titles = "、".join(f"《{t}》" for t in report["deduped"])
-                        send_dispatch_notice(
+                        _send_and_log(
+                            "书籍查重",
                             "Atelierr 书籍查重",
                             f"{titles}已有档案卡，未重复建档；同名不同版请人工定夺",
                         )

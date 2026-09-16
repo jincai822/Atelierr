@@ -24,6 +24,9 @@ After=network.target
 Type=oneshot
 WorkingDirectory=/srv/workspaces/Atelierr
 Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+# 月度 purge 提醒等通知的推送凭证经此环境文件注入（与其他服务一致；
+# "-" 前缀表示文件缺失也不影响启动）
+EnvironmentFile=-%h/.config/atelierr/env
 ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
 ExecStart=-/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.memory_cli sync
 ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.memory_cli decay

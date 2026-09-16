@@ -17,6 +17,9 @@ Description=Atelierr morning digest (daily)
 Type=oneshot
 WorkingDirectory=/srv/workspaces/Atelierr
 Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+# 推送凭证（FEISHU_*）与 LLM key 经此环境文件注入；2026-09-16 实证：
+# 缺了它晨报卡静默发送失败（send_feishu 无凭证返回 False，不抛异常）
+EnvironmentFile=-%h/.config/atelierr/env
 ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
 ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli digest
 StandardOutput=append:%h/atelierr-data/state/logs/digest.log
