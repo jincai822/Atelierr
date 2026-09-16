@@ -1,0 +1,1248 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Atelierr 系统总架构 v1.5（2026-09-16 实况）",
+    "subtitle": "4 入口 → 定时器管线 → 同一个库 → 出口回路；编号①-⑮是信息流主线，机器只在两处例外下动笔记",
+    "output": "atelierr-v15.html",
+    "viewBox": [
+      1760,
+      1000
+    ]
+  },
+  "components": [
+    {
+      "id": "feishu-in",
+      "type": "external",
+      "label": "飞书机器人（手机/电脑）",
+      "sublabel": "链接·评论·图片·视频·PDF·语音",
+      "pos": [
+        50,
+        90
+      ],
+      "size": [
+        230,
+        80
+      ]
+    },
+    {
+      "id": "quickadd",
+      "type": "external",
+      "label": "手机 QuickAdd 速记",
+      "sublabel": "一键捕获 想法/目标",
+      "pos": [
+        50,
+        210
+      ],
+      "size": [
+        230,
+        64
+      ]
+    },
+    {
+      "id": "obsidian-pc",
+      "type": "external",
+      "label": "电脑 Obsidian",
+      "sublabel": "直写笔记 / 拖入附件",
+      "pos": [
+        50,
+        310
+      ],
+      "size": [
+        230,
+        64
+      ]
+    },
+    {
+      "id": "clipper",
+      "type": "external",
+      "label": "Chrome 剪藏",
+      "sublabel": "网页一键剪藏",
+      "pos": [
+        50,
+        410
+      ],
+      "size": [
+        230,
+        64
+      ]
+    },
+    {
+      "id": "bridge",
+      "type": "backend",
+      "label": "飞书桥 atelierr-feishu.service",
+      "sublabel": "长连接常驻 · 文字→日记 链接→state队列 附件→原件",
+      "pos": [
+        360,
+        90
+      ],
+      "size": [
+        250,
+        80
+      ]
+    },
+    {
+      "id": "syncthing",
+      "type": "backend",
+      "label": "Syncthing 容器",
+      "sublabel": "手机↔电脑 秒级双向同步",
+      "pos": [
+        360,
+        210
+      ],
+      "size": [
+        250,
+        64
+      ]
+    },
+    {
+      "id": "t-links",
+      "type": "backend",
+      "label": "atelierr-links.timer",
+      "sublabel": "每15分钟 · links + media",
+      "pos": [
+        360,
+        320
+      ],
+      "size": [
+        250,
+        56
+      ]
+    },
+    {
+      "id": "t-light",
+      "type": "backend",
+      "label": "atelierr-light.timer",
+      "sublabel": "每15分钟 · todos + highlights",
+      "pos": [
+        360,
+        392
+      ],
+      "size": [
+        250,
+        56
+      ]
+    },
+    {
+      "id": "t-digest",
+      "type": "backend",
+      "label": "atelierr-digest.timer",
+      "sublabel": "每天 07:53 晨报 · 含记忆复习条目（resurface）",
+      "pos": [
+        360,
+        464
+      ],
+      "size": [
+        250,
+        56
+      ]
+    },
+    {
+      "id": "t-decay",
+      "type": "backend",
+      "label": "atelierr-decay.timer",
+      "sublabel": "03:00 sync归一化 → decay → git快照",
+      "pos": [
+        360,
+        536
+      ],
+      "size": [
+        250,
+        56
+      ]
+    },
+    {
+      "id": "t-pending",
+      "type": "backend",
+      "label": "atelierr-pending.timer",
+      "sublabel": "21:17 待确认提醒",
+      "pos": [
+        360,
+        608
+      ],
+      "size": [
+        250,
+        56
+      ]
+    },
+    {
+      "id": "t-review",
+      "type": "backend",
+      "label": "atelierr-review(.monthly).timer",
+      "sublabel": "周日周回顾 · 每月1日脉冲",
+      "pos": [
+        360,
+        680
+      ],
+      "size": [
+        250,
+        56
+      ]
+    },
+    {
+      "id": "c-link",
+      "type": "backend",
+      "label": "链接管线 dispatch/links.py",
+      "sublabel": "yt-dlp 480p → Whisper(GPU)转写 → DeepSeek 总结+中图法标签+todo判定",
+      "pos": [
+        690,
+        312
+      ],
+      "size": [
+        270,
+        72
+      ]
+    },
+    {
+      "id": "c-media",
+      "type": "backend",
+      "label": "附件管线 dispatch/media.py",
+      "sublabel": "图片OCR · 图集合并 · 音视频转写 · PDF分流",
+      "pos": [
+        690,
+        404
+      ],
+      "size": [
+        270,
+        72
+      ]
+    },
+    {
+      "id": "c-book",
+      "type": "backend",
+      "label": "书籍管线 processors/highlights.py",
+      "sublabel": "划重点清单 + 扫描件结构化重建(全文.md+插图) + 版式polish",
+      "pos": [
+        690,
+        512
+      ],
+      "size": [
+        270,
+        80
+      ]
+    },
+    {
+      "id": "c-todo",
+      "type": "backend",
+      "label": "待办判定 dispatch/todos.py",
+      "sublabel": "LLM 判 0..N 条 → todo卡 + 飞书任务同步",
+      "pos": [
+        690,
+        608
+      ],
+      "size": [
+        270,
+        64
+      ]
+    },
+    {
+      "id": "c-mem",
+      "type": "backend",
+      "label": "记忆系统 scripts/memory/",
+      "sublabel": "confidence · decay · search · resurface · watcher · sidecar 索引",
+      "pos": [
+        690,
+        700
+      ],
+      "size": [
+        270,
+        76
+      ]
+    },
+    {
+      "id": "d-inbox",
+      "type": "database",
+      "label": "inbox/ 中转确认卡",
+      "sublabel": "链接/附件/书籍/剪藏/todo 卡 · 待你确认",
+      "pos": [
+        1040,
+        300
+      ],
+      "size": [
+        280,
+        64
+      ]
+    },
+    {
+      "id": "d-att",
+      "type": "database",
+      "label": "attachments/ 源文件",
+      "sublabel": "专夹制：书籍/书名/{原书+全文.md+图片/} · 抖音/ · 媒体/",
+      "pos": [
+        1040,
+        400
+      ],
+      "size": [
+        280,
+        80
+      ]
+    },
+    {
+      "id": "d-memory",
+      "type": "database",
+      "label": "memory/ 真记忆",
+      "sublabel": "日记·待办·抖音·小红书·B站·书籍/中图法·媒体·飞书·想法·目标",
+      "pos": [
+        1040,
+        516
+      ],
+      "size": [
+        280,
+        90
+      ]
+    },
+    {
+      "id": "d-wiki",
+      "type": "database",
+      "label": "memory/wiki/ 知识库",
+      "sublabel": "摘录卡 · reflections/ · cognition/",
+      "pos": [
+        1040,
+        636
+      ],
+      "size": [
+        280,
+        64
+      ]
+    },
+    {
+      "id": "d-state",
+      "type": "database",
+      "label": "state/ 运行态",
+      "sublabel": "index.json sidecar · trash/ · logs/ · 链接队列 · git快照",
+      "pos": [
+        1040,
+        736
+      ],
+      "size": [
+        280,
+        76
+      ]
+    },
+    {
+      "id": "e-feishu",
+      "type": "frontend",
+      "label": "飞书卡片（回推给你）",
+      "sublabel": "确认卡 ✅/📁/🗑 · 晨报 · 待确认提醒 · 周回顾四问",
+      "pos": [
+        1400,
+        90
+      ],
+      "size": [
+        280,
+        88
+      ]
+    },
+    {
+      "id": "e-console",
+      "type": "frontend",
+      "label": "Obsidian 控制台 主页.md",
+      "sublabel": "Dataview 直查 inbox/待办/反思",
+      "pos": [
+        1400,
+        240
+      ],
+      "size": [
+        280,
+        72
+      ]
+    },
+    {
+      "id": "e-flatnotes",
+      "type": "frontend",
+      "label": "Flatnotes Web :8080",
+      "sublabel": "docker 容器 · 浏览器读写",
+      "pos": [
+        1400,
+        350
+      ],
+      "size": [
+        280,
+        60
+      ]
+    },
+    {
+      "id": "e-atelier",
+      "type": "backend",
+      "label": "Atelier 车间（思考层）",
+      "sublabel": "$hi 路由 · $weekly 等仪式 · 只读 memory+wiki → reflections/",
+      "pos": [
+        1400,
+        470
+      ],
+      "size": [
+        280,
+        88
+      ]
+    },
+    {
+      "id": "you",
+      "type": "security",
+      "label": "你（人工确认层）",
+      "sublabel": "点卡片按钮 · 勾选[x] · 回答四问 · 拖归档",
+      "pos": [
+        720,
+        880
+      ],
+      "size": [
+        280,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "① 摄入入口（收敛为 4 个）",
+      "wraps": [
+        "feishu-in",
+        "quickadd",
+        "obsidian-pc",
+        "clipper"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "② 接入与定时器（systemd user · 无人值守）",
+      "wraps": [
+        "bridge",
+        "syncthing",
+        "t-links",
+        "t-light",
+        "t-digest",
+        "t-decay",
+        "t-pending",
+        "t-review"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "③ 加工引擎（scripts/dispatch + processors + memory）",
+      "wraps": [
+        "c-link",
+        "c-media",
+        "c-book",
+        "c-todo",
+        "c-mem"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "④ 同一个库 ~/atelierr-data/（Obsidian 库根 · 文件级解耦 · 人可读）",
+      "wraps": [
+        "d-inbox",
+        "d-att",
+        "d-memory",
+        "d-wiki",
+        "d-state"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "⑤ 出口与回路",
+      "wraps": [
+        "e-feishu",
+        "e-console",
+        "e-flatnotes",
+        "e-atelier"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from": "feishu-in",
+      "to": "bridge",
+      "label": "① 发消息/附件",
+      "classification": "长连接进库 · 免公网",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight"
+    },
+    {
+      "from": "bridge",
+      "to": "d-memory",
+      "label": "② 文字/评论 → 当天日记",
+      "classification": "memory/YYYY-MM-DD.md",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "left",
+      "via": [
+        [
+          485,
+          40
+        ],
+        [
+          985,
+          40
+        ],
+        [
+          985,
+          561
+        ]
+      ],
+      "labelAt": [
+        690,
+        30
+      ]
+    },
+    {
+      "from": "bridge",
+      "to": "d-att",
+      "label": "② 附件原件落盘",
+      "classification": "图片/视频/PDF/语音",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          530,
+          196
+        ],
+        [
+          1020,
+          196
+        ],
+        [
+          1020,
+          440
+        ]
+      ],
+      "labelAt": [
+        740,
+        186
+      ]
+    },
+    {
+      "from": "quickadd",
+      "to": "syncthing",
+      "label": "③ 速记",
+      "classification": "写入手机端库",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight"
+    },
+    {
+      "from": "syncthing",
+      "to": "d-memory",
+      "label": "③ 同步进库",
+      "classification": "双向 · 秒级",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [
+        [
+          640,
+          242
+        ],
+        [
+          640,
+          288
+        ],
+        [
+          1010,
+          288
+        ],
+        [
+          1010,
+          545
+        ]
+      ],
+      "labelAt": [
+        700,
+        272
+      ]
+    },
+    {
+      "from": "obsidian-pc",
+      "to": "d-memory",
+      "label": "④ 直写/拖附件",
+      "classification": "免同步 · 同一台机",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          165,
+          835
+        ],
+        [
+          1000,
+          835
+        ],
+        [
+          1000,
+          590
+        ]
+      ],
+      "labelAt": [
+        560,
+        825
+      ]
+    },
+    {
+      "from": "clipper",
+      "to": "d-inbox",
+      "label": "⑤ 剪藏 → clip卡",
+      "classification": "进 inbox 待确认",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          165,
+          850
+        ],
+        [
+          1032,
+          850
+        ],
+        [
+          1032,
+          332
+        ]
+      ],
+      "labelAt": [
+        560,
+        844
+      ]
+    },
+    {
+      "from": "t-links",
+      "to": "c-link",
+      "label": "⑥ 出队链接",
+      "classification": "state/队列去重",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight"
+    },
+    {
+      "from": "t-links",
+      "to": "c-media",
+      "label": "⑥ 发现新附件",
+      "classification": "扫 attachments/",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [
+        [
+          640,
+          360
+        ],
+        [
+          640,
+          440
+        ]
+      ],
+      "labelAt": [
+        656,
+        404
+      ]
+    },
+    {
+      "from": "c-media",
+      "to": "c-book",
+      "label": "⑦ PDF",
+      "classification": "书籍/长文档",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [
+        850,
+        494
+      ]
+    },
+    {
+      "from": "c-link",
+      "to": "d-inbox",
+      "label": "⑧ 转写+总结 → 确认卡",
+      "classification": "标题=平台-主题 · 观点总结",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [
+        [
+          975,
+          348
+        ],
+        [
+          975,
+          332
+        ]
+      ],
+      "labelAt": [
+        940,
+        302
+      ]
+    },
+    {
+      "from": "c-link",
+      "to": "d-att",
+      "label": "⑧ 480p视频",
+      "classification": "只存480p单份",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "left",
+      "via": [
+        [
+          825,
+          304
+        ],
+        [
+          990,
+          304
+        ],
+        [
+          990,
+          420
+        ]
+      ],
+      "labelAt": [
+        880,
+        300
+      ]
+    },
+    {
+      "from": "c-media",
+      "to": "d-att",
+      "label": "⑧ 原件归位",
+      "classification": "截图/录音/图集",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight"
+    },
+    {
+      "from": "c-media",
+      "to": "d-inbox",
+      "label": "⑧ OCR/转写 → 确认卡",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "left",
+      "via": [
+        [
+          760,
+          394
+        ],
+        [
+          968,
+          394
+        ],
+        [
+          968,
+          356
+        ]
+      ],
+      "labelAt": [
+        976,
+        396
+      ]
+    },
+    {
+      "from": "c-book",
+      "to": "d-att",
+      "label": "⑨ 专夹落盘",
+      "classification": "原书.pdf+全文.md+图片/",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          982,
+          552
+        ],
+        [
+          982,
+          492
+        ],
+        [
+          1180,
+          492
+        ]
+      ],
+      "labelAt": [
+        1060,
+        502
+      ]
+    },
+    {
+      "from": "c-book",
+      "to": "d-inbox",
+      "label": "⑨ 清单卡",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          997,
+          552
+        ],
+        [
+          997,
+          380
+        ],
+        [
+          1120,
+          380
+        ]
+      ],
+      "labelAt": [
+        1005,
+        478
+      ]
+    },
+    {
+      "from": "c-todo",
+      "to": "d-inbox",
+      "label": "⑩ todo卡",
+      "classification": "+飞书任务同步",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          1025,
+          640
+        ],
+        [
+          1025,
+          372
+        ],
+        [
+          1120,
+          372
+        ]
+      ],
+      "labelAt": [
+        1028,
+        508
+      ]
+    },
+    {
+      "from": "t-light",
+      "to": "c-todo",
+      "label": "⑪ 扫行动意图",
+      "classification": "memory+inbox 正文",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [
+        [
+          640,
+          420
+        ],
+        [
+          640,
+          624
+        ]
+      ],
+      "labelAt": [
+        656,
+        524
+      ]
+    },
+    {
+      "from": "t-light",
+      "to": "d-wiki",
+      "label": "⑪ 勾中[x] → wiki摘录卡",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [
+        [
+          660,
+          432
+        ],
+        [
+          660,
+          686
+        ]
+      ],
+      "labelAt": [
+        700,
+        680
+      ]
+    },
+    {
+      "from": "t-decay",
+      "to": "c-mem",
+      "label": "⑫ 03:00 sync归一化→decay",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          485,
+          760
+        ],
+        [
+          670,
+          760
+        ],
+        [
+          670,
+          738
+        ]
+      ],
+      "labelAt": [
+        560,
+        772
+      ]
+    },
+    {
+      "from": "c-mem",
+      "to": "d-state",
+      "label": "⑫ 打分/分层 → 只写sidecar",
+      "classification": "0.95^(idle/ref) · 笔记不动",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [
+        [
+          980,
+          738
+        ],
+        [
+          980,
+          774
+        ]
+      ],
+      "labelAt": [
+        700,
+        790
+      ]
+    },
+    {
+      "from": "c-mem",
+      "to": "d-memory",
+      "label": "读（不写笔记）",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "left",
+      "via": [
+        [
+          825,
+          694
+        ],
+        [
+          1012,
+          694
+        ],
+        [
+          1012,
+          600
+        ]
+      ],
+      "labelAt": [
+        900,
+        686
+      ]
+    },
+    {
+      "from": "t-digest",
+      "to": "e-feishu",
+      "label": "⑬ 07:53 晨报卡",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [
+        [
+          485,
+          64
+        ],
+        [
+          1540,
+          64
+        ]
+      ],
+      "labelAt": [
+        1050,
+        56
+      ],
+      "classification": "待办+日历+resurface 复习"
+    },
+    {
+      "from": "t-pending",
+      "to": "e-feishu",
+      "label": "⑬ 21:17 待确认提醒",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          485,
+          820
+        ],
+        [
+          1350,
+          820
+        ],
+        [
+          1350,
+          150
+        ]
+      ],
+      "labelAt": [
+        900,
+        812
+      ]
+    },
+    {
+      "from": "t-review",
+      "to": "e-feishu",
+      "label": "⑬ 周日四问卡",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          485,
+          834
+        ],
+        [
+          1365,
+          834
+        ],
+        [
+          1365,
+          166
+        ]
+      ],
+      "labelAt": [
+        900,
+        826
+      ]
+    },
+    {
+      "from": "d-inbox",
+      "to": "d-memory",
+      "label": "⑭ 点✅→归档分类",
+      "classification": "机器唯一移动笔记的授权例外",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "right",
+      "via": [
+        [
+          1335,
+          332
+        ],
+        [
+          1335,
+          561
+        ]
+      ],
+      "labelAt": [
+        1335,
+        266
+      ]
+    },
+    {
+      "from": "d-memory",
+      "to": "e-console",
+      "label": "⑮ Dataview",
+      "variant": "default",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [
+        [
+          1380,
+          561
+        ],
+        [
+          1380,
+          276
+        ]
+      ],
+      "labelAt": [
+        1360,
+        498
+      ]
+    },
+    {
+      "from": "d-memory",
+      "to": "e-flatnotes",
+      "label": "⑮ Web浏览",
+      "variant": "default",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [
+        [
+          1392,
+          590
+        ],
+        [
+          1392,
+          380
+        ]
+      ],
+      "labelAt": [
+        1375,
+        460
+      ]
+    },
+    {
+      "from": "e-atelier",
+      "to": "d-memory",
+      "label": "只读引用",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "right",
+      "labelAt": [
+        1365,
+        500
+      ],
+      "via": [
+        [
+          1360,
+          514
+        ],
+        [
+          1360,
+          561
+        ]
+      ]
+    },
+    {
+      "from": "e-atelier",
+      "to": "d-wiki",
+      "label": "产物 → reflections/",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "right",
+      "labelAt": [
+        1370,
+        616
+      ],
+      "via": [
+        [
+          1470,
+          668
+        ]
+      ]
+    },
+    {
+      "from": "e-feishu",
+      "to": "you",
+      "label": "推送给你",
+      "variant": "default",
+      "fromSide": "right",
+      "toSide": "right",
+      "via": [
+        [
+          1700,
+          134
+        ],
+        [
+          1700,
+          912
+        ]
+      ],
+      "labelAt": [
+        1722,
+        520
+      ]
+    },
+    {
+      "from": "you",
+      "to": "e-feishu",
+      "label": "点✅/📁/🗑 · 回四问",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "right",
+      "via": [
+        [
+          860,
+          856
+        ],
+        [
+          1690,
+          856
+        ],
+        [
+          1690,
+          166
+        ]
+      ],
+      "labelAt": [
+        1300,
+        848
+      ]
+    },
+    {
+      "from": "you",
+      "to": "d-memory",
+      "label": "勾选[x]（light 班次读）",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "via": [
+        [
+          790,
+          862
+        ],
+        [
+          1020,
+          862
+        ],
+        [
+          1020,
+          620
+        ],
+        [
+          1120,
+          620
+        ]
+      ],
+      "labelAt": [
+        900,
+        868
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "sky",
+      "title": "这张图怎么读",
+      "items": [
+        "①-⑤ 入口落库：飞书/QuickAdd/电脑/剪藏 → 同一个库",
+        "⑥-⑨ 定时器加工：链接转写总结 · 附件OCR · 书籍划重点+重建 → inbox 确认卡 + attachments 原件",
+        "⑩-⑫ 待办判定 / 勾中[x]转 wiki 摘录卡 / 03:00 记忆衰减（只写 sidecar）",
+        "⑬-⑮ 回推与展示：飞书卡片 → 你 ✅ → inbox 卡归档进 memory 分类；Dataview 控制台 / Flatnotes / Atelier 车间",
+        "记忆系统 = ③区底部「记忆系统」盒：管 memory/ 的索引/衰减/复习/搜索，不进加工热线"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "定时器时刻表（全部无人值守）",
+      "items": [
+        "常驻：atelierr-feishu.service（长连接收消息）",
+        "每 15 分钟：links（链接+附件加工）、light（待办判定+清单勾选）",
+        "03:00 decay（sync归一化→衰减→git快照） · 07:53 晨报 · 21:17 待确认提醒",
+        "周日 09:13 周回顾 · 每月 1 日月度脉冲 · 每月 2 日文档健康"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "红线不变量（契约 v1.5）",
+      "items": [
+        "笔记机器不改写/不移动——授权例外仅两处：归一化补 frontmatter（还原 mtime）、你点✅后的归档移动",
+        "动态状态只进 state/index.json（sidecar）；删除只进 state/trash/ 可恢复",
+        "confidence 无状态纯函数 0.95^(闲置天数/引用因子)，禁止增量累乘",
+        "库根即 Obsidian 库：脱离本系统全部文件可被人直接读"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "冻结与待做",
+      "items": [
+        "cognition/ 回路三：目录已就位（wiki/cognition），判断登记未启用",
+        "微信处理器：backlog 冻结，不实现",
+        "文字层 PDF 插图提取：待做（现仅扫描件走结构化重建）",
+        "ntfy 已弃用并入飞书；Flatnotes 为既有 Web 入口保留"
+      ]
+    }
+  ]
+}
