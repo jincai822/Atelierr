@@ -219,6 +219,16 @@ class DigestDispatcher:
                 f"新进待删 {decay_last.get('pending', 0)} · "
                 f"日记豁免 {decay_last.get('daily_exempt', 0)}"
             )
+        # 判断直收账（2026-09-16 回路三启用）：昨日新收判断计数，
+        # 0 条不出现该行（安静小节，不带按钮不打断）
+        from scripts.dispatch.judgments import registered_since
+
+        judgments_new = registered_since(self.tree, yesterday)
+        judgment_line = (
+            f"昨日新收判断 {judgments_new} 条 → memory/wiki/cognition/ 登记处"
+            if judgments_new
+            else None
+        )
         is_sunday = datetime.strptime(today, "%Y-%m-%d").weekday() == 6
         weekly_lines = (
             render_weekly_stats(capture_stats(self.tree, days=7, today=today))
@@ -231,6 +241,7 @@ class DigestDispatcher:
             capture_line=capture_line, weekly_lines=weekly_lines,
             failure_line=failure_line, decay_line=decay_line,
             stale_pending_lines=stale_pending, stale_human_lines=stale_human,
+            judgment_line=judgment_line,
         )
         created = None
         if not dry_run:
@@ -427,6 +438,7 @@ class DigestDispatcher:
         weekly_lines: Optional[List[str]] = None,
         failure_line: Optional[str] = None,
         decay_line: Optional[str] = None,
+        judgment_line: Optional[str] = None,
         stale_pending_lines: Optional[List[str]] = None,
         stale_human_lines: Optional[List[str]] = None,
     ) -> str:
@@ -512,6 +524,8 @@ class DigestDispatcher:
             sections += [f"> {failure_line}", ""]
         if decay_line:
             sections += [f"> {decay_line}", ""]
+        if judgment_line:
+            sections += [f"> {judgment_line}", ""]
         sections += [
             *_lines(yesterday_new),
             "",

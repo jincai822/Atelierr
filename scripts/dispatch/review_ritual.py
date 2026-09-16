@@ -112,6 +112,9 @@ def build_intro(tree, kind: str) -> str:
     pending_delete = len(tree.list_pending_delete())
     if pending_delete:
         lines.append(f"🗑 待删清单等你过目：{pending_delete} 条")
+    # 判断登记处入口提示（2026-09-16 回路三启用）：不进表单不占问题位，
+    # 回顾时刻正是产生判断的时刻，顺手一句即直收
+    lines.append("💡 想到什么判断？回复「判断：xxx」直收进登记处（不计入回答）")
     lines += ["", "不想答的留空，点提交即可。"]
     return "\n".join(lines)
 

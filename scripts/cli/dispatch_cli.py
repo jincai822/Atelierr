@@ -281,6 +281,8 @@ def _notify_digest(
         f"待办 {counts['todos']}，今日复习 {counts['resurface']}，"
         f"昨日新入库 {counts['yesterday_new']}"
     )
+    if counts.get("judgments_new"):
+        message += f"，昨日新收判断 {counts['judgments_new']}"
     if counts.get("stale"):
         message += f"；⏰ 滞留 {counts['stale']} 条"
     if counts.get("health_stale"):
@@ -420,6 +422,67 @@ class DispatchCLI:
                     _notify_todos(report["created"], tree)
                 if dry_run:
                     click.echo("（dry-run：未做处理）")
+
+        @cli.command(name="judgments")
+        @click.option(
+            "--dry-run",
+            "dry_run",
+            is_flag=True,
+            help="只扫描报告，不收条目、不写已见状态",
+        )
+        def judgments_command(dry_run: bool) -> None:
+            """扫描笔记中的「#判断」标记行，直收进 cognition 判断登记处。
+
+            用户主动标记 = 人已完成批准（2026-09-16 裁决：零摩擦直收）；
+            机器绝不从正文自动提炼判断。已收行按哈希登记防重复。
+            """
+            from scripts.dispatch.judgments import scan_vault
+
+            tree = self._build_tree()
+            with _dispatch_lock(tree.state_dir) as locked:
+                if not locked:
+                    click.echo("已有分发任务在运行，本次跳过")
+                    return
+                if dry_run:
+                    # 纯只读预扫：不走 scan_vault（它会真实建 cognition 条目）
+                    from scripts.dispatch.judgments import parse_line
+
+                    found = []
+                    for root in (tree.notes_dir, tree.inbox_dir):
+                        if not root.is_dir():
+                            continue
+                        for path in sorted(root.rglob("*.md")):
+                            try:
+                                text = path.read_text(encoding="utf-8")
+                            except (OSError, UnicodeDecodeError):
+                                continue
+                            for line in text.splitlines():
+                                statement = parse_line(line)
+                                if statement:
+                                    found.append((tree._rel_key(path), statement))
+                    click.echo(f"发现 #判断 标记 {len(found)} 条")
+                    for rel, statement in found[:20]:
+                        click.echo(f"  {rel}: {statement[:40]}")
+                    click.echo("（dry-run：未写入）")
+                    return
+                report = scan_vault(tree)
+                click.echo(
+                    f"直收判断 {len(report['registered'])} 条，"
+                    f"重复 {len(report['duplicates'])} 条，"
+                    f"已见过 {report['seen_before']} 条"
+                )
+                for statement, entry_id in report["registered"]:
+                    click.echo(f"  已收: {statement[:40]} → {entry_id}")
+                if report["registered"]:
+                    lines = "\n".join(
+                        f"• {statement[:60]}"
+                        for statement, _ in report["registered"][:8]
+                    )
+                    _send_and_log(
+                        "判断直收",
+                        f"判断登记处新收 {len(report['registered'])} 条",
+                        lines + "\n\n（你标记的，已直接收；标错了到 cognition 目录删文件即可）",
+                    )
 
         @cli.command(name="media")
         @click.option(

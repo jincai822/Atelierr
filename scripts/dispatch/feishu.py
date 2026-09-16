@@ -1546,6 +1546,9 @@ class FeishuBridge:
         笔记；回答「跳过」/「完成」关闭会话。会话关闭后恢复捕获。
         「摘要/待办/提炼候选/周回顾/菜单」是快捷菜单指令（拉取式交互；
         整词精确匹配，会话期间也优先按指令处理——查进度不会被误计为
+        回答）；「判断：/记为判断：/#判断 」前缀是判断直收指令
+        （2026-09-16 裁决：直收进 cognition 判断登记处，照常追加日记，
+        回文字轻通知；与菜单同级，会话期间也优先——是登记指令不是
         回答）；「搜 xxx」/「搜索 xxx」是搜索指令（会话期间让位仪式，
         前缀匹配的内容仍计为回答）。
         捕获成功给原消息加 ✅ 表情回执；失败发文字反馈。
@@ -1555,6 +1558,26 @@ class FeishuBridge:
             return None
         if text in MENU_COMMANDS or text.lower() == "help":
             self._answer_menu(chat_id, text)
+            return None
+        # 判断直收（2026-09-16 裁决：零摩擦登记进 cognition 判断登记处）：
+        # 「判断：/记为判断：/#判断 」前缀的文本既是日记也是判断条目——
+        # 与菜单指令同级、先于问答会话处理（周回顾期间回复「判断：xxx」
+        # 是登记指令，不算仪式回答），日记照记（生活流不丢），判断处
+        # 直收（用户显式标记=人已批准，不再二次确认），回文字轻通知
+        from scripts.dispatch.judgments import parse_feishu_judgment, register_statement
+
+        statement = parse_feishu_judgment(text)
+        if statement:
+            try:
+                _entry_id, reply = register_statement(
+                    self.tree, statement, origin_note="飞书直收（用户主动标记）"
+                )
+            except Exception as exc:  # noqa: BLE001 - 登记失败不丢日记
+                print(f"[feishu] judgment fail: {exc}", flush=True)
+                self._send_feedback(chat_id, "⚠️ 判断登记失败，请稍后重发")
+                return None
+            self._append_diary(text)
+            self._send_feedback(chat_id, reply)
             return None
         store = PromptStore(Path(self.tree.state_dir))
         if store.is_open():
