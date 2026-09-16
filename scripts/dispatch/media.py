@@ -23,7 +23,10 @@ Obsidian 里图片直接显示、录音/视频直接可播）→ 正文同时进
 原资料归位（2026-09-10 用户裁决 G1）：附件按来源平台分子目录——
 ``媒体/``（截图/图片/语音/**直发视频**）、``书籍/``（PDF）、``抖音/``
 ``小红书/`` ``B站/``（链接视频，由 links 管线写入）；与笔记归档目录
-同一套名字。扫描覆盖 attachments/ 顶层与一层子目录。
+同一套名字。扫描覆盖 attachments/ 顶层与一层子目录。PDF 处理成功后
+再收一层专夹（2026-09-16 裁决 KM 规格）：``<平台>/<书名或净化主名>/``
+下收原件 + ``全文.md``（二层深度天然不再入扫描，防重跑）；清单与
+档案卡都带全文链接。
 
 直发视频（2026-09-11 用户裁决：飞书直接发视频文件，不用链接）：
 2026-09-13 起改为**全 attachments/ 认视频**（评审架构账 5：此前只认
@@ -688,13 +691,32 @@ class MediaDispatcher:
         entry["last_attempt"] = datetime.now(timezone.utc).isoformat()
         if result.success:
             if is_pdf:
+                # 原件收进专夹 + 全文落盘（2026-09-16 用户裁决 KM 规格，
+                # 对齐链接管线"一条内容一个文件夹"）：全文是可检索/可再
+                # 加工的资产，清单只是它的视图；OCR 重建的全文尤其贵
+                #（GPU ~1.3s/页），绝不一次性用完就扔
+                book_meta = (result.metadata or {}).get("book") or {}
+                fulltext_rel, shelved = self._shelve_pdf(
+                    path, result.text or "", book_meta
+                )
+                path = shelved or path
+                markdown = result.markdown
+                if fulltext_rel:
+                    how = (
+                        "OCR 重建"
+                        if (result.metadata or {}).get("ocr")
+                        else "文字层提取"
+                    )
+                    markdown += (
+                        f"\n> 全文：[[{fulltext_rel}]]（{how}，供检索与再加工）\n"
+                    )
                 # PDF → 划重点清单，写进 系统/ 机器产物区（不占记忆扫描域；
                 # 清单本身无需确认，确认动作在"勾中条目转 wiki 摘录卡"的
                 # 人工勾选上；dispatch/highlights 直接读目录，不走索引）
                 filename = self._pdf_note_filename(path)
                 try:
                     rel = write_machine_note(
-                        Path(self.tree.notes_dir), filename, result.markdown,
+                        Path(self.tree.notes_dir), filename, markdown,
                         source=CHECKLIST_SOURCE, tags=[ITEM_TAG],
                     )
                 except (ValueError, FileExistsError):
@@ -710,7 +732,7 @@ class MediaDispatcher:
                 book = (result.metadata or {}).get("book")
                 if book:
                     card = self._create_book_card(
-                        path, book, Path(filename).stem, report
+                        path, book, Path(filename).stem, report, fulltext_rel
                     )
                     if card:
                         report["created"].append(card)
@@ -815,6 +837,60 @@ class MediaDispatcher:
             logger.warning("视频替换原件失败 %s: %s", path, exc)
             tmp.unlink(missing_ok=True)
 
+    def _shelve_pdf(
+        self, path: Path, text: str, book: Dict[str, Any]
+    ) -> Tuple[Optional[str], Optional[Path]]:
+        """PDF 原件收进专夹 + 全文落盘（2026-09-16 用户裁决 KM 规格，
+        对齐链接管线"一条内容一个文件夹"）：
+        ``attachments/<原目录>/<书名或净化主名>/`` 下收原件 PDF 与
+        ``全文.md``，清单与档案卡都带全文链接。
+
+        全文是可检索/可再加工的资产，清单只是它的视图——OCR 重建的
+        全文尤其贵（GPU ~1.3s/页），绝不一次性用完就扔。专夹里已有同
+        名原件时原件原地不动（同名不同版共存）；全文已存在时改写
+        ``全文-<哈希6>``.md，绝不覆盖旧版。
+
+        Args:
+            path: PDF 当前路径（到达位置，专夹建在其父目录下）。
+            text: 全文（文字层提取或 OCR 重建）；空文本直接跳过。
+            book: 书籍档案元数据（有题名时专夹按题名命名）。
+
+        Returns:
+            Tuple[Optional[str], Optional[Path]]: (全文相对数据根路径,
+            原件现路径)；失败返回 (None, None)，原件原地不动、不阻塞主流程。
+        """
+        if not (text or "").strip():
+            return None, None
+        try:
+            title = str(book.get("title") or "").strip()
+            base = title or path.stem
+            cleaned = _PDF_ILLEGAL_RE.sub("-", base).strip(". ")[:40] or "未命名"
+            folder = path.parent / cleaned
+            folder.mkdir(parents=True, exist_ok=True)
+            new_path = folder / path.name
+            if not new_path.exists():
+                shutil.move(str(path), str(new_path))
+            else:
+                # 专夹已有同名原件（同名不同版重投）：原件留在原地
+                new_path = path
+            fulltext = folder / "全文.md"
+            if fulltext.exists():
+                digest = hashlib.sha1(path.name.encode("utf-8")).hexdigest()[:6]
+                fulltext = folder / f"全文-{digest}.md"
+            header = (
+                "---\n"
+                f"created: '{datetime.now(timezone.utc).isoformat()}'\n"
+                "source: pdf-fulltext\n"
+                "---\n\n"
+                f"# {cleaned} 全文\n\n> 原件：[[{new_path.name}]]\n\n"
+            )
+            fulltext.write_text(header + text.strip() + "\n", encoding="utf-8")
+            rel = fulltext.relative_to(self.tree.attachments_dir.parent).as_posix()
+            return rel, new_path
+        except OSError as exc:
+            logger.warning("PDF 全文落盘失败 %s: %s", path, exc)
+            return None, None
+
     @staticmethod
     def _pdf_note_filename(path: Path) -> str:
         """PDF 产出清单文件名：划重点-<净化主名>-<哈希前6>.md。"""
@@ -849,6 +925,7 @@ class MediaDispatcher:
         book: Dict[str, Any],
         checklist_stem: str,
         report: Dict[str, Any],
+        fulltext_rel: Optional[str] = None,
     ) -> Optional[str]:
         """书籍档案卡（2026-09-14 用户裁决：对齐 Cognitive OS 准入协议）。
 
@@ -856,7 +933,8 @@ class MediaDispatcher:
         归档进 ``memory/书籍/[中图法/]``。查重按 书名+作者+版次 哈希
         （book_key）：同一份不建卡并记 report["deduped"]（US-001 §3.4
         "报人工一句"，由 dispatch_cli 推送）；同名不同版建卡但正文加
-        警示行，交人工定夺。
+        警示行，交人工定夺。fulltext_rel 给定（全文已落盘）时正文带
+        全文链接。
         """
         key_src = f"{book['title']}|{book['author']}|{book['edition']}"
         book_key = hashlib.sha1(key_src.encode("utf-8")).hexdigest()[:6]
@@ -873,6 +951,10 @@ class MediaDispatcher:
             f"　ISBN：{book['isbn'] or '（未识别）'}",
             f"- 原件：[[{self._key(path)}]]",
             f"- 筛查清单：[[{checklist_stem}]]（勾中条目转 wiki 摘录卡）",
+        ]
+        if fulltext_rel:
+            lines.append(f"- 全文：[[{fulltext_rel}]]（供检索与再加工）")
+        lines += [
             f"- 级别建议：{book['level']}——{book['level_reason'] or '机器建议'}"
             "（机器只能建议 L1/L2；L3 定级永远是人工权力）",
             "- 阅读状态：想读（读完手动改 在读/读完）",

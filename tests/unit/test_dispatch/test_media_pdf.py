@@ -245,3 +245,100 @@ def test_pdf_book_card_dedupes_after_archival(memory_tree):
     assert _book_card_paths(memory_tree) == []  # inbox 没有新卡
     assert report.get("deduped") == ["认知觉醒"]
     assert len(list(target_dir.glob("书籍-*.md"))) == 1  # 原卡原地不动
+
+
+# ----------------------------------------------------------------------
+# 全文落盘（2026-09-16 裁决 KM 规格：原件收专夹 + 全文.md + 清单/档案卡带链）
+# ----------------------------------------------------------------------
+
+
+class _FakeFulltextProcessor:
+    """假划重点处理器：返回带全文的清单结果（触发全文落盘）。"""
+
+    ocr = False
+
+    def process(self, path):
+        return ProcessResult(
+            success=True,
+            text="第一页正文。\n\n第二页正文。",
+            markdown="# 划重点清单：长文\n\n- [ ] **概念甲**（第 3 页）\n",
+            metadata={"candidates": 1, "ocr": type(self).ocr},
+        )
+
+
+def test_pdf_shelves_original_and_fulltext(memory_tree):
+    """原件收进专夹、全文.md 落同夹、清单带全文链接（文字层提取）。"""
+    _add_pdf(memory_tree, name="长文.pdf")
+
+    report = MediaDispatcher(
+        memory_tree, highlights_factory=_FakeFulltextProcessor
+    ).run()
+
+    folder = Path(memory_tree.attachments_dir) / "长文"
+    assert (folder / "长文.pdf").exists()  # 原件收进专夹
+    assert "第二页正文" in (folder / "全文.md").read_text(encoding="utf-8")
+    checklist = (memory_tree.notes_dir / report["created"][0]).read_text(
+        encoding="utf-8"
+    )
+    assert "[[attachments/长文/全文.md]]" in checklist
+    assert "文字层提取" in checklist
+
+
+def test_pdf_ocr_fulltext_marked(memory_tree):
+    """OCR 重建的全文：清单标注"OCR 重建"。"""
+    _FakeFulltextProcessor.ocr = True
+    try:
+        _add_pdf(memory_tree, name="扫描书.pdf")
+        report = MediaDispatcher(
+            memory_tree, highlights_factory=_FakeFulltextProcessor
+        ).run()
+    finally:
+        _FakeFulltextProcessor.ocr = False
+
+    checklist = (memory_tree.notes_dir / report["created"][0]).read_text(
+        encoding="utf-8"
+    )
+    assert "OCR 重建" in checklist
+
+
+def test_pdf_book_fulltext_folder_named_by_title(memory_tree):
+    """书籍模式：专夹按书名命名，档案卡带全文链接、原件指专夹新位置。"""
+
+    class _BookWithText(_FakeBookProcessor):
+        def process(self, path):
+            result = super().process(path)
+            result.text = "全书正文"
+            return result
+
+    _add_pdf(memory_tree, name="认知觉醒.pdf")
+    MediaDispatcher(memory_tree, highlights_factory=_BookWithText).run()
+
+    folder = Path(memory_tree.attachments_dir) / "认知觉醒"
+    assert (folder / "认知觉醒.pdf").exists()
+    assert "全书正文" in (folder / "全文.md").read_text(encoding="utf-8")
+    cards = _book_card_paths(memory_tree)
+    post = frontmatter.loads(cards[0].read_text(encoding="utf-8"))
+    assert "[[attachments/认知觉醒/认知觉醒.pdf]]" in post.content
+    assert "[[attachments/认知觉醒/全文.md]]" in post.content
+
+
+def test_pdf_shelve_failure_degrades(memory_tree, monkeypatch):
+    """全文落盘失败（OSError）：原件原地不动，清单照建、无全文链接。"""
+    import shutil
+
+    def _boom(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(shutil, "move", _boom)
+    _add_pdf(memory_tree, name="长文.pdf")
+
+    report = MediaDispatcher(
+        memory_tree, highlights_factory=_FakeFulltextProcessor
+    ).run()
+
+    assert len(report["created"]) == 1  # 清单照建
+    assert (Path(memory_tree.attachments_dir) / "长文.pdf").exists()  # 原件原地
+    checklist = (memory_tree.notes_dir / report["created"][0]).read_text(
+        encoding="utf-8"
+    )
+    assert "全文" not in checklist
