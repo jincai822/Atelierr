@@ -30,7 +30,10 @@ target 优先对着这些真实条目；未注入时退回 LLM 泛判「待读�
 - 结构化重建（同日裁决）：``ocr_structured`` 默认开——有 PP-StructureV3
   可用时按版面分析重建**书版式**全文（标题层级、段落、插图裁切落
   assets 目录、页锚 ``<!-- pN -->``），供 media 管线落盘为
-  "像一本书"的 全文.md；引擎缺失/初始化失败自动退回逐页纯文本 OCR。
+  "像一本书"的 全文.md；整篇拼装后统一过
+  ``_polish_structured_markdown``（代码段围栏、In/Out 提示符清除、
+  伪表格去竖线、空行压缩、被拆块的章节名合并）；引擎缺失/初始化
+  失败自动退回逐页纯文本 OCR（polish 同样适用）。
 """
 
 from __future__ import annotations
@@ -76,6 +79,164 @@ _STRUCT_IMG_DIV_RE = re.compile(
 _STRUCT_IMG_RE = re.compile(r'<img\s+src="图片/([^"]+)"[^>]*/?>')
 #: PP-Structure 输出的居中图注 div → 斜体行
 _STRUCT_CAPTION_RE = re.compile(r'<div\s+style="text-align:\s*center;?"[^>]*>([^<]+)</div>')
+
+# --- 结构化全文 polish（2026-09-16 排版修复）---
+# PP-StructureV3 的通用版面模型没有 code 标签：书里所有代码被当正文
+# 段落吐出（缩进丢失、一句一段、全角符号混入），Jupyter 提示符被误判
+# 成标题（## In / ## Out），表格标题退化成 |作者简介| 伪表格，段落间
+# 空行成对出现。以下规则在整篇拼装后统一 polish，重建成可读版式。
+
+#: Jupyter 输入/输出提示符被误判的标题（## In / ## Out [3]: 等变体）
+_POLISH_INOUT_RE = re.compile(r"^##\s+(?:In|Out)(?:\s*\[\s*\d*\s*\])?\s*:?\s*$")
+
+#: 伪表格标记：整行仅 |文字|（真实表格行内至少再含一个 | ）
+_POLISH_PSEUDO_TABLE_RE = re.compile(r"^\|([^|\n]+)\|\s*$")
+
+#: 短标题 + 紧随的一级标题 = 被拆成两块的章节名（## 第4课 ⏎ # 柳暗花明…）
+_POLISH_SHORT_HEAD_RE = re.compile(r"^(#{2,6})\s+(.{1,15}?)\s*$")
+
+#: 代码行强信号（OCR 粘连容忍：for/while 等不要求词边界，中文书正文
+#: 不会以这些英文关键字开头；`#注释` 单井号无空格是代码注释，
+#: `## 标题`、`# 标题` 是 markdown 标题，靠「# 后不能再是 # 或空格」
+#: 区分）
+_POLISH_CODE_STRONG_RE = re.compile(
+    r"^(?:import|from|def|class|print\s*\(|return|yield|raise|"
+    r"assert\s|global\s|for|while|if|elif|else|try|except|finally|with|"
+    r"break|continue|pass|@[a-zA-Z_]|#(?![#\s]))"
+)
+
+#: 代码延续弱信号：标识符开头的赋值/调用/下标（OCR 全角括号也认）
+_POLISH_CODE_CONT_RE = re.compile(r"^[a-zA-Z_][\w.\[\]'\"]*\s*[=:(\[]")
+
+#: 代码围栏内的全角符号修复（注释里的中文逗号/句号不动）
+_POLISH_FULLWIDTH = str.maketrans(
+    {"（": "(", "）": ")", "【": "[", "】": "]", "：": ":", "；": ";",
+     "＝": "=", "，": ",", "‘": "'", "’": "'", "“": '"', "”": '"'}
+)
+
+_CJK_RE = re.compile(r"^[一-鿿]")
+
+
+def _looks_like_code(line: str) -> bool:
+    """行级代码判定：强信号直接命中；否则要求近纯 ASCII 且含代码标点。"""
+    if _POLISH_CODE_STRONG_RE.match(line):
+        return True
+    if _POLISH_CODE_CONT_RE.match(line):
+        return True
+    if line.startswith(("!", "<", ">", "-", "*", "|")):
+        return False
+    if _CJK_RE.match(line):
+        return False
+    asciiish = sum(ch.isascii() for ch in line)
+    return (
+        bool(line)
+        and asciiish >= len(line) * 0.8
+        # 只认代码特征标点（目录页行「1.1N-Gram模型026」只有 . 结尾数字，
+        # 不能误判成代码）
+        and re.search(r"[=()\[\]{}]|:$", line) is not None
+    )
+
+
+def _polish_structured_markdown(text: str) -> str:
+    """结构化 OCR 全文的版式后处理（幂等）。
+
+    规则：已有 ``` 围栏内容原样保留（python 围栏内仅修全角符号）；
+    代码行段包 ```python 围栏并修全角符号；删除 ## In/## Out 提示符
+    标题；|文字| 伪表格去竖线；被拆成「短标题 + 一级标题」两块的
+    章节名合并；围栏外连续空行压成一个；仅隔空行的相邻 python 围栏
+    合并。页锚、图片内嵌、真实表格、frontmatter 均不受影响。
+    """
+    prefix = ""
+    body = text
+    if text.startswith("---\n"):
+        end = text.find("\n---", 4)
+        if end != -1:
+            close = text.find("\n", end + 1)
+            if close != -1:
+                prefix, body = text[: close + 1], text[close + 1 :]
+
+    lines = body.split("\n")
+    out: List[str] = []
+    i = 0
+    in_fence = False
+    fence_python = False
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            if in_fence:
+                in_fence = False
+                fence_python = False
+            else:
+                in_fence = True
+                fence_python = stripped[3:].strip() == "python"
+            out.append(line)
+            i += 1
+            continue
+        if in_fence:
+            # 已有 python 围栏内同样修全角符号（幂等：半角行不受影响），
+            # 其余规则（In/Out、空行压缩等）不进围栏
+            if fence_python:
+                line = line.translate(_POLISH_FULLWIDTH)
+            out.append(line)
+            i += 1
+            continue
+        if _POLISH_INOUT_RE.match(stripped):
+            i += 1
+            continue
+        m = _POLISH_PSEUDO_TABLE_RE.match(stripped)
+        if m:
+            out.append(m.group(1).strip())
+            i += 1
+            continue
+        m = _POLISH_SHORT_HEAD_RE.match(stripped)
+        if m:
+            j = i + 1
+            while j < n and not lines[j].strip():
+                j += 1
+            if j < n and lines[j].strip().startswith("# "):
+                out.append(f"{m.group(1)} {m.group(2)} {lines[j].strip()[2:].strip()}")
+                i = j + 1
+                continue
+        if _looks_like_code(stripped):
+            block: List[str] = []
+            while i < n:
+                cur = lines[i].strip()
+                if cur:
+                    if _looks_like_code(cur) and not cur.startswith("# "):
+                        block.append(cur.translate(_POLISH_FULLWIDTH))
+                        i += 1
+                        continue
+                    break
+                # 空行：向后看，下一个非空行仍是代码则段继续（丢空行）
+                j = i + 1
+                while j < n and not lines[j].strip():
+                    j += 1
+                if j < n and _looks_like_code(lines[j].strip()) and block:
+                    i = j
+                    continue
+                break
+            if block and (
+                len(block) >= 2 or _POLISH_CODE_STRONG_RE.match(block[0])
+            ):
+                # 单行弱信号不围栏（防正文里「术语: 解释」式行被误伤）；
+                # 强信号单行（如 OCR 粘连的整行注释+代码）照常围栏
+                out.append("```python")
+                out.extend(block)
+                out.append("```")
+            else:
+                out.extend(block)
+            continue
+        out.append(line)
+        i += 1
+
+    collapsed = "\n".join(out)
+    # 相邻 python 围栏（之间只有空行）合并成一个：分段识别/分批
+    # polish 可能把同一段代码切成几个小围栏，合并后渲染更连贯
+    collapsed = re.sub(r"```\n\n+```python\n", "", collapsed)
+    collapsed = re.sub(r"\n{3,}", "\n\n", collapsed)
+    return prefix + collapsed.strip("\n") + "\n" if prefix else collapsed.strip("\n") + "\n"
 
 
 class HighlightsProcessor(BaseProcessor):
@@ -203,9 +364,14 @@ class HighlightsProcessor(BaseProcessor):
         merged = self._merge_candidates(candidates)
 
         markdown = self._build_markdown(path, pages, merged, warnings, profile, toc)
+        full_text = "\n\n".join(text for _, text in pages)
+        if ocr_used:
+            # OCR 全文统一过版式 polish（代码围栏/In-Out 标记/伪表格/
+            # 空行压缩/章节名合并），LLM 分块仍用原始页文本
+            full_text = _polish_structured_markdown(full_text)
         return ProcessResult(
             success=True,
-            text="\n\n".join(text for _, text in pages),
+            text=full_text,
             markdown=markdown,
             metadata={
                 "engine": self.llm_model,

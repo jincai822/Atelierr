@@ -614,3 +614,117 @@ def test_merge_orders_challenge_first_among_recommended(tmp_path, monkeypatch):
     assert "**挑战项**" in checkboxes[0]
     assert "**支持项**" in checkboxes[1]
     assert "**路人项**" in checkboxes[2]
+
+
+# --- 结构化全文 polish（2026-09-16 排版修复）---
+
+
+def test_polish_wraps_code_lines_in_fence():
+    """散装代码段落 → ```python 围栏，全角符号在围栏内修复。"""
+    raw = (
+        "<!-- p45 -->\n\n"
+        "## 第2步 分词\n\n"
+        "定义一个分词函数，用它将文本分割成单个汉字字符。\n\n"
+        "#定义一个分词函数，将文本转换为单个字符的列表\n\n"
+        "def tokenize(text):\n\n"
+        "return[char for char in text]#将文本拆分为字符列表\n\n"
+        "正文继续。\n"
+    )
+    out = hl_module._polish_structured_markdown(raw)
+    assert "```python\n#定义一个分词函数,将文本转换为单个字符的列表\ndef tokenize(text):\nreturn[char for char in text]#将文本拆分为字符列表\n```" in out
+    assert "正文继续。" in out
+    # 围栏外正文不受影响
+    assert "定义一个分词函数，用它将文本分割成单个汉字字符。" in out
+
+
+def test_polish_fixes_fullwidth_inside_code_only():
+    """全角括号/冒号只在代码围栏内修复，正文里的全角不动。"""
+    raw = (
+        "ngrams_count=defaultdict（Counter）#创建一个字典\n\n"
+        "fromcollections importdefaultdict,Counter#导入所需库\n\n"
+        "for text in corpus：\n\n"
+        "bigram_counts=count_ngrams(corpus，2)#计算词频\n\n"
+        "正文（这里）的括号：不动，逗号也不动。\n"
+    )
+    out = hl_module._polish_structured_markdown(raw)
+    assert "ngrams_count=defaultdict(Counter)#创建一个字典" in out
+    assert "fromcollections importdefaultdict,Counter#导入所需库" in out
+    assert "for text in corpus:" in out
+    assert "bigram_counts=count_ngrams(corpus,2)#计算词频" in out
+    assert "正文（这里）的括号：不动，逗号也不动。" in out
+
+
+def test_polish_removes_in_out_markers():
+    """Jupyter 提示符被误判的 ## In / ## Out 标题删除。"""
+    raw = "## In \n\nimport numpy as np \n\n## Out \n\n正文。\n"
+    out = hl_module._polish_structured_markdown(raw)
+    assert "## In" not in out
+    assert "## Out" not in out
+    assert "import numpy as np" in out
+
+
+def test_polish_strips_pseudo_table_but_keeps_real_table():
+    """|作者简介| 伪表格去竖线；真实表格（分隔行）原样保留。"""
+    raw = (
+        "|作者简介|\n\n"
+        "| 列甲 | 列乙 |\n| --- | --- |\n| 1 | 2 |\n"
+    )
+    out = hl_module._polish_structured_markdown(raw)
+    assert "|作者简介|" not in out
+    assert "作者简介" in out
+    assert "| 列甲 | 列乙 |\n| --- | --- |\n| 1 | 2 |" in out
+
+
+def test_polish_merges_split_chapter_heading():
+    """被拆成两块的章节名（## 第4课 + # 标题）合并成一行二级标题。"""
+    raw = "## 第4课\n\n# 柳暗花明又一村：Seq2Seq架构 \n\n正文。\n"
+    out = hl_module._polish_structured_markdown(raw)
+    assert "## 第4课 柳暗花明又一村：Seq2Seq架构" in out
+    assert "\n# 柳暗花明" not in out
+
+
+def test_polish_collapses_blank_runs():
+    """连续空行压成一个（围栏内不动）。"""
+    raw = "第一段。\n\n\n\n第二段。\n"
+    out = hl_module._polish_structured_markdown(raw)
+    assert "\n\n\n" not in out
+    assert "第一段。\n\n第二段。" in out
+
+
+def test_polish_keeps_anchors_images_and_frontmatter():
+    """页锚、图片内嵌、frontmatter 原样保留。"""
+    raw = (
+        "---\ncreated: '2026-09-16T13:35:00+08:00'\n---\n\n"
+        "# 书名 全文\n\n<!-- p30 -->\n\n"
+        "![[attachments/书籍/x/图片/p0030-img.jpg]]\n\n*图注*\n"
+    )
+    out = hl_module._polish_structured_markdown(raw)
+    assert out.startswith("---\ncreated: '2026-09-16T13:35:00+08:00'\n---\n")
+    assert "<!-- p30 -->" in out
+    assert "![[attachments/书籍/x/图片/p0030-img.jpg]]" in out
+
+
+def test_polish_toc_line_not_fenced():
+    """目录页行（1.1N-Gram模型026）不是代码，不进围栏。"""
+    raw = "1.1N-Gram模型026\n\n1.2“词”是什么030\n"
+    out = hl_module._polish_structured_markdown(raw)
+    assert "```" not in out
+
+
+def test_polish_is_idempotent():
+    """二次 polish 不再改动（已有围栏跳过、空行已压缩）。"""
+    raw = (
+        "---\ncreated: 'x'\n---\n\n|作者简介|\n\n## In \n\n"
+        "import numpy as np \n\nnp.zeros((2,2))\n\n\n正文（保留）。\n"
+    )
+    once = hl_module._polish_structured_markdown(raw)
+    twice = hl_module._polish_structured_markdown(once)
+    assert once == twice
+
+
+def test_polish_merges_adjacent_python_fences():
+    """仅隔空行的相邻 python 围栏合并（分批/分段识别产生的碎片）。"""
+    raw = "```python\nimport numpy as np\n```\n\n\n```python\nnp.zeros((2,2))\n```\n\n正文。\n"
+    out = hl_module._polish_structured_markdown(raw)
+    assert out.count("```python") == 1
+    assert "```python\nimport numpy as np\nnp.zeros((2,2))\n```" in out
