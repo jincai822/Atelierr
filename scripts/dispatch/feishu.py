@@ -1374,7 +1374,13 @@ class FeishuBridge:
         匹配才操作：0 个返回 "笔记不存在"，多个返回 "歧义"（同名
         冲突，卡片给不出文件级精确操作，请人到 Obsidian 处理）。
         确认与归档两个回调共用此定位。
+
+        ``inbox/`` 虚拟前缀豁免（2026-09-16 实证）：书籍卡等
+        confirm_note 带 ``inbox/`` 前缀（供发送侧 Obsidian URI 解析），
+        定位前剥掉按纯文件名处理。
         """
+        if filename.startswith("inbox/"):
+            filename = filename[len("inbox/"):]
         if (
             not filename
             or "/" in filename

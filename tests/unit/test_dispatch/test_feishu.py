@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -395,6 +396,26 @@ def test_card_action_confirm_note_in_subdir(memory_tree):
     after = frontmatter.loads(target.read_text(encoding="utf-8"))
     assert after.metadata == {**before.metadata, "tags": ["抖音"]}
     assert after.content == before.content
+
+
+def test_card_action_confirm_note_with_inbox_prefix(memory_tree):
+    """confirm_note 带 inbox/ 虚拟前缀（书籍卡等）：剥前缀后定位成功
+    （2026-09-16 实证 bug：前缀触发"非法路径"，书籍卡按钮全部不可用）。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note(
+        "书籍-x.md", "档案卡正文\n", source="book", tags=["待确认", "书籍"],
+        inbox=True,
+    )
+
+    resp = bridge.handle_card_action(
+        _card_action({"action": "confirm_note", "note": "inbox/书籍-x.md"})
+    )
+
+    assert resp["toast"] == {"type": "success", "content": "已确认"}
+    path = Path(memory_tree.inbox_dir) / "书籍-x.md"
+    assert "待确认" not in frontmatter.loads(
+        path.read_text(encoding="utf-8")
+    ).metadata.get("tags", [])
 
 
 def test_card_action_same_name_in_trash_ignored(memory_tree):
