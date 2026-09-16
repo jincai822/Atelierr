@@ -241,7 +241,7 @@ def _add_attachment(tree, name="IMG_001.png"):
 
 
 def test_media_failure_pushes(cli, memory_tree, pushes, monkeypatch):
-    """附件处理失败 → 推"Atelierr 处理失败"。"""
+    """附件处理失败 → 推"Atelierr 处理失败"（带文件名+原因+出路）。"""
     monkeypatch.setattr(media_module, "ImageProcessor", _FakeMediaProcessor)
     _FakeMediaProcessor.fail_with = "OCR 失败: 引擎崩溃"
     _add_attachment(memory_tree)
@@ -250,7 +250,49 @@ def test_media_failure_pushes(cli, memory_tree, pushes, monkeypatch):
     assert len(pushes) == 1
     title, message = pushes[0]
     assert title == "Atelierr 处理失败"
-    assert "1 个附件处理失败" in message
+    assert "IMG_001.png" in message
+    assert "OCR 失败: 引擎崩溃" in message
+    assert "将自动重试 2 次" in message
+
+
+def test_media_mid_retry_silent_final_pushes(cli, memory_tree, pushes, monkeypatch):
+    """中间自动重试不刷屏；第 3 次熔断时推"不再重试"。"""
+    monkeypatch.setattr(media_module, "ImageProcessor", _FakeMediaProcessor)
+    _FakeMediaProcessor.fail_with = "OCR 失败: 引擎崩溃"
+    _add_attachment(memory_tree)
+
+    assert cli.main(["media"]) == 0
+    assert len(pushes) == 1
+    assert cli.main(["media"]) == 0
+    assert len(pushes) == 1  # 第二次（自动重试中）不推
+    assert cli.main(["media"]) == 0
+    assert len(pushes) == 2
+    assert "不再重试" in pushes[1][1]
+
+
+def test_media_scanned_pdf_advice_wording():
+    """扫描件错误 → 出路指"换文字版 PDF 重发"（纯函数）。"""
+    advice = cli_module._media_failure_advice(
+        "PDF 无可提取文字（疑似纯扫描件，请先 OCR 再投喂）"
+    )
+    assert "文字版" in advice
+    assert "扫描件" in advice
+
+
+def test_media_duplicate_receipt_pushes(cli, memory_tree, pushes, monkeypatch):
+    """同内容换名重发 → 跳过 + 推"内容查重"回执（2026-09-16 裁决 A）。"""
+    monkeypatch.setattr(media_module, "ImageProcessor", _FakeMediaProcessor)
+    _FakeMediaProcessor.fail_with = None
+    _add_attachment(memory_tree)
+    assert cli.main(["media"]) == 0
+    assert pushes == []
+
+    _add_attachment(memory_tree, name="IMG_001-重发.png")
+    assert cli.main(["media"]) == 0
+    assert len(pushes) == 1
+    title, message = pushes[0]
+    assert title == "Atelierr 内容查重"
+    assert "IMG_001-重发.png" in message
 
 
 def test_media_success_no_push(cli, memory_tree, pushes, monkeypatch):

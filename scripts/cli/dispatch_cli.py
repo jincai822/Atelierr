@@ -65,13 +65,37 @@ def _notify_failures(failures: List[Dict[str, Any]]) -> None:
         )
 
 
+def _media_failure_advice(error: str) -> str:
+    """按错误文案给出出路（白话、可执行）；未知错误回退通用建议。"""
+    if "无可提取文字" in error or "扫描件" in error:
+        return "疑似纯扫描件（没有文字层）：请换能选中文字的文字版 PDF 重发"
+    return f"{error[:80]}；请检查文件后重新放入"
+
+
 def _notify_media_failures(failures: List[Dict[str, Any]]) -> None:
-    """附件处理失败时推送（同上：成功不推，失败必推）。"""
-    if failures:
-        send_dispatch_notice(
-            "Atelierr 处理失败",
-            f"{len(failures)} 个附件处理失败，请检查文件后重新放入",
+    """附件处理失败时推送文件名+原因+出路（同上：成功不推，失败必推）。
+
+    只在首次失败与熔断时推（中间自动重试不刷屏）：同一文件 15 分钟
+    一推连推三条的噪音，2026-09-16 裁决砍掉。
+    """
+    fresh = [
+        failure
+        for failure in failures
+        if failure.get("final") or int(failure.get("attempts", 1)) <= 1
+    ]
+    if not fresh:
+        return
+    lines = []
+    for failure in fresh[:5]:
+        name = Path(str(failure["file"])).name
+        advice = _media_failure_advice(str(failure.get("error") or "未知原因"))
+        tail = (
+            "已自动重试 3 次仍失败，不再重试"
+            if failure.get("final")
+            else "将自动重试 2 次"
         )
+        lines.append(f"• {name}：{advice}（{tail}）")
+    send_dispatch_notice("Atelierr 处理失败", "\n".join(lines))
 
 
 def _feishu_ready() -> bool:
@@ -420,10 +444,23 @@ class DispatchCLI:
                     click.echo(f"  已创建: {filename}{suffix}")
                 for title in report.get("deduped") or []:
                     click.echo(f"  查重跳过: 《{title}》已有档案卡（US-001 §3.4）")
+                for dup in report.get("duplicates") or []:
+                    click.echo(f"  内容重复: {dup['file']}（与已处理件相同，跳过）")
                 for failure in report["failed"]:
                     click.echo(f"  失败: {failure['file']} — {failure['error']}")
                 if not dry_run:
                     _notify_media_failures(report["failed"])
+                    if report.get("duplicates"):
+                        # 内容级查重命中"回执一句"（2026-09-16 裁决 A）
+                        names = "、".join(
+                            Path(d["file"]).name
+                            for d in report["duplicates"][:5]
+                        )
+                        send_dispatch_notice(
+                            "Atelierr 内容查重",
+                            f"{len(report['duplicates'])} 个附件此前已处理过，"
+                            f"未重复处理：{names}",
+                        )
                     if report.get("deduped"):
                         # 书籍查重命中"报人工一句"（US-001 §3.4）
                         titles = "、".join(f"《{t}》" for t in report["deduped"])

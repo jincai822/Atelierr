@@ -89,16 +89,18 @@ def _dispatcher(tree):
     )
 
 
-def _add_attachment(tree, name="IMG_001.png", age_seconds=60, subdir=""):
+def _add_attachment(tree, name="IMG_001.png", age_seconds=60, subdir="", content=None):
     """在 attachments/ 落一个假附件并回拨 mtime（避开 30s 防半文件守卫）。
 
-    attachments/ 2026-09-13 起在数据根平级（tree.attachments_dir）。"""
+    attachments/ 2026-09-13 起在数据根平级（tree.attachments_dir）。
+    content 缺省为固定字节——同字节文件会被内容级查重判为重复件，
+    需要"同名/同型不同内容"的用例必须传不同 content。"""
     attach = Path(tree.attachments_dir)
     if subdir:
         attach = attach / subdir
     attach.mkdir(parents=True, exist_ok=True)
     path = attach / name
-    path.write_bytes(b"\x89PNG fake-bytes")
+    path.write_bytes(content if content is not None else b"\x89PNG fake-bytes")
     old = time.time() - age_seconds
     os.utime(path, (old, old))
     return path
@@ -162,6 +164,68 @@ def test_idempotent_second_run(memory_tree):
     assert len(_FakeImageProcessor.calls) == 1
 
 
+def test_content_duplicate_skipped(memory_tree):
+    """同一文件换名重发：字节 sha1 命中已处理件 → 跳过（2026-09-16 裁决 A）。"""
+    _add_attachment(memory_tree, "voice_001.m4a")
+    dispatcher = _dispatcher(memory_tree)
+    dispatcher.run()
+    assert len(_FakeAudioProcessor.calls) == 1
+
+    _add_attachment(memory_tree, "voice_001-重发.m4a")  # 同字节不同名
+    report = dispatcher.run()
+
+    assert report["created"] == []
+    assert [d["file"] for d in report["duplicates"]] == [
+        "attachments/voice_001-重发.m4a"
+    ]
+    assert len(_FakeAudioProcessor.calls) == 1  # 没再走转写
+    state = json.loads(
+        (memory_tree.state_dir / "processed_media.json").read_text()
+    )
+    dup = state["attachments/voice_001-重发.m4a"]
+    origin = state["attachments/voice_001.m4a"]
+    assert dup["status"] == "done"
+    assert dup["duplicate"] is True
+    assert dup["note"] == origin["note"]
+    assert dup["file_hash"] == origin["file_hash"]
+    notes = list(Path(memory_tree.inbox_dir).glob("media-*.md"))
+    assert len(notes) == 1
+
+
+def test_different_content_not_duplicate(memory_tree):
+    """字节不同的两个附件各自正常处理（内容查重不误伤）。"""
+    _add_attachment(memory_tree, "voice_001.m4a")
+    second = _add_attachment(memory_tree, "voice_002.m4a")
+    second.write_bytes(b"different-bytes")
+    old = time.time() - 60  # 覆写刷新了 mtime，回拨避开 30s 守卫
+    os.utime(second, (old, old))
+
+    report = _dispatcher(memory_tree).run()
+
+    assert len(report["created"]) == 2
+    assert report["duplicates"] == []
+    assert len(_FakeAudioProcessor.calls) == 2
+
+
+def test_failure_report_carries_attempts_and_final(memory_tree):
+    """失败报告带 attempts/final：首次非终态，第 3 次熔断为终态。"""
+    _FakeAudioProcessor.fail_with = "转写失败: boom"
+    _add_attachment(memory_tree, "voice_001.m4a")
+    dispatcher = _dispatcher(memory_tree)
+
+    first = dispatcher.run()
+    assert first["failed"][0]["attempts"] == 1
+    assert first["failed"][0]["final"] is False
+    dispatcher.run()
+    third = dispatcher.run()
+    assert third["failed"][0]["attempts"] == 3
+    assert third["failed"][0]["final"] is True
+    state = json.loads(
+        (memory_tree.state_dir / "processed_media.json").read_text()
+    )
+    assert state["attachments/voice_001.m4a"]["status"] == "failed"
+
+
 def test_unsupported_files_ignored(memory_tree):
     """非图片/音频文件与隐藏文件不进入扫描。"""
     _add_attachment(memory_tree, "notes.txt")
@@ -196,7 +260,7 @@ def test_missing_attachments_dir_noop(memory_tree):
 
     assert report == {
         "scanned": 0, "found": 0, "created": [], "failed": [], "skipped": 0,
-        "imported": 0,
+        "imported": 0, "duplicates": [],
     }
 
 
@@ -287,8 +351,8 @@ def test_media_subdir_processed(memory_tree):
 
 def test_same_name_in_two_subdirs_both_processed(memory_tree):
     """不同子目录的同名附件不撞笔记名（状态键/笔记哈希都按相对路径）。"""
-    _add_attachment(memory_tree, "IMG_003.png", subdir="媒体")
-    _add_attachment(memory_tree, "IMG_003.png")
+    _add_attachment(memory_tree, "IMG_003.png", subdir="媒体", content=b"png-a")
+    _add_attachment(memory_tree, "IMG_003.png", content=b"png-b")
 
     report = _dispatcher(memory_tree).run()
 
@@ -459,8 +523,8 @@ def test_video_outside_media_subdir_also_processed(memory_tree, monkeypatch):
     """顶层散放与书籍/ 里的 mp4 同样认得（2026-09-13 起视频全目录认；
     防自产自吃靠引用判定，见上两条用例）。"""
     monkeypatch.setattr(media_module, "compress_to_480p", _fake_compress_ok)
-    _add_attachment(memory_tree, "loose.mp4")
-    _add_attachment(memory_tree, "odd.mp4", subdir="书籍")
+    _add_attachment(memory_tree, "loose.mp4", content=b"video-a")
+    _add_attachment(memory_tree, "odd.mp4", subdir="书籍", content=b"video-b")
 
     report = _dispatcher(memory_tree).run()
 

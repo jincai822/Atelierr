@@ -10,6 +10,11 @@
 （docker/systemd/atelierr-links.*，每 15 分钟一次）；人工确认在产出端：
 自动创建的笔记带 ``tags=["待确认"]``，人在 Obsidian 阅读后自行移除标签。
 
+内容级查重（2026-09-16 用户裁决 A）：同名靠状态键幂等，**不同名靠
+字节 sha1**——同一文件换名重发命中已处理条目即标记 ``duplicate``
+跳过（不重复建卡、不计次数），由 CLI 层推飞书回执；多图图集批次
+不走此查重（图集合并本身是另一层去重）。
+
 典型路径：手机截图/录音 → Obsidian 附件目录 → Syncthing 同步到电脑
 → 本模块识别 → 建笔记（内嵌原附件 ``![[attachments/媒体/xxx]]``，
 Obsidian 里图片直接显示、录音/视频直接可播）→ 正文同时进入 todos
@@ -259,7 +264,7 @@ class MediaDispatcher:
 
         Returns:
             Dict[str, Any]: 运行报告（scanned/found/created/failed/
-            skipped/imported）。
+            skipped/imported/duplicates）。
         """
         state = self._load_state()
         report: Dict[str, Any] = {
@@ -269,6 +274,7 @@ class MediaDispatcher:
             "failed": [],
             "skipped": 0,
             "imported": 0,
+            "duplicates": [],
         }
         self._import_inbox(report, dry_run)
         pending: List[Path] = []
@@ -424,6 +430,32 @@ class MediaDispatcher:
         return items
 
     @staticmethod
+    def _file_sha1(path: Path) -> Optional[str]:
+        """文件字节 sha1（分块读；读取失败返回 None——放弃查重，照常处理）。"""
+        try:
+            digest = hashlib.sha1()
+            with open(path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    digest.update(chunk)
+            return digest.hexdigest()
+        except OSError:
+            return None
+
+    @staticmethod
+    def _duplicate_of(
+        state: Dict[str, Any], key: str, file_hash: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """查已有条目里同内容的已处理件（自身除外）；无哈希或未命中返回 None。"""
+        if not file_hash:
+            return None
+        for other_key, other in state.items():
+            if other_key == key or not isinstance(other, dict):
+                continue
+            if other.get("status") == "done" and other.get("file_hash") == file_hash:
+                return other
+        return None
+
+    @staticmethod
     def _arrival_ts(path: Path) -> float:
         """到达时间（epoch 秒）：飞书文件名时间戳（UTC）优先，回退 mtime。"""
         match = _FEISHU_NAME_RE.match(path.name)
@@ -462,11 +494,17 @@ class MediaDispatcher:
             entry["last_attempt"] = now_iso
             entries.append(entry)
         if not ocr_parts:
+            final = any(e["attempts"] >= MAX_ATTEMPTS for e in entries)
             for entry in entries:
                 if entry["attempts"] >= MAX_ATTEMPTS:
                     entry["status"] = "failed"
             report["failed"].append(
-                {"file": f"图集 {len(paths)} 张", "error": "OCR 全部失败"}
+                {
+                    "file": f"图集 {len(paths)} 张",
+                    "error": "OCR 全部失败",
+                    "attempts": entries[0]["attempts"],
+                    "final": final,
+                }
             )
             return
         filename = self._batch_note_filename(paths)
@@ -627,6 +665,20 @@ class MediaDispatcher:
         """处理单个附件：成功建笔记，失败计次数（3 次熔断）。"""
         key = self._key(path)
         entry = state.setdefault(key, {"attempts": 0})
+        # 内容级查重（2026-09-16 用户裁决 A）：同名靠 key 幂等、不同名靠
+        # 内容——同一文件换名重发，字节 sha1 命中已处理条目即跳过（CLI 层
+        # 按 report["duplicates"] 推飞书回执），不重复建卡、不计次数。
+        # 多图批次不走这里（图集合并本身是另一层去重），单图/录音/视频/
+        # PDF 全覆盖。
+        file_hash = self._file_sha1(path)
+        dup_of = self._duplicate_of(state, key, file_hash)
+        if dup_of is not None:
+            entry["status"] = "done"
+            entry["duplicate"] = True
+            entry["note"] = dup_of.get("note")
+            entry["file_hash"] = file_hash
+            report["duplicates"].append({"file": key, "note": dup_of.get("note")})
+            return
         entry["attempts"] += 1
         is_pdf = path.suffix.lower() in _PDF_EXTS
         # 评论附着以"到达时刻"为准：直发视频压缩会刷新 mtime，须先取样
@@ -650,6 +702,8 @@ class MediaDispatcher:
                     rel = f"{SYSTEM_DIRNAME}/{filename}"
                 entry["status"] = "done"
                 entry["note"] = rel
+                if file_hash:
+                    entry["file_hash"] = file_hash
                 report["created"].append(rel)
                 # 书籍模式（2026-09-14 裁决，对齐 Cognitive OS 准入协议）：
                 # 档案卡进 inbox 待确认，✅ 一步归档进 memory/书籍/[中图法/]
@@ -705,12 +759,23 @@ class MediaDispatcher:
                 pass
             entry["status"] = "done"
             entry["note"] = filename
+            if file_hash:
+                entry["file_hash"] = file_hash
             report["created"].append(filename)
             return
         entry["last_error"] = (result.error or "")[:300]
-        if entry["attempts"] >= MAX_ATTEMPTS:
+        final = entry["attempts"] >= MAX_ATTEMPTS
+        if final:
             entry["status"] = "failed"
-        report["failed"].append({"file": key, "error": result.error})
+        # attempts/final 供 CLI 层决定推送节奏（首次与熔断才推，中间不刷屏）
+        report["failed"].append(
+            {
+                "file": key,
+                "error": result.error,
+                "attempts": entry["attempts"],
+                "final": final,
+            }
+        )
 
     def _get_processor(self, path: Path):
         """按扩展名取处理器实例（每轮每类只构造一次，引擎加载昂贵）。"""

@@ -45,11 +45,13 @@ def _dispatcher(tree):
     return MediaDispatcher(tree, highlights_factory=_FakeHighlightsProcessor)
 
 
-def _add_pdf(tree, name="测试书.pdf", age_seconds=60):
+def _add_pdf(tree, name="测试书.pdf", age_seconds=60, content=None):
     attach = Path(tree.attachments_dir)
     attach.mkdir(parents=True, exist_ok=True)
     path = attach / name
-    path.write_bytes(b"%PDF fake-bytes")
+    # content 缺省固定字节——同字节文件会被内容级查重判为重复件，
+    # 模拟"不同版本/不同书"的用例必须传不同 content
+    path.write_bytes(content if content is not None else b"%PDF fake-bytes")
     old = time.time() - age_seconds
     os.utime(path, (old, old))
     return path
@@ -190,9 +192,10 @@ def test_pdf_book_card_warns_on_different_edition(memory_tree):
     MediaDispatcher(memory_tree, highlights_factory=lambda: first).run()
     assert len(_book_card_paths(memory_tree)) == 1
 
-    # 第二版进来（不同版次 → 不同 book_key）
+    # 第二版进来（不同版次 → 不同 book_key；真实不同版字节必不同，
+    # 绕开内容级查重）
     second_book = dict(first._book, edition="第2版")
-    _add_pdf(memory_tree, name="认知觉醒-第2版.pdf")
+    _add_pdf(memory_tree, name="认知觉醒-第2版.pdf", content=b"%PDF 2nd-edition")
     MediaDispatcher(
         memory_tree, highlights_factory=lambda: _FakeBookProcessor(second_book)
     ).run()
