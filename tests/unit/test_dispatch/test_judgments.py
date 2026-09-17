@@ -477,6 +477,50 @@ def test_feishu_decide_command(memory_tree, monkeypatch):
     assert len(list(cog_dir.rglob("*.md"))) == 1
 
 
+def test_feishu_decide_multi_index_one_message(memory_tree, monkeypatch):
+    """一条消息批多条（「批1批2」）：按序号从大到小裁决防位移——
+    2026-09-17 实测「批 1」后「批 2」扑空（原 2 号已变 1 号）。"""
+    from scripts.dispatch.judgments import nominate_from_note
+
+    note = _note_with_viewpoints(memory_tree)
+    nominated = nominate_from_note(memory_tree, note)
+    assert len(nominated) == 2
+    bridge = FeishuBridge(memory_tree, app_id="cli_x", app_secret="secret")
+    feedback = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat_id, text: feedback.append(text)
+    )
+    event = _event("md2", "text", {"text": "批1批2"})
+    event.event.message.chat_id = "oc_demo"
+
+    bridge.handle_event(event)
+
+    assert feedback and feedback[0].count("已收进判断登记处") == 2
+    cog_dir = memory_tree.notes_dir.parent / "memory" / "wiki" / "cognition"
+    assert len(list(cog_dir.rglob("*.md"))) == 2
+
+
+def test_feishu_decide_mixed_verdicts(memory_tree, monkeypatch):
+    """「批 1、略 2」混合裁决：1 号收进登记处，2 号拒掉。"""
+    from scripts.dispatch.judgments import nominate_from_note
+
+    note = _note_with_viewpoints(memory_tree)
+    nominate_from_note(memory_tree, note)
+    bridge = FeishuBridge(memory_tree, app_id="cli_x", app_secret="secret")
+    feedback = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat_id, text: feedback.append(text)
+    )
+    event = _event("md3", "text", {"text": "批 1、略 2"})
+    event.event.message.chat_id = "oc_demo"
+
+    bridge.handle_event(event)
+
+    assert feedback and "已收进判断登记处" in feedback[0] and "已略过" in feedback[0]
+    cog_dir = memory_tree.notes_dir.parent / "memory" / "wiki" / "cognition"
+    assert len(list(cog_dir.rglob("*.md"))) == 1
+
+
 def test_confirm_hook_nominates(memory_tree, monkeypatch):
     """点 ✅ 确认带观点总结的笔记：顺手机器提名候选（只提名不批准）。"""
     note = _note_with_viewpoints(memory_tree, inbox=True, tags=["待确认"])

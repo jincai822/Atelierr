@@ -1624,16 +1624,23 @@ class FeishuBridge:
         # 指令同级，先于问答会话；序号与晨报安静小节同源同序
         from scripts.dispatch.judgments import decide_by_index
 
-        decide = re.match(r"^(批|略)\s*(\d{1,2})$", text)
-        if decide:
-            try:
-                _ok, reply = decide_by_index(
-                    self.tree, int(decide.group(2)), decide.group(1) == "批"
-                )
-            except Exception as exc:  # noqa: BLE001 - 审批失败不中断守护
-                print(f"[feishu] proposal decide fail: {exc}", flush=True)
-                reply = "⚠️ 审批失败，请稍后重试"
-            self._send_feedback(chat_id, reply)
+        decides = re.findall(r"(批|略)\s*(\d{1,2})", text)
+        if decides and re.fullmatch(r"(?:[批略]\s*\d{1,2}[，,、\s]*)*", text):
+            # 支持一条消息批多条（「批 1 2」「批1批2」「批 1、略 2」）：
+            # 同序号去重（后者为准），按序号从大到小依次裁决防位移——
+            # 2026-09-17 实测：批掉 1 号后原 2 号变 1 号，「批 2」扑空报错
+            replies = []
+            todo: Dict[int, bool] = {}
+            for verdict, num in decides:
+                todo[int(num)] = verdict == "批"
+            for num in sorted(todo, reverse=True):
+                try:
+                    _ok, reply = decide_by_index(self.tree, num, todo[num])
+                except Exception as exc:  # noqa: BLE001 - 审批失败不中断守护
+                    print(f"[feishu] proposal decide fail: {exc}", flush=True)
+                    reply = "⚠️ 审批失败，请稍后重试"
+                replies.append(reply)
+            self._send_feedback(chat_id, "\n".join(replies))
             return None
         store = PromptStore(Path(self.tree.state_dir))
         if store.is_open():
