@@ -813,6 +813,78 @@ def test_video_card_has_summary_and_tags(memory_tree, monkeypatch):
     assert seen == ["视频转写文本。"]  # 总结收到的确实是转写全文
 
 
+def test_video_body_formatted_before_summary(memory_tree, monkeypatch):
+    """直发视频正文先过 LLM 整理再进卡、再喂总结（2026-09-17 裁决：
+    与链接视频同待遇，此前直发的是 Whisper 原稿）。"""
+    monkeypatch.setattr(media_module, "compress_to_480p", _fake_compress_ok)
+    seen = []
+
+    def _fake_format(text):
+        return "整理后的分段正文。", "ok"
+
+    def _fake_summarize(text):
+        seen.append(text)
+        return _summary_dict(), "ok"
+
+    _add_attachment(memory_tree, "clip.mp4", subdir="媒体")
+    dispatcher = MediaDispatcher(
+        memory_tree,
+        video_factory=_FakeVideoProcessor,
+        summarize_fn=_fake_summarize,
+        format_fn=_fake_format,
+    )
+    report = dispatcher.run()
+
+    assert len(report["created"]) == 1
+    note = _created_note(memory_tree)
+    post = frontmatter.loads(note.read_text(encoding="utf-8"))
+    assert "整理后的分段正文。" in post.content
+    assert "视频转写文本。" not in post.content
+    assert seen == ["整理后的分段正文。"]  # 总结吃的是整理后正文
+
+
+def test_audio_format_failure_falls_back_to_raw(memory_tree):
+    """整理失败/跳过：正文降级为 Whisper 原稿，管线不阻塞。"""
+
+    def _fail_format(text):
+        return None, "failed:RuntimeError"
+
+    _add_attachment(memory_tree, "voice.ogg", age_seconds=60, subdir="媒体")
+    dispatcher = MediaDispatcher(
+        memory_tree,
+        audio_factory=_FakeAudioProcessor,
+        summarize_fn=lambda text: (None, "skipped:test"),
+        format_fn=_fail_format,
+    )
+    report = dispatcher.run()
+
+    assert len(report["created"]) == 1
+    note = _created_note(memory_tree)
+    post = frontmatter.loads(note.read_text(encoding="utf-8"))
+    assert "转写文本。" in post.content
+
+
+def test_screenshot_text_not_formatted(memory_tree):
+    """OCR 文本是书面语不过整理工序（只过总结），format_fn 不被调用。"""
+    called = []
+
+    def _spy_format(text):
+        called.append(text)
+        return "不应出现", "ok"
+
+    _add_attachment(memory_tree, "IMG_002.png", subdir="媒体")
+    dispatcher = MediaDispatcher(
+        memory_tree,
+        image_factory=_FakeImageProcessor,
+        summarize_fn=lambda text: (None, "skipped:test"),
+        format_fn=_spy_format,
+    )
+    report = dispatcher.run()
+
+    assert len(report["created"]) == 1
+    assert called == []
+
+
 def test_audio_card_summarize_failure_annotated(memory_tree):
     """总结失败/被护栏跳过：卡面必须标注（不静默降级），无摘要节。"""
 

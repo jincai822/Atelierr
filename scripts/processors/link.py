@@ -1132,6 +1132,21 @@ class LinkProcessor(BaseProcessor):
         """
         return self._summarize(transcript)
 
+    def format_transcript(self, transcript: str) -> Tuple[Optional[str], str]:
+        """公开的转写整理入口：复用 _format_transcript 的护栏与提示词契约。
+
+        供 dispatch/media 等其他管线复用（2026-09-17 裁决：直发视频/录音
+        的正文与链接视频同待遇——此前只过了总结没过整理，正文是 Whisper
+        原稿，无标点分段，与链接卡的阅读体验割裂）。
+
+        Args:
+            transcript: 简体转写全文。
+
+        Returns:
+            Tuple[Optional[str], str]: (整理后正文 或 None, 状态串)。
+        """
+        return self._format_transcript(transcript)
+
     def _summarize(
         self, transcript: str, prompt: Optional[str] = None
     ) -> Tuple[Optional[Dict[str, Any]], str]:

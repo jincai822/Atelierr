@@ -222,6 +222,7 @@ class MediaDispatcher:
         summarize_fn: Optional[
             Callable[[str], Tuple[Optional[Dict[str, Any]], str]]
         ] = None,
+        format_fn: Optional[Callable[[str], Tuple[Optional[str], str]]] = None,
     ) -> None:
         """初始化。
 
@@ -241,6 +242,9 @@ class MediaDispatcher:
             summarize_fn: 总结函数（测试注入）；缺省为 None，运行时惰性
             构造 LinkProcessor 复用其总结能力与护栏（2026-09-15 裁决 B：
             直发视频/录音与链接视频同待遇）。
+            format_fn: 正文整理函数（测试注入）；缺省为 None，运行时惰性
+            构造 LinkProcessor 复用其整理能力与护栏（2026-09-17 裁决：
+            直发视频/录音的正文与链接同待遇——分段、补标点、逐字不改写）。
         """
         self.tree = tree
         self._image_factory = image_factory or ImageProcessor
@@ -251,6 +255,7 @@ class MediaDispatcher:
         )
         self._video_factory = video_factory or VideoProcessor
         self._summarize_fn = summarize_fn
+        self._format_fn = format_fn
         self._link: Optional[LinkProcessor] = None
         self._inbox = screenshot_inbox
         self._image: Optional[ImageProcessor] = None
@@ -615,6 +620,19 @@ class MediaDispatcher:
         summary, status = self._link.summarize_transcript(text)
         return summary, status, self._link.llm_max_chars
 
+    def _format_transcript(self, text: str) -> Tuple[Optional[str], str]:
+        """直发视频/录音的正文整理：复用链接管线 LinkProcessor 的护栏。
+
+        Returns:
+            Tuple[Optional[str], str]: (整理后正文 或 None, 状态串)；
+            失败/跳过返回 (None, 状态)，调用方降级为 Whisper 原稿。
+        """
+        if self._format_fn is not None:
+            return self._format_fn(text)
+        if self._link is None:
+            self._link = LinkProcessor()
+        return self._link.format_transcript(text)
+
     def _diary_comment_near(self, ts: float) -> str:
         """取到达时刻前后窗口内的日记人话，作媒体卡的评论（无则空串）。
 
@@ -750,18 +768,25 @@ class MediaDispatcher:
             filename = self._note_filename(path)
             summary = None
             llm_note = None
+            # 2026-09-17 裁决：直发视频/录音的正文同权过 LLM 整理（分段、
+            # 补标点、逐字不改写；此前只有链接管线过，直发的是 Whisper
+            # 原稿）。整理失败/跳过降级为 Whisper 原稿，不阻塞管线。
+            # OCR 文本本身是书面语不过整理。
+            note_text = result.text or ""
+            if kind in ("视频", "录音") and note_text:
+                formatted, _fmt_status = self._format_transcript(note_text)
+                if formatted is not None:
+                    note_text = formatted
             # 2026-09-15 裁决 B（当日扩展：截图同权——OCR 全文即内容本体，
             # 与转写同待遇）：全部非 PDF 附件都过总结，同一道字数护栏；
             # 跳过/失败卡面标注，不静默降级
-            text_len = len(result.text or "")
-            summary, llm_status, llm_limit = self._summarize_transcript(
-                result.text or ""
-            )
+            text_len = len(note_text)
+            summary, llm_status, llm_limit = self._summarize_transcript(note_text)
             llm_note = _llm_skip_note(llm_status, text_len, llm_limit)
             body = self._build_note(
                 path,
                 kind,
-                result.text,
+                note_text,
                 Path(filename).stem,
                 getattr(result, "confidence", 0.0),
                 summary=summary,
