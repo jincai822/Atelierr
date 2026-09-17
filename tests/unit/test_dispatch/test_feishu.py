@@ -632,6 +632,48 @@ def test_card_archive_moves_note_and_strips_tag(memory_tree):
     assert entry["last_accessed"] == entry_before["last_accessed"]
 
 
+def test_card_archive_inbox_prefixed_filename_no_nested_dir(memory_tree):
+    """卡片 value 带 inbox/ 虚拟前缀时，归档用实体文件名落位——
+    不得拼出 平台/分类/inbox/ 嵌套目录（2026-09-17 实证 bug）。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note(
+        "book-x.md",
+        "正文\n",
+        source="link",
+        tags=["待确认", "书籍", "TP391-自然语言处理"],
+        inbox=True,
+    )
+
+    resp = bridge.handle_card_action(_card_archive("inbox/book-x.md"))
+
+    assert resp["toast"]["type"] == "success"
+    target = memory_tree.notes_dir / "书籍" / "TP391-自然语言处理" / "book-x.md"
+    assert target.exists()
+    # 不存在嵌套 inbox 目录
+    assert not (memory_tree.notes_dir / "书籍" / "TP391-自然语言处理" / "inbox").exists()
+
+
+def test_card_archive_pick_two_level_dir_accepted(memory_tree):
+    """目录选择卡的「推荐」项是二级路径（平台/分类）：点它必须成功——
+    校验按段查非法字符，段分隔符 "/" 合法（2026-09-17 实证被误杀）。"""
+    bridge = _bridge(memory_tree)
+    memory_tree.create_note(
+        "douyin-psy2.md",
+        "正文\n",
+        source="link",
+        tags=["待确认", "抖音", "B84-心理学"],
+        inbox=True,
+    )
+    action = _card_action(
+        {"action": "archive_note", "note": "douyin-psy2.md", "dir": "抖音/B84-心理学"}
+    )
+
+    resp = bridge.handle_card_action(action)
+
+    assert resp["toast"]["type"] == "success"
+    assert (memory_tree.notes_dir / "抖音" / "B84-心理学" / "douyin-psy2.md").exists()
+
+
 def test_card_archive_uses_cclass_subdir(memory_tree):
     """带中图法分类标签：归档进 平台/分类/ 二级目录。"""
     bridge = _bridge(memory_tree)

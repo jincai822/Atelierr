@@ -33,6 +33,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from scripts.cognition.manager import ApprovalRecord, CognitionManager
 from scripts.memory.core import MemoryTree
+from scripts.processors.base import CONFIG_FILES
+
+import httpx
+import yaml
 
 #: 飞书判断消息统一匹配：「判断」或「记为判断」（可带 #）后必须跟
 #: 冒号或空白再跟陈述——「判断力很重要」这类正文不会误命中
@@ -262,6 +266,124 @@ def _split_viewpoints(text: str) -> List[str]:
     return []
 
 
+#: LLM 提名默认接入点（配置节 dispatch.judgments.llm；缺省与 todos 同规格）
+_LLM_DEFAULT_BASE_URL = "https://api.deepseek.com"
+_LLM_DEFAULT_MODEL = "deepseek-v4-flash"
+_LLM_KEY_ENV = "DEEPSEEK_API_KEY"
+
+#: 提名提示词：判断 = 对世界运行方式/行动取舍的主张（因果、规律、方法论、
+#: 价值观断言），人可以选择认同或反对；书名录、生平事实、内容复述、
+#: 修辞感慨都不是判断（2026-09-17 实证：机械摘录把"叔本华著有《作为
+#: 意志和表象的世界》"这类书名录提成了判断候选——质量问题的根）
+_NOMINATE_PROMPT = (
+    "以下是一篇笔记的观点节。请提炼最多 2 条值得收入「个人判断登记处」的"
+    "原子断言。判断的标准：关于世界运行方式或行动取舍的主张（因果、规律、"
+    "方法论、价值观断言），读者可以选择认同或反对。以下都不是判断，绝不"
+    "提炼：书名录/作品信息、人物生平事实、情节或内容复述、修辞性感慨。"
+    "要求：每条一句话，脱离原文也能读懂，不超过 40 字，尽量沿用原文用词。"
+    "没有合格的就一条都不输出。只输出 JSON：{\"judgments\": [...]}。\n\n"
+    "观点节原文：\n"
+)
+
+#: 落地校验最低连续覆盖率（规范化后）：防 LLM 编造来源里不存在的断言
+_GROUNDING_MIN = 0.5
+
+
+def _load_llm_config() -> Dict[str, Any]:
+    """读取配置文件 ``dispatch.judgments.llm`` 节（缺失/损坏返回空表）。"""
+    for config_file in CONFIG_FILES:
+        path = Path(config_file)
+        if not path.exists():
+            continue
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        if isinstance(data, dict):
+            section = data.get("dispatch")
+            if isinstance(section, dict):
+                judgments = section.get("judgments")
+                if isinstance(judgments, dict) and isinstance(
+                    judgments.get("llm"), dict
+                ):
+                    return dict(judgments["llm"])
+    return {}
+
+
+def _sections_text(text: str) -> str:
+    """取观点总结 + 分观点论述两节原文作 LLM 输入（都没有返回空串）。"""
+    parts = []
+    for pattern in (_SUMMARY_RE, _VIEWPOINTS_RE):
+        m = pattern.search(text)
+        if m:
+            parts.append(m.group("body").strip())
+    return "\n\n".join(parts)
+
+
+def _grounded(statement: str, source_text: str) -> bool:
+    """候选断言规范化后与来源文字的连续覆盖率 ≥ 阈值才算落地（防编造）。"""
+    import difflib
+
+    def _norm(value: str) -> str:
+        return re.sub(r"[^\w]", "", value, flags=re.UNICODE)
+
+    needle, corpus = _norm(statement), _norm(source_text)
+    if not needle or not corpus:
+        return False
+    match = difflib.SequenceMatcher(None, needle, corpus).find_longest_match(
+        0, len(needle), 0, len(corpus)
+    )
+    return match.size / len(needle) >= _GROUNDING_MIN
+
+
+def _extract_judgments_llm(text: str) -> Optional[List[str]]:
+    """LLM 提炼判断候选；不可用/失败返回 None（调用方退回机械摘录）。
+
+    三分语义：None = LLM 没上班（退回机械摘录）；[] = LLM 判定观点节
+    里没有合格判断（尊重它，一条都不提）；非空列表 = 通过落地校验的
+    候选。护栏：key 缺失不调用；输出须为 JSON；每条候选须通过落地校验
+    （规范化连续覆盖率 ≥ 0.5，防编造），全不落地视同失败退回。
+    """
+    api_key = os.environ.get(_LLM_KEY_ENV, "").strip()
+    source = _sections_text(text)
+    if not api_key or not source:
+        return None
+    cfg = _load_llm_config()
+    base_url = str(cfg.get("base_url", _LLM_DEFAULT_BASE_URL)).rstrip("/")
+    payload = {
+        "model": str(cfg.get("model", _LLM_DEFAULT_MODEL)),
+        "messages": [{"role": "user", "content": _NOMINATE_PROMPT + source}],
+        "max_tokens": int(cfg.get("max_tokens", 2000)),
+        "temperature": 0.1,
+        # 机械提取任务禁用思考链（2026-09-02 实测：推理会吃光 max_tokens
+        # 致 content 为空，与 todos 的 800-token 熔断同源）
+        "thinking": {"type": "disabled"},
+        "response_format": {"type": "json_object"},
+    }
+    try:
+        response = httpx.post(
+            f"{base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json=payload,
+            timeout=float(cfg.get("timeout", 60)),
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"]
+        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
+        data = json.loads(content)
+    except Exception:  # noqa: BLE001 - 提名是增强工序，任何失败退回机械摘录
+        return None
+    items = [
+        str(item).strip()
+        for item in (data.get("judgments") or [])
+        if str(item).strip()
+    ]
+    if not items:
+        return []  # 模型判定无合格判断：尊重，不提名
+    grounded = [item for item in items if _grounded(item, source)]
+    return grounded or None
+
+
 def _manager(tree: MemoryTree) -> CognitionManager:
     """按库的 $OV 根构造 CognitionManager。"""
     return CognitionManager(tree.notes_dir.parent, state_dir=tree.state_dir)
@@ -287,7 +409,10 @@ def nominate_from_note(
         text = note_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return []
-    statements = _split_viewpoints(text)
+    statements = _extract_judgments_llm(text)
+    if statements is None:
+        # LLM 不可用/失败：退回机械摘录（无 LLM 环境也能运转）
+        statements = _split_viewpoints(text)
     if not statements:
         return []
     try:
@@ -311,7 +436,7 @@ def nominate_from_note(
                 entry_type="belief",
                 title=title,
                 statement=statement,
-                rationale="机器摘录自已确认笔记的观点节，待你批准（2026-09-16 回路三）",
+                rationale="机器提炼自已确认笔记的观点节，待你批准（2026-09-16 回路三）",
                 proposed_status="active",
                 proposed_certainty=DEFAULT_BELIEF_CERTAINTY,
             )

@@ -326,6 +326,98 @@ def test_nominate_skips_notes_without_viewpoints(memory_tree):
     assert nominate_from_note(memory_tree, note) == []
 
 
+class _NomLLMResponse:
+    """假 httpx 响应：json 返回固定负载（机器提名 LLM 用）。"""
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+def _nom_llm_payload(judgments):
+    return {
+        "choices": [
+            {"message": {"content": json.dumps({"judgments": judgments}, ensure_ascii=False)}}
+        ]
+    }
+
+
+def test_nominate_llm_path_prefers_grounded_judgments(memory_tree, monkeypatch):
+    """有 key 时走 LLM 提炼：真判断留下，机械行不用；书名录类被 LLM 拒。"""
+    import scripts.dispatch.judgments as judgments_module
+    from scripts.dispatch.judgments import nominate_from_note
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        judgments_module.httpx,
+        "post",
+        lambda *a, **k: _NomLLMResponse(
+            _nom_llm_payload(["早起是效率的根基。", "晚起的人更容易焦虑。"])
+        ),
+    )
+    note = _note_with_viewpoints(memory_tree)
+    nominated = nominate_from_note(memory_tree, note)
+
+    assert [s for _, s in nominated] == ["早起是效率的根基。", "晚起的人更容易焦虑。"]
+
+
+def test_nominate_llm_empty_means_no_nomination(memory_tree, monkeypatch):
+    """LLM 判定观点节无合格判断 → 一条都不提（不退回机械摘录）。
+
+    与 None（LLM 没上班，退回机械）严格区分：空表是质量闸门的结论。
+    """
+    import scripts.dispatch.judgments as judgments_module
+    from scripts.dispatch.judgments import nominate_from_note
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        judgments_module.httpx,
+        "post",
+        lambda *a, **k: _NomLLMResponse(_nom_llm_payload([])),
+    )
+    note = _note_with_viewpoints(memory_tree)
+    assert nominate_from_note(memory_tree, note) == []
+
+
+def test_nominate_llm_ungrounded_falls_back_to_mechanical(memory_tree, monkeypatch):
+    """LLM 候选全不落地（编造）→ 视同失败，退回机械摘录保底。"""
+    import scripts.dispatch.judgments as judgments_module
+    from scripts.dispatch.judgments import nominate_from_note
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        judgments_module.httpx,
+        "post",
+        lambda *a, **k: _NomLLMResponse(_nom_llm_payload(["量子波动速读改变命运。"])),
+    )
+    note = _note_with_viewpoints(memory_tree)
+    nominated = nominate_from_note(memory_tree, note)
+
+    assert [s for _, s in nominated] == ["早起让一天有掌控感。", "晚起的人更容易焦虑。"]
+
+
+def test_nominate_llm_http_failure_falls_back(memory_tree, monkeypatch):
+    """LLM 请求异常 → 退回机械摘录，不阻塞提名。"""
+    import scripts.dispatch.judgments as judgments_module
+    from scripts.dispatch.judgments import nominate_from_note
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+
+    def _boom(*a, **k):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(judgments_module.httpx, "post", _boom)
+    note = _note_with_viewpoints(memory_tree)
+    nominated = nominate_from_note(memory_tree, note)
+
+    assert len(nominated) == 2
+
+
 def test_decide_by_index_accept_creates_entry(memory_tree):
     from scripts.dispatch.judgments import (
         decide_by_index, nominate_from_note, pending_proposals,

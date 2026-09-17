@@ -950,15 +950,16 @@ class FeishuBridge:
         非法字符、三级及以上、wiki/系统/attachments/trash/templates
         （NOTE_EXCLUDED_DIRS 成员，归档进去等于藏进机器区）。
         """
-        if (
-            not target_dir
-            or "\\" in target_dir
-            or target_dir.startswith("/")
-            or _ILLEGAL_RE.search(target_dir)
-        ):
+        if not target_dir or "\\" in target_dir or target_dir.startswith("/"):
             return False
         parts = target_dir.split("/")
-        if len(parts) > 2 or any(part in ("", ".", "..") for part in parts):
+        # 非法字符按段校验：_ILLEGAL_RE 含 "/"（文件名消毒场景要禁），
+        # 目录路径的段分隔符本身合法——整串校验会把所有二级目录误杀
+        #（2026-09-17 实证：目录选择卡的「推荐」项是 平台/分类 二级路径，
+        # 一点就报"非法目录"）
+        if len(parts) > 2 or any(
+            part in ("", ".", "..") or _ILLEGAL_RE.search(part) for part in parts
+        ):
             return False
         return parts[0] not in NOTE_EXCLUDED_DIRS
 
@@ -1518,7 +1519,9 @@ class FeishuBridge:
             # 已在目标目录：幂等，只删标签不移动
             self._strip_review_tag(note_path)
             return True, target_dir
-        target = Path(self.tree.notes_dir) / target_dir / filename
+        # 目标文件名用定位后的实体名（卡片 value 可能带 inbox/ 虚拟前缀，
+        # 直接用 filename 会拼出 平台/分类/inbox/ 嵌套目录——2026-09-17 实证）
+        target = Path(self.tree.notes_dir) / target_dir / note_path.name
         if target.exists():
             return False, "目标重名"
         try:
