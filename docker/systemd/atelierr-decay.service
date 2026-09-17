@@ -34,5 +34,10 @@ ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.memo
 # || true 吞掉，快照失败绝不阻塞 decay。排除规则见 %h/atelierr-data/.gitignore
 #（state/ sessions/ exports/ 不入库）；.git 经 .stignore 排除不同步手机。
 ExecStartPost=/bin/bash -c '/usr/bin/git -C %h/atelierr-data add -A && /usr/bin/git -C %h/atelierr-data commit -q -m "snapshot $(date +\%%F)" || true'
+# 异地备份（2026-09-17 用户裁决）：快照后推送 GitHub 私有仓
+# jincai822/atelierr-data。代理只挂在 git 命令上（unit 全局不设
+# http_proxy——decay 本身要直连 DeepSeek，不能依赖梯子）；行首 "-" 表示
+# 推送失败不标 unit 失败（网络/梯子抖动是常态，次日快照会带上前量）。
+ExecStartPost=-/usr/bin/git -C %h/atelierr-data -c http.proxy=http://127.0.0.1:7897 push -q origin master
 StandardOutput=append:%h/atelierr-data/state/logs/decay.log
 StandardError=append:%h/atelierr-data/state/logs/decay.log
