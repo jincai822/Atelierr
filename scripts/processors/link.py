@@ -1113,7 +1113,23 @@ class LinkProcessor(BaseProcessor):
             timeout=self.llm_timeout,
         )
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+        choice = response.json()["choices"][0]
+        content = choice["message"]["content"]
+        if json_mode:
+            if not (content or "").strip():
+                # 推理残留或截断导致空 content，给清晰错误而非下游
+                # JSONDecodeError（与 todos 2026-09-17 熔断同源）
+                raise ValueError(
+                    f"LLM 返回空内容（finish_reason={choice.get('finish_reason')}）"
+                )
+            # 容错：偶发 ```json 围栏或前后夹带散文——剥围栏、抽大括号块
+            #（2026-09-17 存量回填实测 4 篇触发）
+            content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
+            if not content.startswith("{"):
+                match = re.search(r"\{.*\}", content, re.S)
+                if match:
+                    content = match.group(0)
+        return content
 
     def summarize_transcript(
         self, transcript: str
