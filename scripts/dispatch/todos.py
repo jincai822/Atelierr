@@ -54,6 +54,10 @@ MAX_ATTEMPTS = 3
 TODO_TAG = "待办"
 REVIEW_TAG = "待确认"
 
+#: 系统面笔记不扫描：导航主页全是查询块，没有行动意图，喂给 LLM 只会
+#: 空转烧断（2026-09-17 实证：主页.md 连续 JSONDecodeError 熔断挂晨报）
+_SKIP_NOTE_NAMES = frozenset({"主页.md"})
+
 #: 显式通道：未勾选任务行 / 行内标记
 _TASK_LINE_RE = re.compile(r"^\s*- \[ \] (?P<text>.+?)\s*$", re.M)
 #: 行内标记（前面不能是 "tag:"——那是 Obsidian 查询语法，2026-09-01 实测
@@ -246,7 +250,10 @@ class TodoDispatcher:
         self.llm_base_url = str(llm_cfg.get("base_url", _LLM_DEFAULT_BASE_URL))
         self.llm_model = str(llm_cfg.get("model", _LLM_DEFAULT_MODEL))
         self.llm_api_key_env = str(llm_cfg.get("api_key_env", "DEEPSEEK_API_KEY"))
-        self.llm_max_tokens = int(llm_cfg.get("max_tokens", 800))
+        # 默认 4000：deepseek-v4-flash 是推理模型，reasoning_content 会
+        # 吃掉约 1300 token 再写答案；800 时约四成请求 finish=length、
+        # content 为空（2026-09-17 实测 8 次挂 3 次），熔断挂晨报
+        self.llm_max_tokens = int(llm_cfg.get("max_tokens", 4000))
         self.llm_timeout = float(llm_cfg.get("timeout", 60))
         self.state_path = Path(tree.state_dir) / "processed_todos.json"
 
@@ -292,6 +299,10 @@ class TodoDispatcher:
             # 已完成待办的归宿目录：_todo_done 摘标签后收进 待办/，防自循环
             # 的标签规则在那里失效，只能靠路径兜底（2026-09-15 实证：完成的
             # 待办被显式通道重生，还自产自销出自我引用卡）
+            report["skipped"] += 1
+            return
+        if note_path.name in _SKIP_NOTE_NAMES:
+            # 系统面（导航主页）：查询块会被误当行动项，且 LLM 判定空转
             report["skipped"] += 1
             return
         try:
@@ -503,10 +514,26 @@ class TodoDispatcher:
             timeout=self.llm_timeout,
         )
         response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
+        choice = response.json()["choices"][0]
+        content = choice["message"]["content"]
+        if not (content or "").strip():
+            # 推理模型 max_tokens 被 reasoning_content 吃光时 content 为空
+            # （finish_reason=length），给清晰错误而非 JSONDecodeError
+            raise ValueError(
+                f"LLM 返回空内容（finish_reason={choice.get('finish_reason')}），"
+                "max_tokens 可能不足"
+            )
         # 容错：模型偶发用 ```json 围栏包裹（2026-09-01 实测遇到）
         content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
-        data = json.loads(content)
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            # 容错 2：模型偶发在 JSON 前后夹带散文（2026-09-14 实测长日记
+            # 连续触发熔断），抽第一个大括号块再试；仍失败才上抛计数
+            match = re.search(r"\{.*\}", content, re.S)
+            if not match:
+                raise
+            data = json.loads(match.group(0))
         todos = data.get("todos") or []
         items: List[Dict[str, Any]] = []
         for todo in todos[:5]:

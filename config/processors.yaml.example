@@ -113,7 +113,8 @@ processors:
 #       base_url: https://api.deepseek.com
 #       model: deepseek-v4-flash
 #       api_key_env: DEEPSEEK_API_KEY
-#       max_tokens: 800
+#       max_tokens: 4000  # 推理模型需给 reasoning_content 留余量
+#                           #（800 时约四成请求空内容熔断，2026-09-17 实测）
 #       timeout: 60
 #   notify:             # ntfy 推送（2026-09-09 起停用，全部推送走飞书卡片；
 #     ntfy_url: https://ntfy.sh   # 此配置节仅留作看门狗备胎：飞书桥全挂时

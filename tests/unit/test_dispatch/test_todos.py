@@ -405,8 +405,8 @@ def test_query_block_and_tag_syntax_not_extracted(memory_tree, monkeypatch):
         lambda *a, **k: called.append(1) or _FakeLLMResponse(_todos_payload([])),
     )
     memory_tree.create_note(
-        "主页.md",
-        "# 主页\n\n```query\ntag:#待办\n```\n\n```query\ntag:#待确认\n```\n",
+        "导航页.md",
+        "# 导航页\n\n```query\ntag:#待办\n```\n\n```query\ntag:#待确认\n```\n",
         source="manual",
     )
 
@@ -414,7 +414,79 @@ def test_query_block_and_tag_syntax_not_extracted(memory_tree, monkeypatch):
 
     assert report["created"] == []
     assert called  # 无显式命中才走 LLM，且 LLM 也判无
-    assert _state(memory_tree)["主页.md"]["status"] == "no-todo"
+    assert _state(memory_tree)["导航页.md"]["status"] == "no-todo"
+
+
+def test_dashboard_note_skipped_entirely(memory_tree, monkeypatch):
+    """系统面（主页.md）整篇跳过：不进显式通道、不喂 LLM、不落状态。
+
+    2026-09-17 实证：主页.md 全是查询块，LLM 连续 JSONDecodeError 熔断，
+    挂上晨报「处理失败未恢复」——系统面本就不该进待办扫描。
+    """
+    called = []
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    monkeypatch.setattr(
+        todos_module.httpx,
+        "post",
+        lambda *a, **k: called.append(1) or _FakeLLMResponse(_todos_payload([])),
+    )
+    memory_tree.create_note(
+        "主页.md",
+        "# 主页\n\n```query\ntag:#待办\n```\n",
+        source="manual",
+    )
+
+    report = TodoDispatcher(memory_tree).run()
+
+    assert report["created"] == []
+    assert not called  # LLM 一次都不该被调用
+    assert "主页.md" not in _state(memory_tree)
+
+
+def test_empty_content_raises_clear_error(memory_tree, monkeypatch):
+    """推理模型 max_tokens 被 reasoning 吃光时返回空 content（finish=length），
+    报 ValueError 说人话，不报 JSONDecodeError（2026-09-17 实测熔断源）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    empty = {
+        "choices": [
+            {"message": {"content": ""}, "finish_reason": "length"}
+        ]
+    }
+    monkeypatch.setattr(
+        todos_module.httpx, "post", lambda *a, **k: _FakeLLMResponse(empty)
+    )
+    memory_tree.create_note("plain.md", "打算读叔本华", source="test")
+
+    report = TodoDispatcher(memory_tree).run()
+
+    assert report["created"] == []
+    assert report["failed"][0]["error"] == "ValueError"
+    entry = _state(memory_tree)["plain.md"]
+    assert entry["last_error"] == "ValueError"
+
+
+def test_prose_wrapped_json_tolerated(memory_tree, monkeypatch):
+    """LLM 在 JSON 前后夹带散文时抽大括号块恢复（2026-09-14 实测熔断源）。"""
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
+    prose = {
+        "choices": [
+            {
+                "message": {
+                    "content": '这篇笔记有一个行动项。\n{"todos": [{"text": "读叔本华", "due": null}]}\n以上。'
+                }
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        todos_module.httpx, "post", lambda *a, **k: _FakeLLMResponse(prose)
+    )
+    memory_tree.create_note("plain.md", "打算读叔本华", source="test")
+
+    report = TodoDispatcher(memory_tree).run()
+
+    assert report["failed"] == []
+    assert len(report["created_review"]) == 1
+    assert _state(memory_tree)["plain.md"]["llm_done"] is True
 
 
 def test_llm_item_overlapping_explicit_is_skipped(memory_tree, monkeypatch):
