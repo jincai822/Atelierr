@@ -304,7 +304,7 @@ def write_answers(tree, data: Dict[str, Any]) -> Optional[Path]:
     label = {
         KIND_WEEKLY: "周回顾",
         KIND_MONTHLY: "月回顾",
-        KIND_DAILY: "每日三问",
+        KIND_DAILY: "每日四问",
     }.get(kind, "月回顾")
     target = refl_dir / f"{today}-{suffix}.md"
     questions = [str(q) for q in (data.get("questions") or [])]

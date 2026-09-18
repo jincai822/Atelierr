@@ -249,7 +249,7 @@ def test_daily_stale_with_answers_filed_and_resets(memory_tree, monkeypatch):
     assert len(files) == 1
     text = files[0].read_text(encoding="utf-8")
     assert "累但充实" in text
-    assert "每日三问" in text  # 标题/标签用每日三问
+    assert "每日四问" in text  # 标题/标签用每日四问
     state = _daily_state(memory_tree.state_dir)
     assert state["unanswered_streak"] == 0
     assert state["paused"] is False
@@ -308,4 +308,4 @@ def test_daily_answers_file_matches_atelier_glob(memory_tree):
     assert path.name.endswith("-reflection.md")
     post = frontmatter.loads(path.read_text(encoding="utf-8"))
     assert post.metadata["source"] == "reflection"
-    assert "每日三问" in str(post.metadata["tags"])
+    assert "每日四问" in str(post.metadata["tags"])
