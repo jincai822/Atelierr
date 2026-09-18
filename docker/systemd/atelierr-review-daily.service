@@ -1,0 +1,16 @@
+# Atelierr 每日三问服务（oneshot，与 atelierr-review-daily.timer 配套）
+
+[Unit]
+Description=Atelierr daily reflection ritual (21:30)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/workspaces/Atelierr
+Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+EnvironmentFile=-%h/.config/atelierr/env
+ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli review open --kind daily
+StandardOutput=append:%h/atelierr-data/state/logs/review-daily.log
+StandardError=append:%h/atelierr-data/state/logs/review-daily.log

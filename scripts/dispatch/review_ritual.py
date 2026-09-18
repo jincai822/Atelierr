@@ -1,4 +1,5 @@
-"""回顾仪式（方案 A 改 1，2026-09-13 用户批准）：周日周回顾 + 月末月回顾轻脉冲。
+"""回顾仪式（方案 A 改 1，2026-09-13 用户批准）：周日周回顾 + 月末月回顾轻脉冲；
+每日三问（2026-09-18 用户批准：推送式复盘——系统到点来问，零命令启动）。
 
 问题由当期数据生成（捕获统计/滞留待确认/待删清单——防固定四问的
 仪式疲劳）；飞书表单卡推送（schema 2.0，2026-09-13 真机验证过的
@@ -6,8 +7,15 @@
 回顾目录；零自动 LLM——综合成文发生在用户下次会话，Atelier 车间）。
 
 触发：atelierr-review.timer（周日 09:13）、atelierr-review-monthly.timer
-（每月 1 日 09:21 回顾上月）。会话关闭（表单提交或回「完成」）时
+（每月 1 日 09:21 回顾上月）、atelierr-review-daily.timer（每天 21:30
+今日三问）。会话关闭（表单提交或回「完成」）时
 FeishuBridge 自动把答案落盘（kind 以 review- 开头）。
+
+每日三问护栏（2026-09-18 批准，防推送疲劳）：
+- 连续 3 天没答自动暂停（状态记在 <state_dir>/review_daily.json）；
+- 飞书回「复盘」随时手动恢复并立刻发当日三问；
+- 前一天没答的会话不覆盖：收尸时答案照落盘、无答才记一天未答；
+- 周/月回顾会话在跑时，每日三问让位（不打扰、不计未答）。
 """
 
 from __future__ import annotations
@@ -22,17 +30,61 @@ from scripts.dispatch.feishu_cards import prompt_form_card
 from scripts.dispatch.feishu_io import send_feishu_card
 from scripts.dispatch.prompt import PromptStore
 from scripts.dispatch.stats import capture_stats
+from scripts.utils.state_store import read_json, write_json
 from scripts.wiki.manager import WIKI_DIRNAME
 
 #: 会话类型前缀（与 Codex $weekly 的会话区分；桥按此前缀识别落盘）
 KIND_WEEKLY = "review-weekly"
 KIND_MONTHLY = "review-monthly"
+#: 每日三问（推送式复盘，2026-09-18 用户批准）
+KIND_DAILY = "review-daily"
 
 #: 滞留判定：待确认卡超过 7 天未处理
 _STALE_DAYS = 7
 
 #: 表单问题数上限（卡片长度护栏；与 PROMPT_FORM_MAX_QUESTIONS 同纪律）
 _MAX_QUESTIONS = 6
+
+#: 连续未答天数上限：达到即自动暂停推送（防推送疲劳护栏）
+_DAILY_MAX_UNANSWERED = 3
+
+#: 每日三问状态文件（<state_dir> 下；只记暂停/连续未答，不碰笔记）
+_DAILY_STATE_FILENAME = "review_daily.json"
+
+
+def _load_daily_state(tree) -> Dict[str, Any]:
+    """读每日三问状态；文件不存在/损坏按全新（未暂停、零未答）处理。"""
+    data = read_json(Path(tree.state_dir) / _DAILY_STATE_FILENAME, None)
+    return data if isinstance(data, dict) else {}
+
+
+def _save_daily_state(tree, state: Dict[str, Any]) -> None:
+    write_json(Path(tree.state_dir) / _DAILY_STATE_FILENAME, state, indent=2)
+
+
+def _bump_daily_unanswered(tree) -> None:
+    """记一天未答；连续达上限即置暂停（不再推送，直到回「复盘」）。"""
+    state = _load_daily_state(tree)
+    streak = int(state.get("unanswered_streak") or 0) + 1
+    _save_daily_state(
+        tree,
+        {
+            "unanswered_streak": streak,
+            "paused": state.get("paused") or streak >= _DAILY_MAX_UNANSWERED,
+        },
+    )
+
+
+def _reset_daily_streak(tree) -> None:
+    """有任何回顾答案落盘（周/月/日都算参与）就清零连续未答、解除暂停。"""
+    state = _load_daily_state(tree)
+    if state.get("unanswered_streak") or state.get("paused"):
+        _save_daily_state(tree, {"unanswered_streak": 0, "paused": False})
+
+
+def unpause_daily(tree) -> None:
+    """手动恢复（飞书回「复盘」）：清暂停、清零连续未答。"""
+    _save_daily_state(tree, {"unanswered_streak": 0, "paused": False})
 
 
 def _stale_pending_count(tree) -> int:
@@ -87,6 +139,17 @@ def build_intro(tree, kind: str) -> str:
     （2026-09-13 用户反馈：数据塞问题里当输入框标签，手机上没法看——
     人机交互红线）。
     """
+    if kind == KIND_DAILY:
+        # 每日三问正文保持极简（每晚都见的卡，字越少越好）
+        stats = capture_stats(tree, days=1)
+        lines = [f"📊 今天捕获 {stats['total']} 条"]
+        lines.append("💡 想到什么判断？回复「判断：xxx」直收进登记处（不计入回答）")
+        lines += [
+            "",
+            "不想答的留空，点提交即可。连续 3 天没答会自动暂停，"
+            "回「复盘」随时重新开始。",
+        ]
+        return "\n".join(lines)
     days = 30 if kind == KIND_MONTHLY else 7
     stats = capture_stats(tree, days=days)
     rate = (
@@ -129,6 +192,15 @@ def build_questions(tree, kind: str) -> List[str]:
     Returns:
         List[str]: 问题列表（至多 _MAX_QUESTIONS 条）。
     """
+    if kind == KIND_DAILY:
+        # 固定三问（2026-09-18 批准）：状态脉搏 + 内耗留痕 + 值得记的。
+        # 内耗问源自 2026-09-18 周回顾「下周 Start：内耗留痕」——
+        # 让感觉留痕，才看得见、治得了。
+        return [
+            "今天状态怎么样？（一个词也行）",
+            "今天有内耗的时刻吗？因为什么？",
+            "今天有什么值得记下的？（一句话也行）",
+        ]
     if kind == KIND_MONTHLY:
         return [
             "这个节奏健康吗？（数据见上方摘要）",
@@ -150,23 +222,50 @@ def build_questions(tree, kind: str) -> List[str]:
 
 
 def open_ritual(tree, kind: str, send: bool = True) -> Dict[str, Any]:
-    """开启回顾会话并推表单卡；已有会话在跑时跳过（不覆盖）。
+    """开启回顾会话并推表单卡。
+
+    周/月回顾：已有会话在跑时跳过（不覆盖）。
+    每日三问：前一天没答的会话先收尸（有答落盘清零、无答记一天未答）；
+    当天已开过幂等跳过；周/月回顾在跑时让位；连续 3 天未答自动暂停。
 
     Args:
         tree: MemoryTree 实例。
-        kind: KIND_WEEKLY / KIND_MONTHLY。
+        kind: KIND_WEEKLY / KIND_MONTHLY / KIND_DAILY。
         send: 是否推飞书表单卡（测试关）。
 
     Returns:
-        Dict[str, Any]: {"opened", "questions"}；已有会话时 opened=False。
+        Dict[str, Any]: {"opened", "questions"}；已有会话时 opened=False；
+        每日三问被自动暂停拦住时带 paused=True。
     """
     store = PromptStore(tree.state_dir)
     if store.is_open():
-        return {"opened": False, "questions": []}
+        if kind != KIND_DAILY:
+            return {"opened": False, "questions": []}
+        existing = store.load() or {}
+        if str(existing.get("kind") or "") != KIND_DAILY:
+            return {"opened": False, "questions": []}  # 周/月回顾在跑，让位
+        asked = str(existing.get("asked_at") or "")[:10]
+        if asked == datetime.now().strftime("%Y-%m-%d"):
+            return {"opened": False, "questions": []}  # 当天幂等
+        closed = store.close()  # 前一天的会话收尸
+        if closed and [
+            a
+            for a in (closed.get("answers") or [])
+            if str(a.get("text") or "").strip()
+        ]:
+            write_answers(tree, closed)  # 有答：落盘（内部清零未答计数）
+        else:
+            _bump_daily_unanswered(tree)  # 无答：记一天未答
+    if kind == KIND_DAILY and _load_daily_state(tree).get("paused"):
+        return {"opened": False, "questions": [], "paused": True}
     questions = build_questions(tree, kind)
     store.open(kind, questions)
     if send:
-        title = "🌿 周回顾" if kind == KIND_WEEKLY else "🌙 月度回顾（轻）"
+        title = {
+            KIND_WEEKLY: "🌿 周回顾",
+            KIND_MONTHLY: "🌙 月度回顾（轻）",
+            KIND_DAILY: "🌛 今日三问",
+        }[kind]
         intro = build_intro(tree, kind)
         send_feishu_card(prompt_form_card(title, intro, questions))
     return {"opened": True, "questions": questions}
@@ -194,7 +293,19 @@ def write_answers(tree, data: Dict[str, Any]) -> Optional[Path]:
     today = asked or datetime.now().strftime("%Y-%m-%d")
     refl_dir = Path(tree.notes_dir) / "wiki" / "reflections"
     refl_dir.mkdir(parents=True, exist_ok=True)
-    target = refl_dir / f"{today}-{kind.replace('review-', '')}.md"
+    # 文件名后缀：daily 用 reflection——与 Atelier /weekly 的缺日检测
+    # glob（`<date>-reflection*.md`）对齐，每日三问落盘即被车间认成日报
+    suffix = {
+        KIND_WEEKLY: "weekly",
+        KIND_MONTHLY: "monthly",
+        KIND_DAILY: "reflection",
+    }.get(kind, kind.replace("review-", ""))
+    label = {
+        KIND_WEEKLY: "周回顾",
+        KIND_MONTHLY: "月回顾",
+        KIND_DAILY: "每日三问",
+    }.get(kind, "月回顾")
+    target = refl_dir / f"{today}-{suffix}.md"
     questions = [str(q) for q in (data.get("questions") or [])]
     new_blocks: List[str] = []
     for index, answer in enumerate(answers):
@@ -211,16 +322,17 @@ def write_answers(tree, data: Dict[str, Any]) -> Optional[Path]:
             return None
         with target.open("a", encoding="utf-8") as fh:
             fh.write("\n---\n\n" + "\n".join(fresh))
+        _reset_daily_streak(tree)  # 有答案落盘 = 有参与
         return target
     lines = [
         "---",
         f"created: {datetime.now().astimezone().isoformat(timespec='seconds')}",
         "source: reflection",
-        f"tags: [回顾, {'周回顾' if 'weekly' in kind else '月回顾'}]",
-        f"title: '{today} {'周回顾' if 'weekly' in kind else '月回顾'}（原始回答）'",
+        f"tags: [回顾, {label}]",
+        f"title: '{today} {label}（原始回答）'",
         "---",
         "",
-        f"# {today} {'周回顾' if 'weekly' in kind else '月回顾'}（原始回答）",
+        f"# {today} {label}（原始回答）",
         "",
         "> 机械落盘：答案原样记录（零自动 LLM）；综合成文在你下次会话（车间）。",
         "",
@@ -231,6 +343,7 @@ def write_answers(tree, data: Dict[str, Any]) -> Optional[Path]:
             lines += [f"## 问：{question}", ""]
         lines += [str(answer["text"]).strip(), ""]
     target.write_text("\n".join(lines), encoding="utf-8")
+    _reset_daily_streak(tree)  # 有答案落盘 = 有参与
     return target
 
 

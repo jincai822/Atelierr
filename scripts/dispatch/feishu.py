@@ -1106,6 +1106,31 @@ class FeishuBridge:
         }
         self._send_card(chat_id, card)
 
+    def _open_daily_review(self, chat_id: Optional[str]) -> None:
+        """「复盘」指令：手动开启今日三问（并解除自动暂停）。
+
+        2026-09-18 推送式复盘裁决：三问每晚 21:30 定时推送，连续 3 天
+        没答自动暂停；「复盘」是随时重新开始的手动入口（立刻发当日卡）。
+        """
+        print("[feishu] menu '复盘' -> open daily review", flush=True)
+        store = PromptStore(Path(self.tree.state_dir))
+        if store.is_open():
+            self._send_feedback(
+                chat_id, "已有进行中的问答，直接回答即可（回「完成」结束）"
+            )
+            return
+        from scripts.dispatch import review_ritual
+
+        review_ritual.unpause_daily(self.tree)
+        try:
+            report = review_ritual.open_ritual(self.tree, review_ritual.KIND_DAILY)
+        except Exception as exc:  # noqa: BLE001 - 发卡失败回文字，不中断守护
+            print(f"[feishu] daily review open fail: {exc}", flush=True)
+            self._send_feedback(chat_id, "⚠️ 三问卡片发送失败，请稍后重试")
+            return
+        if not report["opened"]:
+            self._send_feedback(chat_id, "今天的三问已发过了，直接回答即可")
+
     def _answer_menu(self, chat_id: Optional[str], command: str) -> None:
         """快捷菜单指令分发（拉取式交互：你点菜，我回卡）。"""
         print(f"[feishu] menu {command!r}", flush=True)
@@ -1117,6 +1142,7 @@ class FeishuBridge:
                 "· 待办 — 进行中的待办（带打开按钮）\n"
                 "· 提炼候选 — 今日待提炼清单\n"
                 "· 周回顾 — 问答进度/发起指引\n"
+                "· 复盘 — 今日三问（手动发起/恢复每晚推送）\n"
                 "· 同步看板 — 笔记元数据同步进多维表格（手机看板视图）\n"
                 "· 搜 关键词 — 搜笔记（前 5 条带打开按钮）\n"
                 "直接发文字=捕获笔记；发链接=转写；发语音=Whisper；发图=OCR",
@@ -1586,7 +1612,8 @@ class FeishuBridge:
         笔记；回答「跳过」/「完成」关闭会话。会话关闭后恢复捕获。
         「摘要/待办/提炼候选/周回顾/菜单」是快捷菜单指令（拉取式交互；
         整词精确匹配，会话期间也优先按指令处理——查进度不会被误计为
-        回答）；「判断：/记为判断：/#判断 」前缀是判断直收指令
+        回答）；「复盘」手动开启今日三问并解除自动暂停（2026-09-18
+        推送式复盘裁决；同级优先，会话期间回复它不会被误计为回答）；「判断：/记为判断：/#判断 」前缀是判断直收指令
         （2026-09-16 裁决：直收进 cognition 判断登记处，照常追加日记，
         回文字轻通知；与菜单同级，会话期间也优先——是登记指令不是
         回答）；「搜 xxx」/「搜索 xxx」是搜索指令（会话期间让位仪式，
@@ -1598,6 +1625,11 @@ class FeishuBridge:
             return None
         if text in MENU_COMMANDS or text.lower() == "help":
             self._answer_menu(chat_id, text)
+            return None
+        # 「复盘」（2026-09-18 推送式复盘裁决）：手动开启今日三问并解除
+        # 自动暂停——与菜单指令同级，先于判断/审批/问答会话/捕获处理
+        if text == "复盘":
+            self._open_daily_review(chat_id)
             return None
         # 判断直收（2026-09-16 裁决：零摩擦登记进 cognition 判断登记处）：
         # 「判断：/记为判断：/#判断 」前缀的文本既是日记也是判断条目——

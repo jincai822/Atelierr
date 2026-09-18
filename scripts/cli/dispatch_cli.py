@@ -635,9 +635,10 @@ class DispatchCLI:
         @click.option(
             "--kind",
             "kind",
-            type=click.Choice(["weekly", "monthly"]),
+            type=click.Choice(["weekly", "monthly", "daily"]),
             default="weekly",
-            help="weekly=周回顾（周日定时）；monthly=月回顾轻脉冲（每月 1 日）",
+            help="weekly=周回顾（周日定时）；monthly=月回顾轻脉冲（每月 1 日）；"
+            "daily=每日三问（每天 21:30 定时，连续 3 天未答自动暂停）",
         )
         def review_command(action: str, kind: str) -> None:
             """回顾仪式（方案 A）：open 推表单（问题由当期数据生成）；
@@ -645,15 +646,17 @@ class DispatchCLI:
             from scripts.dispatch import review_ritual
 
             tree = self._build_tree()
-            full_kind = (
-                review_ritual.KIND_WEEKLY
-                if kind == "weekly"
-                else review_ritual.KIND_MONTHLY
-            )
+            full_kind = {
+                "weekly": review_ritual.KIND_WEEKLY,
+                "monthly": review_ritual.KIND_MONTHLY,
+                "daily": review_ritual.KIND_DAILY,
+            }[kind]
             if action == "open":
                 report = review_ritual.open_ritual(tree, full_kind)
                 if report["opened"]:
                     click.echo(f"已开启回顾会话并推送表单：{len(report['questions'])} 问")
+                elif report.get("paused"):
+                    click.echo("已连续 3 天未答，每日三问自动暂停（飞书回「复盘」恢复）")
                 else:
                     click.echo("已有进行中的问答会话，跳过")
             else:
