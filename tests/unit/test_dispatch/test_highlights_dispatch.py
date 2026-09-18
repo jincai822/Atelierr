@@ -91,6 +91,14 @@ def test_ticked_item_becomes_excerpt_card(memory_tree):
     assert post["generated"]["by"] == "atelierr-highlights/1.0"
     assert post["sources"][0]["id"] == "划重点-测试书-abc123"
     assert post["sources"][0]["resource"].endswith(".md")
+    # OKF Freshness（2026-09-18 全量采纳）：到期复查日期
+    assert post["stale_after"]
+    # OKF 机器自留地：index/log/主题页已维护（清单无中图法 → 未分类）
+    wiki_dir = _wiki_dir(memory_tree)
+    assert "摘录-概念甲-" in (wiki_dir / "index.md").read_text(encoding="utf-8")
+    assert "摘录-概念甲-" in (wiki_dir / "log.md").read_text(encoding="utf-8")
+    topic_text = (wiki_dir / "topics" / "未分类.md").read_text(encoding="utf-8")
+    assert "[[摘录-概念甲-" in topic_text
     assert "[[划重点-测试书-abc123]]" in post.content
     assert "第 3 页" in post.content
     assert "- 内容：甲是什么" in post.content

@@ -204,6 +204,8 @@ def test_decide_accept_creates_okf_card(memory_tree, llm_ok):
     assert post["generated"]["by"] == "atelierr-distill/1.0"
     assert post["verified"][0]["by"] == "human:test"
     assert post["sources"][0]["resource"] == "old.md"
+    # OKF Freshness（2026-09-18 全量采纳）：默认 +180 天到期复查
+    assert post["stale_after"]
     # 兼容字段（现有校验与 distilled_stems 机制）
     assert post["from"] == "[[old]]"
     assert post["source"] == "distill"
@@ -218,6 +220,11 @@ def test_decide_accept_creates_okf_card(memory_tree, llm_ok):
     assert "[内核稳定](内核稳定.md) - 讲情绪稳定的来源与练习方法。" in index_text
     log_text = (wiki_dir / "log.md").read_text(encoding="utf-8")
     assert "**Creation**: 新增 [内核稳定](内核稳定.md)" in log_text
+    # OKF 主题页：卡被收进 topics/（来源无中图法标签 → 未分类）
+    topic_page = wiki_dir / "topics" / "未分类.md"
+    assert topic_page.exists()
+    assert "[[内核稳定]]" in topic_page.read_text(encoding="utf-8")
+    assert "## 主题页" in index_text
     # 草稿出队
     assert pending_drafts(memory_tree) == []
 

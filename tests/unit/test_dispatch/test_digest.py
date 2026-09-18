@@ -470,3 +470,41 @@ def test_digest_undistilled_backlink_path(memory_tree):
     section = report["markdown"].split("## 🧠 提炼候选")[1].split("## ✅")[0]
     assert "[[hub]]" in section
     assert "[[ref]]" not in section  # 引用别人不等于自己被引用
+
+
+def test_digest_stale_wiki_recheck_section(memory_tree):
+    """OKF Freshness：stale_after 到期的 stable 卡进晨报「到期复查」节（安静点名）。"""
+    import frontmatter as fm
+
+    wiki_dir = memory_tree.notes_dir / "wiki"
+    wiki_dir.mkdir(parents=True)
+    (wiki_dir / "老卡.md").write_text(
+        fm.dumps(
+            fm.Post(
+                "正文\n",
+                type="Excerpt",
+                title="老卡",
+                status="stable",
+                stale_after="2026-09-01",
+            )
+        ),
+        encoding="utf-8",
+    )
+    (wiki_dir / "新卡.md").write_text(
+        fm.dumps(
+            fm.Post(
+                "正文\n",
+                type="Excerpt",
+                title="新卡",
+                status="stable",
+                stale_after="2027-01-01",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-10")
+
+    assert "wiki 到期复查（1）" in report["markdown"]
+    assert "[[老卡]]" in report["markdown"]
+    assert "[[新卡]]" not in report["markdown"].split("到期复查")[1]

@@ -5,10 +5,11 @@
   stable、「弃」永久跳过；机器绝不自动落 wiki——wiki 是无 purge 的
   永久知识层，进门必须过人（"人类策展，LLM 维护"的 OKF 分工）；
 - 卡片 schema 采纳 OKF v0.2 轻量层：type/title/description/tags/
-  status(draft→stable)/generated/verified/sources，另保留兼容字段
-  from/created/source（现有 WikiManager 校验与 distilled_stems 机制
-  不动）；wiki/index.md（导航）与 wiki/log.md（变更日志）是 OKF
-  约定文件，由机器在落卡时维护（机器自留地，允许写）；
+  status(draft→stable)/stale_after(默认 +180 天，到期进晨报复查)/
+  generated/verified/sources，另保留兼容字段 from/created/source
+  （现有 WikiManager 校验与 distilled_stems 机制不动）；wiki/index.md
+  （导航）、wiki/log.md（变更日志）、wiki/topics/<主题>.md（主题页）
+  是 OKF 约定的机器自留地，统一由 scripts/wiki/curation.py 维护；
 - 候选来源与晨报同源（digest.compute_distill_candidates：反复推送/
   被引用/沉一沉三路汇合，全库只此一份口径）；
 - 草稿与弃稿名单记 ``<state_dir>/distill_drafts.json``。
@@ -31,7 +32,7 @@ import hashlib
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -46,6 +47,7 @@ from scripts.memory.core import LAYERS, MemoryTree
 from scripts.processors.base import CONFIG_FILES
 from scripts.processors.link import _verify_insights
 from scripts.utils.state_store import read_json, write_json
+from scripts.wiki import curation
 from scripts.wiki.manager import WikiManager
 
 #: LLM 默认接入点（配置节 dispatch.distill.llm；缺省与 todos 同规格）
@@ -58,6 +60,9 @@ _ILLEGAL_NAME_RE = re.compile(r'[\\/:*?"<>|]')
 
 #: 喂给 LLM 的笔记正文上限（书籍类长文截断，摘要通常已含骨架）
 _MAX_NOTE_CHARS = 8000
+
+#: OKF Freshness：卡片默认保鲜期（天），到期进晨报「到期复查」节
+_STALE_AFTER_DAYS = 180
 
 #: 起草提示词：产出 OKF 轻量层字段（title/description/points/quotes）。
 #: 金句必须逐字（机器会回溯校验）；核心主张是提炼不是照抄（人来审）。
@@ -286,6 +291,11 @@ def _compose_card(draft: Dict[str, Any], actor: str) -> str:
         "description": draft["description"],
         "tags": draft.get("source_tags") or [],
         "status": "stable",  # 人批即正式版（draft 态只存在于送审期间）
+        # OKF Freshness（2026-09-18 全量采纳）：半年后到期复查，
+        # 晨报「到期复查」节点名，人复查后自行顺延
+        "stale_after": (datetime.now() + timedelta(days=_STALE_AFTER_DAYS)).strftime(
+            "%Y-%m-%d"
+        ),
         "generated": {"by": "atelierr-distill/1.0", "at": draft["created"]},
         "verified": [{"by": actor, "at": now}],
         "sources": [
@@ -312,58 +322,13 @@ def _compose_card(draft: Dict[str, Any], actor: str) -> str:
 
 
 def _update_index(wiki_dir: Path, filename: str, title: str, description: str) -> None:
-    """维护 wiki/index.md（OKF 导航页）：在「## 摘录卡」节追加一行。"""
-    path = wiki_dir / "index.md"
-    entry = f"* [{title}]({filename}) - {description}"
-    if not path.exists():
-        path.write_text(
-            "---\nokf_version: \"0.2\"\n---\n\n# 知识库导航\n\n"
-            f"## 摘录卡\n\n{entry}\n",
-            encoding="utf-8",
-        )
-        return
-    text = path.read_text(encoding="utf-8")
-    if entry in text:
-        return
-    match = re.search(r"^## 摘录卡\s*$", text, re.M)
-    if match:
-        # 插到该节末尾（下一个二级标题或文末之前）
-        tail = text[match.end():]
-        next_h = re.search(r"^## ", tail, re.M)
-        insert_at = match.end() + (next_h.start() if next_h else len(tail))
-        body = text[:insert_at].rstrip("\n") + "\n" + entry + "\n"
-        text = body + text[insert_at:].lstrip("\n")
-    else:
-        text = text.rstrip("\n") + f"\n\n## 摘录卡\n\n{entry}\n"
-    path.write_text(text, encoding="utf-8")
+    """（兼容包装）实现已提升为 :func:`scripts.wiki.curation.update_index`。"""
+    curation.update_index(wiki_dir, filename, title, description)
 
 
 def _append_log(wiki_dir: Path, filename: str, title: str) -> None:
-    """维护 wiki/log.md（OKF 变更日志）：最新日期节在最上，同日追加。"""
-    path = wiki_dir / "log.md"
-    today = datetime.now().strftime("%Y-%m-%d")
-    entry = f"* **Creation**: 新增 [{title}]({filename})。"
-    header = "# Knowledge Update Log\n"
-    if not path.exists():
-        path.write_text(f"{header}\n## {today}\n\n{entry}\n", encoding="utf-8")
-        return
-    text = path.read_text(encoding="utf-8")
-    if re.search(rf"^## {re.escape(today)}\s*$", text, re.M):
-        text = re.sub(
-            rf"(^## {re.escape(today)}\s*\n)",
-            rf"\1\n{entry}\n",
-            text,
-            count=1,
-            flags=re.M,
-        )
-    else:
-        text = text.rstrip("\n") + "\n"
-        # 新日期节插在头部之后（最新在最上）
-        if text.startswith(header):
-            text = header + f"\n## {today}\n\n{entry}\n" + text[len(header):].lstrip("\n")
-        else:
-            text = f"{header}\n## {today}\n\n{entry}\n\n" + text
-    path.write_text(text, encoding="utf-8")
+    """（兼容包装）实现已提升为 :func:`scripts.wiki.curation.append_log`。"""
+    curation.append_log(wiki_dir, filename, title)
 
 
 def decide_by_index(
@@ -400,6 +365,18 @@ def decide_by_index(
     (wiki_dir / filename).write_text(_compose_card(draft, actor), encoding="utf-8")
     _update_index(wiki_dir, filename, title, str(draft.get("description") or ""))
     _append_log(wiki_dir, filename, title)
+    try:
+        # OKF 主题页（2026-09-18 全量采纳）：收录进 topics/<主题>.md 并
+        # 刷新导读——增强工序，失败不阻塞审批回执
+        curation.update_topic_page(
+            wiki_dir,
+            card_stem=Path(filename).stem,
+            card_title=title,
+            description=str(draft.get("description") or ""),
+            tags=[str(t) for t in (draft.get("source_tags") or [])],
+        )
+    except Exception as exc:  # noqa: BLE001 - 主题页是增强工序
+        print(f"[distill] topic page fail: {exc}", flush=True)
     state["drafts"].pop(draft["id"], None)
     _save_state(tree, state)
     return True, f"已收进 wiki：「{title}」（{filename}）"

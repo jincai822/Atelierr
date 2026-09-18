@@ -235,6 +235,15 @@ class DigestDispatcher:
         from scripts.dispatch.distill import pending_drafts
 
         distill_drafts = pending_drafts(self.tree)
+        # OKF Freshness 到期复查（2026-09-18 全量采纳）：stale_after 到期
+        # 的 stable 卡点名——复查与顺延是人的动作，机器只点名不改卡
+        from scripts.wiki import curation
+
+        stale_wiki = curation.list_stale_cards(Path(self.tree.notes_dir) / "wiki", today)
+        stale_wiki_lines = [
+            f"- [[{stem}]]（{date} 到期）：还准就把 stale_after 往后改半年"
+            for stem, _title, date in stale_wiki
+        ] or None
         is_sunday = datetime.strptime(today, "%Y-%m-%d").weekday() == 6
         weekly_lines = (
             render_weekly_stats(capture_stats(self.tree, days=7, today=today))
@@ -250,6 +259,7 @@ class DigestDispatcher:
             judgment_line=judgment_line,
             judgment_proposals=judgment_proposals,
             distill_draft_count=len(distill_drafts),
+            stale_wiki_lines=stale_wiki_lines,
         )
         created = None
         if not dry_run:
@@ -397,6 +407,7 @@ class DigestDispatcher:
         distill_draft_count: int = 0,
         stale_pending_lines: Optional[List[str]] = None,
         stale_human_lines: Optional[List[str]] = None,
+        stale_wiki_lines: Optional[List[str]] = None,
     ) -> str:
         """组装摘要 Markdown（空节显示"无"）。
 
@@ -468,6 +479,9 @@ class DigestDispatcher:
                 f"- [[{item['stem']}]]：{'、'.join(item['issues'])}"
                 for item in wiki_issues
             ]
+        if stale_wiki_lines:
+            # OKF Freshness（2026-09-18 全量采纳）：到期卡点名，复查/顺延是人的动作
+            sections += ["", f"⏰ wiki 到期复查（{len(stale_wiki_lines)}）：", *stale_wiki_lines]
         sections += [""]
         sections += [f"## ✅ 待办进行中（{len(todos)}）", "", *_lines(todos), ""]
         sections += [f"## 🔁 今日复习（{len(review)}）", ""]

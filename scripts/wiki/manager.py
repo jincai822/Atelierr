@@ -1,6 +1,7 @@
 """wiki 沉淀层管理器：只读盘点与纪律校验，绝不改写任何笔记。
 
-条目即 ``<库根>/wiki/*.md``（平面，无子目录）。与 memory 的关系：
+条目即 ``<库根>/wiki/*.md``（平面，无子目录；OKF 约定文件 index.md /
+log.md 与 topics/ 主题页是机器自留地，豁免盘点与校验）。与 memory 的关系：
 单向引用——wiki 条目用 frontmatter ``from`` 指向它提炼自的 memory
 笔记（wikilink 或纯 stem）；memory 机制完全不知道 wiki 的存在。
 
@@ -35,6 +36,11 @@ from scripts.memory.core import SYSTEM_DIRNAME, MemoryTree
 WIKI_DIRNAME = "wiki"  # 库根下的沉淀层子目录名（memory.yaml 可覆盖）
 
 REQUIRED_FRONTMATTER = ("created", "source", "from")
+
+#: OKF 约定文件（机器自留地：导航 index.md / 变更日志 log.md）——
+#: 不是知识条目，盘点/校验/孤儿/统计一律豁免（2026-09-18 OKF 全量采纳；
+#: topics/ 主题页不在根层 glob 内，天然豁免）
+OKF_CONVENTION_FILES = frozenset({"index.md", "log.md"})
 
 #: Cognitive OS 迁入卡的必备字段（frontmatter 含 type 即走此 schema，
 #: 豁免 from/互链——存量资产的来源在各自 sources 字段里；description
@@ -109,7 +115,11 @@ class WikiManager:
                 links 为正文 wikilink 目标 stem 列表（已去别名/锚点）；
                 from 为归一化后的 memory 笔记 stem（空串表示未填）。
         """
-        return [self._entry(path) for path in sorted(self.wiki_dir.glob("*.md"))]
+        return [
+            self._entry(path)
+            for path in sorted(self.wiki_dir.glob("*.md"))
+            if path.name not in OKF_CONVENTION_FILES
+        ]
 
     def validate(self) -> List[Dict[str, Any]]:
         """纪律校验：返回有问题的条目及原因（无问题返回空）。

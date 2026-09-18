@@ -34,7 +34,7 @@ import hashlib
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -43,6 +43,7 @@ import frontmatter
 from scripts.dispatch.sysdir import SYSTEM_DIRNAME
 from scripts.utils.state_store import read_json, write_json
 from scripts.memory.core import MemoryTree
+from scripts.wiki import curation
 from scripts.wiki.manager import EXCERPT_TYPE, WIKI_DIRNAME
 
 #: 清单笔记的 source 值（复数；todos 分发按此跳过）
@@ -158,6 +159,28 @@ class HighlightsDispatcher:
             except FileExistsError:
                 # 同名卡片已存在（状态丢失后的重跑）：视为已转记
                 pass
+            try:
+                # OKF 机器自留地（2026-09-18 全量采纳，与 distill 同源）：
+                # index.md 导航 / log.md 日志 / topics 主题页——全部幂等
+                book = post.metadata.get("book") or {}
+                curation.update_index(
+                    Path(self.tree.notes_dir) / self.wiki_dirname,
+                    filename,
+                    title,
+                    f"划重点勾选自 {note_path.stem}",
+                )
+                curation.append_log(
+                    Path(self.tree.notes_dir) / self.wiki_dirname, filename, title
+                )
+                curation.update_topic_page(
+                    Path(self.tree.notes_dir) / self.wiki_dirname,
+                    card_stem=Path(filename).stem,
+                    card_title=title,
+                    description=f"划重点勾选自 {note_path.stem}",
+                    topic_hint=str(book.get("clc") or ""),
+                )
+            except Exception as exc:  # noqa: BLE001 - 自留地维护不阻塞转记
+                print(f"[highlights] curation fail: {exc}", flush=True)
             promoted[item_key] = filename
             entry["last_attempt"] = datetime.now(timezone.utc).isoformat()
             report["created"].append(filename)
@@ -190,6 +213,8 @@ class HighlightsDispatcher:
             "source": PROMOTED_SOURCE,
             "tags": [ITEM_TAG],
             "status": "stable",  # 勾选即批准（draft 态只属于 distill 送审流）
+            # OKF Freshness（2026-09-18 全量采纳）：半年后到期复查
+            "stale_after": (datetime.now() + timedelta(days=180)).strftime("%Y-%m-%d"),
             "generated": {"by": "atelierr-highlights/1.0", "at": now},
             "verified": [{"by": "human:cj1024", "at": now}],
             "sources": [
