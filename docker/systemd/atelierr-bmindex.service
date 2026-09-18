@@ -1,0 +1,16 @@
+# Atelierr Basic Memory 语义索引刷新服务（oneshot，与 atelierr-bmindex.timer 配套）
+
+[Unit]
+Description=Atelierr basic-memory semantic index refresh (daily)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/workspaces/Atelierr
+Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+EnvironmentFile=-%h/.config/atelierr/env
+ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
+ExecStart=/bin/bash -c "HTTPS_PROXY=$${HTTPS_PROXY:-http://127.0.0.1:7897} HTTP_PROXY=$${HTTP_PROXY:-http://127.0.0.1:7897} uvx basic-memory reindex"
+StandardOutput=append:%h/atelierr-data/state/logs/bmindex.log
+StandardError=append:%h/atelierr-data/state/logs/bmindex.log
