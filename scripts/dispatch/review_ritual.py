@@ -245,7 +245,13 @@ def open_ritual(tree, kind: str, send: bool = True) -> Dict[str, Any]:
         existing = store.load() or {}
         if str(existing.get("kind") or "") != KIND_DAILY:
             return {"opened": False, "questions": []}  # 周/月回顾在跑，让位
-        asked = str(existing.get("asked_at") or "")[:10]
+        # 幂等/收尸都按本地日期判（2026-09-19 修：asked_at 是 UTC 存储，
+        # 直接 [:10] 会在每天 00:00-08:00 本地时段把当天误判成昨天）
+        asked_raw = str(existing.get("asked_at") or "")
+        try:
+            asked = datetime.fromisoformat(asked_raw).astimezone().strftime("%Y-%m-%d")
+        except ValueError:
+            asked = asked_raw[:10]
         if asked == datetime.now().strftime("%Y-%m-%d"):
             return {"opened": False, "questions": []}  # 当天幂等
         closed = store.close()  # 前一天的会话收尸
@@ -290,7 +296,12 @@ def write_answers(tree, data: Dict[str, Any]) -> Optional[Path]:
     if not answers:
         return None
     kind = str(data.get("kind") or KIND_WEEKLY)
-    asked = str(data.get("asked_at") or "")[:10]
+    # 落盘日期按会话提问时的本地日期（同 open_ritual 的 UTC→本地修复）
+    asked_raw = str(data.get("asked_at") or "")
+    try:
+        asked = datetime.fromisoformat(asked_raw).astimezone().strftime("%Y-%m-%d")
+    except ValueError:
+        asked = asked_raw[:10]
     today = asked or datetime.now().strftime("%Y-%m-%d")
     refl_dir = Path(tree.notes_dir) / "wiki" / "reflections"
     refl_dir.mkdir(parents=True, exist_ok=True)
