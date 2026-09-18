@@ -60,6 +60,13 @@ def _fake_lark(monkeypatch, client):
     return fake_lark
 
 
+def _actions_of(card):
+    """取卡片动作区（确认卡 2026-09-18 加了决策提问行，索引不再固定）。"""
+    for element in card["elements"]:
+        if element.get("tag") == "action":
+            return element["actions"]
+    raise AssertionError("卡片没有动作区")
+
 def test_text_message_appends_to_diary(memory_tree, capsys):
     """文本消息 → 当天日记（2026-09-12 碎片治理裁决）：source=lark、
     ``- HH:MM 内容`` 列表行（多行缩进续行）、sidecar 登记；
@@ -513,7 +520,7 @@ def test_send_feishu_confirm_note_adds_callback_button(monkeypatch):
     assert chat_id == "oc_chat"
     assert msg_type == "interactive"
     card = json.loads(content)
-    actions = card["elements"][1]["actions"]
+    actions = _actions_of(card)
     # 2026-09-12 归档默认化：主按钮一步到位确认并归档；
     # 2026-09-13 环节三评审：补「🗑 不要了」（标 pending_delete）
     assert [a["text"]["content"] for a in actions] == [
@@ -1430,7 +1437,7 @@ def test_send_todo_feishu_card_buttons(monkeypatch):
 
     assert feishu_module.send_todo_feishu("todo-x.md") is True
 
-    actions = cards[0]["elements"][1]["actions"]
+    actions = _actions_of(cards[0])
     assert [a["text"]["content"] for a in actions] == [
         "在 Obsidian 中打开",
         "✅ 已完成",
@@ -1468,7 +1475,11 @@ def test_send_resurface_feishu_card_layout(monkeypatch):
         if e["tag"] == "action"
         for a in e["actions"]
     ]
-    assert len(buttons) == 6  # 每条：打开 + 想起来了 + 没想起来
+    assert len(buttons) == 8  # 每条：打开 + 想起来了 + 没想起来 + 🚫不再推（C3）
+    assert any("不再推" in (b["text"]["content"]) for b in buttons)
+    # 先回忆后展示 + 应用追问（2026-09-18 脑科学 C3）
+    intro = card["elements"][0]["text"]["content"]
+    assert "先在心里回想" in intro and "今天有什么用" in intro
     uri_buttons = [b for b in buttons if "url" in b]
     assert len(uri_buttons) == 2
     assert all(
@@ -1633,7 +1644,7 @@ def test_archive_cancel_restores_confirm_card(memory_tree):
 
     result = bridge.handle_card_action(_card_archive_cancel("x.md"))
 
-    actions = result["card"]["data"]["elements"][1]["actions"]
+    actions = _actions_of(result["card"]["data"])
     assert [a["text"]["content"] for a in actions] == [
         "在 Obsidian 中打开",
         "✅ 确认并归档",
@@ -1703,7 +1714,7 @@ def test_menu_digest_card(memory_tree, monkeypatch):
     card = cards[0]
     assert "今日摘要" in card["header"]["title"]["content"]
     assert "待我确认" in card["elements"][0]["text"]["content"]
-    assert card["elements"][1]["actions"][0]["url"].startswith(
+    assert _actions_of(card)[0]["url"].startswith(
         "obsidian://open?vault="
     )
     assert list(memory_tree.notes_dir.glob("feishu-*.md")) == []
@@ -2168,7 +2179,7 @@ def test_confirm_card_has_discard_button(memory_tree):
     from scripts.dispatch.feishu_io import _confirm_action_card
 
     card = _confirm_action_card("标题", "正文", "x.md")
-    actions = card["elements"][1]["actions"]
+    actions = _actions_of(card)
     discard = [a for a in actions if a.get("type") == "danger"]
     assert len(discard) == 1
     assert discard[0]["behaviors"][0]["value"] == {
@@ -2531,3 +2542,72 @@ def test_natural_language_workshop_gets_guidance(memory_tree, monkeypatch):
     assert feedback and "车间" in feedback[0]
     diary = memory_tree.notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}.md"
     assert not diary.exists() or "换工作" not in diary.read_text(encoding="utf-8")
+
+
+def test_push_counter_bumped_on_card_send(memory_tree, monkeypatch, tmp_path):
+    """打扰账单计数（2026-09-18 P1）：每张成功发出的卡写 push_log.json。"""
+    import scripts.dispatch.feishu_io as io_module
+
+    monkeypatch.setenv("ATELIERR_STATE_DIR", str(tmp_path))
+    client = MagicMock()
+    _fake_lark(monkeypatch, client)
+    monkeypatch.setattr(io_module, "_send", lambda *a, **k: object())
+
+    ok = io_module.send_feishu_card(
+        {"header": {"title": {"content": "测试卡"}}, "elements": []},
+        chat_id="oc_demo",
+        app_id="x",
+        app_secret="y",
+    )
+
+    assert ok is True
+    from scripts.utils.state_store import read_json
+
+    log = read_json(tmp_path / "push_log.json", {})
+    today = datetime.now().strftime("%Y-%m-%d")
+    assert log.get(today) == 1
+
+
+def test_scenario_command_attaches_implementation_intention(memory_tree, monkeypatch):
+    """「场景：晚饭时」（2026-09-18 C4）：补登实施意图到最近一条判断。"""
+    from datetime import timezone
+
+    from scripts.utils.state_store import read_json, write_json
+
+    write_json(
+        Path(memory_tree.state_dir) / "judgments_last.json",
+        {"entry_id": "e1", "title": "每天少吃一点",
+         "at": datetime.now(timezone.utc).isoformat()},
+        indent=2,
+    )
+    bridge = _bridge(memory_tree)
+    feedback = []
+    monkeypatch.setattr(bridge, "_send_feedback", lambda chat_id, text: feedback.append(text))
+    event = _event("m-scene", "text", {"text": "场景：晚饭时"})
+    event.event.message.chat_id = "oc_demo_chat"
+    bridge.handle_event(event)
+
+    scenarios = read_json(Path(memory_tree.state_dir) / "judgments_scenarios.json", {})
+    assert scenarios["e1"]["scenario"] == "晚饭时"
+    assert feedback and "晚饭时" in feedback[0]
+
+
+def test_scenario_command_expired(memory_tree, monkeypatch):
+    """超 60 分钟无新判断：回提示，不写注记。"""
+    from scripts.utils.state_store import read_json, write_json
+
+    write_json(
+        Path(memory_tree.state_dir) / "judgments_last.json",
+        {"entry_id": "e1", "title": "旧判断", "at": "2020-01-01T00:00:00+00:00"},
+        indent=2,
+    )
+    bridge = _bridge(memory_tree)
+    feedback = []
+    monkeypatch.setattr(bridge, "_send_feedback", lambda chat_id, text: feedback.append(text))
+    event = _event("m-scene2", "text", {"text": "场景：晚饭时"})
+    event.event.message.chat_id = "oc_demo_chat"
+    bridge.handle_event(event)
+
+    scenarios = read_json(Path(memory_tree.state_dir) / "judgments_scenarios.json", {})
+    assert not scenarios
+    assert feedback and "过期" in feedback[0]

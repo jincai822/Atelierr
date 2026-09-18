@@ -892,19 +892,23 @@ class FeishuBridge:
         chat_id: Optional[str] = None,
         batch: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """复习卡「想起来了/没想起来」：记每篇的独立复习间隔
-        （想起来 ×2、没想起来 ÷2；简化 SM-2，只写 resurface.json，
-        不进 confidence 公式）；想起来了顺带记一次访问（合法重置
-        闲置时钟）。批次场景重建剩余复习卡（整卡替换语义）。"""
+        """复习卡反馈：「想起来了」间隔 ×2 + 记访问；「没想起来」间隔 ÷2
+        （连续 2 次自动流放——水蛭处理）；「🚫 不再推」直接流放。
+        只写 resurface.json，不进 confidence 公式；批次场景重建剩余
+        复习卡（整卡替换语义）。"""
         from scripts.memory.resurface import ResurfaceManager
 
         try:
             note_path = self.tree._abs(filename)
             note_id = self.tree._find_entry_id(note_path) or Path(filename).stem
             manager = ResurfaceManager(self.tree)
-            state = manager.record_outcome(note_id, remembered=(outcome == "good"))
-            if outcome == "good" and note_path.exists():
-                self.tree.on_note_accessed(note_path)
+            if outcome == "exile":
+                manager.exile(note_id)
+                state = {"interval": 0.0, "exiled": True}
+            else:
+                state = manager.record_outcome(note_id, remembered=(outcome == "good"))
+                if outcome == "good" and note_path.exists():
+                    self.tree.on_note_accessed(note_path)
         except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
             print(f"[feishu] resurface feedback note={filename} fail: {exc}", flush=True)
             self._send_feedback(chat_id, f"⚠️ 处理失败，请稍后重试：{filename}")
@@ -915,7 +919,9 @@ class FeishuBridge:
             f"interval={state['interval']}",
             flush=True,
         )
-        if good:
+        if outcome == "exile":
+            msg = "🚫 好的，这条以后不再推了（想恢复告诉我）"
+        elif good:
             msg = f"✅ 好，它{state['interval']:.0f} 天后再来见你"
         else:
             msg = "❌ 收到，近期再来看一眼；值得就提炼进压缩层，不值得留给 decay"
@@ -1126,10 +1132,10 @@ class FeishuBridge:
             report = review_ritual.open_ritual(self.tree, review_ritual.KIND_DAILY)
         except Exception as exc:  # noqa: BLE001 - 发卡失败回文字，不中断守护
             print(f"[feishu] daily review open fail: {exc}", flush=True)
-            self._send_feedback(chat_id, "⚠️ 三问卡片发送失败，请稍后重试")
+            self._send_feedback(chat_id, "⚠️ 四问卡片发送失败，请稍后重试")
             return
         if not report["opened"]:
-            self._send_feedback(chat_id, "今天的三问已发过了，直接回答即可")
+            self._send_feedback(chat_id, "今天的四问已发过了，直接回答即可")
 
     def _answer_menu(self, chat_id: Optional[str], command: str) -> None:
         """快捷菜单指令分发（拉取式交互：你点菜，我回卡）。"""
@@ -1142,7 +1148,7 @@ class FeishuBridge:
                 "· 待办 — 进行中的待办（带打开按钮）\n"
                 "· 提炼候选 — 今日待提炼清单\n"
                 "· 周回顾 — 问答进度/发起指引\n"
-                "· 复盘 — 今日三问（手动发起/恢复每晚推送）\n"
+                "· 复盘 — 今日四问（手动发起/恢复每晚推送）\n"
                 "· 同步看板 — 笔记元数据同步进多维表格（手机看板视图）\n"
                 "· 搜 关键词 — 搜笔记（前 5 条带打开按钮）\n"
                 "直接发文字=捕获笔记；发链接=转写；发语音=Whisper；发图=OCR",
@@ -1651,6 +1657,20 @@ class FeishuBridge:
                 print(f"[feishu] judgment fail: {exc}", flush=True)
                 self._send_feedback(chat_id, "⚠️ 判断登记失败，请稍后重发")
                 return None
+            self._append_diary(text)
+            self._send_feedback(chat_id, reply)
+            return None
+        # 「场景：」（2026-09-18 脑科学 C4 实施意图）：给最近一条判断
+        # 补「如果-那么」场景——与判断指令同级，先于问答会话/捕获
+        if text.startswith("场景：") or text.startswith("场景:"):
+            from scripts.dispatch.judgments import attach_scenario
+
+            scenario = text.split("：", 1)[1] if "：" in text else text.split(":", 1)[1]
+            try:
+                reply = attach_scenario(self.tree, scenario)
+            except Exception as exc:  # noqa: BLE001 - 注记失败不中断守护
+                print(f"[feishu] scenario fail: {exc}", flush=True)
+                reply = "⚠️ 场景登记失败，请稍后重发"
             self._append_diary(text)
             self._send_feedback(chat_id, reply)
             return None

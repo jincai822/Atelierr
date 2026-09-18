@@ -396,10 +396,10 @@ def test_digest_stale_pending_section(memory_tree):
     section = body.split("## ⏰")[1].split("## 🧠")[0]
     assert "## ⏰ 滞留提醒（2）" in body
     assert "### 待确认（1）" in body
-    assert "[[old]]（滞留 12 天）" in section
+    assert "[[old]]（在收件箱躺了 12 天）" in section
     assert "[[new]]（滞留" not in section
     assert "### 你的笔记（1）" in body
-    assert "[[done]]（你的笔记 · 滞留 31 天）" in section
+    assert "[[done]]（你的笔记 · 躺了 31 天）" in section
     assert "[[arch]]" not in section
     assert report["counts"]["stale"] == 2
 
@@ -427,7 +427,7 @@ def test_digest_stale_human_notes(memory_tree):
     body = report["markdown"]
     section = body.split("## ⏰")[1].split("## 🧠")[0]
     assert "### 你的笔记（1）" in body
-    assert "[[mine]]（你的笔记 · 滞留 17 天）" in section
+    assert "[[mine]]（你的笔记 · 躺了 17 天）" in section
     assert "[[young]]" not in section
     assert "[[2026-08-10]]" not in section
     assert "[[digest_src]]" not in section
@@ -445,7 +445,7 @@ def test_digest_stale_human_threshold(memory_tree):
     report = DigestDispatcher(memory_tree).run(today="2026-09-01")
 
     section = report["markdown"].split("## ⏰")[1].split("## 🧠")[0]
-    assert "[[d15]]（你的笔记 · 滞留 15 天）" in section
+    assert "[[d15]]（你的笔记 · 躺了 15 天）" in section
     assert "[[d13]]" not in section
 
 
@@ -508,3 +508,26 @@ def test_digest_stale_wiki_recheck_section(memory_tree):
     assert "wiki 到期复查（1）" in report["markdown"]
     assert "[[老卡]]" in report["markdown"]
     assert "[[新卡]]" not in report["markdown"].split("到期复查")[1]
+
+
+def test_digest_interruption_bill(memory_tree):
+    """打扰账单（2026-09-18 P1）：昨日推卡数 + 捕获时点分桶（深夜档可见）。"""
+    from pathlib import Path
+
+    from scripts.utils.state_store import write_json
+
+    write_json(
+        Path(memory_tree.state_dir) / "push_log.json", {"2026-09-09": 5}, indent=0
+    )
+    (memory_tree.notes_dir / "2026-09-09.md").write_text(
+        "---\ntitle: '2026-09-09'\n---\n\n"
+        "- 08:10 早一条\n- 13:20 午一条\n- 23:52 深夜一条\n- 23:56 深夜二条\n",
+        encoding="utf-8",
+    )
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-10")
+
+    assert "昨日打扰账单" in report["markdown"]
+    assert "系统推卡 5 张" in report["markdown"]
+    assert "深夜 2" in report["markdown"]
+    assert "早 1" in report["markdown"]

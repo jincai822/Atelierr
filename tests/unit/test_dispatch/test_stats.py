@@ -338,3 +338,18 @@ def test_digest_stale_decay_last_hidden(memory_tree):
     )
     report = DigestDispatcher(memory_tree).run(dry_run=True, today=TODAY)
     assert "昨日 decay" not in report["markdown"]
+
+
+def test_diet_line_feed_vs_active(memory_tree):
+    """信息食谱（2026-09-18 C6）：投喂型（抖音/小红书/B站标签）vs 主动型。"""
+    from scripts.dispatch.stats import diet_line
+
+    memory_tree.create_note("a.md", "x", source="link", tags=["抖音", "B84-心理学"])
+    memory_tree.create_note("b.md", "x", source="link", tags=["小红书"])
+    memory_tree.create_note("c.md", "x", source="web", tags=["书籍"])
+
+    line = diet_line(memory_tree, days=7)
+
+    assert "投喂型 2" in line
+    assert "主动型 1" in line
+    assert "67%" in line

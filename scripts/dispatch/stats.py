@@ -172,6 +172,40 @@ def render_capture_line(stats: Dict[str, Any]) -> str:
     return f"昨日捕获 {stats['total']} 条" + (f"：{parts}" if parts else "")
 
 
+#: 信息食谱的平台标签（算法投喂型内容源，2026-09-18 脑科学评审 C6）
+_FEED_TAGS = frozenset({"抖音", "小红书", "B站"})
+
+
+def diet_line(tree: MemoryTree, days: int = 7, today: Optional[str] = None) -> str:
+    """信息食谱行：窗口内捕获分「投喂型（算法推荐）vs 主动型」。
+
+    分类按平台标签（抖音/小红书/B站 = 投喂；其余 = 主动）。让投喂占比
+    可见——看见即改变（2026-09-18 脑科学评审 C6）。
+    """
+    end_str = today or datetime.now().strftime("%Y-%m-%d")
+    start = (datetime.strptime(end_str, "%Y-%m-%d") - timedelta(days=days)).strftime(
+        "%Y-%m-%d"
+    )
+    feed = active = 0
+    for path in tree.iter_all_note_files():
+        try:
+            post = frontmatter.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        created = str(post.get("created") or "")[:10]
+        if not created or not (start < created <= end_str):
+            continue
+        tags = {str(t) for t in (post.get("tags") or [])}
+        if tags & _FEED_TAGS:
+            feed += 1
+        else:
+            active += 1
+    total = feed + active
+    if not total:
+        return "- 信息食谱：窗口内无捕获"
+    return f"- 信息食谱：投喂型 {feed} · 主动型 {active}（投喂占 {feed / total * 100:.0f}%）"
+
+
 def render_weekly_stats(stats: Dict[str, Any]) -> List[str]:
     """周报详细行（周日摘要节用）：入口分条 + 确认率 + 沉淀数。"""
     lines = [

@@ -319,3 +319,38 @@ def test_resurface_feedback_bridge(memory_tree, make_note, monkeypatch):
     assert "1" in card["header"]["title"]["content"]
     # 访问时钟已重置
     assert memory_tree._entry(note)["last_accessed"] is not None
+
+
+def test_exile_skips_candidates(memory_tree, make_note):
+    """流放（🚫 不再推）：candidates 永久跳过（2026-09-18 脑科学 C3）。"""
+    from scripts.memory.resurface import ResurfaceManager
+
+    note = make_note(memory_tree, filename="a.md", content="内容", idle_days=10)
+    manager = ResurfaceManager(memory_tree)
+    note_id = memory_tree._find_entry_id(note) or note.stem
+
+    manager.exile(note_id)
+
+    assert all(item["id"] != note_id for item in manager.candidates())
+
+
+def test_two_consecutive_forgets_auto_exile(memory_tree, make_note):
+    """水蛭处理：连续 2 次「没想起来」自动流放；想起来清零连败。"""
+    from scripts.memory.resurface import ResurfaceManager
+
+    note = make_note(memory_tree, filename="b.md", content="内容", idle_days=10)
+    manager = ResurfaceManager(memory_tree)
+    note_id = memory_tree._find_entry_id(note) or note.stem
+
+    first = manager.record_outcome(note_id, remembered=False)
+    assert first.get("fail_streak") == 1 and not first.get("exiled")
+    second = manager.record_outcome(note_id, remembered=False)
+    assert second.get("exiled") is True
+    assert all(item["id"] != note_id for item in manager.candidates())
+
+    # 想起来一次：连败清零（不流放）
+    note2 = make_note(memory_tree, filename="c.md", content="内容", idle_days=10)
+    id2 = memory_tree._find_entry_id(note2) or note2.stem
+    manager.record_outcome(id2, remembered=False)
+    good = manager.record_outcome(id2, remembered=True)
+    assert good.get("fail_streak") == 0

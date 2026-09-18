@@ -286,7 +286,7 @@ def _notify_digest(
     if counts.get("judgment_proposals"):
         message += f"；🧭 判断候选 {counts['judgment_proposals']} 条等你批（批 N 收 / 略 N 拒）"
     if counts.get("stale"):
-        message += f"；⏰ 滞留 {counts['stale']} 条"
+        message += f"；🗂 {counts['stale']} 张旧卡待扫一眼"
     if counts.get("health_stale"):
         message += f"；⚠️ 自检异常 {counts['health_stale']} 项"
     _send_and_log(

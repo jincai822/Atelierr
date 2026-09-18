@@ -27,13 +27,14 @@ import hashlib
 import json
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from scripts.cognition.manager import ApprovalRecord, CognitionManager
 from scripts.memory.core import MemoryTree
 from scripts.processors.base import CONFIG_FILES
+from scripts.utils.state_store import read_json, write_json
 
 import httpx
 import yaml
@@ -81,6 +82,48 @@ def _duplicate_of(manager: CognitionManager, statement: str) -> Optional[str]:
         if str(entry.statement).strip() == statement.strip():
             return entry.title
     return None
+
+
+#: 最近一条判断的暂存（等「场景：」追问补登；有效期 60 分钟）
+_LAST_FILE = "judgments_last.json"
+#: 场景注记层（entry_id -> scenario；cognition schema 不动，注记平铺）
+_SCENARIOS_FILE = "judgments_scenarios.json"
+_SCENARIO_TTL_SECONDS = 3600
+
+
+def attach_scenario(tree: MemoryTree, scenario: str) -> str:
+    """给最近一条判断补「如果-那么」场景（实施意图，2026-09-18 C4）。
+
+    Args:
+        tree: MemoryTree。
+        scenario: 场景原文（如「晚饭时」）。
+
+    Returns:
+        str: 人类可读回执；超过 60 分钟没有新判断时回提示语。
+    """
+    scenario = scenario.strip()
+    last = read_json(Path(tree.state_dir) / _LAST_FILE, None)
+    if not isinstance(last, dict) or not last.get("entry_id"):
+        return "最近没有新登记的判断——先发「判断：xxx」登记一条"
+    try:
+        age = (
+            datetime.now(timezone.utc) - datetime.fromisoformat(str(last["at"]))
+        ).total_seconds()
+    except ValueError:
+        age = _SCENARIO_TTL_SECONDS + 1
+    if age > _SCENARIO_TTL_SECONDS:
+        return "这条追问过期了——重新发「判断：xxx」登记后再补场景"
+    path = Path(tree.state_dir) / _SCENARIOS_FILE
+    data = read_json(path, {})
+    if not isinstance(data, dict):
+        data = {}
+    data[str(last["entry_id"])] = {
+        "scenario": scenario,
+        "title": last.get("title") or "",
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    write_json(path, data, indent=2)
+    return f"记下了：「{scenario}」用它——到点想起来，就算赢一次"
 
 
 def register_statement(
@@ -133,8 +176,20 @@ def register_statement(
             action="create", reason=origin_note, source="human_assessment"
         ),
     )
+    # 实施意图追问（2026-09-18 脑科学评审 C4）：登记只是意图，
+    # 「如果-那么」的场景才是行为——记下最近一条，等用户回「场景：」
+    write_json(
+        Path(tree.state_dir) / _LAST_FILE,
+        {"entry_id": str(entry.id), "title": title,
+         "at": datetime.now(timezone.utc).isoformat()},
+        indent=2,
+    )
     kind_text = "疑问" if entry_type == "question" else f"判断（确信度 {certainty}，可改）"
-    return str(entry.id), f"已收进判断登记处：{kind_text}「{title}」"
+    return (
+        str(entry.id),
+        f"已收进判断登记处：{kind_text}「{title}」\n"
+        "想让它真落地？回「场景：xxx」告诉我什么场景用它（比如：晚饭时）",
+    )
 
 
 def _evidence_for(tree: MemoryTree, note_path: Path) -> Optional[Tuple[str, str]]:

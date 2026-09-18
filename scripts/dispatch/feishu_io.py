@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import quote
@@ -282,10 +283,49 @@ def _confirm_action_card(
         },
         "elements": [
             {"tag": "div", "text": {"tag": "lark_md", "content": message}},
+            *(
+                [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            # 2026-09-18 脑科学评审 C5：把确认从反射变回决策
+                            "content": "—— 问一句：这条值得留下吗？留就 ✅，不值就 🗑。",
+                        },
+                    }
+                ]
+                if confirm_note
+                else []
+            ),
             {"tag": "action", "actions": actions},
         ],
     }
 
+
+
+
+
+def _bump_push_counter() -> None:
+    """推卡计数（2026-09-18 「打扰账单」）：每张成功发出的卡 +1。
+
+    只写 ``<state>/push_log.json``（{"YYYY-MM-DD": N}），状态目录取
+    ``ATELIERR_STATE_DIR`` 环境变量（缺省 ~/atelierr-data/state）。
+    任何失败静默——计数是观测工序，绝不影响发卡主流程。
+    """
+    try:
+        state_dir = Path(
+            os.environ.get("ATELIERR_STATE_DIR")
+            or str(Path.home() / "atelierr-data" / "state")
+        )
+        path = state_dir / "push_log.json"
+        today = datetime.now().strftime("%Y-%m-%d")
+        data = read_json(path, {})
+        if not isinstance(data, dict):
+            data = {}
+        data[today] = int(data.get(today) or 0) + 1
+        write_json(path, data, indent=0)
+    except Exception:  # noqa: BLE001 - 观测工序静默
+        pass
 
 
 def send_feishu_card(
@@ -320,6 +360,7 @@ def send_feishu_card(
             .build()
         )
         if _send(client, target, "interactive", json.dumps(card)) is not None:
+            _bump_push_counter()
             return True
         title = card.get("header", {}).get("title", {}).get("content", "")
         text = str(title) if title else "（卡片发送失败）"

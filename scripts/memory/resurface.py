@@ -173,6 +173,8 @@ class ResurfaceManager:
                     continue
                 note_id = str(info.get("id") or path.stem)
                 stamp = pushed.get(note_id)
+                if isinstance(stamp, dict) and stamp.get("exiled"):
+                    continue  # 流放（🚫 不再推 / 连续没想起来的水蛭卡）
                 if stamp and self._in_cooldown(stamp, now):
                     continue
                 picked.append(
@@ -242,19 +244,44 @@ class ResurfaceManager:
             else self.cooldown_days
         )
         streak = int(entry.get("streak", 0)) if isinstance(entry, dict) else 0
+        fail_streak = int(entry.get("fail_streak", 0)) if isinstance(entry, dict) else 0
         if remembered:
             interval = min(interval * 2, 60.0)
             streak += 1
+            fail_streak = 0
         else:
             interval = max(1.0, interval / 2)
             streak = 0
-        state[note_id] = {
+            fail_streak += 1
+        entry_out = {
             "pushed": now.isoformat(timespec="seconds"),
             "interval": interval,
             "streak": streak,
+            "fail_streak": fail_streak,
         }
+        # 水蛭处理（2026-09-18 脑科学评审 C3）：连续 2 次「没想起来」
+        # 自动流放——SRS 里这叫 leech suspend，再推只是骚扰，不是复习
+        if fail_streak >= 2:
+            entry_out["exiled"] = True
+        state[note_id] = entry_out
         self._save_state(state)
         return dict(state[note_id])
+
+    def exile(self, note_id: str, now: Optional[datetime] = None) -> None:
+        """流放一条笔记（🚫 不再推）：candidates 永久跳过。
+
+        只写 resurface.json，不碰笔记本身（内容去留交给 review→purge，
+        与「不想被推」是两回事）。
+        """
+        now = now or datetime.now().astimezone()
+        state = self._load_state()
+        entry = state.get(note_id)
+        if not isinstance(entry, dict):
+            entry = {"interval": self.cooldown_days, "streak": 0}
+        entry["exiled"] = True
+        entry["pushed"] = now.isoformat(timespec="seconds")
+        state[note_id] = entry
+        self._save_state(state)
 
     def _in_cooldown(self, stamp: Any, now: datetime) -> bool:
         """距上次推送不足该篇间隔（缺省 cooldown_days）返回 True；

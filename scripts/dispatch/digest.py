@@ -92,6 +92,41 @@ DASHBOARD_STEMS = frozenset({"主页", "控制台"})  # 门面文件不算候选
 DISTILL_EXCLUDED_SOURCES = frozenset({"digest", "highlights"})  # 摘要/清单容器
 
 
+def _interruption_line(tree: MemoryTree, yesterday: str) -> Optional[str]:
+    """打扰账单（2026-09-18 脑科学评审 P1）：昨日系统推卡数 + 捕获时点分布。
+
+    推卡计数来自 feishu_io 的 push_log.json；捕获时点从昨日日记的
+    ``- HH:MM`` 时间戳分桶（早6-12/午12-18/晚18-23/深夜23-6）——让
+    用户亲眼看见自己的注意力曲线（23 点档刷喂无处遁形）。
+    """
+    push = read_json(Path(tree.state_dir) / "push_log.json", {})
+    cards = int(push.get(yesterday) or 0) if isinstance(push, dict) else 0
+    buckets = {"早": 0, "午": 0, "晚": 0, "深夜": 0}
+    diary = Path(tree.notes_dir) / f"{yesterday}.md"
+    if diary.is_file():
+        for hour in re.findall(
+            r"^- (\d{2}):\d{2}\s", diary.read_text(encoding="utf-8"), re.M
+        ):
+            h = int(hour)
+            if 6 <= h < 12:
+                buckets["早"] += 1
+            elif 12 <= h < 18:
+                buckets["午"] += 1
+            elif 18 <= h < 23:
+                buckets["晚"] += 1
+            else:
+                buckets["深夜"] += 1
+    parts = []
+    if cards:
+        parts.append(f"系统推卡 {cards} 张")
+    times = " · ".join(f"{k} {v}" for k, v in buckets.items() if v)
+    if times:
+        parts.append(f"捕获时点：{times}")
+    if not parts:
+        return None
+    return "⏱ 昨日打扰账单：" + "｜".join(parts)
+
+
 def _health_lines(state_dir: Path, now: Optional[datetime] = None) -> Tuple[List[str], int]:
     """系统自检行（定时器活性）与异常项数。
 
@@ -252,10 +287,17 @@ class DigestDispatcher:
             if is_sunday
             else None
         )
+        if weekly_lines is not None:
+            # 信息食谱（2026-09-18 脑科学 C6）：投喂型 vs 主动型占比
+            from scripts.dispatch.stats import diet_line
+
+            weekly_lines.append(diet_line(self.tree, days=7, today=today))
+        interruption_line = _interruption_line(self.tree, yesterday)
         markdown = self._build(
             today, pending, todos, review_stems, yesterday_new,
             undistilled, wiki_issues, health, health_stale,
             capture_line=capture_line, weekly_lines=weekly_lines,
+            interruption_line=interruption_line,
             failure_line=failure_line, decay_line=decay_line,
             stale_pending_lines=stale_pending, stale_human_lines=stale_human,
             judgment_line=judgment_line,
@@ -372,7 +414,7 @@ class DigestDispatcher:
             if "待确认" in (post.get("tags") or []):
                 if created_date <= pending_cutoff:
                     pending_rows.append(
-                        (-days, f"- [[{note_path.stem}]]（滞留 {days} 天）")
+                        (-days, f"- [[{note_path.stem}]]（在收件箱躺了 {days} 天）")
                     )
                 continue
             stem = note_path.stem
@@ -382,7 +424,7 @@ class DigestDispatcher:
                 continue
             if created_date <= human_cutoff:
                 human_rows.append(
-                    (-days, f"- [[{stem}]]（你的笔记 · 滞留 {days} 天）")
+                    (-days, f"- [[{stem}]]（你的笔记 · 躺了 {days} 天）")
                 )
         return (
             [line for _, line in sorted(pending_rows)],
@@ -401,6 +443,7 @@ class DigestDispatcher:
         health: List[str],
         health_stale: int,
         capture_line: Optional[str] = None,
+        interruption_line: Optional[str] = None,
         weekly_lines: Optional[List[str]] = None,
         failure_line: Optional[str] = None,
         decay_line: Optional[str] = None,
@@ -472,6 +515,7 @@ class DigestDispatcher:
                 "> 不用自己动手写：机器每天从候选里挑 1 条起草，",
                 "> 飞书回「提 N」收进压缩层、「弃 N」跳过。",
                 "> 提炼后自动从本栏消失；不值得留的，留给 review→purge。",
+                "> 捕获是海选，精华本来就是少数——剩下的放心让它沉。",
                 "",
             ]
         sections += [*_lines(undistilled)]
@@ -517,6 +561,8 @@ class DigestDispatcher:
         ]
         if capture_line:
             sections += [f"> {capture_line}", ""]
+        if interruption_line:
+            sections += [f"> {interruption_line}", ""]
         if failure_line:
             sections += [f"> {failure_line}", ""]
         if decay_line:

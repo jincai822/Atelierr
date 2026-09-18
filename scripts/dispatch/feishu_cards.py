@@ -224,8 +224,9 @@ def resurface_card(items: List[Dict[str, Any]]) -> Dict[str, Any]:
             "text": {
                 "tag": "lark_md",
                 "content": (
-                    "先在心里回想内容，再点「打开」核对。"
-                    "想起来了/没想起来点一下，我按你的反馈调间隔。"
+                    "先在心里回想内容，再点「打开」核对（先回忆后展示）。"
+                    "看完问自己：这对你今天有什么用？\n"
+                    "✅/❌ 我按反馈调间隔（连错 2 次自动停推）；🚫 这条以后不再推。"
                 ),
             },
         }
@@ -282,6 +283,22 @@ def resurface_card(items: List[Dict[str, Any]]) -> Dict[str, Any]:
                                     "action": RESURFACE_FEEDBACK_ACTION,
                                     "note": relpath,
                                     "outcome": "bad",
+                                    "batch": batch,
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "🚫 不再推"},
+                        "type": "default",
+                        "behaviors": [
+                            {
+                                "type": "callback",
+                                "value": {
+                                    "action": RESURFACE_FEEDBACK_ACTION,
+                                    "note": relpath,
+                                    "outcome": "exile",
                                     "batch": batch,
                                 },
                             }
@@ -409,7 +426,7 @@ def pending_digest_card(filenames: List[str]) -> Dict[str, Any]:
                 "tag": "lark_md",
                 "content": (
                     "无评论的捕获攒成这一张（写了评论的已即时单推）。"
-                    "逐条点「✅ 确认并归档」，或「打开细看」后再定。"
+                    "逐条问一句：值得留下吗？留就 ✅，不值就 🗑（进待删，周报终审）。"
                 ),
             },
         }

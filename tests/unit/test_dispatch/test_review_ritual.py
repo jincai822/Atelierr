@@ -34,9 +34,9 @@ def test_weekly_questions_from_data(memory_tree, make_note):
 
     # 数据在正文摘要（卡片 markdown），问题是短句（手机可点）
     assert "本周数据" in intro and "捕获" in intro
-    assert "滞留待确认超 7 天：1 条" in intro
+    assert "1 张旧卡还没确认" in intro
     assert any("最值得留" in q for q in questions)
-    assert any("留还是扔" in q for q in questions)
+    assert any("哪些值得留" in q for q in questions)
 
 
 def test_monthly_questions_are_light(memory_tree):
@@ -184,12 +184,14 @@ def _daily_state(state_dir):
     return read_json(Path(state_dir) / "review_daily.json", None)
 
 
-def test_daily_questions_fixed_three(memory_tree):
-    """每日三问：固定 3 个短问，含内耗留痕（周回顾下周动作的落地）。"""
+def test_daily_questions_fixed_four(memory_tree):
+    """每日四问（2026-09-18 脑科学处方 P0）：睡眠仪表 + 小胜 + 注意力 + 内耗。"""
     questions = review_ritual.build_questions(memory_tree, review_ritual.KIND_DAILY)
-    assert len(questions) == 3
+    assert len(questions) == 4
+    assert any("睡了" in q for q in questions)
+    assert any("小事" in q for q in questions)
+    assert any("注意力" in q for q in questions)
     assert any("内耗" in q for q in questions)
-    assert any("状态" in q for q in questions)
     intro = review_ritual.build_intro(memory_tree, review_ritual.KIND_DAILY)
     assert "今天捕获" in intro
     assert "判断：xxx" in intro
@@ -204,8 +206,8 @@ def test_daily_open_pushes_form_and_idempotent(memory_tree, monkeypatch):
     )
     report = review_ritual.open_ritual(memory_tree, review_ritual.KIND_DAILY)
     assert report["opened"] is True
-    assert len(report["questions"]) == 3
-    assert cards and "今日三问" in str(cards[0]["header"]["title"]["content"])
+    assert len(report["questions"]) == 4
+    assert cards and "今日四问" in str(cards[0]["header"]["title"]["content"])
 
     again = review_ritual.open_ritual(memory_tree, review_ritual.KIND_DAILY)
     assert again["opened"] is False

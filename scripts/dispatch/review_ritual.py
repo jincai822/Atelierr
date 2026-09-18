@@ -164,7 +164,7 @@ def build_intro(tree, kind: str) -> str:
     ]
     stale = _stale_pending_count(tree)
     if stale:
-        lines.append(f"⏰ 滞留待确认超 7 天：{stale} 条")
+        lines.append(f"🗂 有 {stale} 张旧卡还没确认——方便时扫一眼就好")
     excerpt_total, excerpt_titles = _new_excerpt_cards(tree, days)
     if excerpt_total:
         # KM 评审 P1①：点名本期新勾的摘录卡，提醒提炼（防收藏谬误）
@@ -193,13 +193,14 @@ def build_questions(tree, kind: str) -> List[str]:
         List[str]: 问题列表（至多 _MAX_QUESTIONS 条）。
     """
     if kind == KIND_DAILY:
-        # 固定三问（2026-09-18 批准）：状态脉搏 + 内耗留痕 + 值得记的。
-        # 内耗问源自 2026-09-18 周回顾「下周 Start：内耗留痕」——
-        # 让感觉留痕，才看得见、治得了。
+        # 固定四问（2026-09-18 脑科学评审处方 P0）：睡眠仪表（认知表现的
+        # 第一预测因子）+ 小胜记录（胜任感供给，对抗内耗）+ 注意力账簿
+        # （自述注意力偏移）+ 内耗留痕（情绪标签化）。
         return [
-            "今天状态怎么样？（一个词也行）",
+            "今天睡了几小时？（大概就行）",
+            "今天做成的一件小事？（再小也算）",
+            "今天注意力最好的一段时间在干什么？",
             "今天有内耗的时刻吗？因为什么？",
-            "今天有什么值得记下的？（一句话也行）",
         ]
     if kind == KIND_MONTHLY:
         return [
@@ -211,7 +212,7 @@ def build_questions(tree, kind: str) -> List[str]:
     # 长句当输入框标签在手机上没法看）
     questions = ["本周最值得留的是哪条？为什么？"]
     if _stale_pending_count(tree):
-        questions.append("滞留的待确认卡：留还是扔？")
+        questions.append("没确认的旧卡：哪些值得留、哪些可以扔？")
     if tree.list_pending_delete():
         questions.append("待删清单有没有误判？")
     questions += [
@@ -264,7 +265,7 @@ def open_ritual(tree, kind: str, send: bool = True) -> Dict[str, Any]:
         title = {
             KIND_WEEKLY: "🌿 周回顾",
             KIND_MONTHLY: "🌙 月度回顾（轻）",
-            KIND_DAILY: "🌛 今日三问",
+            KIND_DAILY: "🌛 今日四问",
         }[kind]
         intro = build_intro(tree, kind)
         send_feishu_card(prompt_form_card(title, intro, questions))
