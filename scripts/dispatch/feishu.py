@@ -1642,6 +1642,27 @@ class FeishuBridge:
                 replies.append(reply)
             self._send_feedback(chat_id, "\n".join(replies))
             return None
+        distills = re.findall(r"(提|弃)\s*(\d{1,2})", text)
+        if distills and re.fullmatch(r"(?:[提弃]\s*\d{1,2}[，,、\s]*)*", text):
+            # 提炼草稿审批（2026-09-18 深加工链路）：「提 N」落 wiki、
+            # 「弃 N」跳过；与判断「批/略」同款多序号、倒序防位移
+            from scripts.dispatch import distill as distill_module
+
+            replies = []
+            todo_distill: Dict[int, bool] = {}
+            for verdict, num in distills:
+                todo_distill[int(num)] = verdict == "提"
+            for num in sorted(todo_distill, reverse=True):
+                try:
+                    _ok, reply = distill_module.decide_by_index(
+                        self.tree, num, todo_distill[num]
+                    )
+                except Exception as exc:  # noqa: BLE001 - 审批失败不中断守护
+                    print(f"[feishu] distill decide fail: {exc}", flush=True)
+                    reply = "⚠️ 审批失败，请稍后重试"
+                replies.append(reply)
+            self._send_feedback(chat_id, "\n".join(replies))
+            return None
         store = PromptStore(Path(self.tree.state_dir))
         if store.is_open():
             if text.lower() in CLOSE_WORDS:

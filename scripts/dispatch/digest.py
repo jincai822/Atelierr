@@ -231,6 +231,10 @@ class DigestDispatcher:
         )
         # 机器提名待批候选（安静小节：列在摘要里，飞书回复「批 N/略 N」审批）
         judgment_proposals = pending_proposals(self.tree)
+        # 提炼草稿待审计数（2026-09-18 深加工链路：「提 N/弃 N」审批）
+        from scripts.dispatch.distill import pending_drafts
+
+        distill_drafts = pending_drafts(self.tree)
         is_sunday = datetime.strptime(today, "%Y-%m-%d").weekday() == 6
         weekly_lines = (
             render_weekly_stats(capture_stats(self.tree, days=7, today=today))
@@ -245,6 +249,7 @@ class DigestDispatcher:
             stale_pending_lines=stale_pending, stale_human_lines=stale_human,
             judgment_line=judgment_line,
             judgment_proposals=judgment_proposals,
+            distill_draft_count=len(distill_drafts),
         )
         created = None
         if not dry_run:
@@ -274,65 +279,10 @@ class DigestDispatcher:
         }
 
     def _distill_candidates(self, wiki: WikiManager, today: str) -> List[str]:
-        """提炼候选：从未进 wiki 且值得动笔的笔记 stem（截断到上限）。
-
-        三路汇合，去重后推送多的在前、其次被引用多的、最后最旧的在前：
-        - 反复推送：ResponseProbe 累计推送 ≥MIN_PUSH_COUNT 次；
-        - 被引用：别的笔记 [[wikilink]] 引用 ≥1 次（2026-09-12 裁决②：
-        沉淀从"自己的笔记长出来"——被引用的已是枢纽，与每日衰减同源
-        的反链统计，DecayManager.backlink_counts）；
-        - 沉一沉：已确认且 created 满 DISTILL_MIN_AGE_DAYS 天。
-        文件已消失（purge 也是加工）自然不计；日报/控制台/摘要/
-        划重点清单/待确认/待办不候选（见 _excluded_from_distill）。
-        """
-        counts = {
-            str(slot.get("filename") or ""): int(slot.get("count") or 0)
-            for slot in self.probe.push_counts().values()
-        }
-        backlink_by_stem = {
-            path.stem: count
-            for path, count in DecayManager(self.tree).backlink_counts().items()
-            if count >= 1
-        }
-        distilled = wiki.distilled_stems()
-        cutoff = (
-            datetime.strptime(today, "%Y-%m-%d")
-            - timedelta(days=DISTILL_MIN_AGE_DAYS)
-        ).strftime("%Y-%m-%d")
-        pushed: List[Tuple[int, str]] = []  # (-count, stem)
-        linked: List[Tuple[int, str]] = []  # (-引用数, stem)
-        settled: List[Tuple[str, str]] = []  # (created, stem)
-        # 全库扫描（含已归档子目录）：归档后的笔记被引用多了照样该提炼
-        all_paths = [
-            path for layer in LAYERS for path in self.tree.list_notes(layer)
-        ]
-        for note_path in sorted(all_paths):
-            if SYNC_CONFLICT_RE.search(note_path.name):
-                continue  # Syncthing 冲突副本不是笔记
-            stem = note_path.stem
-            if stem in distilled:
-                continue
-            try:
-                post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if self._excluded_from_distill(stem, post):
-                continue
-            push_count = counts.get(note_path.name, 0)
-            if push_count >= MIN_PUSH_COUNT:
-                pushed.append((-push_count, stem))
-                continue
-            ref_count = backlink_by_stem.get(stem, 0)
-            if ref_count >= 1:
-                linked.append((-ref_count, stem))
-                continue
-            created = str(post.get("created") or "")[:10]
-            if created and created <= cutoff:
-                settled.append((created, stem))
-        picked = [stem for _, stem in sorted(pushed)]
-        picked += [stem for _, stem in sorted(linked)]
-        picked += [stem for _, stem in sorted(settled)]
-        return picked[:MAX_DISTILL_CANDIDATES]
+        """提炼候选（薄封装）：逻辑已提升为模块级
+        :func:`compute_distill_candidates`，供本类与 dispatch/distill.py
+        共用（2026-09-18 深加工链路：候选口径全库只此一份）。"""
+        return compute_distill_candidates(self.tree, self.probe, wiki, today)
 
     @staticmethod
     def _excluded_from_distill(stem: str, post: Any) -> bool:
@@ -444,6 +394,7 @@ class DigestDispatcher:
         decay_line: Optional[str] = None,
         judgment_line: Optional[str] = None,
         judgment_proposals: Optional[List[Dict[str, Any]]] = None,
+        distill_draft_count: int = 0,
         stale_pending_lines: Optional[List[str]] = None,
         stale_human_lines: Optional[List[str]] = None,
     ) -> str:
@@ -495,6 +446,14 @@ class DigestDispatcher:
                     "",
                 ]
         sections += [f"## 🧠 提炼候选（{len(undistilled)}）", ""]
+        if distill_draft_count:
+            # 深加工草稿待审（2026-09-18）：机器已起草，人「提/弃」即可，
+            # 不用自己动手写——安静一行，无草稿不出现
+            sections += [
+                f"> ✍️ 机器已备好 {distill_draft_count} 张摘录卡草稿："
+                "回复「提 1」收进 wiki、「弃 1」跳过。",
+                "",
+            ]
         if undistilled:
             sections += [
                 "> 每周日周回顾前，从这儿挑 1 条提炼进 wiki：",
@@ -563,3 +522,80 @@ class DigestDispatcher:
         )
         sections += [header, "", *health]
         return fm + "\n".join(sections) + "\n"
+
+
+def compute_distill_candidates(
+    tree: MemoryTree,
+    probe: ResponseProbe,
+    wiki: WikiManager,
+    today: str,
+    limit: int = MAX_DISTILL_CANDIDATES,
+) -> List[str]:
+    """提炼候选：从未进 wiki 且值得动笔的笔记 stem（截断到上限）。
+
+    三路汇合，去重后推送多的在前、其次被引用多的、最后最旧的在前：
+    - 反复推送：ResponseProbe 累计推送 ≥MIN_PUSH_COUNT 次；
+    - 被引用：别的笔记 [[wikilink]] 引用 ≥1 次（2026-09-12 裁决②：
+      沉淀从"自己的笔记长出来"——被引用的已是枢纽，与每日衰减同源
+      的反链统计，DecayManager.backlink_counts）；
+    - 沉一沉：已确认且 created 满 DISTILL_MIN_AGE_DAYS 天。
+    文件已消失（purge 也是加工）自然不计；日报/控制台/摘要/
+    划重点清单/待确认/待办不候选。候选口径全库只此一份：晨报
+    （DigestDispatcher._distill_candidates）与深加工起草器
+    （dispatch/distill.py）都从这里取（2026-09-18 提升为模块级）。
+
+    Args:
+        tree: MemoryTree。
+        probe: ResponseProbe（推送计数来源）。
+        wiki: WikiManager（distilled_stems 来源）。
+        today: YYYY-MM-DD。
+        limit: 返回条数上限。
+
+    Returns:
+        List[str]: 候选笔记 stem 列表（优先级序）。
+    """
+    counts = {
+        str(slot.get("filename") or ""): int(slot.get("count") or 0)
+        for slot in probe.push_counts().values()
+    }
+    backlink_by_stem = {
+        path.stem: count
+        for path, count in DecayManager(tree).backlink_counts().items()
+        if count >= 1
+    }
+    distilled = wiki.distilled_stems()
+    cutoff = (
+        datetime.strptime(today, "%Y-%m-%d") - timedelta(days=DISTILL_MIN_AGE_DAYS)
+    ).strftime("%Y-%m-%d")
+    pushed: List[Tuple[int, str]] = []  # (-count, stem)
+    linked: List[Tuple[int, str]] = []  # (-引用数, stem)
+    settled: List[Tuple[str, str]] = []  # (created, stem)
+    # 全库扫描（含已归档子目录）：归档后的笔记被引用多了照样该提炼
+    all_paths = [path for layer in LAYERS for path in tree.list_notes(layer)]
+    for note_path in sorted(all_paths):
+        if SYNC_CONFLICT_RE.search(note_path.name):
+            continue  # Syncthing 冲突副本不是笔记
+        stem = note_path.stem
+        if stem in distilled:
+            continue
+        try:
+            post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if DigestDispatcher._excluded_from_distill(stem, post):
+            continue
+        push_count = counts.get(note_path.name, 0)
+        if push_count >= MIN_PUSH_COUNT:
+            pushed.append((-push_count, stem))
+            continue
+        ref_count = backlink_by_stem.get(stem, 0)
+        if ref_count >= 1:
+            linked.append((-ref_count, stem))
+            continue
+        created = str(post.get("created") or "")[:10]
+        if created and created <= cutoff:
+            settled.append((created, stem))
+    picked = [stem for _, stem in sorted(pushed)]
+    picked += [stem for _, stem in sorted(linked)]
+    picked += [stem for _, stem in sorted(settled)]
+    return picked[:limit]

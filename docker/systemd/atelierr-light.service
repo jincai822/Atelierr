@@ -25,5 +25,7 @@ ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
 ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli todos
 ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli highlights
 ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli judgments
+# 深加工起草（2026-09-18）：每天最多 1 张摘录卡草稿，送飞书审批
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli distill
 StandardOutput=append:%h/atelierr-data/state/logs/light.log
 StandardError=append:%h/atelierr-data/state/logs/light.log

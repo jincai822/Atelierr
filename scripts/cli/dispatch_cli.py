@@ -486,6 +486,36 @@ class DispatchCLI:
                         lines + "\n\n（你标记的，已直接收；标错了到 cognition 目录删文件即可）",
                     )
 
+        @cli.command(name="distill")
+        @click.option(
+            "--dry-run",
+            "dry_run",
+            is_flag=True,
+            help="只报告候选，不起草、不写状态、不推送",
+        )
+        def distill_command(dry_run: bool) -> None:
+            """机器辅助提炼：取今日提炼候选，LLM 起草 wiki 摘录卡送审。
+
+            每天最多 1 张草稿（防刷屏）；人「提 N」落 wiki、「弃 N」跳过
+            （2026-09-18 用户裁决，OKF v0.2 轻量层 schema）。
+            """
+            from scripts.dispatch import distill as distill_module
+
+            tree = self._build_tree()
+            with _dispatch_lock(tree.state_dir) as locked:
+                if not locked:
+                    click.echo("已有分发任务在运行，本次跳过")
+                    return
+                report = distill_module.run(tree, dry_run=dry_run)
+                click.echo(
+                    f"提炼候选 {report['candidates']} 篇，"
+                    f"起草 {report['drafted'] or '无'}，"
+                    f"跳过原因 {report['skipped'] or '无'}，"
+                    f"推送 {report['pushed']}"
+                )
+                if dry_run:
+                    click.echo("（dry-run：未起草）")
+
         @cli.command(name="media")
         @click.option(
             "--dry-run",
