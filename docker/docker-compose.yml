@@ -1,28 +1,14 @@
-# Atelierr - Flatnotes Web 界面部署 (MVP 2)
+# Atelierr - 底座服务部署（同步）
 #
 # 用法:
-#   cp .env.example .env   # 修改账号密码和数据目录
+#   cp .env.example .env   # 修改数据目录等
 #   docker compose up -d
-#   访问 http://localhost:8080
+#
+# 2026-09-18 用户裁决：Flatnotes 网页版（MVP 2）退役——入口收敛为
+# Obsidian + 飞书；外部写入的归一化由 scripts/web/integration.py
+# （WebIntegration，纯文件系统门面）负责，不依赖任何 Web 服务在线。
 
 services:
-  flatnotes:
-    image: dullage/flatnotes:latest
-    container_name: atelierr-flatnotes
-    ports:
-      - "${FLATNOTES_PORT:-8080}:8080"
-    environment:
-      PUID: "${PUID:-1000}"
-      PGID: "${PGID:-1000}"
-      FLATNOTES_AUTH_TYPE: "${FLATNOTES_AUTH_TYPE:-password}"
-      FLATNOTES_USERNAME: "${FLATNOTES_USERNAME:-admin}"
-      FLATNOTES_PASSWORD: "${FLATNOTES_PASSWORD:?请在 .env 中设置 FLATNOTES_PASSWORD}"
-      FLATNOTES_SECRET_KEY: "${FLATNOTES_SECRET_KEY:?请在 .env 中设置 FLATNOTES_SECRET_KEY}"
-    volumes:
-      # 挂载记忆模块数据目录（$OV/memory）；默认使用本地 ./data 便于独立试用
-      - "${MEMORY_DATA_DIR:-./data}:/data"
-    restart: unless-stopped
-
   # 手机端同步（OBSIDIAN-SYNC-PLAN-DRAFT.md）：与手机 Syncthing-Fork 双向同步
   # 同一个 $OV/memory 目录；host 网络用于局域网发现与 WireGuard 直连
   syncthing:

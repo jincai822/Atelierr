@@ -87,14 +87,18 @@ python tools/init_memory.py
 ```
 
 创建内容：
-- 平面笔记目录（`memory.root`，Flatnotes 直接挂载）
+- 平面笔记目录（`memory.root`，Obsidian/Syncthing 直接挂载）
 - 状态目录（`memory.state_dir`，含 `reports/` 衰减报告与 `trash/` 回收站）
 - inbox 目录（笔记目录的同级兄弟 `inbox/`，待处理输入入口）
 
-### Step 5: 启动 Web 界面（1 分钟）
+### Step 5: 启动底座服务（1 分钟）
+
+> 注：Flatnotes 网页版已于 2026-09-18 退役（入口收敛为 Obsidian + 飞书）。
+> 本步只剩手机同步底座；外部写入的归一化由 `scripts/web/integration.py`
+> 自动处理，无需启动任何 Web 服务。
 
 ```bash
-# 启动 Flatnotes（compose 文件在 docker/ 下）
+# 启动 Syncthing 同步（compose 文件在 docker/ 下）
 cd docker && docker compose up -d
 
 # 检查状态
@@ -104,12 +108,9 @@ docker compose ps
 真实输出：
 
 ```
- Container atelierr-flatnotes Running 
-NAME                 IMAGE                      COMMAND            SERVICE     CREATED       STATUS                    PORTS
-atelierr-flatnotes   dullage/flatnotes:latest   "/entrypoint.sh"   flatnotes   3 hours ago   Up 32 minutes (healthy)   0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp
+NAME                 IMAGE                   STATUS
+atelierr-syncthing   syncthing/syncthing     Up (healthy)
 ```
-
-访问: http://localhost:8080
 
 ---
 
@@ -325,7 +326,7 @@ OCR/转写）。确认/勾选等写动作仍在 Obsidian 完成（机器不改�
 
 ## ✅ 验证安装
 
-运行完整的验证脚本（检查 Python/依赖/目录/配置/Docker/Flatnotes 可达性/
+运行完整的验证脚本（检查 Python/依赖/目录/配置/Docker/Syncthing 同步/
 模块导入/MemoryTree 冒烟）：
 
 ```bash
@@ -372,8 +373,8 @@ python tools/verify_installation.py
   ✅ docker/docker-compose.yml
 🔍 检查 Docker...
   ✅ Docker version 29.7.2, build a7dcaa6
-🔍 检查 Flatnotes...
-  ✅ http://localhost:8080 可访问 (HTTP 200)
+🔍 检查 Syncthing 同步...
+  ✅ atelierr-syncthing 容器在运行
 🔍 检查 Atelierr 模块...
   ✅ 记忆模块核心
   ✅ Confidence 计算
@@ -398,7 +399,7 @@ python tools/verify_installation.py
   ✅ 目录结构
   ✅ 配置文件
   ✅ Docker
-  ✅ Flatnotes
+  ✅ Syncthing 同步
   ✅ Atelierr 模块
   ✅ MemoryTree
 
@@ -475,7 +476,7 @@ cd docker
 docker compose ps
 
 # 查看日志
-docker compose logs flatnotes
+docker compose logs syncthing
 
 # 重启
 docker compose restart

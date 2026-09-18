@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from scripts.memory.core import MemoryTree
-from scripts.web.integration import FlatnotesIntegration
+from scripts.web.integration import WebIntegration
 from tools.generate_test_data import generate_all
 
 
@@ -26,5 +26,5 @@ def memory_tree(tmp_path):
 
 @pytest.fixture
 def integration(memory_tree):
-    """FlatnotesIntegration 门面（共享平面目录 + 归一化）。"""
-    return FlatnotesIntegration(memory_tree)
+    """WebIntegration 门面（共享平面目录 + 归一化）。"""
+    return WebIntegration(memory_tree)

@@ -26,8 +26,8 @@
 
 ### 🌐 现代化界面
 
-- **Web 访问**: 基于 Flatnotes 的优雅界面
-- **移动友好**: 随时随地访问笔记
+- **Obsidian 控制台**: 主页/控制台就是你的驾驶舱
+- **移动友好**: 手机 Obsidian + 飞书机器人随时随地
 - **Markdown 原生**: 纯文本，永不过时
 
 ---
@@ -113,8 +113,8 @@ python -m scripts.cli.memory_cli decay
 
 ```
 ┌─────────────────────────────────┐
-│  模块 1: Web 界面 (Flatnotes)   │
-│  🌐 网页访问，移动友好           │
+│  模块 1: Web 界面【已退役】      │
+│  🌐 2026-09-18 起入口=Obsidian+飞书│
 └────────────┬────────────────────┘
              ↓ (读写文件)
 ┌─────────────────────────────────┐
@@ -246,7 +246,7 @@ tags: ["标签1", "标签2"]
 
 ### ✅ Phase 2: Web 界面集成（Week 3）
 
-- [x] Flatnotes 部署
+- [x] ~~Flatnotes 部署~~（2026-09-18 退役，入口收敛为 Obsidian + 飞书）
 - [x] 文件监控集成
 - [x] 自动化工作流
 
@@ -306,7 +306,7 @@ git push origin feature/amazing-feature
 
 ### 核心技术
 
-- [Flatnotes](https://github.com/dullage/flatnotes) - Web 界面
+- [Flatnotes](https://github.com/dullage/flatnotes) - 早期 Web 界面（2026-09-18 退役）
 - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) - OCR 识别
 - [Whisper](https://github.com/openai/whisper) - 语音转文字
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) - 视频下载

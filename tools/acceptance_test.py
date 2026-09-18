@@ -8,7 +8,7 @@ Atelierr MVP 分阶段验收测试（架构 v1.2：平面存储 + sidecar 索引
 - phase 1: 记忆模块（init/create/read/search/move/list/access/decay/stats）
           + 复习队列（resurface 窗口/冷却/摘要集成）
           + CLI（MemoryCLI + CliRunner）+ 工具函数冒烟
-- phase 2: 追加 Web 集成（scripts/web.integration.FlatnotesIntegration）
+- phase 2: 追加 Web 集成（scripts/web.integration.WebIntegration）
 - phase 3: 追加输入处理器（scripts/processors 导入 + fixtures 冒烟）
 - all:    全部（默认）
 - 示例:   子进程逐个运行 examples/*.py 断言 exit 0（所有 phase 都运行，
@@ -244,15 +244,15 @@ def run_utils_section() -> bool:
 
 
 def run_web_section() -> bool:
-    """Web 集成验收（phase >= 2）：导入 + 归一化冒烟（走 FlatnotesIntegration 门面）。"""
+    """Web 集成验收（phase >= 2）：导入 + 归一化冒烟（走 WebIntegration 门面）。"""
     print("🧪 Web 集成...")
     try:
         from scripts.memory.core import MemoryTree
-        from scripts.web.integration import FlatnotesIntegration
+        from scripts.web.integration import WebIntegration
 
         with tempfile.TemporaryDirectory() as tmp:
             tree = MemoryTree(f"{tmp}/memory", state_dir=f"{tmp}/state")
-            integration = FlatnotesIntegration(tree)
+            integration = WebIntegration(tree)
             note = tree.notes_dir / "raw.md"
             note.write_text("裸内容", encoding="utf-8")
             result = integration.process_pending()

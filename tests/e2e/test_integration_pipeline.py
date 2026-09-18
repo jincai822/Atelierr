@@ -1,21 +1,18 @@
 """三 MVP 集成端到端测试（DEVELOPMENT-PLAN-3MVP.md Week 3 集成清单）。
 
 链路：process_cli 处理图片/PDF → create_note 入库 → decay 分层 →
-Flatnotes 可见。只组合现有公共接口，不触碰任何生产代码。
+外部读者可见（文件系统层面）。只组合现有公共接口，不触碰任何生产代码。
 
 - test_process_to_memory_to_decay_pipeline：纯临时目录，总是能跑。
-- test_flatnotes_sees_pipeline_note：live 验证 Flatnotes 可见性，
-  docker/.env 缺失或容器未起时 pytest.skip 优雅跳过。
+- test_pipeline_note_visible_to_external_reader：live 验证外部可见性
+  （2026-09-18 Flatnotes 退役：原 Flatnotes HTTP 断言改为文件系统断言，
+  任何外部读者——Obsidian/历史网页端——看到的就是这个平面目录）。
 """
 
 from __future__ import annotations
 
-import json
 import os
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
 import pytest
@@ -25,12 +22,10 @@ from scripts.cli.memory_cli import MemoryCLI
 from scripts.cli.process_cli import ProcessCLI
 from scripts.memory.core import MemoryTree
 from scripts.memory.decay import DecayManager
-from scripts.web.integration import FlatnotesIntegration
+from scripts.web.integration import WebIntegration
 from tools.generate_test_data import generate_all
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
-REPO_ROOT = Path(__file__).resolve().parents[2]
-FLATNOTES_BASE = "http://localhost:8080"
 
 #: 夹具中的可识别文本（tools/generate_test_data.py 定义）
 OCR_TEXT = "Atelierr OCR test"
@@ -97,7 +92,7 @@ def test_process_to_memory_to_decay_pipeline(memory_config, tmp_path):
     _invoke(memory_cli, runner, ["create", "pdf-note.md", "--content", pdf_markdown])
     img_note = notes_dir / "img-note.md"
     pdf_note = notes_dir / "pdf-note.md"
-    assert img_note.parent == notes_dir  # Flatnotes 挂载的就是这个平面目录
+    assert img_note.parent == notes_dir  # 外部读者挂载的就是这个平面目录
     assert pdf_note.parent == notes_dir
     tree = MemoryTree(str(notes_dir), state_dir=str(state_dir))
     assert tree.layer_of(img_note) == "short-term"
@@ -133,58 +128,17 @@ def test_process_to_memory_to_decay_pipeline(memory_config, tmp_path):
     assert pdf_note.parent == notes_dir
 
 
-def _flatnotes_env_path() -> Path:
-    return REPO_ROOT / "docker" / ".env"
+def test_pipeline_note_visible_to_external_reader(tmp_path):
+    """live：process_cli 图片输出经 create_note 入库后，外部读者文件系统可见。
 
-
-def _read_flatnotes_credentials() -> dict:
-    """从 docker/.env 解析 Flatnotes 认证配置（值不打印）。"""
-    creds = {}
-    for line in _flatnotes_env_path().read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key, value = line.split("=", 1)
-            creds[key.strip()] = value.strip().strip('"').strip("'")
-    return {
-        "username": creds.get("FLATNOTES_USERNAME", "admin"),
-        "password": creds.get("FLATNOTES_PASSWORD"),
-    }
-
-
-def _flatnotes_reachable(timeout: float = 3.0) -> bool:
-    """Flatnotes 容器是否可达（超时/拒绝 → 视为未运行）。"""
-    try:
-        with urllib.request.urlopen(FLATNOTES_BASE + "/", timeout=timeout) as response:
-            return response.status == 200
-    except (urllib.error.URLError, OSError, TimeoutError):
-        return False
-
-
-def _flatnotes_get_json(path: str, token: str):
-    """Bearer 认证的 Flatnotes GET，返回 (status, json)。"""
-    request = urllib.request.Request(
-        FLATNOTES_BASE + path, headers={"Authorization": f"Bearer {token}"}
-    )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        return response.status, json.loads(response.read().decode("utf-8"))
-
-
-def test_flatnotes_sees_pipeline_note(tmp_path):
-    """live：process_cli 图片输出经 create_note 入库后 Flatnotes 可见。
-
-    decay 后仍可见且内容不变（layer 是 sidecar 属性，不影响 Flatnotes）。
+    decay 后仍在且内容不变（layer 是 sidecar 属性，不影响外部读取）。
     teardown 只删除本测试创建的文件并注销其 sidecar 条目。
     """
-    if not _flatnotes_env_path().exists():
-        pytest.skip("docker/.env 不存在，跳过 Flatnotes live 验证")
-    if not _flatnotes_reachable():
-        pytest.skip("Flatnotes 容器未运行（http://localhost:8080 不可达）")
-
     tree = MemoryTree(
         os.path.expanduser("~/atelierr-data/memory"),
         state_dir=os.path.expanduser("~/atelierr-data/state"),
     )
-    integration = FlatnotesIntegration(tree)
+    integration = WebIntegration(tree)
     integration.process_pending()  # 先对齐真实数据目录
 
     unique = f"e2e-pipeline-{time.time_ns()}"
@@ -199,40 +153,17 @@ def test_flatnotes_sees_pipeline_note(tmp_path):
         assert result.exit_code == 0, f"exit={result.exit_code}\n{result.output}"
         markdown = image_out.read_text(encoding="utf-8")
         assert OCR_TEXT in markdown
-        created = tree.create_note(f"{unique}.md", markdown)
-        assert created == note_path
+        tree.create_note(f"{unique}.md", markdown)
         assert note_path.parent == tree.notes_dir
 
-        # 登录 Flatnotes 拿 token
-        creds = _read_flatnotes_credentials()
-        assert creds["password"], "docker/.env 缺少 FLATNOTES_PASSWORD"
-        login = urllib.request.Request(
-            FLATNOTES_BASE + "/api/token",
-            data=json.dumps(
-                {"username": creds["username"], "password": creds["password"]}
-            ).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(login, timeout=10) as response:
-            token = json.loads(response.read().decode("utf-8"))["access_token"]
+        # 外部读者视角：共享平面目录直读，内容含 OCR 文本
+        before = note_path.read_text(encoding="utf-8")
+        assert OCR_TEXT in before
 
-        # GET /api/notes/{title}：200 且内容包含 OCR 文本
-        status, body = _flatnotes_get_json(
-            f"/api/notes/{urllib.parse.quote(unique)}", token
-        )
-        assert status == 200, f"Flatnotes 应能看到 {unique}，status={status}"
-        assert OCR_TEXT in body.get("content", ""), "Flatnotes 内容应包含 OCR 文本"
-
-        # decay 后再查：仍可见且内容不变
+        # decay 后再查：文件仍在且内容不变
         DecayManager(tree).run()
-        status_after, body_after = _flatnotes_get_json(
-            f"/api/notes/{urllib.parse.quote(unique)}", token
-        )
-        assert status_after == 200, "decay 后 Flatnotes 仍应可见"
-        assert body_after.get("content") == body.get(
-            "content"
-        ), "decay 不应改变笔记内容"
+        assert note_path.exists(), "decay 不应删除短层新笔记"
+        assert note_path.read_text(encoding="utf-8") == before, "decay 不应改变笔记内容"
     finally:
         # 只清理本测试自己的产物：删文件 + process_pending 注销 sidecar 条目
         if note_path.exists():

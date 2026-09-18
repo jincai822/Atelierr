@@ -258,7 +258,7 @@ def check_consistency():
         terms = {
             "MemoryTree": "记忆树核心类",
             "Confidence": "可信度机制",
-            "Flatnotes": "Web 界面",
+            "WebIntegration": "外部写入归一化门面",
             "三层记忆": "短期/中期/长期",
         }
 

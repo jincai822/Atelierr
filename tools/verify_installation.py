@@ -196,28 +196,27 @@ def check_atelierr_modules():
     return all_ok
 
 
-def check_flatnotes():
-    """检查 Flatnotes Web 界面可达性（http://localhost:8080）。
+def check_syncthing():
+    """检查 Syncthing 同步容器在跑（Flatnotes 已于 2026-09-18 退役）。
 
-    不可达只给 ⚠️ 警告不算失败（Web 界面是可选组件）。
+    不在跑只给 ⚠️ 警告不算失败（不玩手机的单端用户不需要同步）。
     """
-    print("🔍 检查 Flatnotes...")
+    print("🔍 检查 Syncthing 同步...")
     try:
-        with urllib.request.urlopen("http://localhost:8080", timeout=3) as resp:
-            status = resp.status
-        if status == 200:
-            print(f"  {GREEN}✅{RESET} http://localhost:8080 可访问 (HTTP {status})")
+        import subprocess
+
+        out = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+        if "atelierr-syncthing" in out:
+            print(f"  {GREEN}✅{RESET} atelierr-syncthing 容器在运行")
             return True
-        print(
-            f"  {YELLOW}⚠️{RESET}  http://localhost:8080 返回 HTTP {status}（非 200）"
-        )
+        print(f"  {YELLOW}⚠️{RESET}  atelierr-syncthing 未运行（可选，单端用户无需同步）")
+        print("     提示: cd docker && docker compose up -d")
         return True
     except Exception as exc:
-        print(
-            f"  {YELLOW}⚠️{RESET}  http://localhost:8080 不可达（可选，Web 界面未启动）"
-        )
-        print("     提示: cd docker && docker compose up -d")
-        print(f"     原因: {exc}")
+        print(f"  {YELLOW}⚠️{RESET}  无法检查 docker（可选组件）: {exc}")
         return True
 
 
@@ -286,7 +285,7 @@ def main():
         "目录结构": check_directories(),
         "配置文件": check_config_files(),
         "Docker": check_docker(),
-        "Flatnotes": check_flatnotes(),
+        "Syncthing 同步": check_syncthing(),
         "Atelierr 模块": check_atelierr_modules(),
         "MemoryTree": check_memorytree(),
     }

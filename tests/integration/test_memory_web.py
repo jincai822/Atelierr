@@ -3,14 +3,14 @@
 断言以 docs/ACCEPTANCE-CRITERIA.md 2.1 为准：新文件归一化、
 mtime 保持、创建笔记对 Flatnotes 可见；扩展覆盖外部删除注销、
 损坏 frontmatter 跳过、自带 frontmatter 只登记。全部走
-FlatnotesIntegration 门面，不绕过。
+WebIntegration 门面，不绕过。
 """
 
 from __future__ import annotations
 
 import pytest
 
-from scripts.web.integration import FlatnotesIntegration
+from scripts.web.integration import WebIntegration
 
 
 def _read_frontmatter(path):
@@ -106,7 +106,7 @@ def test_from_config(tmp_path):
         encoding="utf-8",
     )
 
-    integration = FlatnotesIntegration.from_config(str(config))
+    integration = WebIntegration.from_config(str(config))
 
     assert integration.tree.notes_dir == tmp_path / "memory"
     assert integration.tree.state_dir == tmp_path / "state"

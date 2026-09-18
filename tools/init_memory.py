@@ -5,7 +5,7 @@
 ~/atelierr-data 默认路径），按 MemoryTree 的配置语义取
 memory.root / memory.state_dir，创建：
 
-- 平面笔记目录（memory.root，Flatnotes 挂载点）
+- 平面笔记目录（memory.root，Obsidian/Syncthing 挂载点）
 - 状态目录（memory.state_dir，含 reports/ 与 trash/ 子目录）
 - inbox 目录（notes_dir 的同级兄弟，待处理输入入口）
 

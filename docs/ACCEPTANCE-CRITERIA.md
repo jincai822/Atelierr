@@ -408,12 +408,18 @@ pytest tests/performance/test_search_performance.py -v
 
 ### 模块 2: Web 界面 (scripts/web/)
 
-#### 2.1 Flatnotes 集成 (integration.py)
+#### 2.1 外部写入归一化 (integration.py)
+
+> **2026-09-18 用户裁决：Flatnotes 网页版退役**（入口收敛为 Obsidian +
+> 飞书，容器已移除）。本节规格继续有效——归一化职责与是否运行某个
+> 网页前端无关：任何外部写入者（Obsidian、Syncthing 落盘等）在共享
+> 平面目录写下的裸 markdown 都走同一份归一化。门类由
+> FlatnotesIntegration 更名为 `WebIntegration`。
 
 **功能要求**:
 
 ```python
-✅ 必须实现（架构 v1.2：Flatnotes 与记忆模块共享同一平面目录，
+✅ 必须实现（架构 v1.2：与记忆模块共享同一平面目录，
    不存在"同步"，集成的职责是"归一化"）:
   - watcher 监控笔记目录的新文件 / 删除事件
   - 新文件归一化：补写一次性 frontmatter（id/title/created/source）
@@ -423,7 +429,7 @@ pytest tests/performance/test_search_performance.py -v
     避免污染衰减的 modified 信号
   
 ✅ 错误处理:
-  - Flatnotes 未启动不影响归一化（纯文件系统操作）
+  - 任何 Web 服务未启动不影响归一化（纯文件系统操作）
   - frontmatter 损坏的文件跳过并记录日志，不中断 watcher
 ```
 
@@ -433,8 +439,8 @@ pytest tests/performance/test_search_performance.py -v
 # tests/integration/test_web_integration.py
 
 def test_new_file_normalized():
-    """外部（Flatnotes/Obsidian）新建的笔记被登记"""
-    # 模拟 Flatnotes：直接往共享目录写裸 markdown
+    """外部（Obsidian/历史网页端）新建的笔记被登记"""
+    # 模拟外部写入者：直接往共享目录写裸 markdown
     (memory_tree.notes_dir / "test.md").write_text("content")
     
     watcher.process_pending()  # 或等待 watcher 周期
@@ -452,7 +458,7 @@ def test_normalize_preserves_mtime():
     assert note.stat().st_mtime_ns == before
 
 def test_created_note_visible_to_flatnotes():
-    """记忆模块创建的笔记就在共享目录根层（Flatnotes 可直接见）"""
+    """记忆模块创建的笔记就在共享目录根层（外部读者可直接见）"""
     path = memory_tree.create_note("from_memory.md", "content")
     assert path.parent == memory_tree.notes_dir
 ```
@@ -460,8 +466,7 @@ def test_created_note_visible_to_flatnotes():
 **验收检查**:
 
 ```bash
-# 启动 Flatnotes
-docker-compose up -d flatnotes
+# 无需启动任何 Web 服务（归一化是纯文件系统操作）
 
 # 运行集成测试
 pytest tests/integration/test_web_integration.py -v
