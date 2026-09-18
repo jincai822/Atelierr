@@ -14,6 +14,6 @@ WorkingDirectory=/srv/workspaces/Atelierr
 Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
 EnvironmentFile=-%h/.config/atelierr/env
 ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
-ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli pending
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr-312/bin/python -m scripts.cli.dispatch_cli pending
 StandardOutput=append:%h/atelierr-data/state/logs/pending.log
 StandardError=append:%h/atelierr-data/state/logs/pending.log

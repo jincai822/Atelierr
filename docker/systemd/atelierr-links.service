@@ -37,8 +37,8 @@ Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
 # "-" 前缀表示文件缺失也不影响服务启动（摘要功能自动降级跳过）
 EnvironmentFile=-%h/.config/atelierr/env
 ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
-ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli links
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr-312/bin/python -m scripts.cli.dispatch_cli links
 # 同轮顺带做附件分发（attachments/ 截图/录音/视频 OCR/转写，见 scripts/dispatch/media.py）
-ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli media
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr-312/bin/python -m scripts.cli.dispatch_cli media
 StandardOutput=append:%h/atelierr-data/state/logs/links.log
 StandardError=append:%h/atelierr-data/state/logs/links.log

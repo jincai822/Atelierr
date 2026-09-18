@@ -31,7 +31,7 @@ WorkingDirectory=/srv/workspaces/Atelierr
 Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
 EnvironmentFile=-%h/.config/atelierr/env
 ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
-ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.dispatch_cli feishu
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr-312/bin/python -m scripts.cli.dispatch_cli feishu
 # 断线自愈：SDK 内部自动重连；进程级崩溃 30 秒后拉起
 Restart=on-failure
 RestartSec=30

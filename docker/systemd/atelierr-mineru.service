@@ -12,8 +12,8 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 EnvironmentFile=-%h/.config/atelierr/env
-ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/mineru server start
-ExecStop=/srv/workspaces/Atelierr/.venv-atelierr/bin/mineru server stop
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr-312/bin/mineru server start
+ExecStop=/srv/workspaces/Atelierr/.venv-atelierr-312/bin/mineru server stop
 StandardOutput=append:%h/atelierr-data/state/logs/mineru.log
 StandardError=append:%h/atelierr-data/state/logs/mineru.log
 
