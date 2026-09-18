@@ -68,8 +68,32 @@ def _draft_payload(**overrides):
     }
 
 
+
+
+def _fake_bm_write(monkeypatch):
+    """P4 测试双身：bm 写入改为按 metadata 直写 tmp 库（不碰真实 vault）。"""
+
+    def _write(rel_path, title, content, *, note_type=None, tags=None, metadata=None, overwrite=True):
+        import frontmatter as fm
+
+        for base in _fake_bm_write.bases:
+            target = base / rel_path
+            if target.parent.exists() or rel_path.startswith("distilled/"):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(
+                    fm.dumps(fm.Post(content, **(metadata or {}))), encoding="utf-8"
+                )
+                return "atelierr/" + rel_path[:-3]
+        raise RuntimeError("no base")
+
+    monkeypatch.setattr("scripts.memory.bm_bridge.write_note", _write)
+    return _write
+
+
+_fake_bm_write.bases = []
+
 @pytest.fixture
-def llm_ok(monkeypatch):
+def llm_ok(memory_tree, monkeypatch):
     """配好 key + 假 LLM 起草 + 假推送（记录推送文本）。"""
     monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
     monkeypatch.setattr(
@@ -83,6 +107,8 @@ def llm_ok(monkeypatch):
         "send_dispatch_notice",
         lambda title, message: pushed.append(message) or {"feishu": True},
     )
+    _fake_bm_write.bases = [memory_tree.notes_dir]
+    _fake_bm_write(monkeypatch)
     return pushed
 
 

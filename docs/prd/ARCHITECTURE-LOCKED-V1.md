@@ -8,6 +8,14 @@
 > v1.1 修订：Confidence 语义统一为"新鲜度"模型，与 `docs/ACCEPTANCE-CRITERIA.md` 对齐。  
 > v1.2 修订：平面存储（Flatnotes 兼容）+ sidecar 状态索引 + 无状态 confidence 重算 + 访问信号契约 + trash/purge 流程。
 >
+> **2026-09-19 用户裁决：方案三落地——basic-memory 作记忆底座**（v1.3）。
+> 生产环境升 Python 3.12；存储=Markdown vault（basic-memory atelierr 项目）；
+> 检索经 `scripts/memory/bm_bridge.py` 委托 basic-memory 语义搜索（融合 live
+> confidence，失败退回全文匹配）；压缩层卡片经 bm 写入（文件+实体+关系一体，
+> 图谱随新卡生长）；衰减/复习/回收站继续在「文件+sidecar」上运行（自研算法
+> 不变，permalink 与相对路径确定性换算，无映射表）。OCR 全面换 MinerU 4.0
+> （PaddleOCR/rapidocr 退役）。旧库数据经用户批准清零重启（双备份留存）。
+>
 > **2026-09-18 用户裁决：三层知识结构。** 原料层 `memory/<类目>/`（原文、
 > 转写全文、附件原件，机器不改写）｜压缩层 `memory/distilled/`（机器浓缩品：
 > 摘录卡+主题页，人批准进门，带 stale_after 保鲜期，可过期清理）｜知识层

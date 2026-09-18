@@ -1063,12 +1063,18 @@ class FeishuBridge:
         from scripts.memory.search import MemorySearcher
 
         try:
-            results = MemorySearcher(self.tree).search(query, limit=SEARCH_LIMIT)
+            # 先语义（方案三 P3：意思命中），召回为空退回全文（关键词命中）
+            searcher = MemorySearcher(self.tree)
+            results = searcher.semantic_search(query, limit=SEARCH_LIMIT)
+            engine = "语义"
+            if not results:
+                results = searcher.search(query, limit=SEARCH_LIMIT)
+                engine = "全文"
         except Exception as exc:  # noqa: BLE001 - 搜索失败文字告知，不中断守护
             print(f"[feishu] search fail: {exc}", flush=True)
             self._send_feedback(chat_id, "⚠️ 搜索失败，请稍后重试")
             return
-        print(f"[feishu] search q={query!r} hits={len(results)}", flush=True)
+        print(f"[feishu] search q={query!r} hits={len(results)} engine={engine}", flush=True)
         if not results:
             self._send_feedback(chat_id, f"没有找到匹配「{query}」的笔记")
             return

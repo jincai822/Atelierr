@@ -285,8 +285,12 @@ def _safe_filename(title: str, wiki_dir: Path) -> str:
     return candidate
 
 
-def _compose_card(draft: Dict[str, Any], actor: str) -> str:
-    """按 OKF v0.2 轻量层 schema 组装卡片全文（frontmatter + 正文）。"""
+def _compose_card(draft: Dict[str, Any], actor: str) -> Tuple[Dict[str, Any], str]:
+    """按 OKF v0.2 轻量层 schema 拆出卡片（metadata dict, 正文）。
+
+    2026-09-19 方案三 P4：卡片经 bm_bridge 写入（文件+实体+关系一体），
+    frontmatter 以 metadata 传递（bm 合并落盘并注入 permalink 字段）。
+    """
     now = datetime.now(timezone.utc).isoformat()
     metadata: Dict[str, Any] = {
         "type": "Excerpt",
@@ -321,7 +325,7 @@ def _compose_card(draft: Dict[str, Any], actor: str) -> str:
         lines += ["", "## 原文金句", ""]
         lines += [f"「{q}」" for q in draft["quotes"]]
     lines += ["", "## 来源", "", f"- [[{draft['source_stem']}]]", ""]
-    return frontmatter.dumps(frontmatter.Post("\n".join(lines), **metadata))
+    return metadata, "\n".join(lines)
 
 
 def _update_index(wiki_dir: Path, filename: str, title: str, description: str) -> None:
@@ -365,7 +369,26 @@ def decide_by_index(
     distilled_dir = Path(tree.notes_dir) / curation.DISTILLED_DIRNAME
     distilled_dir.mkdir(parents=True, exist_ok=True)
     filename = _safe_filename(title, distilled_dir)
-    (distilled_dir / filename).write_text(_compose_card(draft, actor), encoding="utf-8")
+    card_metadata, card_body = _compose_card(draft, actor)
+    try:
+        # 方案三 P4：卡片经 basic-memory 写入（文件+实体+关系一体，
+        # 图谱从新卡开始生长）；桥失败退回直写文件（落卡不阻塞）
+        from scripts.memory.bm_bridge import write_note as bm_write
+
+        bm_write(
+            f"distilled/{filename}",
+            title,
+            card_body,
+            note_type="Excerpt",
+            tags=[str(t) for t in (draft.get("source_tags") or [])],
+            metadata=card_metadata,
+        )
+    except Exception as exc:  # noqa: BLE001 - 桥失败退回直写（绝不影响审批）
+        print(f"[distill] bm write fail, fallback to file: {exc}", flush=True)
+        (distilled_dir / filename).write_text(
+            frontmatter.dumps(frontmatter.Post(card_body, **card_metadata)),
+            encoding="utf-8",
+        )
     _update_index(distilled_dir, filename, title, str(draft.get("description") or ""))
     _append_log(distilled_dir, filename, title)
     try:

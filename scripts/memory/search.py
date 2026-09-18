@@ -356,6 +356,60 @@ class MemorySearcher:
         results.extend(self._search_reference(query_lower))
         return results
 
+    def semantic_search(self, query: str, limit: int = 10) -> List[Memory]:
+        """语义搜索（方案三 P3，2026-09-19 用户裁决）：basic-memory 语义
+        召回 × live confidence 融合排序。
+
+        召回走 bm_bridge（atelierr 项目的语义索引）；排序分 =
+        bm 相关度 × live confidence（机器搬运来源再乘
+        MACHINE_SOURCE_WEIGHT，与全文搜索同规）；索引里的陈旧实体
+        （文件已不在库）跳过。basic-memory 不可用/失败返回空列表——
+        调用方据此退回 search() 全文匹配（降级是设计的一部分）。
+
+        Args:
+            query: 查询文本。
+            limit: 返回条数上限。
+
+        Returns:
+            List[Memory]: 按融合分降序；语义层失败/无召回为空列表。
+        """
+        if limit < 1 or not query.strip():
+            return []
+        try:
+            from scripts.memory.bm_bridge import search as bm_search
+
+            hits = bm_search(query, limit=max(limit * 2, 10))
+        except Exception:  # noqa: BLE001 - 语义层失败退回全文（调用方兜底）
+            return []
+        entry_map = self._entry_map()
+        fused: List[Tuple[float, float, str, str, str, Any]] = []
+        for hit in hits:
+            rel = hit.get("rel_path") or ""
+            if not rel:
+                continue
+            path = self.tree.notes_dir / rel
+            try:
+                stat = path.stat()
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue  # 索引陈旧实体
+            entry = entry_map.get(rel)
+            note_layer = entry["layer"] if entry is not None else "short-term"
+            references = entry.get("references", 0) if entry is not None else 0
+            source_match = _SOURCE_RE.search(text[:400])
+            source = source_match.group(1) if source_match else ""
+            confidence = self._live_confidence(entry, references, stat, source=source)
+            weight = MACHINE_SOURCE_WEIGHT if source in MACHINE_SOURCES else 1.0
+            score = float(hit.get("score") or 0.0) * confidence * weight
+            fused.append((score, confidence, rel, text, note_layer, stat))
+        fused.sort(key=lambda item: (-item[0], item[2]))
+        results: List[Memory] = []
+        for _score, confidence, rel, text, note_layer, stat in fused[:limit]:
+            memory = self._materialize(rel, confidence, note_layer, text, stat)
+            if memory is not None:
+                results.append(memory)
+        return results
+
     # ------------------------------------------------------------------
     # 资料全文组（方案 B：attachments/**/*.md 的外置全文）
     # ------------------------------------------------------------------

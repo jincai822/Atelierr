@@ -231,6 +231,22 @@ class HighlightsDispatcher:
         }
         if page:
             metadata["page"] = page
+        try:
+            # 方案三 P4：卡片经 basic-memory 写入（文件+实体+关系一体）；
+            # 桥失败退回原子直写（勾选项不丢）
+            from scripts.memory.bm_bridge import write_note as bm_write
+
+            bm_write(
+                f"{DISTILLED_DIRNAME}/{filename}",
+                title,
+                body,
+                note_type=EXCERPT_TYPE,
+                tags=list(metadata.get("tags") or []),
+                metadata=metadata,
+            )
+            return
+        except Exception:  # noqa: BLE001 - 桥失败退回原子直写
+            pass
         text = frontmatter.dumps(frontmatter.Post(body, **metadata))
         fd, tmp_path = tempfile.mkstemp(dir=str(wiki_dir), suffix=".tmp")
         try:
