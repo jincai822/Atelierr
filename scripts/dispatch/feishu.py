@@ -1674,16 +1674,18 @@ class FeishuBridge:
                 replies.append(reply)
             self._send_feedback(chat_id, "\n".join(replies))
             return None
-        distills = re.findall(r"(提|弃)\s*(\d{1,2})", text)
-        if distills and re.fullmatch(r"(?:[提弃]\s*\d{1,2}[，,、\s]*)*", text):
+        distills = re.findall(r"(提|题|弃)\s*(\d{1,2})", text)
+        if distills and re.fullmatch(r"(?:[提题弃]\s*\d{1,2}[，,、\s]*)*", text):
             # 提炼草稿审批（2026-09-18 深加工链路）：「提 N」落 wiki、
-            # 「弃 N」跳过；与判断「批/略」同款多序号、倒序防位移
+            # 「弃 N」跳过；与判断「批/略」同款多序号、倒序防位移。
+            # 「题」作「提」的同音别名（2026-09-18 实测：用户发「题 1」
+            # 被吞进日记、审批丢失——输入法同音字是常态不是手误）
             from scripts.dispatch import distill as distill_module
 
             replies = []
             todo_distill: Dict[int, bool] = {}
             for verdict, num in distills:
-                todo_distill[int(num)] = verdict == "提"
+                todo_distill[int(num)] = verdict in ("提", "题")
             for num in sorted(todo_distill, reverse=True):
                 try:
                     _ok, reply = distill_module.decide_by_index(

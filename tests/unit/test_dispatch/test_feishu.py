@@ -2444,3 +2444,32 @@ def test_post_locale_wrapper_pure_images(memory_tree, monkeypatch):
 def test_read_receipt_handler_is_noop():
     """已读回执事件注册空处理器：接住事件、不抛异常、不刷日志。"""
     assert FeishuBridge.ignore_read_receipt(object()) is None
+
+
+def test_distill_decide_accepts_homophone_alias(memory_tree, monkeypatch):
+    """「题 1」作「提 1」的同音别名（2026-09-18 实测：用户发「题 1」
+    被当普通文本吞进日记，审批静默丢失——输入法同音字是常态）。"""
+    from scripts.dispatch import distill as distill_module
+
+    calls = []
+    monkeypatch.setattr(
+        distill_module,
+        "decide_by_index",
+        lambda tree, num, accept, **kw: calls.append((num, accept)) or (True, "已收进 wiki"),
+    )
+    bridge = _bridge(memory_tree)
+    feedback = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat_id, text: feedback.append(text)
+    )
+    event = _event("m-alias", "text", {"text": "题 1"})
+    event.event.message.chat_id = "oc_demo_chat"
+    bridge.handle_event(event)
+
+    assert calls == [(1, True)]
+    assert feedback and "已收进 wiki" in feedback[0]
+    # 别名命中即审批，不再被吞进日记
+    from datetime import datetime
+
+    diary = memory_tree.notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}.md"
+    assert not diary.exists() or "题 1" not in diary.read_text(encoding="utf-8")
