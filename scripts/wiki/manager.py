@@ -8,7 +8,9 @@
 - 手工提炼条目：frontmatter 需 created / source / from（from 归一化后
   非空且指向仍存在的 memory 笔记）+ 正文至少一条指向其他已存在 wiki
   条目的 wikilink；
-- 摘录卡（``type: Excerpt``，划重点清单人工勾中后由机器创建）：
+- 摘录卡（``type: Excerpt``；两个来源：划重点清单人工勾中机器转记、
+  distill 机器起草人工「提」批——均按 OKF v0.2 轻量层带
+  status/verified/sources，2026-09-18 格式统一裁决）：
   需 type / title / from 非空且 from 指向仍存在的 memory 笔记
   （勾选自哪份清单）；豁免互链——文献笔记的互链义务在日后提炼出的
   concept 卡身上（concept 卡互链回摘录卡）；

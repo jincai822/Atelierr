@@ -152,7 +152,9 @@ class HighlightsDispatcher:
             filename = self._card_filename(key, title)
             body = self._build_card_body(note_path.stem, post.content, match, title, page)
             try:
-                self._write_excerpt_card(filename, title, note_path.stem, page, body)
+                self._write_excerpt_card(
+                    filename, title, note_path, page, body
+                )
             except FileExistsError:
                 # 同名卡片已存在（状态丢失后的重跑）：视为已转记
                 pass
@@ -161,12 +163,20 @@ class HighlightsDispatcher:
             report["created"].append(filename)
 
     def _write_excerpt_card(
-        self, filename: str, title: str, checklist_stem: str, page: int, body: str
+        self, filename: str, title: str, checklist_path: Path, page: int, body: str
     ) -> None:
         """在 wiki/ 根层原子创建摘录卡（撞名抛 FileExistsError，绝不覆盖）。
 
         卡片不进 sidecar 索引、不参与 decay——勾选即沉淀为永久资产。
+        frontmatter 与 distill 的 OKF v0.2 轻量层对齐（2026-09-18 格式
+        统一裁决）：勾选 = 人工批准，故建卡即 status: stable + verified。
         """
+        checklist_stem = checklist_path.stem
+        try:
+            checklist_rel = str(checklist_path.relative_to(self.tree.notes_dir))
+        except ValueError:
+            checklist_rel = checklist_path.name
+        now = datetime.now(timezone.utc).isoformat()
         wiki_dir = Path(self.tree.notes_dir) / self.wiki_dirname
         wiki_dir.mkdir(parents=True, exist_ok=True)
         target = wiki_dir / filename
@@ -176,9 +186,19 @@ class HighlightsDispatcher:
             "type": EXCERPT_TYPE,
             "title": title,
             "from": f"[[{checklist_stem}]]",
-            "created": datetime.now(timezone.utc).isoformat(),
+            "created": now,
             "source": PROMOTED_SOURCE,
             "tags": [ITEM_TAG],
+            "status": "stable",  # 勾选即批准（draft 态只属于 distill 送审流）
+            "generated": {"by": "atelierr-highlights/1.0", "at": now},
+            "verified": [{"by": "human:cj1024", "at": now}],
+            "sources": [
+                {
+                    "id": checklist_stem,
+                    "resource": checklist_rel,
+                    "title": checklist_stem,
+                }
+            ],
         }
         if page:
             metadata["page"] = page

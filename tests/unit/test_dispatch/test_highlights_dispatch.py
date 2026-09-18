@@ -85,6 +85,12 @@ def test_ticked_item_becomes_excerpt_card(memory_tree):
     assert post["page"] == 3
     assert post["created"]
     assert post["tags"] == ["划重点"]
+    # OKF v0.2 轻量层（2026-09-18 与 distill 格式统一）：勾选即批准
+    assert post["status"] == "stable"
+    assert post["verified"][0]["by"] == "human:cj1024"
+    assert post["generated"]["by"] == "atelierr-highlights/1.0"
+    assert post["sources"][0]["id"] == "划重点-测试书-abc123"
+    assert post["sources"][0]["resource"].endswith(".md")
     assert "[[划重点-测试书-abc123]]" in post.content
     assert "第 3 页" in post.content
     assert "- 内容：甲是什么" in post.content
