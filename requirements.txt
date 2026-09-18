@@ -4,16 +4,10 @@ pyyaml>=6.0
 watchdog>=2.1.0
 python-frontmatter>=1.0.0
 
-# OCR（图片处理）
-# GPU 用户换装 GPU 版（同版本号，官方 cu126 源；2026-09-16 实测可用）：
-#   pip uninstall paddlepaddle && pip install paddlepaddle-gpu==3.3.1 \
-#       --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
-# 注意：torch 2.13 依赖 nvidia-nccl-cu13==2.29.7，paddle 会拉 cu12 旧版
-# 顶掉它导致 torch 加载失败，换装后需 pip install --force-reinstall --no-deps
-# nvidia-nccl-cu13==2.29.7 修复（详见 config/processors.yaml.example image 节）
-# 扫描件 PDF 的书版式结构化重建另需 paddlex 扩展：pip install "paddlex[ocr]"
-paddlepaddle>=2.5.0
-paddleocr>=2.6.0
+# OCR（图片/PDF/扫描件；2026-09-19 用户裁决：MinerU 4.0 全面替换
+# PaddleOCR/rapidocr——mineru server 托管模型，首用需
+# mineru-kit models download --tier standard）
+mineru>=4.0.0
 pillow>=9.0.0
 
 # 视频处理
@@ -48,3 +42,4 @@ tomli>=2.0.0; python_version < '3.11'
 
 # 飞书机器人桥（可选；长连接收消息 + 卡片推送，见 scripts/dispatch/feishu.py）
 lark-oapi>=1.7.0
+mineru>=4.0.0

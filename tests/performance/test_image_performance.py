@@ -27,7 +27,7 @@ def test_image_ocr_performance():
     assert elapsed < 5.0, f"单张 OCR 耗时 {elapsed:.2f}s >= 5s"
 
 
-def test_rapidocr_fullpage_under_5s(tmp_path):
+def test_mineru_fullpage_under_15s(tmp_path):
     """RapidOCR 整页扫描 < 5s（backlog 的 5s 路径验收；实测 ~0.8s）。"""
     import fitz  # 延迟导入，仅为提取扫描页图片
 
@@ -43,7 +43,7 @@ def test_rapidocr_fullpage_under_5s(tmp_path):
     fullpage = tmp_path / "fullpage.png"
     pix.save(str(fullpage))
 
-    processor = ImageProcessor(config={"engine": "rapidocr"})
+    processor = ImageProcessor(config={"engine": "mineru"})
     start = time.monotonic()
     result = processor.process(str(fullpage))
     elapsed = time.monotonic() - start

@@ -25,7 +25,7 @@
 
 原因:
   - Flatnotes 是现成的（开源）
-  - PaddleOCR 是现成的（开源）
+  - OCR 引擎是现成的（开源；2026-09-19 起为 MinerU 4.0，替换 PaddleOCR）
   - Whisper 是现成的（开源）
   - 我们只需要写胶水代码！
 ```
@@ -55,7 +55,7 @@ Atelierr/
 │   │
 │   ├── processors/                 ← 模块 3: 输入处理（独立开发）
 │   │   ├── base.py                 ← 基类（先写这个）
-│   │   ├── image.py                ← 图片处理（调用 PaddleOCR）
+│   │   ├── image.py                ← 图片处理（调用 MinerU）
 │   │   ├── video.py                ← 视频处理（调用 Whisper）
 │   │   ├── pdf.py                  ← PDF 处理（调用 PyMuPDF）
 │   │   ├── audio.py                ← 音频处理
@@ -164,7 +164,7 @@ Day 1: 框架
   scripts/processors/base.py      # 基类接口
   
 Day 2: 图片处理（最简单）
-  scripts/processors/image.py     # 调用 PaddleOCR
+  scripts/processors/image.py     # 调用 MinerU（2026-09-19 前为 PaddleOCR）
   
 Day 3-4: 视频和 PDF
   scripts/processors/video.py     # 调用 Whisper + ffmpeg
@@ -193,7 +193,7 @@ Day 5: 其他
    - 移动端支持
    → 只需配置和部署（2小时）
 
-✅ PaddleOCR (现成的)
+✅ MinerU 4.0（2026-09-19 用户裁决替换 PaddleOCR）
    - 中文 OCR 识别
    - 高准确率
    → 只需调用 API（半天）
@@ -323,12 +323,12 @@ Week 2 (3-5天, 可选):
 
 ```python
 上午 (2-3小时):
-  安装 PaddleOCR:
-  pip install paddleocr
+  安装 OCR 引擎（现为 MinerU 4.0）:
+  pip install mineru
   
   实现图片处理:
   scripts/processors/image.py
-  # 调用 PaddleOCR API
+  # 调用 MinerU（mineru server）API
   # 生成 Markdown
 
 下午 (2-3小时):

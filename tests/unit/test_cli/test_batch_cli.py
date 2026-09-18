@@ -21,7 +21,7 @@ def test_extension_map_routing():
 
 
 def _prepare_input(tmp_path, fixtures_dir):
-    """输入目录：一张真实图片（rapidocr 引擎，快）。"""
+    """输入目录：一张真实图片（mineru 引擎）。"""
     input_dir = tmp_path / "in"
     input_dir.mkdir()
     shutil.copy(fixtures_dir / "test_image.jpg", input_dir / "shot.jpg")
@@ -34,7 +34,7 @@ def test_batch_success(tmp_path, fixtures_dir):
     output_dir = tmp_path / "out"
 
     result = CliRunner().invoke(
-        BatchCLI(config={"engine": "rapidocr"}).cli,
+        BatchCLI(config={"engine": "mineru"}).cli,
         ["--input-dir", str(input_dir), "--output-dir", str(output_dir)],
     )
 
@@ -51,7 +51,7 @@ def test_batch_failure_does_not_abort(tmp_path, fixtures_dir):
     output_dir = tmp_path / "out"
 
     result = CliRunner().invoke(
-        BatchCLI(config={"engine": "rapidocr"}).cli,
+        BatchCLI(config={"engine": "mineru"}).cli,
         ["--input-dir", str(input_dir), "--output-dir", str(output_dir)],
     )
 
@@ -92,7 +92,7 @@ def test_batch_workers_option(tmp_path, fixtures_dir):
     output_dir = tmp_path / "out"
 
     result = CliRunner().invoke(
-        BatchCLI(config={"engine": "rapidocr"}).cli,
+        BatchCLI(config={"engine": "mineru"}).cli,
         [
             "--input-dir",
             str(input_dir),
@@ -110,7 +110,7 @@ def test_batch_workers_option(tmp_path, fixtures_dir):
 def test_batch_main_success_returns_zero(tmp_path, fixtures_dir):
     """main() 成功路径返回 0。"""
     input_dir = _prepare_input(tmp_path, fixtures_dir)
-    code = BatchCLI(config={"engine": "rapidocr"}).main(
+    code = BatchCLI(config={"engine": "mineru"}).main(
         ["--input-dir", str(input_dir), "--output-dir", str(tmp_path / "out")]
     )
     assert code == 0

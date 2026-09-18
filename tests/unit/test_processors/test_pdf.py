@@ -43,11 +43,11 @@ def test_pdf_performance(pdf_text):
 def test_pdf_scanned(pdf_scanned):
     """扫描版 PDF：无文字层但 success，图片 OCR 路径生效。
 
-    用 rapidocr 引擎（整页扫描 CPU 实测 ~0.8s/页，远快于 paddle 的 12-14s），
+    用 mineru 引擎（2026-09-19 换引擎；实测整页扫描 ~3.4s/页），
     同时覆盖 PDFProcessor 的 ocr_engine 透传；默认 paddle 引擎由
     test_pdf_with_images 覆盖。
     """
-    processor = PDFProcessor(config={"ocr_engine": "rapidocr"})
+    processor = PDFProcessor(config={"ocr_engine": "mineru"})
     result = processor.process(str(pdf_scanned))
 
     assert result.success, result.error

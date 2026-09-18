@@ -1,0 +1,21 @@
+# Atelierr MinerU 文档解析服务（2026-09-19 用户裁决：OCR 全面换 MinerU 4.0）
+#
+# mineru server 以后台 daemon 形态运行（Type=oneshot + RemainAfterExit）；
+# 首次部署需先下载模型：mineru-kit models download --tier standard
+
+[Unit]
+Description=Atelierr MinerU document parse server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-%h/.config/atelierr/env
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr/bin/mineru server start
+ExecStop=/srv/workspaces/Atelierr/.venv-atelierr/bin/mineru server stop
+StandardOutput=append:%h/atelierr-data/state/logs/mineru.log
+StandardError=append:%h/atelierr-data/state/logs/mineru.log
+
+[Install]
+WantedBy=default.target

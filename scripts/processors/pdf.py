@@ -41,7 +41,7 @@ class PDFProcessor(BaseProcessor):
         super().__init__(config)
         self.ocr_images = bool(self.config.get("ocr_images", True))
         self.generate_toc = bool(self.config.get("generate_toc", True))
-        self.ocr_engine = str(self.config.get("ocr_engine", "paddleocr"))
+        self.ocr_engine = str(self.config.get("ocr_engine", "mineru"))
         self._image_processor: Optional[ImageProcessor] = None
 
     def _get_image_processor(self) -> ImageProcessor:
@@ -103,10 +103,28 @@ class PDFProcessor(BaseProcessor):
                 image_index += 1
 
         text = "\n".join(pages_text)
-        markdown = self._build_markdown(path, pages_text, document, images)
+        scanned_fallback = False
+        if len(text.strip()) < 20 and self.ocr_engine == "mineru":
+            # 纯扫描件整档兜底（2026-09-19 用户裁决：OCR 换 MinerU）：无文字层
+            # 的 PDF 整档交给 MinerU——版面结构一并解析（书籍流的家门口，
+            # 此前这类文件直接被拒收「无可提取文字」）
+            from scripts.processors.mineru_cli import parse_document
+
+            markdown = parse_document(
+                path,
+                tier=str(self.config.get("mineru_tier", "basic")),
+                wait_s=int(self.config.get("mineru_wait_s", 600)),
+                timeout_s=float(self.config.get("mineru_timeout_s", 900)),
+                pages=str(self.config.get("mineru_pages", "all")),
+            )
+            text = markdown
+            scanned_fallback = True
+        else:
+            markdown = self._build_markdown(path, pages_text, document, images)
         images_processed = len(images)
         metadata: Dict[str, Any] = {
-            "engine": "pymupdf",
+            "engine": "mineru" if scanned_fallback else "pymupdf",
+            "scanned_fallback": scanned_fallback,
             "page_count": page_count,
             "ocr_images": self.ocr_images,
             "images_total": images_total,

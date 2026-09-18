@@ -2,24 +2,20 @@
 
 processors:
   image:
-    engine: paddleocr     # paddleocr（默认）/ rapidocr（onnxruntime，已实现：
-                          # 安装体积小一个数量级、无需 paddlepaddle；整页扫描
-                          # CPU 实测 ~0.8s/页 vs paddle 12-14s，扫描件多时用 rapidocr）
-                          # / feishu（飞书云端 OCR，不占本机算力；注意：图片会
-                          # 上传到飞书云端识别，敏感截图勿用此引擎——凭证走
-                          # FEISHU_APP_ID/SECRET 环境变量）
+    engine: mineru      # mineru（默认，2026-09-19 用户裁决：MinerU 4.0 全面
+                          # 替换 PaddleOCR/rapidocr；本机 mineru server 托管模型，
+                          # 首用：mineru server start + mineru-kit models download
+                          # --tier standard）/ feishu（飞书云端 OCR，不占本机
+                          # 算力；注意：图片会上传到飞书云端识别，敏感截图勿用
+                          # 此引擎——凭证走 FEISHU_APP_ID/SECRET 环境变量）
+    mineru_tier: basic    # 解析档位 flash/basic/standard/advanced；
+                          # basic 实测：截图 ~2.4s、扫描页 ~3.4s
+    mineru_wait_s: 300    # 服务侧等待解析完成的秒数上限
     lang: ch              # ch / en
-    use_gpu: false      # true 需 GPU 版 paddle：pip uninstall paddlepaddle &&
-                        # pip install paddlepaddle-gpu==3.3.1 --extra-index-url
-                        # https://www.paddlepaddle.org.cn/packages/stable/cu126/
-                        #（2026-09-16 实测：GPU 版与 torch 2.13 共存需
-                        # nvidia-nccl-cu13==2.29.7 压过 paddle 拉的 cu12 版，
-                        # 否则 torch 加载失败；enable_mkldnn=False 仅影响 CPU）
-    timeout_s: 5          # 软目标：截图类 < 5s；paddle 整页扫描图 CPU 实测 12-14s
-                          # （对齐 docs/ACCEPTANCE-CRITERIA.md 性能表），实现不做硬中断
-    # 实现注记：paddlepaddle 3.3.1 + paddleocr 3.x 的 MKLDNN 推理路径会崩溃
-    # （NotImplementedError: ConvertPirAttribute2RuntimeAttribute），
-    # image.py 构造 PaddleOCR 时固定 enable_mkldnn=False，勿改
+    use_gpu: true         # mineru server 自行调度 GPU（MinerU2.5-Pro 1.2B
+                          # GGUF 可 GPU 推理；与 whisper 错时运行）
+    timeout_s: 5          # 软目标：截图类 < 5s（mineru basic 实测 ~2.4s 达标；
+                          # 对齐 docs/ACCEPTANCE-CRITERIA.md 性能表），实现不做硬中断
 
   pdf:
     engine: pymupdf

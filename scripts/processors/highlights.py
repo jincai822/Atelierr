@@ -428,21 +428,25 @@ class HighlightsProcessor(BaseProcessor):
             if self.structure_factory is not None:
                 self._structure = self.structure_factory()
             else:
-                from paddleocr import PPStructureV3
+                try:
+                    from paddleocr import PPStructureV3
+                except ImportError:  # 2026-09-19 OCR 换 MinerU：paddle 已退役
+                    PPStructureV3 = None
 
-                use_gpu = bool(load_processor_config("image").get("use_gpu"))
-                # 只留 版面检测+OCR+阅读顺序；表格/公式/印章等子模型全关
-                #（书稿场景用不上，省下加载时间与显存）
-                self._structure = PPStructureV3(
-                    device="gpu:0" if use_gpu else "cpu",
-                    use_doc_orientation_classify=False,
-                    use_doc_unwarping=False,
-                    use_textline_orientation=False,
-                    use_table_recognition=False,
-                    use_formula_recognition=False,
-                    use_chart_recognition=False,
-                    use_seal_recognition=False,
-                )
+                if PPStructureV3 is not None:
+                    use_gpu = bool(load_processor_config("image").get("use_gpu"))
+                    # 只留 版面检测+OCR+阅读顺序；表格/公式/印章等子模型全关
+                    #（书稿场景用不上，省下加载时间与显存）
+                    self._structure = PPStructureV3(
+                        device="gpu:0" if use_gpu else "cpu",
+                        use_doc_orientation_classify=False,
+                        use_doc_unwarping=False,
+                        use_textline_orientation=False,
+                        use_table_recognition=False,
+                        use_formula_recognition=False,
+                        use_chart_recognition=False,
+                        use_seal_recognition=False,
+                    )
         except Exception:  # noqa: BLE001 - 引擎不可用退回纯文本路径
             self._structure = None
         return self._structure

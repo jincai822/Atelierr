@@ -489,12 +489,12 @@ pytest tests/integration/test_web_integration.py -v
 ```python
 ✅ 必须实现:
   - 支持 JPG, PNG, WEBP 格式
-  - OCR 文字提取（PaddleOCR）
+  - OCR 文字提取（MinerU 4.0，2026-09-19 用户裁决替换 PaddleOCR）
   - 生成 Markdown 格式输出
   - 保留原图链接
   
 ✅ 性能要求:
-  - 截图类图片处理 < 5s；整页扫描图 ≤ 15s（CPU 实测 12-14s）
+  - 截图类图片处理 < 5s（MinerU basic 实测 ~2.4s）；整页扫描图 ≤ 15s（实测 ~3.4s）
   - 批量处理支持并行
 ```
 
@@ -970,8 +970,8 @@ pytest --cov=scripts --cov-report=html --cov-report=term
 搜索（1000笔记）          | < 100ms    | test_search_performance
 计算 Confidence          | < 10ms     | test_confidence_performance
 衰减扫描（1000笔记）      | < 5s       | test_decay_performance
-图片 OCR                 | 截图类 < 5s；整页扫描 ≤ 15s（CPU 实测 12-14s） | test_image_ocr_performance
-扫描件 PDF OCR（2026-09-16 裁决 C） | GPU 实测 ~1.3s/页；200 页上限内整本约 4.5 分钟（含 LLM 代读）；CPU 约 12-14s/页不建议整本 | test_scanned_pdf_ocr_fallback（假引擎验路径，真实耗时为人工实测）
+图片 OCR（MinerU 4.0）   | 截图类 < 5s（实测 ~2.4s）；整页扫描 ≤ 15s（实测 ~3.4s） | test_image_ocr_performance
+扫描件 PDF OCR（2026-09-19 MinerU 整档兜底） | MinerU basic 实测 ~3.4s/页；纯扫描 PDF 无文字层时整档走 MinerU（版面结构一并解析），不再拒收「无可提取文字」 | test_scanned_pdf_ocr_fallback（假引擎验路径，真实耗时为人工实测）
 PDF 处理（10页）          | < 30s      | test_pdf_processing_performance
 视频转文字（1分钟）       | < 60s      | test_video_transcribe_performance
 Cognition（10000条）      | 记录 list/reindex/validate 耗时；v1.1 不设硬阈值 | test_cognition_capacity_correctness_at_10000_entries

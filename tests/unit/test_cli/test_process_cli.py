@@ -11,7 +11,7 @@ def test_process_image_to_output_file(tmp_path, fixtures_dir):
     """image 子命令 --output：写入 markdown，exit 0。"""
     output = tmp_path / "out" / "shot.md"
     result = CliRunner().invoke(
-        ProcessCLI(config={"engine": "rapidocr"}).cli,
+        ProcessCLI(config={"engine": "mineru"}).cli,
         ["image", str(fixtures_dir / "test_image.jpg"), "--output", str(output)],
     )
 
@@ -23,7 +23,7 @@ def test_process_image_to_output_file(tmp_path, fixtures_dir):
 def test_process_image_to_stdout(fixtures_dir):
     """无 --output：markdown 打印到 stdout。"""
     result = CliRunner().invoke(
-        ProcessCLI(config={"engine": "rapidocr"}).cli,
+        ProcessCLI(config={"engine": "mineru"}).cli,
         ["image", str(fixtures_dir / "test_image.jpg")],
     )
 
@@ -68,7 +68,7 @@ def test_process_audio_with_model_option(tmp_path, monkeypatch, fixtures_dir):
 
 def test_main_entry_return_codes(tmp_path, fixtures_dir):
     """main()：成功 0 / 失败 1。"""
-    ok = ProcessCLI(config={"engine": "rapidocr"}).main(
+    ok = ProcessCLI(config={"engine": "mineru"}).main(
         [
             "image",
             str(fixtures_dir / "test_image.jpg"),
