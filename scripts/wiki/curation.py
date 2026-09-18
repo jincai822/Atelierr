@@ -34,7 +34,12 @@ _LLM_DEFAULT_BASE_URL = "https://api.deepseek.com"
 _LLM_DEFAULT_MODEL = "deepseek-v4-flash"
 _LLM_KEY_ENV = "DEEPSEEK_API_KEY"
 
-#: 主题页目录（wiki/ 下）
+#: 压缩层目录名（2026-09-18 三层结构裁决：原料层 memory/<类目>/ ｜
+#: 压缩层 memory/distilled/ ｜ 知识层 memory/wiki/；NOTE_EXCLUDED_DIRS 成员，
+#: 与 wiki 同级豁免记忆扫描/衰减/搜索——机器压缩品有自己的保鲜机制）
+DISTILLED_DIRNAME = "distilled"
+
+#: 主题页目录（压缩层下）
 TOPICS_DIRNAME = "topics"
 
 #: 中图法分类标签（C93-管理·领导 / B2-中国哲学 / TP391-… 形态）

@@ -6,7 +6,8 @@
 1. processors/highlights 产出的清单笔记（``source: highlights``，
    标签"划重点"）里，每条候选是一个 ``- [ ]`` 复选框；
 2. 人在 Obsidian 里把想要的勾成 ``- [x]``；
-3. 本模块下一轮扫描发现新勾项，为其在 wiki/ 根层建一张摘录卡
+3. 本模块下一轮扫描发现新勾项，为其在压缩层 ``distilled/``
+   根层建一张摘录卡（2026-09-18 三层结构裁决：机器压缩品不进 wiki/）
    （``type: Excerpt``，``from`` 指回清单 + 页码，``source: highlight``
    单数），内容含候选详情与来源双链——勾选即沉淀，不再经 memory/
    待确认笔记中转（2026-09-06 方案③：摘录卡 = Zettelkasten 文献笔记，
@@ -44,7 +45,8 @@ from scripts.dispatch.sysdir import SYSTEM_DIRNAME
 from scripts.utils.state_store import read_json, write_json
 from scripts.memory.core import MemoryTree
 from scripts.wiki import curation
-from scripts.wiki.manager import EXCERPT_TYPE, WIKI_DIRNAME
+from scripts.wiki.curation import DISTILLED_DIRNAME
+from scripts.wiki.manager import EXCERPT_TYPE
 
 #: 清单笔记的 source 值（复数；todos 分发按此跳过）
 CHECKLIST_SOURCE = "highlights"
@@ -67,20 +69,22 @@ _LAYERS = ("short-term", "mid-term", "long-term")
 
 
 class HighlightsDispatcher:
-    """扫描划重点清单笔记，把新勾中的候选转为 wiki/ 摘录卡。
+    """扫描划重点清单笔记，把新勾中的候选转为压缩层摘录卡。
 
     Attributes:
         tree: MemoryTree 实例（只借它定位库根与清单笔记）。
-        wiki_dirname: 库根下的 wiki 子目录名（默认 ``wiki``）。
+        distilled_dirname: 库根下的压缩层子目录名（默认 ``distilled``；
+            参数名沿用旧的 wiki_dirname 形状，调用方不传即可）。
         state_path: 勾项转记状态文件（processed_highlights.json）。
     """
 
-    def __init__(self, tree: MemoryTree, wiki_dirname: str = WIKI_DIRNAME) -> None:
+    def __init__(self, tree: MemoryTree, wiki_dirname: str = DISTILLED_DIRNAME) -> None:
         """初始化。
 
         Args:
             tree: MemoryTree 实例。
-            wiki_dirname: 库根下的 wiki 子目录名。
+            wiki_dirname: 库根下的压缩层子目录名（2026-09-18 三层结构后
+                默认 ``distilled``；保留旧参数名以免打断既有调用）。
         """
         self.tree = tree
         self.wiki_dirname = wiki_dirname
@@ -164,16 +168,16 @@ class HighlightsDispatcher:
                 # index.md 导航 / log.md 日志 / topics 主题页——全部幂等
                 book = post.metadata.get("book") or {}
                 curation.update_index(
-                    Path(self.tree.notes_dir) / self.wiki_dirname,
+                    Path(self.tree.notes_dir) / DISTILLED_DIRNAME,
                     filename,
                     title,
                     f"划重点勾选自 {note_path.stem}",
                 )
                 curation.append_log(
-                    Path(self.tree.notes_dir) / self.wiki_dirname, filename, title
+                    Path(self.tree.notes_dir) / DISTILLED_DIRNAME, filename, title
                 )
                 curation.update_topic_page(
-                    Path(self.tree.notes_dir) / self.wiki_dirname,
+                    Path(self.tree.notes_dir) / DISTILLED_DIRNAME,
                     card_stem=Path(filename).stem,
                     card_title=title,
                     description=f"划重点勾选自 {note_path.stem}",
@@ -200,7 +204,7 @@ class HighlightsDispatcher:
         except ValueError:
             checklist_rel = checklist_path.name
         now = datetime.now(timezone.utc).isoformat()
-        wiki_dir = Path(self.tree.notes_dir) / self.wiki_dirname
+        wiki_dir = Path(self.tree.notes_dir) / DISTILLED_DIRNAME
         wiki_dir.mkdir(parents=True, exist_ok=True)
         target = wiki_dir / filename
         if target.exists():

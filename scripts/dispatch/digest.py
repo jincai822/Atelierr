@@ -7,7 +7,7 @@
 
 内容五节（wikilink 列表，点开即达）：
 - 待我确认：当前带"待确认"标签的笔记（摘除标签后次日自然消失）；
-- 提炼候选：从未提炼进 wiki/ 且值得动笔的笔记，两路汇合——
+- 提炼候选：从未提炼（进压缩层 distilled/）且值得动笔的笔记，两路汇合——
   ①被反复推送（≥2 次，ResponseProbe 推算）仍未提炼；
   ②已确认且创建满 DISTILL_MIN_AGE_DAYS 天（"沉一沉再提炼"）。
   日报/控制台/摘要/划重点清单/待确认/待办不算候选；最多列
@@ -18,7 +18,7 @@
 - 待办进行中：当前带"待办"标签的笔记；
 - 今日复习：遗忘临界区内的笔记（ResurfaceManager，decay 的反面；
   检索式推送——只列标题，提示"先回忆再点开"，点开看一眼即重置时钟，
-  确认无价值的留给 review→purge，值得留存的提炼进 wiki/）；
+  确认无价值的留给 review→purge，值得留存的提炼进压缩层）；
 - 昨日新入库：frontmatter created 日期为昨天的笔记（附入口分布一行，
   捕获统计见 scripts/dispatch/stats.py）；
 - 本周捕获统计（仅周日）：近 7 天各入口捕获条数、确认率、wiki 沉淀数
@@ -239,7 +239,9 @@ class DigestDispatcher:
         # 的 stable 卡点名——复查与顺延是人的动作，机器只点名不改卡
         from scripts.wiki import curation
 
-        stale_wiki = curation.list_stale_cards(Path(self.tree.notes_dir) / "wiki", today)
+        stale_wiki = curation.list_stale_cards(
+            Path(self.tree.notes_dir) / curation.DISTILLED_DIRNAME, today
+        )
         stale_wiki_lines = [
             f"- [[{stem}]]（{date} 到期）：还准就把 stale_after 往后改半年"
             for stem, _title, date in stale_wiki
@@ -462,13 +464,13 @@ class DigestDispatcher:
             # 不用自己动手写——安静一行，无草稿不出现
             sections += [
                 f"> ✍️ 机器已备好 {distill_draft_count} 张摘录卡草稿："
-                "回复「提 1」收进 wiki、「弃 1」跳过。",
+                "回复「提 1」收进压缩层、「弃 1」跳过。",
                 "",
             ]
         if undistilled:
             sections += [
                 "> 不用自己动手写：机器每天从候选里挑 1 条起草，",
-                "> 飞书回「提 N」收进 wiki、「弃 N」跳过。",
+                "> 飞书回「提 N」收进压缩层、「弃 N」跳过。",
                 "> 提炼后自动从本栏消失；不值得留的，留给 review→purge。",
                 "",
             ]
@@ -488,7 +490,7 @@ class DigestDispatcher:
         if review:
             sections += [
                 "> 检索练习：看着标题先想「它讲了什么」，再点开核对；",
-                "> 想不起来的，值得就提炼进 wiki/，不值得就留给 review→purge。",
+                "> 想不起来的，值得就提炼进压缩层，不值得就留给 review→purge。",
                 "",
             ]
         sections += [*_lines(review), ""]
@@ -545,7 +547,7 @@ def compute_distill_candidates(
     today: str,
     limit: int = MAX_DISTILL_CANDIDATES,
 ) -> List[str]:
-    """提炼候选：从未进 wiki 且值得动笔的笔记 stem（截断到上限）。
+    """提炼候选：从未进压缩层且值得动笔的笔记 stem（截断到上限）。
 
     三路汇合，去重后推送多的在前、其次被引用多的、最后最旧的在前：
     - 反复推送：ResponseProbe 累计推送 ≥MIN_PUSH_COUNT 次；

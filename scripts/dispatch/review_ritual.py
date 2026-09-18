@@ -31,7 +31,7 @@ from scripts.dispatch.feishu_io import send_feishu_card
 from scripts.dispatch.prompt import PromptStore
 from scripts.dispatch.stats import capture_stats
 from scripts.utils.state_store import read_json, write_json
-from scripts.wiki.manager import WIKI_DIRNAME
+from scripts.wiki.curation import DISTILLED_DIRNAME
 
 #: 会话类型前缀（与 Codex $weekly 的会话区分；桥按此前缀识别落盘）
 KIND_WEEKLY = "review-weekly"
@@ -112,17 +112,17 @@ def _stale_pending_count(tree) -> int:
 
 
 def _new_excerpt_cards(tree, days: int) -> Tuple[int, List[str]]:
-    """当期新增 wiki 摘录卡（按 frontmatter created 判），返回 (总数, 前5标题)。
+    """当期新增压缩层摘录卡（按 frontmatter created 判），返回 (总数, 前5标题)。
 
     2026-09-14 KM 评审 P1①：摘录卡勾中即沉底（不进任何回顾回路）是
     收藏谬误温床——回顾仪式点名提醒"提炼成自己话的概念卡"。
     """
-    wiki_dir = Path(tree.notes_dir) / WIKI_DIRNAME
-    if not wiki_dir.is_dir():
+    distilled_dir = Path(tree.notes_dir) / DISTILLED_DIRNAME
+    if not distilled_dir.is_dir():
         return 0, []
     cutoff = datetime.now().astimezone() - timedelta(days=days)
     seen: List[Tuple[str, str]] = []
-    for path in wiki_dir.glob("摘录-*.md"):
+    for path in distilled_dir.glob("摘录-*.md"):
         try:
             post = frontmatter.loads(path.read_text(encoding="utf-8"))
             created = datetime.fromisoformat(str(post.get("created") or ""))

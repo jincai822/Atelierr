@@ -415,6 +415,10 @@ pytest tests/performance/test_search_performance.py -v
 > 网页前端无关：任何外部写入者（Obsidian、Syncthing 落盘等）在共享
 > 平面目录写下的裸 markdown 都走同一份归一化。门类由
 > FlatnotesIntegration 更名为 `WebIntegration`。
+>
+> **2026-09-18 三层结构裁决**：机器压缩品（摘录卡/主题页）落
+> `memory/distilled/`（压缩层，带保鲜期）；`memory/wiki/` 只放人认证的
+> concept 卡、cognition、reflections（知识层，只增不改）。
 
 **功能要求**:
 

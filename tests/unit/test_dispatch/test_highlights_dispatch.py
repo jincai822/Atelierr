@@ -46,7 +46,7 @@ def _tick(tree, path, title):
 
 
 def _wiki_dir(tree):
-    return tree.notes_dir / "wiki"
+    return tree.notes_dir / "distilled"
 
 
 def _state(tree):

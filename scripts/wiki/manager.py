@@ -1,9 +1,12 @@
-"""wiki 沉淀层管理器：只读盘点与纪律校验，绝不改写任何笔记。
+"""知识层 wiki + 压缩层 distilled 管理器：只读盘点与纪律校验，绝不改写任何笔记。
 
-条目即 ``<库根>/wiki/*.md``（平面，无子目录；OKF 约定文件 index.md /
-log.md 与 topics/ 主题页是机器自留地，豁免盘点与校验）。与 memory 的关系：
-单向引用——wiki 条目用 frontmatter ``from`` 指向它提炼自的 memory
-笔记（wikilink 或纯 stem）；memory 机制完全不知道 wiki 的存在。
+三层结构（2026-09-18 用户裁决）：原料层 ``memory/<类目>/``（原文）、
+压缩层 ``memory/distilled/``（机器浓缩品：摘录卡+主题页，有保鲜期）、
+知识层 ``memory/wiki/``（人认证：concept 卡、cognition、reflections，
+只增不改）。本管理器覆盖后两层：wiki 条目按 concept 纪律校验，
+distilled 条目按摘录卡纪律校验；``from`` 单向指回原料层（memory
+机制完全不知道这两层的存在）。OKF 约定文件（index.md/log.md/topics/）
+是机器自留地，豁免盘点与校验。
 
 三 schema 条目（2026-09-06 方案 C 并入 legacy 卡；同日方案③加摘录卡）：
 - 手工提炼条目：frontmatter 需 created / source / from（from 归一化后
@@ -32,6 +35,7 @@ from typing import Any, Dict, List, Optional, Set
 import frontmatter
 
 from scripts.memory.core import SYSTEM_DIRNAME, MemoryTree
+from scripts.wiki.curation import DISTILLED_DIRNAME
 
 WIKI_DIRNAME = "wiki"  # 库根下的沉淀层子目录名（memory.yaml 可覆盖）
 
@@ -83,6 +87,7 @@ class WikiManager:
         """
         self.tree = memory_tree
         self.wiki_dir = Path(memory_tree.notes_dir) / dirname
+        self.distilled_dir = Path(memory_tree.notes_dir) / DISTILLED_DIRNAME
 
     @classmethod
     def from_config(
@@ -121,13 +126,27 @@ class WikiManager:
             if path.name not in OKF_CONVENTION_FILES
         ]
 
+    def distilled_entries(self) -> List[Dict[str, Any]]:
+        """盘点压缩层条目（distilled/*.md；OKF 约定文件豁免；目录缺失返回空）。"""
+        if not self.distilled_dir.is_dir():
+            return []
+        return [
+            self._entry(path)
+            for path in sorted(self.distilled_dir.glob("*.md"))
+            if path.name not in OKF_CONVENTION_FILES
+        ]
+
     def validate(self) -> List[Dict[str, Any]]:
         """纪律校验：返回有问题的条目及原因（无问题返回空）。
+
+        知识层 wiki 条目按 concept 纪律（created/source/from+互链或
+        legacy/Excerpt 分支）；压缩层 distilled 条目按摘录卡纪律
+        （type/title/from 指向仍存在的原料层笔记）。
 
         Returns:
             List[Dict]: [{"stem": ..., "issues": [...]}]，只报告不改写。
         """
-        entries = self.entries()
+        entries = self.entries() + self.distilled_entries()
         wiki_stems = {entry["stem"] for entry in entries}
         # 根层笔记 + 系统/ 机器产物（划重点清单等；摘录卡 from 指向它们）
         memory_stems = {
@@ -192,8 +211,12 @@ class WikiManager:
         return sorted(stems - linked)
 
     def distilled_stems(self) -> Set[str]:
-        """已被提炼过的 memory 笔记 stem 集合（所有条目的 from 并集）。"""
-        return {entry["from"] for entry in self.entries() if entry["from"]}
+        """已被提炼过的 memory 笔记 stem 集合（知识层+压缩层条目的 from 并集）。"""
+        return {
+            entry["from"]
+            for entry in self.entries() + self.distilled_entries()
+            if entry["from"]
+        }
 
     def stats(self) -> Dict[str, int]:
         """总条目数 / 孤儿数 / 待修数 / 已提炼来源数。"""

@@ -146,7 +146,7 @@ def test_write_answers_appends_new_answers(memory_tree):
 
 def test_weekly_intro_names_new_excerpt_cards(memory_tree):
     """周回顾摘要点名本期新勾摘录卡（KM 评审 P1① 防收藏谬误）；老卡不出现。"""
-    wiki = Path(memory_tree.notes_dir) / "wiki"
+    wiki = Path(memory_tree.notes_dir) / "distilled"
     wiki.mkdir()
     now_iso = datetime.now().astimezone().isoformat(timespec="seconds")
     old_iso = (datetime.now().astimezone() - timedelta(days=30)).isoformat(timespec="seconds")

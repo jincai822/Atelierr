@@ -918,7 +918,7 @@ class FeishuBridge:
         if good:
             msg = f"✅ 好，它{state['interval']:.0f} 天后再来见你"
         else:
-            msg = "❌ 收到，近期再来看一眼；值得就提炼进 wiki，不值得留给 decay"
+            msg = "❌ 收到，近期再来看一眼；值得就提炼进压缩层，不值得留给 decay"
         self._send_feedback(chat_id, f"{msg}：{filename}")
         if batch:
             remaining = [item for item in batch if item != filename]
@@ -1328,7 +1328,7 @@ class FeishuBridge:
                     "text": {
                         "tag": "lark_md",
                         "content": (
-                            f"{lines}\n\n周日挑 1 条提炼进 wiki"
+                            f"{lines}\n\n周日挑 1 条提炼进压缩层"
                             "（QuickAdd，五分钟）。"
                         ),
                     },
@@ -1679,7 +1679,7 @@ class FeishuBridge:
             return None
         distills = re.findall(r"(提|题|弃)\s*(\d{1,2})", text)
         if distills and re.fullmatch(r"(?:[提题弃]\s*\d{1,2}[，,、\s]*)*", text):
-            # 提炼草稿审批（2026-09-18 深加工链路）：「提 N」落 wiki、
+            # 提炼草稿审批（2026-09-18 深加工链路）：「提 N」落压缩层、
             # 「弃 N」跳过；与判断「批/略」同款多序号、倒序防位移。
             # 「题」作「提」的同音别名（2026-09-18 实测：用户发「题 1」
             # 被吞进日记、审批丢失——输入法同音字是常态不是手误）

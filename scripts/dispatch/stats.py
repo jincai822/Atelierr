@@ -113,19 +113,29 @@ def capture_stats(
 
 
 def _wiki_new_count(tree: MemoryTree, start: str, end_str: str) -> int:
-    """wiki/ 中 created 落在 (start, end] 的卡片数（沉淀数）。"""
-    wiki_dir = Path(tree.notes_dir) / "wiki"
-    if not wiki_dir.is_dir():
-        return 0
+    """压缩层+知识层中 created 落在 (start, end] 的卡片数（沉淀数）。
+
+    2026-09-18 三层结构裁决：沉淀主战场是压缩层 distilled/（摘录卡），
+    知识层 wiki/（concept 卡）计入同一指标；OKF 约定文件豁免。
+    """
+    from scripts.wiki.curation import DISTILLED_DIRNAME
+    from scripts.wiki.manager import OKF_CONVENTION_FILES
+
     count = 0
-    for path in wiki_dir.glob("*.md"):
-        try:
-            post = frontmatter.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+    for dirname in (DISTILLED_DIRNAME, "wiki"):
+        layer_dir = Path(tree.notes_dir) / dirname
+        if not layer_dir.is_dir():
             continue
-        created = str(post.get("created") or "")[:10]
-        if created and start < created <= end_str:
-            count += 1
+        for path in layer_dir.glob("*.md"):
+            if path.name in OKF_CONVENTION_FILES:
+                continue
+            try:
+                post = frontmatter.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            created = str(post.get("created") or "")[:10]
+            if created and start < created <= end_str:
+                count += 1
     return count
 
 
@@ -179,7 +189,7 @@ def render_weekly_stats(stats: Dict[str, Any]) -> List[str]:
         )
     else:
         lines.append("- 确认率：—（窗口内无机器产出）")
-    lines.append(f"- 沉淀进 wiki：{stats['wiki_new']} 张卡")
+    lines.append(f"- 沉淀（压缩层+知识层）：{stats['wiki_new']} 张卡")
     lines.append(f"- 本周遗忘（purge 进回收站）：{stats['purged']} 条")
     return lines
 

@@ -1,22 +1,25 @@
 """机器辅助提炼（深加工链路）：提炼候选 → LLM 起草 wiki 摘录卡 → 人批落库。
 
 定位（2026-09-18 用户裁决，采纳 Google OKF v0.2 格式骨架）：
-- 机器起草（每天 ≤1 张，防刷屏）→ 飞书送审 → 人「提」落 wiki/ 转
-  stable、「弃」永久跳过；机器绝不自动落 wiki——wiki 是无 purge 的
-  永久知识层，进门必须过人（"人类策展，LLM 维护"的 OKF 分工）；
+- 机器起草（每天 ≤1 张，防刷屏）→ 飞书送审 → 人「提」落压缩层
+  ``memory/distilled/``（2026-09-18 三层结构裁决：原料/压缩/知识分层，
+  机器压缩品不进知识层 wiki/）转
+  stable、「弃」永久跳过；机器绝不自动落卡——压缩层进门也必须
+  过人（"人类策展，LLM 维护"的 OKF 分工）；
 - 卡片 schema 采纳 OKF v0.2 轻量层：type/title/description/tags/
   status(draft→stable)/stale_after(默认 +180 天，到期进晨报复查)/
   generated/verified/sources，另保留兼容字段 from/created/source
-  （现有 WikiManager 校验与 distilled_stems 机制不动）；wiki/index.md
-  （导航）、wiki/log.md（变更日志）、wiki/topics/<主题>.md（主题页）
-  是 OKF 约定的机器自留地，统一由 scripts/wiki/curation.py 维护；
+  （现有 WikiManager 校验与 distilled_stems 机制不动）；
+  distilled/index.md（导航）、distilled/log.md（变更日志）、
+  distilled/topics/<主题>.md（主题页）是 OKF 约定的机器自留地，
+  统一由 scripts/wiki/curation.py 维护；
 - 候选来源与晨报同源（digest.compute_distill_candidates：反复推送/
   被引用/沉一沉三路汇合，全库只此一份口径）；
 - 草稿与弃稿名单记 ``<state_dir>/distill_drafts.json``。
 
 纪律（与 dispatch 各模块一致）：
-- 只新增卡片与 state，绝不改写/移动/删除既有笔记（wiki/index.md、
-  log.md 除外——OKF 约定的机器自留地）；
+- 只新增卡片与 state，绝不改写/移动/删除既有笔记（distilled/index.md、
+  log.md、topics/ 除外——OKF 约定的机器自留地）；
 - 幂等：同一 stem 同时只有一张待批草稿；已提炼（wiki 有 from 回链）
   自然退出候选；LLM 失败当日跳过（不补不炸，次日再来）；
 - 金句逐字校验（processors/link._verify_insights 同源）：编造的剔除，
@@ -261,14 +264,14 @@ def run(
         f"摘要：{draft['description']}\n\n核心主张：\n"
         + "\n".join(f"{i}. {p}" for i, p in enumerate(draft["points"], 1))
         + ("\n\n原文金句：\n" + "\n".join(f"「{q}」" for q in quotes) if quotes else "")
-        + f"\n\n来源：[[{stem}]]\n回复「提 {seq}」收进 wiki、「弃 {seq}」跳过"
+        + f"\n\n来源：[[{stem}]]\n回复「提 {seq}」收进压缩层、「弃 {seq}」跳过"
     )
     result = send_dispatch_notice("✍️ 提炼草稿待审", message)
     report["pushed"] = result.get("feishu", False)
     return report
 
 
-# ---------- 审批（「提 N」落 wiki /「弃 N」跳过）----------
+# ---------- 审批（「提 N」落压缩层 /「弃 N」跳过）----------
 
 
 def _safe_filename(title: str, wiki_dir: Path) -> str:
@@ -336,9 +339,9 @@ def decide_by_index(
 ) -> Tuple[bool, str]:
     """按当前待批列表序号审批提炼草稿（飞书「提 N」「弃 N」指令）。
 
-    「提」：在 wiki/ 根层落 OKF 摘录卡（status: stable + verified 记
-    操作人），维护 index.md/log.md，草稿出队——wiki 无 purge，落卡
-    即永久，进门必须过人（本函数是唯一入口）。
+    「提」：在压缩层 distilled/ 根层落 OKF 摘录卡（status: stable +
+    verified 记操作人），维护 index.md/log.md/主题页，草稿出队——
+    压缩层有保鲜期（stale_after），进门必须过人（本函数是唯一入口）。
     「弃」：草稿出队并把来源 stem 记入弃稿名单（不再提名）；来源
     笔记本身不动。
 
@@ -359,17 +362,17 @@ def decide_by_index(
             rejected.append(draft["source_stem"])
         _save_state(tree, state)
         return True, f"已跳过这张草稿：「{title}」（来源不再提名）"
-    wiki_dir = Path(tree.notes_dir) / "wiki"
-    wiki_dir.mkdir(parents=True, exist_ok=True)
-    filename = _safe_filename(title, wiki_dir)
-    (wiki_dir / filename).write_text(_compose_card(draft, actor), encoding="utf-8")
-    _update_index(wiki_dir, filename, title, str(draft.get("description") or ""))
-    _append_log(wiki_dir, filename, title)
+    distilled_dir = Path(tree.notes_dir) / curation.DISTILLED_DIRNAME
+    distilled_dir.mkdir(parents=True, exist_ok=True)
+    filename = _safe_filename(title, distilled_dir)
+    (distilled_dir / filename).write_text(_compose_card(draft, actor), encoding="utf-8")
+    _update_index(distilled_dir, filename, title, str(draft.get("description") or ""))
+    _append_log(distilled_dir, filename, title)
     try:
         # OKF 主题页（2026-09-18 全量采纳）：收录进 topics/<主题>.md 并
         # 刷新导读——增强工序，失败不阻塞审批回执
         curation.update_topic_page(
-            wiki_dir,
+            distilled_dir,
             card_stem=Path(filename).stem,
             card_title=title,
             description=str(draft.get("description") or ""),
@@ -379,4 +382,4 @@ def decide_by_index(
         print(f"[distill] topic page fail: {exc}", flush=True)
     state["drafts"].pop(draft["id"], None)
     _save_state(tree, state)
-    return True, f"已收进 wiki：「{title}」（{filename}）"
+    return True, f"已收进压缩层：「{title}」（distilled/{filename}）"

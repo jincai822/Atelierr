@@ -191,8 +191,8 @@ def test_decide_accept_creates_okf_card(memory_tree, llm_ok):
 
     ok, msg = decide_by_index(memory_tree, 1, accept=True, actor="human:test")
 
-    assert ok and "已收进 wiki" in msg
-    wiki_dir = memory_tree.notes_dir / "wiki"
+    assert ok and "已收进压缩层" in msg
+    wiki_dir = memory_tree.notes_dir / "distilled"
     cards = list(wiki_dir.glob("内核稳定*.md"))
     assert len(cards) == 1
     post = frontmatter.loads(cards[0].read_text(encoding="utf-8"))
@@ -258,7 +258,7 @@ def test_decide_bad_index(memory_tree, llm_ok):
 
 def test_safe_filename_collision_suffix(memory_tree, llm_ok):
     """同名卡不覆盖：第二张自动加 -2 后缀。"""
-    wiki_dir = memory_tree.notes_dir / "wiki"
+    wiki_dir = memory_tree.notes_dir / "distilled"
     wiki_dir.mkdir(parents=True, exist_ok=True)
     (wiki_dir / "内核稳定.md").write_text("既有卡", encoding="utf-8")
 
@@ -284,8 +284,8 @@ def test_feishu_ti_command_creates_card(memory_tree, llm_ok, monkeypatch):
 
     bridge.handle_event(event)
 
-    assert feedback and "已收进 wiki" in feedback[0]
-    assert list((memory_tree.notes_dir / "wiki").glob("内核稳定*.md"))
+    assert feedback and "已收进压缩层" in feedback[0]
+    assert list((memory_tree.notes_dir / "distilled").glob("内核稳定*.md"))
 
 
 def test_digest_shows_draft_count_line(memory_tree, llm_ok):

@@ -222,7 +222,7 @@ def test_digest_undistilled_excludes_distilled_and_gone(memory_tree, make_note):
     """已提炼（wiki 条目 from 引用）与已删除（purge）的笔记不进待提炼。"""
     make_note(memory_tree, "done.md", "已提炼", idle_days=30)
     _seed_probe(memory_tree, {"done.md": 3, "purged.md": 5})  # purged 无文件
-    wiki_dir = memory_tree.notes_dir / "wiki"
+    wiki_dir = memory_tree.notes_dir / "distilled"
     wiki_dir.mkdir(parents=True)
     (wiki_dir / "条目.md").write_text(
         "---\ncreated: '2026-09-01T09:00:00+08:00'\nsource: distilled\n"
@@ -238,7 +238,7 @@ def test_digest_undistilled_excludes_distilled_and_gone(memory_tree, make_note):
 
 def test_digest_surfaces_wiki_validate_issues(memory_tree, make_note):
     """wiki 体检：缺互链的条目在待提炼节末尾列出示。"""
-    wiki_dir = memory_tree.notes_dir / "wiki"
+    wiki_dir = memory_tree.notes_dir / "distilled"
     wiki_dir.mkdir(parents=True)
     (wiki_dir / "孤岛.md").write_text(
         "---\ncreated: '2026-09-01T09:00:00+08:00'\nsource: distilled\n"
@@ -476,7 +476,7 @@ def test_digest_stale_wiki_recheck_section(memory_tree):
     """OKF Freshness：stale_after 到期的 stable 卡进晨报「到期复查」节（安静点名）。"""
     import frontmatter as fm
 
-    wiki_dir = memory_tree.notes_dir / "wiki"
+    wiki_dir = memory_tree.notes_dir / "distilled"
     wiki_dir.mkdir(parents=True)
     (wiki_dir / "老卡.md").write_text(
         fm.dumps(

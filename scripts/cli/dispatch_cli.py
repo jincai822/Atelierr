@@ -496,7 +496,7 @@ class DispatchCLI:
         def distill_command(dry_run: bool) -> None:
             """机器辅助提炼：取今日提炼候选，LLM 起草 wiki 摘录卡送审。
 
-            每天最多 1 张草稿（防刷屏）；人「提 N」落 wiki、「弃 N」跳过
+            每天最多 1 张草稿（防刷屏）；人「提 N」落压缩层、「弃 N」跳过
             （2026-09-18 用户裁决，OKF v0.2 轻量层 schema）。
             """
             from scripts.dispatch import distill as distill_module

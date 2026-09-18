@@ -44,7 +44,7 @@ LAYERS: Tuple[str, str, str] = ("short-term", "mid-term", "long-term")
 SYSTEM_DIRNAME = "系统"
 
 NOTE_EXCLUDED_DIRS: frozenset[str] = frozenset(
-    {"wiki", "attachments", "trash", "templates", SYSTEM_DIRNAME}
+    {"wiki", "distilled", "attachments", "trash", "templates", SYSTEM_DIRNAME}
 )
 
 #: Syncthing 冲突副本文件名模式（name.sync-conflict-YYYYMMDD-HHMMSS-XXX.md）：

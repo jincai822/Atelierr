@@ -36,7 +36,7 @@ def _note(tree, name, source, created, tags=None):
 
 def _wiki_card(tree, name, created):
     """造一张 wiki 卡（wiki/ 目录 + created）。"""
-    wiki_dir = tree.notes_dir / "wiki"
+    wiki_dir = tree.notes_dir / "distilled"
     wiki_dir.mkdir(exist_ok=True)
     (wiki_dir / name).write_text(
         f"---\ncreated: {created}\ntype: Excerpt\n---\n\n卡\n", encoding="utf-8"
@@ -180,7 +180,7 @@ def test_digest_weekly_section_only_on_sunday(memory_tree):
     sunday = DigestDispatcher(memory_tree).run(today=TODAY)
     assert "## 📊 本周捕获统计" in sunday["markdown"]
     assert "确认率：100%" in sunday["markdown"]
-    assert "沉淀进 wiki：0 张卡" in sunday["markdown"]
+    assert "沉淀（压缩层+知识层）：0 张卡" in sunday["markdown"]
 
     saturday = DigestDispatcher(memory_tree).run(today="2026-09-12")
     assert "## 📊 本周捕获统计" not in saturday["markdown"]

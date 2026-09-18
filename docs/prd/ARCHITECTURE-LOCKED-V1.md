@@ -7,6 +7,14 @@
 
 > v1.1 修订：Confidence 语义统一为"新鲜度"模型，与 `docs/ACCEPTANCE-CRITERIA.md` 对齐。  
 > v1.2 修订：平面存储（Flatnotes 兼容）+ sidecar 状态索引 + 无状态 confidence 重算 + 访问信号契约 + trash/purge 流程。
+>
+> **2026-09-18 用户裁决：三层知识结构。** 原料层 `memory/<类目>/`（原文、
+> 转写全文、附件原件，机器不改写）｜压缩层 `memory/distilled/`（机器浓缩品：
+> 摘录卡+主题页，人批准进门，带 stale_after 保鲜期，可过期清理）｜知识层
+> `memory/wiki/`（人认证：concept 卡、cognition 判断、reflections 成品，
+> 只增不改）。机器压缩品（distill/划重点产出）落压缩层，不再落 wiki/；
+> 知识层只进人脑加工过的内容（周日提炼仪式：压缩层卡 → 自己话 concept 卡）。
+> 今日摘要归 `系统/`，正名「仪表盘」——操作信号，不是知识，不进三层。
 > v1.3 修订：锁定 Phase 5 认知模块；认知确信度使用 `certainty`，与 memory `confidence` 从字段名上隔离；正式 schema 与状态流转见 `docs/prd/COGNITION-SPEC.md` v1.0。
 > v1.4 修订（2026-09-12 用户特批，方案 C）：confidence 公式引入来源因子 `source_factor`——自动管线转写（source=link/media）闲置时间轴 ×3 加速衰减（约 15 天触及待删，人写笔记 45 天），工作记忆自我清洁；公式仍是无状态纯函数，人写来源与 webclip/highlights 按原速，缺省行为与 v1.2 完全等价。
 > v1.5 修订（2026-09-13 用户裁决，存储拆分）：`memory/` 只存真记忆（人写笔记+确认归档+wiki/）；新增 `$OV/inbox/` 中转站（机器产出卡的唯一落点：确认归档→移进 memory/ 平台目录；decay 照常覆盖，约 15 天没人碰标待删）；`attachments/` 源文件区挪至数据根平级 `$OV/attachments/`（Obsidian 库根在数据根，wikilink 后缀匹配不断链）。sidecar 索引 path 对 inbox 文件加 `inbox/` 虚拟前缀（保留名：memory/ 下禁止建名为 `inbox/` 的子目录；`_abs` 对冲突做存在性回退兜底）；`attachments_dir`/`inbox_dir` 均可在 memory.yaml 配置（缺省为数据根平级推导）。所有索引写入走 flock 事务（多进程写者防丢更新）。日记豁免：YYYY-MM-DD.md 或 日记/ 子目录的笔记是时间档案（保存而非复习），不进 decay 分层与待删标记、不进复习队列，照常登记可搜。
