@@ -456,8 +456,8 @@ class DigestDispatcher:
             ]
         if undistilled:
             sections += [
-                "> 每周日周回顾前，从这儿挑 1 条提炼进 wiki：",
-                "> 点开笔记 → QuickAdd「提炼为 Wiki」，五分钟够了。",
+                "> 不用自己动手写：机器每天从候选里挑 1 条起草，",
+                "> 飞书回「提 N」收进 wiki、「弃 N」跳过。",
                 "> 提炼后自动从本栏消失；不值得留的，留给 review→purge。",
                 "",
             ]

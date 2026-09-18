@@ -265,7 +265,7 @@ def test_digest_distill_candidates_settled_rule(memory_tree):
     section = report["markdown"].split("## 🧠 提炼候选")[1].split("## ✅")[0]
     assert "[[old]]" in section
     assert "[[fresh]]" not in section  # 创建未满 3 天，再沉一沉
-    assert "周日" in section  # CTA：提醒每周提炼仪式
+    assert "提 N" in section  # CTA：机器起草、人「提/弃」审批（深加工链路）
     post = frontmatter.loads(
         (memory_tree.notes_dir / report["created"]).read_text(encoding="utf-8")
     )
