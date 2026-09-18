@@ -148,10 +148,10 @@ class WikiManager:
         """
         entries = self.entries() + self.distilled_entries()
         wiki_stems = {entry["stem"] for entry in entries}
-        # 根层笔记 + 系统/ 机器产物（划重点清单等；摘录卡 from 指向它们）
-        memory_stems = {
-            path.stem for path in Path(self.tree.notes_dir).glob("*.md")
-        }
+        # 原料层全量（根层 + 类目子目录 + inbox，iter_all_note_files 同源；
+        # 2026-09-18 修：类目子目录落地后 from 检查漏报真实存在的笔记）
+        # + 系统/ 机器产物（划重点清单等；摘录卡 from 指向它们）
+        memory_stems = {path.stem for path in self.tree.iter_all_note_files()}
         system_dir = Path(self.tree.notes_dir) / SYSTEM_DIRNAME
         if system_dir.is_dir():
             memory_stems.update(path.stem for path in system_dir.glob("*.md"))

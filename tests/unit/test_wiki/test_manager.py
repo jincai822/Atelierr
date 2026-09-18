@@ -285,3 +285,33 @@ def test_validate_excerpt_from_checklist_in_system_dir(memory_tree):
     _write_wiki(memory_tree, "摘录-概念甲-a1b2c3.md", _EXCERPT_META)
 
     assert WikiManager(memory_tree).validate() == []
+
+
+def test_from_check_covers_category_subdirs(memory_tree):
+    """from 检查覆盖类目子目录（2026-09-18 修：归档到 B站/C93-…/ 的
+    来源笔记不再被误报「不存在」）。"""
+    import frontmatter as fm
+
+    # 来源笔记在类目子目录
+    sub = memory_tree.notes_dir / "B站" / "C93-管理·领导"
+    sub.mkdir(parents=True)
+    (sub / "来源甲.md").write_text(
+        fm.dumps(fm.Post("正文\n", title="来源甲", created="2026-09-18T00:00:00+08:00")),
+        encoding="utf-8",
+    )
+    # 压缩层摘录卡 from 指向它
+    distilled = memory_tree.notes_dir / "distilled"
+    distilled.mkdir()
+    (distilled / "卡甲.md").write_text(
+        fm.dumps(
+            fm.Post(
+                "正文\n",
+                type="Excerpt",
+                title="卡甲",
+                **{"from": "[[来源甲]]"},
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    assert WikiManager(memory_tree).validate() == []
