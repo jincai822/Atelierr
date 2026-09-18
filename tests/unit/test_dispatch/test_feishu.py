@@ -2473,3 +2473,61 @@ def test_distill_decide_accepts_homophone_alias(memory_tree, monkeypatch):
 
     diary = memory_tree.notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}.md"
     assert not diary.exists() or "题 1" not in diary.read_text(encoding="utf-8")
+
+
+def test_natural_language_intent_routes_to_search(memory_tree, monkeypatch):
+    """自然语言「帮我找…」→ 意图分类 → 走搜索，不再吞进日记（2026-09-18 裁决 B）。"""
+    import scripts.dispatch.intent as intent_module
+
+    monkeypatch.setattr(
+        intent_module, "classify", lambda text: {"intent": "search", "query": "叔本华"}
+    )
+    bridge = _bridge(memory_tree)
+    searched = []
+    monkeypatch.setattr(
+        bridge, "_answer_search", lambda chat_id, q: searched.append(q)
+    )
+    event = _event("m-intent", "text", {"text": "帮我找一下上次那个叔本华的视频"})
+    event.event.message.chat_id = "oc_demo_chat"
+    bridge.handle_event(event)
+
+    assert searched == ["叔本华"]
+    diary = memory_tree.notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}.md"
+    assert not diary.exists() or "叔本华的视频" not in diary.read_text(encoding="utf-8")
+
+
+def test_natural_language_fallback_still_captures(memory_tree, monkeypatch):
+    """意图分类退回（capture/失败）：照旧记日记，零回归。"""
+    import scripts.dispatch.intent as intent_module
+
+    monkeypatch.setattr(intent_module, "classify", lambda text: None)
+    bridge = _bridge(memory_tree)
+    monkeypatch.setattr(bridge, "_send_feedback", lambda chat_id, text: None)
+    event = _event("m-cap", "text", {"text": "今天天气不错，随便记一句"})
+    event.event.message.chat_id = "oc_demo_chat"
+    bridge.handle_event(event)
+
+    diary = memory_tree.notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}.md"
+    assert diary.exists()
+    assert "今天天气不错" in diary.read_text(encoding="utf-8")
+
+
+def test_natural_language_workshop_gets_guidance(memory_tree, monkeypatch):
+    """决策/深谈类意图：回车间指引，不执行、不记日记。"""
+    import scripts.dispatch.intent as intent_module
+
+    monkeypatch.setattr(
+        intent_module, "classify", lambda text: {"intent": "workshop", "query": ""}
+    )
+    bridge = _bridge(memory_tree)
+    feedback = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat_id, text: feedback.append(text)
+    )
+    event = _event("m-ws", "text", {"text": "我想认真分析一下要不要换工作"})
+    event.event.message.chat_id = "oc_demo_chat"
+    bridge.handle_event(event)
+
+    assert feedback and "车间" in feedback[0]
+    diary = memory_tree.notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}.md"
+    assert not diary.exists() or "换工作" not in diary.read_text(encoding="utf-8")

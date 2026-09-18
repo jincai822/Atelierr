@@ -1617,7 +1617,10 @@ class FeishuBridge:
         （2026-09-16 裁决：直收进 cognition 判断登记处，照常追加日记，
         回文字轻通知；与菜单同级，会话期间也优先——是登记指令不是
         回答）；「搜 xxx」/「搜索 xxx」是搜索指令（会话期间让位仪式，
-        前缀匹配的内容仍计为回答）。
+        前缀匹配的内容仍计为回答）。未命中以上一切命令的文本先过
+        自然语言意图分类（2026-09-18 裁决 B：听懂就执行搜索/摘要/
+        待办/复盘，决策深谈类回车间指引，听不懂照旧记日记——
+        判断登记不走意图分类，只认「判断：」显式前缀）。
         捕获成功给原消息加 ✅ 表情回执；失败发文字反馈。
         """
         text = text.strip()
@@ -1725,6 +1728,35 @@ class FeishuBridge:
                 return None
         if text in ("搜", "搜索"):
             self._send_feedback(chat_id, "用法：发「搜 关键词」，我回前 5 条匹配")
+            return None
+        # 自然语言意图（2026-09-18 用户裁决 B：Atelier 意图层上岗 v1）：
+        # 未命中一切精确命令的文本过 LLM 意图分类——听懂就执行（搜索/
+        # 摘要/待办/复盘），决策深谈类回车间指引，听不懂/失败一律照旧
+        # 记日记（零回归）；判断登记不走这里，只认「判断：」显式前缀
+        try:
+            from scripts.dispatch.intent import classify
+
+            routed = classify(text)
+        except Exception as exc:  # noqa: BLE001 - 意图是增强工序，不中断守护
+            print(f"[feishu] intent fail: {exc}", flush=True)
+            routed = None
+        if routed:
+            intent = routed["intent"]
+            print(f"[feishu] intent -> {intent} ({routed['query']!r})", flush=True)
+            if intent == "search":
+                self._answer_search(chat_id, routed["query"])
+            elif intent == "digest":
+                self._menu_digest(chat_id)
+            elif intent == "todos":
+                self._menu_todos(chat_id)
+            elif intent == "reflect":
+                self._open_daily_review(chat_id)
+            else:  # workshop：决策/深谈/综合类，指引去车间
+                self._send_feedback(
+                    chat_id,
+                    "这件事适合去车间深聊（决策/综合/探索）："
+                    "电脑上开 Atelier 会话跟我说，或下次会话提醒我",
+                )
             return None
         try:
             note = self._append_diary(text)
