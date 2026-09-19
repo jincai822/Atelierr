@@ -597,10 +597,11 @@ def due_for_review(
     """到期该复盘的判断（登记→复盘→销账 生命周期的复盘端）。
 
     对象：active belief 登记满 30 天、testing hypothesis 满 14 天、
-    active decision 满 30 天；同一条目冷却 30 天内不重复提示（冷却
-    时钟只写 ``<state_dir>/judgments_review.json``）。question 类型
-    走 answer_question 闭环不在此列；decision 的 review_at 字段未进
-    CognitionEntry 只读视图，MVP 一律按 created 账龄算。
+    active decision 满 30 天；**decision 带 review_at 时以它为闹钟**
+    （到期即提示，不看账龄——2026-09-19 阶段二修复后 review_at 已进
+    CognitionEntry 只读视图，电池装上了）；同一条目冷却 30 天内不重复
+    提示（冷却时钟只写 ``<state_dir>/judgments_review.json``）。question
+    类型走 answer_question 闭环不在此列。
 
     Args:
         tree: MemoryTree。
@@ -622,7 +623,13 @@ def due_for_review(
         if created is None:
             continue
         age_days = (moment - created).days
-        if age_days < _REVIEW_DAYS[entry.entry_type]:
+        # decision 的 review_at 是显式闹钟：设了就以它为准（到期即提示，
+        # 没到就安静），没设才退回账龄阈值
+        review_at = _parse_iso(str(getattr(entry, "review_at", "") or ""))
+        if entry.entry_type == "decision" and review_at is not None:
+            if moment < review_at:
+                continue
+        elif age_days < _REVIEW_DAYS[entry.entry_type]:
             continue
         last = _parse_iso(str(cooldown.get(entry.id) or ""))
         if last is not None and (moment - last).days < REVIEW_COOLDOWN_DAYS:

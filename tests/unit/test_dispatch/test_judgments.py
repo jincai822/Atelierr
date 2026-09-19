@@ -726,3 +726,59 @@ def test_feishu_judgment_review_handler(memory_tree, monkeypatch):
     assert "schema" not in resp["card"]["data"]  # legacy 触发配 legacy 返回
     assert _manager(memory_tree).get_entry(entry_id).status == "refuted"
     assert sent and "销账" in sent[-1]
+
+
+def _set_cognition_review_at(memory_tree, entry_id, when):
+    """给 decision 条目写入 review_at（车间/手工写入的形态）。"""
+    import re as _re
+
+    cog_dir = memory_tree.notes_dir.parent / "memory" / "wiki" / "cognition"
+    short = entry_id[-8:].lower()
+    path = next(p for p in cog_dir.rglob("*.md") if short in p.name)
+    text = path.read_text(encoding="utf-8")
+    path.write_text(
+        _re.sub(r"^created:", f"review_at: '{when}'\ncreated:", text, count=1, flags=_re.M),
+        encoding="utf-8",
+    )
+
+
+def test_due_for_review_decision_review_at_governs(memory_tree):
+    """decision 的 review_at 是显式闹钟（2026-09-19 阶段二）：过期即提示
+    （不看账龄）；未到闹钟时间，哪怕账龄满 30 天也不催。"""
+    from datetime import timedelta as _td
+    from datetime import timezone as _tz
+
+    from scripts.cognition.manager import ApprovalRecord, CognitionManager
+    from scripts.dispatch.judgments import due_for_review
+
+    manager = CognitionManager(
+        memory_tree.notes_dir.parent, state_dir=memory_tree.state_dir
+    )
+
+    def _decision(title, statement):
+        return manager.create_entry(
+            entry_type="decision",
+            title=title,
+            statement=statement,
+            status="active",
+            certainty=None,
+            evidence=[],
+            approval=ApprovalRecord(action="create", reason="测试"),
+        )
+
+    now = datetime.now(_tz.utc)
+    past = _decision("旧决定", "每天 11 点前睡")
+    _set_cognition_review_at(
+        memory_tree, str(past.id), (now - _td(days=1)).isoformat()
+    )
+    future = _decision("新决定", "每周三次运动")
+    _backdate_cognition_created(memory_tree, str(future.id), 60)
+    _set_cognition_review_at(
+        memory_tree, str(future.id), (now + _td(days=10)).isoformat()
+    )
+
+    due = due_for_review(memory_tree)
+    due_ids = [item["entry_id"] for item in due]
+
+    assert str(past.id) in due_ids  # 闹钟已过：刚登记也提示
+    assert str(future.id) not in due_ids  # 闹钟未到：账龄再老也不催
