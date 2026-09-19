@@ -411,6 +411,40 @@ def confirmed_with_remark_card(
     }
 
 
+def completed_notice_card(
+    title: str, note_line: str, header: str = "✅ 已完成"
+) -> Dict[str, Any]:
+    """操作完成通知卡（schema 2.0，无表单）——**2.0 卡回调的返回值专用**。
+
+    2026-09-19 实证（顺手记/问答表单提交，客户端报错但后端已成功）：
+    回调返回的更新卡必须与触发卡**同 schema 版本**——2.0 表单卡的回调
+    返回 legacy 卡平台报错；2026-09-13 已实测反向错配（legacy 卡回调
+    返回 2.0 卡）同样报错。legacy 卡的回调照旧用
+    ``FeishuBridge._confirmed_card``。
+
+    Args:
+        title: 完成对象（笔记文件名/「问答表单」等）。
+        note_line: 完成场景文案。
+        header: 卡片头文案。
+
+    Returns:
+        Dict[str, Any]: 卡片 JSON（schema 2.0，纯文案无操作区）。
+    """
+    return {
+        "schema": "2.0",
+        "config": {"update_multi": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": header},
+            "template": "green",
+        },
+        "body": {
+            "elements": [
+                {"tag": "markdown", "content": f"**{title}**\n{note_line}"},
+            ]
+        },
+    }
+
+
 def pending_digest_card(filenames: List[str]) -> Dict[str, Any]:
     """待确认清单卡（纯组装，不发送——回调重建同构卡片也用它）。
 

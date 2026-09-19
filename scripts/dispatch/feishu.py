@@ -80,6 +80,7 @@ from scripts.utils.state_store import read_json, write_json
 
 from scripts.dispatch.archive import derive_archive_dir
 from scripts.dispatch.feishu_cards import (
+    completed_notice_card,
     confirmed_with_remark_card,
     pending_digest_card,
     resurface_card,
@@ -452,10 +453,13 @@ class FeishuBridge:
         的清单卡——平台回调的卡片更新是整卡替换，不重建会让其余条目从
         视图上消失（2026-09-13 真机实测）。
 
-        最终完成时给 legacy 完成卡（回调更新只敢用 legacy——schema 2.0
-        卡作为回调返回值平台报错，2026-09-13 真机实测）；「顺手记一句」
-        表单卡**另发一条新消息**（schema 2.0 走新消息发送是已验证路径，
-        与周回顾四问同路）。丢弃（🗑）场景不邀功（offer_remark=False）。
+        最终完成时给 legacy 完成卡（本卡的触发卡都是 legacy——回调返回
+        必须与触发卡**同 schema 版本**：legacy 回调返回 2.0 报错
+        （2026-09-13 实测），2.0 回调返回 legacy 同样报错
+        （2026-09-19 顺手记/问答表单实证，见 completed_notice_card））；
+        「顺手记一句」表单卡**另发一条新消息**（schema 2.0 走新消息发送
+        是已验证路径，与周回顾四问同路）。丢弃（🗑）场景不邀功
+        （offer_remark=False）。
         """
         if batch:
             remaining = [item for item in batch if item != filename]
@@ -772,13 +776,14 @@ class FeishuBridge:
             except Exception as exc:  # noqa: BLE001 - 钩子是附加动作
                 print(f"[feishu] review dump fail: {exc}", flush=True)
         self._send_feedback(chat_id, f"已收到全部 {len(answers)} 条回答，问答结束 ✅")
+        # 触发卡是 schema 2.0 表单卡——回调返回必须同版本（同 remark 修复）
         return {
             "toast": {"type": "success", "content": f"已提交 {len(answers)} 条回答"},
             "card": {
                 "type": "raw",
-                "data": self._confirmed_card(
+                "data": completed_notice_card(
                     "问答表单",
-                    note_line=f"已收到 {len(answers)} 条回答，会话已结束",
+                    f"已收到 {len(answers)} 条回答，会话已结束",
                     header="✅ 问答已提交",
                 ),
             },
@@ -873,13 +878,15 @@ class FeishuBridge:
             return {"toast": {"type": "error", "content": "记入失败，请稍后重试"}}
         print(f"[feishu] remark note={filename} ok", flush=True)
         self._send_feedback(chat_id, f"💭 已记进笔记末尾：{filename}")
+        # 触发卡是 schema 2.0 表单卡——回调返回必须同版本（legacy 会
+        # 让客户端报错，2026-09-19 实证），legacy 卡回调才用 _confirmed_card
         return {
             "toast": {"type": "success", "content": "已记入"},
             "card": {
                 "type": "raw",
-                "data": self._confirmed_card(
+                "data": completed_notice_card(
                     filename,
-                    note_line="已把一句记到笔记末尾",
+                    "已把一句记到笔记末尾",
                     header="✅ 已确认",
                 ),
             },

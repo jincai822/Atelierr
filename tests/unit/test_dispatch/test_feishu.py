@@ -1860,6 +1860,8 @@ def test_prompt_submit_collects_answers_and_closes(memory_tree, monkeypatch):
 
     assert resp["toast"]["type"] == "success"
     assert resp["card"]["data"]["header"]["template"] == "green"
+    # 触发卡是 schema 2.0——回调返回的更新卡必须同版本（2026-09-19 实证）
+    assert resp["card"]["data"]["schema"] == "2.0"
     data = store.load()
     assert data["status"] == "closed"
     assert [a["text"] for a in data["answers"]] == ["答一", "答三"]
@@ -2202,6 +2204,7 @@ def test_note_remark_appends_line(memory_tree):
     )
 
     assert resp["toast"]["type"] == "success"
+    assert resp["card"]["data"]["schema"] == "2.0"  # 回调返回与触发卡同版本
     text = path.read_text(encoding="utf-8")
     assert "💭 顺手记一句" in text
     assert "这条对我有用，下周试试" in text
@@ -2239,6 +2242,23 @@ def test_confirmed_with_remark_card_shape():
         "action": "note_remark",
         "note": "x.md",
     }
+
+
+def test_completed_notice_card_shape():
+    """完成通知卡（schema 2.0，无表单）：2.0 卡回调的返回值专用——回调
+    返回必须与触发卡同版本（2026-09-19 顺手记/问答表单报错实证）。"""
+    from scripts.dispatch.feishu_cards import completed_notice_card
+
+    card = completed_notice_card("x.md", "已把一句记到笔记末尾", header="✅ 已确认")
+
+    assert card["schema"] == "2.0"
+    assert card["header"]["template"] == "green"
+    assert card["header"]["title"]["content"] == "✅ 已确认"
+    body = card["body"]["elements"]
+    assert len(body) == 1 and body[0]["tag"] == "markdown"
+    assert "x.md" in body[0]["content"] and "已把一句记到笔记末尾" in body[0]["content"]
+    # 无表单/按钮——完成态不该再有操作区
+    assert all(el.get("tag") not in ("form", "button", "action") for el in body)
 
 
 def test_batch_archive_rebuilds_digest_card(memory_tree):
