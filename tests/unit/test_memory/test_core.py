@@ -355,3 +355,27 @@ def test_abs_inbox_prefix_prefers_inbox(tmp_path):
     real_subdir.mkdir()
     (real_subdir / "y.md").write_text("误建目录里的真笔记", encoding="utf-8")
     assert tree._abs("inbox/y.md") == real_subdir / "y.md"
+
+
+def test_move_note_uses_transaction_and_registers(memory_tree):
+    """move_note（2026-09-19 评审 4A 修复，原线索称 set_layer）：已登记笔记
+    置层成功；未登记笔记在同一 flock 事务内补登记并置层（此前绕过事务
+    回写缓存，违反模块「改索引走 _index_transaction」纪律）。"""
+    path = memory_tree.create_note("a.md", "正文\n", source="test")
+
+    memory_tree.move_note(path, "mid-term")
+    assert memory_tree._entry(path)["layer"] == "mid-term"
+
+    # 未登记笔记：直接置层（事务内补登记）
+    bare = memory_tree.notes_dir / "bare.md"
+    bare.write_text("---\ntitle: 裸笔记\n---\n\n# 裸\n", encoding="utf-8")
+    memory_tree.move_note(bare, "long-term")
+    entry = memory_tree._entry(bare)
+    assert entry is not None and entry["layer"] == "long-term"
+
+    import pytest
+
+    with pytest.raises(ValueError):
+        memory_tree.move_note(path, "bogus")
+    with pytest.raises(FileNotFoundError):
+        memory_tree.move_note(memory_tree.notes_dir / "ghost.md", "mid-term")

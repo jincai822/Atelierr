@@ -553,11 +553,29 @@ class MemoryTree:
         path = Path(note_path)
         if not path.exists():
             raise FileNotFoundError(f"笔记不存在: {path}")
-        entry = self._entry(path)
-        if entry is None:
-            entry = self._ensure_registered(path)
-        entry["layer"] = layer
-        self._save_index()
+        key = self._rel_key(path)
+        # 2026-09-19 评审 4A：改走 flock 事务（此前读缓存→改→_save_index
+        # 回写，与本模块「改索引请走 _index_transaction」纪律相悖——
+        # 当前虽无调用者，任何未来调用都会继承竞态）；语义与旧实现一致：
+        # 按当前路径查条目，缺失则在同一事务内补登记（不嵌套 flock）
+        with self._index_transaction() as index:
+            target: Optional[dict] = None
+            for entry in index.values():
+                if entry.get("path") == key:
+                    target = entry
+                    break
+            if target is None:
+                nid = self._read_note_id(path) or generate_id()
+                target = {
+                    "path": key,
+                    "confidence": 1.0,
+                    "layer": "short-term",
+                    "last_accessed": None,
+                    "references": 0,
+                    "pending_delete": False,
+                }
+                index[nid] = target
+            target["layer"] = layer
         return path
 
     def relocate_entry(self, note_id: str, new_rel: str) -> bool:
