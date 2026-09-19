@@ -103,6 +103,7 @@ from scripts.dispatch.feishu_io import (
     ENV_CONSOLE_URL,
     ENV_NOTE_PREFIX,
     ENV_VAULT_NAME,
+    JUDGMENT_REVIEW_ACTION,
     NOTE_REMARK_ACTION,
     RESURFACE_FEEDBACK_ACTION,
     PROMPT_FORM_MAX_QUESTIONS,
@@ -384,6 +385,10 @@ class FeishuBridge:
         if action_name == RESURFACE_FEEDBACK_ACTION:
             outcome = str(value.get("outcome") or "")
             return self._handle_resurface_feedback(filename, outcome, chat_id, batch)
+        if action_name == JUDGMENT_REVIEW_ACTION:
+            entry_id = str(value.get("entry") or "").strip()
+            outcome = str(value.get("outcome") or "").strip()
+            return self._handle_judgment_review(entry_id, outcome, chat_id)
         return {}
 
     @staticmethod
@@ -888,6 +893,43 @@ class FeishuBridge:
                     filename,
                     "已把一句记到笔记末尾",
                     header="✅ 已确认",
+                ),
+            },
+        }
+
+    def _handle_judgment_review(
+        self, entry_id: str, outcome: str, chat_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """判断复盘卡三按钮（2026-09-19 backlog⑤ 生命周期闭环：登记→复盘→销账）。
+
+        落账走 judgments.apply_review_outcome（按钮点击即人工批准，
+        ApprovalRecord 与直收同源）；失败只 toast，不中断守护。
+        触发卡是 legacy——回调返回同版本 legacy 完成卡。
+        """
+        from scripts.dispatch.judgments import apply_review_outcome
+
+        if not entry_id:
+            return {"toast": {"type": "error", "content": "回调缺少条目 id"}}
+        try:
+            ok, receipt = apply_review_outcome(self.tree, entry_id, outcome)
+        except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
+            print(f"[feishu] judgment review {entry_id} fail: {exc}", flush=True)
+            return {"toast": {"type": "error", "content": "复盘落账失败，请稍后重试"}}
+        self._send_feedback(chat_id, f"🧭 {receipt}")
+        if not ok:
+            return {"toast": {"type": "warning", "content": receipt[:40]}}
+        print(f"[feishu] judgment review {entry_id} outcome={outcome} ok", flush=True)
+        header = {"still_true": "✅ 仍成立", "not_true": "❌ 已销账", "adjust": "🔧 已标存疑"}.get(
+            outcome, "🧭 已复盘"
+        )
+        return {
+            "toast": {"type": "success", "content": header},
+            "card": {
+                "type": "raw",
+                "data": self._confirmed_card(
+                    "判断复盘",
+                    note_line=receipt.split("\n")[0][:60],
+                    header=header,
                 ),
             },
         }

@@ -545,3 +545,167 @@ def decide_by_index(
         approval=ApprovalRecord(action="reject", reason="飞书「略 N」略过"),
     )
     return True, f"已略过这条候选：「{head}」"
+
+
+# ----------------------------------------------------------------------
+# 生命周期闭环（2026-09-19 backlog⑤：登记→复盘→销账）
+# ----------------------------------------------------------------------
+
+#: 复盘到期阈值：登记满 N 天提示复盘（天）
+BELIEF_REVIEW_DAYS = 30
+HYPOTHESIS_REVIEW_DAYS = 14
+DECISION_REVIEW_DAYS = 30
+#: 提示冷却：同一条目推过卡/点过按钮后 N 天内不再提示（防打扰）
+REVIEW_COOLDOWN_DAYS = 30
+#: 每天最多推几张复盘卡（与推送纪律同源）
+MAX_REVIEW_CARDS = 3
+
+#: 复盘冷却时钟（只写 state，绝不碰笔记/cognition 文件）
+_REVIEW_FILE = "judgments_review.json"
+
+#: 复盘三结果（卡片按钮 value 的 outcome）
+OUTCOME_STILL_TRUE = "still_true"
+OUTCOME_NOT_TRUE = "not_true"
+OUTCOME_ADJUST = "adjust"
+
+#: 各类型参与复盘的"在研"状态（question 走 answer 闭环，不在此列）
+_REVIEWABLE_STATUS = {"belief": "active", "hypothesis": "testing", "decision": "active"}
+
+#: 各类型到期阈值（天）
+_REVIEW_DAYS = {
+    "belief": BELIEF_REVIEW_DAYS,
+    "hypothesis": HYPOTHESIS_REVIEW_DAYS,
+    "decision": DECISION_REVIEW_DAYS,
+}
+
+
+def _parse_iso(value: str) -> Optional[datetime]:
+    """解析 ISO 时间（宽容：Z 后缀/缺时区按 UTC）；失败返回 None。"""
+    try:
+        text = str(value).strip().replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def due_for_review(
+    tree: MemoryTree, *, now: Optional[datetime] = None
+) -> List[Dict[str, Any]]:
+    """到期该复盘的判断（登记→复盘→销账 生命周期的复盘端）。
+
+    对象：active belief 登记满 30 天、testing hypothesis 满 14 天、
+    active decision 满 30 天；同一条目冷却 30 天内不重复提示（冷却
+    时钟只写 ``<state_dir>/judgments_review.json``）。question 类型
+    走 answer_question 闭环不在此列；decision 的 review_at 字段未进
+    CognitionEntry 只读视图，MVP 一律按 created 账龄算。
+
+    Args:
+        tree: MemoryTree。
+        now: 当前时间（测试注入用；缺省 UTC 现在）。
+
+    Returns:
+        List[Dict]: [{entry_id, title, statement, entry_type, days}]，
+        账龄最长在前，最多 MAX_REVIEW_CARDS 条。
+    """
+    moment = now or datetime.now(timezone.utc)
+    state = read_json(Path(tree.state_dir) / _REVIEW_FILE)
+    cooldown: Dict[str, str] = state.get("prompted", {}) if isinstance(state, dict) else {}
+    due: List[Dict[str, Any]] = []
+    for entry in _manager(tree).list_entries():
+        expected = _REVIEWABLE_STATUS.get(entry.entry_type)
+        if expected is None or entry.status != expected:
+            continue
+        created = _parse_iso(entry.created)
+        if created is None:
+            continue
+        age_days = (moment - created).days
+        if age_days < _REVIEW_DAYS[entry.entry_type]:
+            continue
+        last = _parse_iso(str(cooldown.get(entry.id) or ""))
+        if last is not None and (moment - last).days < REVIEW_COOLDOWN_DAYS:
+            continue
+        due.append(
+            {
+                "entry_id": str(entry.id),
+                "title": entry.title,
+                "statement": entry.statement,
+                "entry_type": entry.entry_type,
+                "days": age_days,
+            }
+        )
+    due.sort(key=lambda item: -item["days"])
+    return due[:MAX_REVIEW_CARDS]
+
+
+def mark_review_prompted(tree: MemoryTree, entry_ids: List[str]) -> None:
+    """记复盘冷却（推卡成功/按钮闭环后调用；只写 state，幂等）。"""
+    if not entry_ids:
+        return
+    path = Path(tree.state_dir) / _REVIEW_FILE
+    state = read_json(path)
+    if not isinstance(state, dict):
+        state = {}
+    prompted = state.setdefault("prompted", {})
+    stamp = datetime.now(timezone.utc).isoformat()
+    for entry_id in entry_ids:
+        prompted[str(entry_id)] = stamp
+    write_json(path, state, indent=2)
+
+
+def apply_review_outcome(
+    tree: MemoryTree, entry_id: str, outcome: str
+) -> Tuple[bool, str]:
+    """复盘结果落账（销账端）：状态迁移 + 历史留痕。
+
+    按钮点击即人工批准（ApprovalRecord source=human_assessment，与直收
+    同源）；certainty 不动。迁移表：
+
+    - 仍成立：belief/decision 保持 active（留复盘痕）；hypothesis → supported
+    - 不成立：belief/hypothesis → refuted；decision → archived（放弃）
+    - 要调整：belief → questioned；hypothesis/decision 原状态留痕，
+      回执引导发新判断（supersede 继任留电脑端人工，不在飞书上猜）
+
+    Returns:
+        Tuple[bool, str]: (是否落账成功, 人类可读回执)。
+    """
+    manager = _manager(tree)
+    try:
+        entry = manager.get_entry(entry_id)
+    except Exception:  # noqa: BLE001 - 条目不存在/损坏只回执
+        return False, f"判断登记处找不到这条（{entry_id}）——可能已在电脑端处理过"
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    if outcome == OUTCOME_STILL_TRUE:
+        new_status = "supported" if entry.entry_type == "hypothesis" else "active"
+        rationale = f"{stamp} 复盘：仍成立"
+        receipt = "已记下：这条还成立 ✅"
+    elif outcome == OUTCOME_NOT_TRUE:
+        new_status = "archived" if entry.entry_type == "decision" else "refuted"
+        rationale = f"{stamp} 复盘：不成立"
+        receipt = "已销账：这条标记为不成立（登记处保留痕迹，不再进默认列表）"
+    elif outcome == OUTCOME_ADJUST:
+        new_status = "questioned" if entry.entry_type == "belief" else entry.status
+        rationale = f"{stamp} 复盘：要调整"
+        receipt = "已标「存疑」。直接发「判断：新表述」我会另收一条；新旧继任关系到电脑端登记处连"
+    else:
+        return False, f"未知的复盘结果：{outcome}"
+    try:
+        manager.reassess_entry(
+            entry_id,
+            evidence=[],
+            certainty=None,
+            status=new_status,
+            rationale=rationale,
+            approval=ApprovalRecord(
+                action="reassess",
+                reason=f"飞书复盘卡「{outcome}」",
+                source="human_assessment",
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 - 迁移失败只回执
+        return False, f"落账失败：{exc}"
+    mark_review_prompted(tree, [entry_id])
+    head = entry.statement[:30]
+    return True, f"{receipt}\n（「{head}」）"

@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from scripts.dispatch.feishu_io import (
     ARCHIVE_ACTION,
     DISCARD_ACTION,
+    JUDGMENT_REVIEW_ACTION,
     RESURFACE_FEEDBACK_ACTION,
     NOTE_REMARK_ACTION,
     PROMPT_FORM_MAX_QUESTIONS,
@@ -550,3 +551,76 @@ def send_pending_digest_feishu(
     if not filenames:
         return False
     return send_feishu_card(pending_digest_card(filenames), chat_id)
+
+
+def judgment_review_card(entry_id: str, statement: str, entry_type: str, days: int) -> Dict[str, Any]:
+    """判断复盘卡（legacy）：陈述 + 账龄 + 三按钮（仍成立/不成立/要调整）。
+
+    2026-09-19 backlog⑤ 生命周期闭环（登记→复盘→销账）：按钮回调
+    ``FeishuBridge._handle_judgment_review`` 落账（legacy 卡回调配
+    legacy 返回，与 2.0 版本错配修复同规）。
+
+    Args:
+        entry_id: cognition 条目 id（回调定位用）。
+        statement: 判断陈述原文（展示截断 60 字）。
+        entry_type: belief/hypothesis/decision（展示用中文名）。
+        days: 登记账龄（天）。
+    """
+    type_name = {"belief": "判断", "hypothesis": "假设", "decision": "决定"}.get(
+        entry_type, "判断"
+    )
+    head = statement if len(statement) <= 60 else statement[:60] + "…"
+    buttons = [
+        ("✅ 仍成立", "primary", "still_true"),
+        ("❌ 不成立", "danger", "not_true"),
+        ("🔧 要调整", "default", "adjust"),
+    ]
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "🧭 判断复盘"},
+            "template": "violet",
+        },
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": (
+                        f"{days} 天前你记下这条{type_name}：\n**{head}**\n"
+                        "现在回头看，它还成立吗？"
+                    ),
+                },
+            },
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": text},
+                        "type": btn_type,
+                        "behaviors": [
+                            {
+                                "type": "callback",
+                                "value": {
+                                    "action": JUDGMENT_REVIEW_ACTION,
+                                    "entry": entry_id,
+                                    "outcome": outcome,
+                                },
+                            }
+                        ],
+                    }
+                    for text, btn_type, outcome in buttons
+                ],
+            },
+        ],
+    }
+
+
+def send_judgment_review_feishu(
+    entry_id: str, statement: str, entry_type: str, days: int, chat_id: Optional[str] = None
+) -> bool:
+    """发送判断复盘卡；未配置/失败静默 False（晨报兜底会在摘要里点名）。"""
+    return send_feishu_card(
+        judgment_review_card(entry_id, statement, entry_type, days), chat_id
+    )

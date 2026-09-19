@@ -779,6 +779,23 @@ class DispatchCLI:
                 )
                 # 今日复习卡：只给标题（先想），按钮才打开原文（再看）
                 send_resurface_feishu(report["review"])
+                # 判断复盘卡（2026-09-19 backlog⑤ 生命周期闭环：登记→复盘
+                # →销账）：到期判断逐条发三按钮卡，冷却 30 天防打扰
+                from scripts.dispatch.judgments import due_for_review, mark_review_prompted
+                from scripts.dispatch.feishu_cards import send_judgment_review_feishu
+
+                due = due_for_review(tree)
+                if due and _feishu_ready():
+                    prompted = []
+                    for item in due:
+                        ok = send_judgment_review_feishu(
+                            item["entry_id"], item["statement"],
+                            item["entry_type"], item["days"],
+                        )
+                        click.echo(f"  推送[判断复盘 {item['entry_id']}]: {ok}")
+                        if ok:
+                            prompted.append(item["entry_id"])
+                    mark_review_prompted(tree, prompted)
 
         @cli.command(name="stats")
         @click.option(

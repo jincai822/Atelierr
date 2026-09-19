@@ -560,3 +560,169 @@ def test_digest_quiet_section_renders(memory_tree):
     assert "1. 早起让一天有掌控感。" in md
     assert "批 1" in md
     assert report["counts"]["judgment_proposals"] == 2
+
+
+# ---------- 生命周期闭环（2026-09-19 backlog⑤：登记→复盘→销账） ----------
+
+
+def _backdate_cognition_created(memory_tree, entry_id, days):
+    """把 cognition 条目的 created 拨到 days 天前（测试复盘账龄用）。"""
+    import re as _re
+    from datetime import timedelta as _td
+    from datetime import timezone as _tz
+
+    cog_dir = memory_tree.notes_dir.parent / "memory" / "wiki" / "cognition"
+    short = entry_id[-8:].lower()  # 文件名规则：<slug>--<id 末 8 位>.md
+    path = next(p for p in cog_dir.rglob("*.md") if short in p.name)
+    text = path.read_text(encoding="utf-8")
+    old = (datetime.now(_tz.utc) - _td(days=days)).isoformat()
+    path.write_text(
+        _re.sub(r"^created:.*$", f"created: '{old}'", text, count=1, flags=_re.M),
+        encoding="utf-8",
+    )
+
+
+def test_due_for_review_age_and_cooldown(memory_tree):
+    """复盘到期：active belief 登记满 30 天到期；冷却 30 天内不重复。"""
+    from scripts.dispatch.judgments import (
+        due_for_review,
+        mark_review_prompted,
+        register_statement,
+    )
+
+    entry_id, _ = register_statement(memory_tree, "每天早起对我有用")
+    assert due_for_review(memory_tree) == []  # 新登记不到期
+
+    _backdate_cognition_created(memory_tree, entry_id, 31)
+    due = due_for_review(memory_tree)
+    assert [item["entry_id"] for item in due] == [entry_id]
+    assert due[0]["entry_type"] == "belief" and due[0]["days"] >= 31
+
+    mark_review_prompted(memory_tree, [entry_id])
+    assert due_for_review(memory_tree) == []  # 冷却期不重复
+
+
+def test_due_for_review_skips_non_active(memory_tree):
+    """refuted 等非在研状态不到期；question 不走复盘（走 answer 闭环）。"""
+    from scripts.dispatch.judgments import (
+        apply_review_outcome,
+        due_for_review,
+        register_statement,
+    )
+
+    entry_id, _ = register_statement(memory_tree, "早睡早起身体好")
+    _backdate_cognition_created(memory_tree, entry_id, 40)
+    apply_review_outcome(memory_tree, entry_id, "not_true")  # → refuted
+    assert due_for_review(memory_tree) == []
+
+    qid, _ = register_statement(memory_tree, "这个方法到底有没有用？")
+    _backdate_cognition_created(memory_tree, qid, 60)
+    assert due_for_review(memory_tree) == []  # question 不参与
+
+
+def test_apply_review_outcome_transitions(memory_tree):
+    """销账迁移：belief 仍成立保持 active 留痕；不成立 → refuted；要调整 → questioned。"""
+    from scripts.dispatch.judgments import (
+        apply_review_outcome,
+        register_statement,
+        _manager,
+    )
+
+    bid, _ = register_statement(memory_tree, "运动让我更专注")
+    ok, receipt = apply_review_outcome(memory_tree, bid, "still_true")
+    assert ok and "还成立" in receipt
+    assert _manager(memory_tree).get_entry(bid).status == "active"
+
+    ok, receipt = apply_review_outcome(memory_tree, bid, "adjust")
+    assert ok and "存疑" in receipt
+    assert _manager(memory_tree).get_entry(bid).status == "questioned"
+
+    ok, receipt = apply_review_outcome(memory_tree, bid, "not_true")
+    assert ok and "销账" in receipt
+    assert _manager(memory_tree).get_entry(bid).status == "refuted"
+
+    ok, receipt = apply_review_outcome(memory_tree, bid, "bogus")
+    assert not ok and "未知" in receipt
+
+
+def test_apply_review_outcome_hypothesis_supported(memory_tree):
+    """hypothesis 仍成立 → supported（销账进非默认列表）。"""
+    from scripts.cognition.manager import ApprovalRecord, CognitionManager
+    from scripts.dispatch.judgments import apply_review_outcome, _manager
+
+    manager = CognitionManager(
+        memory_tree.notes_dir.parent, state_dir=memory_tree.state_dir
+    )
+    entry = manager.create_entry(
+        entry_type="hypothesis",
+        title="假设测试",
+        statement="每天冥想 10 分钟能降低焦虑",
+        status="testing",
+        certainty=0.5,
+        evidence=[],
+        approval=ApprovalRecord(action="create", reason="测试"),
+    )
+    ok, receipt = apply_review_outcome(memory_tree, str(entry.id), "still_true")
+    assert ok
+    assert _manager(memory_tree).get_entry(str(entry.id)).status == "supported"
+
+
+def test_judgment_review_card_shape():
+    """复盘卡（legacy）：三按钮带 entry+outcome（回调配 legacy 返回同规）。"""
+    from scripts.dispatch.feishu_cards import judgment_review_card
+
+    card = judgment_review_card("cog-abc123", "每天少吃一点", "belief", 31)
+
+    assert card["header"]["template"] == "violet"
+    assert "schema" not in card  # legacy（触发卡与回调返回同版本）
+    actions = card["elements"][1]["actions"]
+    assert [a["text"]["content"] for a in actions] == ["✅ 仍成立", "❌ 不成立", "🔧 要调整"]
+    values = [a["behaviors"][0]["value"] for a in actions]
+    assert values[0] == {"action": "judgment_review", "entry": "cog-abc123", "outcome": "still_true"}
+    assert values[1]["outcome"] == "not_true" and values[2]["outcome"] == "adjust"
+
+
+def test_feishu_judgment_review_handler(memory_tree, monkeypatch):
+    """飞书复盘按钮：落账 + 回执 + legacy 完成卡（不中断守护）。"""
+    from scripts.dispatch.judgments import register_statement, _manager
+
+    entry_id, _ = register_statement(memory_tree, "每天早起对我有用")
+    bridge = FeishuBridge.__new__(FeishuBridge)
+    bridge.tree = memory_tree
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+
+    action = type(
+        "A",
+        (),
+        {
+            "event": type(
+                "E",
+                (),
+                {
+                    "action": type(
+                        "Act",
+                        (),
+                        {
+                            "value": {
+                                "action": "judgment_review",
+                                "entry": entry_id,
+                                "outcome": "not_true",
+                            }
+                        },
+                    )(),
+                    "context": {},
+                    "operator": None,
+                },
+            )()
+        },
+    )()
+    resp = bridge.handle_card_action(action)
+
+    assert resp["toast"]["type"] == "success"
+    assert resp["card"]["data"]["header"]["template"] == "green"
+    assert "schema" not in resp["card"]["data"]  # legacy 触发配 legacy 返回
+    assert _manager(memory_tree).get_entry(entry_id).status == "refuted"
+    assert sent and "销账" in sent[-1]

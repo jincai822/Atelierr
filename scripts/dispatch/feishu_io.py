@@ -60,6 +60,9 @@ NOTE_REMARK_ACTION = "note_remark"
 #: 复习卡「想起来了/没想起来」反馈（2026-09-13 间隔重复升级：
 #: 驱动每篇笔记的独立复习间隔；value 带 outcome=good/bad）
 RESURFACE_FEEDBACK_ACTION = "resurface_feedback"
+#: 判断复盘卡「仍成立/不成立/要调整」（2026-09-19 backlog⑤ 生命周期
+#: 闭环：登记→复盘→销账；value 带 entry=cognition id + outcome）
+JUDGMENT_REVIEW_ACTION = "judgment_review"
 
 #: 问答表单卡的问题数上限（卡片长度护栏；周回顾四问远未触及）
 PROMPT_FORM_MAX_QUESTIONS = 8
