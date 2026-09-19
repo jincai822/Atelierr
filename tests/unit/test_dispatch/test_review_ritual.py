@@ -416,3 +416,86 @@ def test_bridge_submit_sends_blind_comparison(memory_tree, monkeypatch):
     comparison = [t for t in sent if "盲测对照" in t]
     assert len(comparison) == 1
     assert "保护大脑的三件事" in comparison[0]
+
+
+# ---------- 费曼讲稿（2026-09-19 脑科学建议②：能讲明白才是真懂） ----------
+
+
+def _make_wiki_card(memory_tree, rel, title, days=5, body="# 概念\n自注意力让词互相看。"):
+    """造一张 days 天前的 wiki 卡（rel 相对 memory/ 根）。"""
+    path = memory_tree.notes_dir / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    created = (
+        datetime.now().astimezone() - timedelta(days=days)
+    ).isoformat(timespec="seconds")
+    path.write_text(
+        f"---\ntitle: {title}\ncreated: '{created}'\ntype: Excerpt\n---\n\n{body}\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_feynman_candidates_wiki_recent_only(memory_tree):
+    """候选口径：当月 wiki 根层卡入选；超窗/cognition/reflections 排除。"""
+    _make_wiki_card(memory_tree, "wiki/新卡.md", "自注意力", days=5)
+    _make_wiki_card(memory_tree, "wiki/旧卡.md", "旧概念", days=60)
+    _make_wiki_card(memory_tree, "wiki/cognition/判断.md", "一条判断", days=5)
+    _make_wiki_card(memory_tree, "wiki/reflections/周报.md", "本周回顾", days=5)
+
+    items = review_ritual.feynman_candidates(memory_tree)
+
+    assert [item["rel"] for item in items] == ["wiki/新卡.md"]
+    assert items[0]["title"] == "自注意力"
+    assert "自注意力让词互相看" in items[0]["body"]
+
+
+def test_feynman_brief_template_fallback(memory_tree, monkeypatch):
+    """无 API key：退回纯模板骨架（含三空），绝不阻塞。"""
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    _make_wiki_card(memory_tree, "wiki/新卡.md", "自注意力", days=5)
+
+    brief = review_ritual.feynman_brief(memory_tree)
+
+    assert "费曼讲稿" in brief
+    assert "自注意力" in brief
+    assert "① 核心概念" in brief and "② 类比" in brief and "③ 应用" in brief
+
+
+def test_feynman_brief_llm_drafted(memory_tree, monkeypatch):
+    """有 key：LLM 起草（mock httpx）；LLM 异常自动回模板。"""
+    _make_wiki_card(memory_tree, "wiki/新卡.md", "自注意力", days=5)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+
+    class _Resp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {"message": {"content": "• 「自注意力」\n  ① 核心概念：词互相看\n  ② 类比：饭局\n  ③ 应用：聊天"}}
+                ]
+            }
+
+    import scripts.dispatch.review_ritual as ritual_module
+
+    monkeypatch.setattr(ritual_module, "feynman_candidates", lambda *a, **k: [
+        {"title": "自注意力", "rel": "wiki/新卡.md", "body": "x"}
+    ])
+    import httpx as _httpx
+
+    monkeypatch.setattr(_httpx, "post", lambda *a, **k: _Resp())
+    brief = review_ritual.feynman_brief(memory_tree)
+    assert "饭局" in brief
+
+    def _boom(*a, **k):
+        raise RuntimeError("api down")
+
+    monkeypatch.setattr(_httpx, "post", _boom)
+    brief = review_ritual.feynman_brief(memory_tree)
+    assert "① 核心概念" in brief  # 模板兜底
+
+
+def test_feynman_brief_none_without_candidates(memory_tree):
+    """当月无新卡：返回 None（不推空稿）。"""
+    assert review_ritual.feynman_brief(memory_tree) is None

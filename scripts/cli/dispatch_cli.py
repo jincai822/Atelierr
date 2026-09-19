@@ -655,6 +655,12 @@ class DispatchCLI:
                 report = review_ritual.open_ritual(tree, full_kind)
                 if report["opened"]:
                     click.echo(f"已开启回顾会话并推送表单：{len(report['questions'])} 问")
+                    # 月度脉冲随附费曼讲稿（2026-09-19 建议②：能讲明白才是
+                    # 真懂；LLM 起草模板兜底，失败/无新卡静默不阻塞脉冲）
+                    if kind == "monthly":
+                        brief = review_ritual.feynman_brief(tree)
+                        if brief:
+                            _send_and_log("费曼讲稿", "🎤 本月费曼讲稿", brief)
                 elif report.get("paused"):
                     click.echo("已连续 3 天未答，每日三问自动暂停（飞书回「复盘」恢复）")
                 else:

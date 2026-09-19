@@ -51,6 +51,12 @@ _MAX_QUESTIONS = 6
 BLIND_RECALL_DAYS = 7
 BLIND_RECALL_LIMIT = 3
 
+#: 费曼讲稿（2026-09-19 脑科学建议②）：每月脉冲从当月 wiki 新卡挑 N 张
+#: 合成讲稿骨架——能讲明白才是真懂（费曼技巧；目标二的验证标准原话
+#: 就是「能向人讲清」）。LLM 起草，模板兜底，绝不影响脉冲本身
+FEYNMAN_DAYS = 30
+FEYNMAN_LIMIT = 3
+
 #: 盲测候选排除：机器产物/知识层不算"本周新收的笔记"
 _BLIND_EXCLUDED_DIRS = frozenset({"wiki", "distilled", "系统", "templates"})
 _BLIND_EXCLUDED_SOURCES = frozenset({"digest", "highlights", "system", "todo"})
@@ -327,6 +333,129 @@ def blind_comparison(
             body = ""
         parts.append(f"• 「{title}」：{body[:excerpt_chars] or '（原文读取失败）'}")
     return "\n".join(parts) if parts else None
+
+
+def feynman_candidates(
+    tree, days: int = FEYNMAN_DAYS, limit: int = FEYNMAN_LIMIT
+) -> List[Dict[str, str]]:
+    """当月 wiki 新卡（费曼讲稿候选）：created 在 days 天内的 concept/
+    摘录卡（cognition/ 与 reflections/ 排除——判断与反思不是讲授素材），
+    按新到旧取前 limit 条。
+
+    Returns:
+        List[Dict]: [{title, rel, body}]，body 为正文（截 800 字）。
+    """
+    wiki_dir = Path(tree.notes_dir) / "wiki"
+    cutoff = datetime.now().astimezone() - timedelta(days=days)
+    items: List[Dict[str, str]] = []
+    if not wiki_dir.is_dir():
+        return items
+    for path in sorted(wiki_dir.rglob("*.md")):
+        rel = path.relative_to(tree.notes_dir)
+        if any(part in ("cognition", "reflections") for part in rel.parts[:-1]):
+            continue
+        try:
+            post = frontmatter.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        try:
+            created = datetime.fromisoformat(str(post.get("created") or ""))
+        except ValueError:
+            continue
+        if created.tzinfo is None:
+            created = created.astimezone()
+        if created < cutoff:
+            continue
+        items.append(
+            {
+                "title": str(post.get("title") or path.stem),
+                "rel": rel.as_posix(),
+                "created": created.isoformat(),
+                "body": " ".join(str(post.content).split())[:800],
+            }
+        )
+    items.sort(key=lambda item: item["created"], reverse=True)
+    return items[:limit]
+
+
+def _feynman_template(candidates: List[Dict[str, str]]) -> str:
+    """纯模板骨架（LLM 不可用时的兜底；填空本就是用户的事）。"""
+    parts = [
+        "🎤 本月费曼讲稿（能讲明白才是真懂——填不填零压力）",
+        "每张卡三空：",
+    ]
+    for item in candidates:
+        parts.append(
+            f"• 「{item['title']}」\n"
+            "  ① 核心概念：____（一句话，说给完全不懂的人）\n"
+            "  ② 类比：它像生活中的什么？\n"
+            "  ③ 应用：下周哪个场景用一次？"
+        )
+    return "\n".join(parts)
+
+
+def _feynman_llm(candidates: List[Dict[str, str]]) -> Optional[str]:
+    """LLM 起草讲稿骨架（DeepSeek 一次调用）；任何失败返回 None（模板兜底）。"""
+    import os
+
+    from scripts.dispatch.judgments import _load_llm_config
+
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if not api_key:
+        return None
+    cfg = _load_llm_config()
+    base_url = str(cfg.get("base_url") or "https://api.deepseek.com").rstrip("/")
+    model = str(cfg.get("model") or "deepseek-v4-flash")
+    cards_text = "\n\n".join(
+        f"卡{i}「{item['title']}」：{item['body'][:400]}"
+        for i, item in enumerate(candidates, 1)
+    )
+    prompt = (
+        "你是费曼技巧教练。给下面每张知识卡写一份讲稿骨架，格式严格为：\n"
+        "• 「标题」\n  ① 核心概念：一句通俗话\n  ② 类比：一个生活类比\n"
+        "  ③ 应用：一个本周可试的具体场景\n"
+        "只输出骨架本身，不要任何前后缀。\n\n" + cards_text
+    )
+    try:
+        import httpx
+
+        response = httpx.post(
+            f"{base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 900,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        text = str(
+            response.json()["choices"][0]["message"]["content"] or ""
+        ).strip()
+    except Exception:  # noqa: BLE001 - LLM 失败退回模板
+        return None
+    return text or None
+
+
+def feynman_brief(
+    tree, days: int = FEYNMAN_DAYS, limit: int = FEYNMAN_LIMIT
+) -> Optional[str]:
+    """本月费曼讲稿（月度脉冲随附）：LLM 起草，模板兜底；当月无新卡返回 None。
+
+    Args:
+        tree: MemoryTree。
+        days: 回看窗口（天）。
+        limit: 卡片上限。
+
+    Returns:
+        Optional[str]: 讲稿文本；无候选为 None。
+    """
+    candidates = feynman_candidates(tree, days=days, limit=limit)
+    if not candidates:
+        return None
+    return _feynman_llm(candidates) or _feynman_template(candidates)
 
 
 def open_ritual(tree, kind: str, send: bool = True, respect_quiet: bool = True) -> Dict[str, Any]:
