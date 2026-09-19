@@ -105,7 +105,8 @@ def test_approval_creates_exactly_one_entry(tree, manager):
     files = list(manager.cognition_dir.glob("*.md"))
     assert len(files) == 1
     assert entry.origin["memory_id"] == _memory_id(note)
-    assert entry.origin["memory_path"] == "src.md"
+    # 2026-09-19 评审修复：溯源字段存 $OV 相对路径（此前截成 basename）
+    assert entry.origin["memory_path"] == "memory/src.md"
     assert entry.revision == 1
     with pytest.raises(CognitionError, match="已处理"):
         manager.approve_promotion(
