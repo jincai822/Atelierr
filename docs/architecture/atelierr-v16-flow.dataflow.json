@@ -2,8 +2,8 @@
   "schema_version": 1,
   "diagram_type": "dataflow",
   "meta": {
-    "title": "Atelierr 总架构：五环接力（每个环节干什么写在箭头上）",
-    "subtitle": "跟着 ①→㉓ 读 · 2026-09-19 · 检索底座已换 basic-memory（方案三）· 箭头全走独立通道不重叠",
+    "title": "Atelierr 信息流：一条信息的一生（v1.6）",
+    "subtitle": "跟着 ①→⑭ 读 · 2026-09-19 · 检索底座 basic-memory（方案三）",
     "output": "atelierr-v16-flow.html",
     "viewBox": [
       1180,
@@ -24,15 +24,15 @@
       "label": "④ 确认 · 你点按钮"
     },
     {
-      "label": "⑤ 沉淀 · 归档/回顾/遗忘"
+      "label": "⑤ 沉淀 · 三层归宿"
     }
   ],
   "nodes": [
     {
       "id": "feishu",
       "type": "frontend",
-      "label": "飞书（手机主入口）",
-      "sublabel": "链接/截图/语音/视频/PDF/文字 · 机器人长连接接收",
+      "label": "飞书（主入口）",
+      "sublabel": "链接/截图/语音/视频/PDF/文字 · 长连接接收",
       "stage": 0,
       "row": 0
     },
@@ -40,7 +40,7 @@
       "id": "quickadd",
       "type": "frontend",
       "label": "手机 QuickAdd",
-      "sublabel": "想法/灵感一键速记 · Syncthing 同步进库",
+      "sublabel": "想法一键速记 · Syncthing 同步",
       "stage": 0,
       "row": 1
     },
@@ -48,7 +48,7 @@
       "id": "obsidian",
       "type": "frontend",
       "label": "电脑 Obsidian",
-      "sublabel": "直写+拖大文件 · 控制台主页在这",
+      "sublabel": "直写+拖大文件 · 控制台主页",
       "stage": 0,
       "row": 2
     },
@@ -56,7 +56,7 @@
       "id": "clipper",
       "type": "frontend",
       "label": "Chrome 剪藏",
-      "sublabel": "网页长文一键剪藏 · 备注框可选",
+      "sublabel": "网页长文一键剪藏",
       "stage": 0,
       "row": 3
     },
@@ -64,7 +64,7 @@
       "id": "vault",
       "type": "database",
       "label": "memory/ 根 收件箱",
-      "sublabel": "裸笔记零摩擦 · 日记追加一行 · 捕获时刻不加工",
+      "sublabel": "裸笔记零摩擦 · 文字进当天日记一行",
       "stage": 1,
       "row": 0,
       "tag": "零摩擦"
@@ -72,124 +72,76 @@
     {
       "id": "att",
       "type": "database",
-      "label": "attachments/ 平台目录",
-      "sublabel": "原件只增不减 · 视频 480p 单份 · 长全文外置 .md",
+      "label": "attachments/ 原件",
+      "sublabel": "只增不减 · 视频 480p 单份 · 全文外置 .md",
       "stage": 1,
       "row": 1,
       "width": 170
     },
     {
-      "id": "watcher",
-      "type": "backend",
-      "label": "watcher 归一化",
-      "sublabel": "裸 md 补一次性 frontmatter · 还原 mtime",
-      "stage": 1,
-      "row": 2
-    },
-    {
       "id": "dispatch",
       "type": "backend",
-      "label": "分发班次",
-      "sublabel": "15 分钟一轮 links/media/todos/highlights · 幂等+熔断",
+      "label": "分发班次+引擎组",
+      "sublabel": "15分钟一轮 · 下载/Whisper转写/MinerU OCR/DeepSeek总结",
       "stage": 2,
-      "row": 0
-    },
-    {
-      "id": "engines",
-      "type": "backend",
-      "label": "加工引擎组",
-      "sublabel": "yt-dlp / Whisper large-v3 / DeepSeek / MinerU OCR / ffmpeg",
-      "stage": 2,
-      "row": 1
+      "row": 0,
+      "tag": "无人值守"
     },
     {
       "id": "cardnote",
       "type": "database",
       "label": "待确认卡笔记",
-      "sublabel": "落 memory/ 根 · 标题+摘要+内嵌原件+全文链接",
+      "sublabel": "标题+摘要+内嵌原件+全文链接 · 机器不改写",
       "stage": 2,
-      "row": 2,
-      "tag": "机器不改写"
+      "row": 1
     },
     {
       "id": "sidecar",
       "type": "database",
       "label": "sidecar 状态",
-      "sublabel": "index.json：confidence/layer/pending_delete · 每日 git 快照",
+      "sublabel": "confidence/分层/复习 · 衰减只写这 · 每日快照",
       "stage": 2,
-      "row": 3
-    },
-    {
-      "id": "decay",
-      "type": "backend",
-      "label": "decay 遗忘",
-      "sublabel": "方案 C 机器 3x 速（15天/45天）· 只写 sidecar 不动文件",
-      "stage": 2,
-      "row": 4
+      "row": 2
     },
     {
       "id": "card",
       "type": "external",
       "label": "飞书确认卡",
-      "sublabel": "✅确认 / 📁归档… / 删除 · 评论备注上卡 · 超限回执",
+      "sublabel": "✅确认归档 / 📁选目录 / 🗑删除 · 评论上卡",
       "stage": 3,
       "row": 0
     },
     {
-      "id": "feishutask",
-      "type": "external",
-      "label": "飞书任务/日历",
-      "sublabel": "待办单向同步 · 点 ✅ 回写完成 · 截止日上日历",
-      "stage": 3,
-      "row": 1
-    },
-    {
-      "id": "reviewcli",
-      "type": "external",
-      "label": "review/purge CLI",
-      "sublabel": "月度待删清单 → 你点头才 purge · 机器绝不自动删",
-      "stage": 3,
-      "row": 2
-    },
-    {
       "id": "arch",
       "type": "database",
-      "label": "归档 memory/平台/",
-      "sublabel": "平铺不建子目录（唯 书籍/ 例外）· 分类全走标签",
+      "label": "memory/ 原料层·类目",
+      "sublabel": "抖音/小红书/书籍(中图法)/媒体/飞书 · 平铺+标签",
       "stage": 4,
       "row": 0
     },
     {
       "id": "wiki",
       "type": "database",
-      "label": "wiki/ 知识总库",
-      "sublabel": "摘录卡/concept/判断登记处(复盘闭环)/反思产物 · 不衰减不 purge",
+      "label": "wiki/ 知识层",
+      "sublabel": "摘录卡/concept/判断/反思 · 不衰减不 purge",
       "stage": 4,
       "row": 1
-    },
-    {
-      "id": "atelier",
-      "type": "backend",
-      "label": "Atelier 车间+回顾",
-      "sublabel": "$hi/$weekly/十框架 · 控制台一键进 · 只读引用全库 + bm MCP",
-      "stage": 4,
-      "row": 2
     },
     {
       "id": "trash",
       "type": "database",
       "label": "trash/ 回收站",
-      "sublabel": "purge 的唯一去处 · 随时可捞回 · 你定期清空",
+      "sublabel": "删除的唯一去处 · 可捞回",
       "stage": 4,
-      "row": 3
+      "row": 2
     },
     {
       "id": "bm",
       "type": "backend",
-      "label": "basic-memory 记忆底座",
-      "sublabel": "全库语义索引+实体图谱 · 飞书「搜」/晨报目标排序 · 索引在库外",
+      "label": "basic-memory 底座",
+      "sublabel": "语义索引+实体图谱 · 飞书「搜」/晨报排序 · 索引在库外",
       "stage": 4,
-      "row": 4,
+      "row": 3,
       "width": 160
     }
   ],
@@ -248,23 +200,9 @@
       ]
     },
     {
-      "from": "obsidian",
-      "to": "att",
-      "label": "⑤ 拖大文件",
-      "variant": "emphasis",
-      "route": "vertical-channel",
-      "fromSide": "right",
-      "toSide": "left",
-      "channelX": 172,
-      "labelAt": [
-        135,
-        345
-      ]
-    },
-    {
       "from": "clipper",
       "to": "vault",
-      "label": "⑥ 剪藏全文",
+      "label": "⑤ 剪藏全文",
       "variant": "emphasis",
       "route": "vertical-channel",
       "fromSide": "right",
@@ -277,19 +215,19 @@
     },
     {
       "from": "vault",
-      "to": "watcher",
-      "label": "⑦ 补 frontmatter（异步）",
-      "variant": "default",
+      "to": "dispatch",
+      "label": "⑥ 班次扫正文",
+      "variant": "emphasis",
       "route": "straight",
       "labelAt": [
-        360,
-        325
+        422,
+        140
       ]
     },
     {
       "from": "att",
       "to": "dispatch",
-      "label": "⑧ 发现新附件",
+      "label": "⑦ 发现新附件",
       "variant": "emphasis",
       "route": "vertical-channel",
       "fromSide": "right",
@@ -301,78 +239,20 @@
       ]
     },
     {
-      "from": "vault",
-      "to": "dispatch",
-      "label": "⑨ 扫正文",
-      "variant": "emphasis",
-      "route": "straight",
-      "labelAt": [
-        422,
-        140
-      ]
-    },
-    {
-      "from": "watcher",
-      "to": "sidecar",
-      "label": "⑩ 登记索引（异步）",
-      "variant": "default",
-      "route": "vertical-channel",
-      "fromSide": "right",
-      "toSide": "left",
-      "channelX": 440,
-      "labelAt": [
-        422,
-        445
-      ]
-    },
-    {
       "from": "dispatch",
-      "to": "engines",
-      "label": "⑪ 按类型分派",
-      "variant": "emphasis",
-      "route": "straight",
-      "labelAt": [
-        580,
-        210
-      ]
-    },
-    {
-      "from": "engines",
       "to": "cardnote",
-      "label": "⑫ 加工成卡",
+      "label": "⑧ 加工成卡",
       "variant": "emphasis",
       "route": "straight",
       "labelAt": [
-        580,
-        325
-      ]
-    },
-    {
-      "from": "cardnote",
-      "to": "sidecar",
-      "label": "⑬ 登记（异步）",
-      "variant": "default",
-      "route": "straight",
-      "labelAt": [
-        585,
-        440
-      ]
-    },
-    {
-      "from": "sidecar",
-      "to": "decay",
-      "label": "⑭ 03:00 算衰减（异步）",
-      "variant": "default",
-      "route": "straight",
-      "labelAt": [
-        595,
-        555
+        560,
+        196
       ]
     },
     {
       "from": "cardnote",
       "to": "card",
-      "label": "⑮ 推确认卡",
+      "label": "⑨ 推确认卡",
       "variant": "emphasis",
       "route": "vertical-channel",
       "fromSide": "right",
@@ -384,37 +264,9 @@
       ]
     },
     {
-      "from": "dispatch",
-      "to": "feishutask",
-      "label": "⑯ 待办同步",
-      "variant": "emphasis",
-      "route": "vertical-channel",
-      "fromSide": "right",
-      "toSide": "left",
-      "channelX": 610,
-      "labelAt": [
-        620,
-        290
-      ]
-    },
-    {
-      "from": "decay",
-      "to": "reviewcli",
-      "label": "⑰ 冷却到期进清单",
-      "variant": "default",
-      "route": "vertical-channel",
-      "fromSide": "right",
-      "toSide": "left",
-      "channelX": 665,
-      "labelAt": [
-        640,
-        500
-      ]
-    },
-    {
       "from": "card",
       "to": "arch",
-      "label": "⑱ 点归档才移动",
+      "label": "⑩ 点✅才归档",
       "variant": "emphasis",
       "route": "straight",
       "labelAt": [
@@ -425,59 +277,48 @@
     {
       "from": "arch",
       "to": "wiki",
-      "label": "⑲ 值得留的进总库（摘录卡经 bm 写入）",
+      "label": "⑪ 值得留的经 bm 写入",
       "variant": "emphasis",
       "route": "straight",
       "labelAt": [
-        1015,
+        1005,
         205
       ]
     },
     {
-      "from": "reviewcli",
+      "from": "cardnote",
+      "to": "sidecar",
+      "label": "⑫ 登记（异步）",
+      "variant": "default",
+      "route": "straight",
+      "labelAt": [
+        560,
+        318
+      ]
+    },
+    {
+      "from": "sidecar",
       "to": "trash",
-      "label": "⑳ 你点头才删",
-      "variant": "emphasis",
+      "label": "⑬ 没人理→待删→你点头（异步）",
+      "variant": "default",
       "route": "vertical-channel",
       "fromSide": "right",
       "toSide": "left",
       "channelX": 852,
       "labelAt": [
-        852,
-        450
-      ]
-    },
-    {
-      "from": "wiki",
-      "to": "atelier",
-      "label": "㉑ 周回顾只读引用（异步）",
-      "variant": "dashed",
-      "route": "straight",
-      "labelAt": [
-        1030,
-        325
+        800,
+        470
       ]
     },
     {
       "from": "arch",
       "to": "bm",
-      "label": "㉒ 索引于 03:20+即时（异步）",
+      "label": "⑭ 索引于 03:20+即时（异步）",
       "variant": "dashed",
       "route": "straight",
       "labelAt": [
         890,
-        545
-      ]
-    },
-    {
-      "from": "bm",
-      "to": "atelier",
-      "label": "㉓ MCP 语义查全库（异步）",
-      "variant": "dashed",
-      "route": "straight",
-      "labelAt": [
-        985,
-        562
+        560
       ]
     }
   ],
@@ -486,42 +327,28 @@
       "dot": "slate",
       "title": "这张图怎么读",
       "items": [
-        "五个大栏 = 五个环节：① 你发东西 → ② 落进库 → ③ 机器加工 → ④ 你确认 → ⑤ 沉淀/回顾/遗忘",
-        "箭头上的字 = 这一棒具体干什么；粗绿线 = 内容在流动；细灰线 = 异步后台活；紫虚线 = 只读引用",
-        "每个箭头走自己的通道（横平竖直），互不重叠；看不清某棒就看卡片「环节接力」"
+        "五个大栏 = 五个环节：你发 → 落库 → 机器加工 → 你确认 → 三层归宿",
+        "粗绿线 = 内容在流动；细灰/虚线 = 异步后台活",
+        "跟着编号 ①→⑭ 走就是一条信息的完整一生"
       ]
     },
     {
       "dot": "cyan",
-      "title": "环节接力（每棒一句话）",
+      "title": "一条抖音链接的一生（实例）",
       "items": [
-        "①→⑥：四个入口各就各位——飞书接一切、QuickAdd 记想法、Obsidian 电脑直写、剪藏收长文；零摩擦，想记到记下 ≤3 秒",
-        "⑦⑧⑨⑩：捕获后机器只做登记——watcher 补 frontmatter、sidecar 记状态，内容本身一字不动",
-        "⑪⑫：15 分钟班次把新东西分派给引擎组（下载/转写/MinerU OCR/摘要/压缩），产出「待确认卡」落回收件箱",
-        "⑮⑯：确认卡和待办推到飞书——你 ✅ 确认、📁 归档、或删除；待办进飞书任务/日历",
-        "⑱⑲⑳㉑：归档进平台目录平铺；值得留的经 bm 写入 wiki 总库（实体+关系入图谱）；没人碰的机器转写 15 天进待删清单，你点头才进回收站；周报月报只读引用全库",
-        "㉒㉓：basic-memory 记忆底座——索引全库（03:20 重建+即时同步），飞书「搜」/晨报目标排序/车间 MCP 都走它"
-      ]
-    },
-    {
-      "dot": "violet",
-      "title": "各模块各管一摊（文件级解耦）",
-      "items": [
-        "摄入模块：只管「从入口到待确认卡」——scripts/dispatch/ + processors/",
-        "记忆模块：只管「sidecar 状态」——confidence/分层/衰减，笔记文件创建后绝不改写移动",
-        "记忆底座（basic-memory）：只管「语义索引+实体图谱」——检索/写卡/MCP；索引在库外，重建不伤库",
-        "wiki 知识总库：真沉淀的唯一出口（判断登记处+反思产物已并入，2026-09 裁决）",
-        "Atelier 框架：工作流车间（$hi/$weekly/十框架），只读引用库，产物落 reflections/ 进 wiki 展示",
-        "每个模块只读写自己的目录，靠文件系统衔接：抽掉任何一个，其它的照常跑"
+        "你发链接 → 进当天日记一行（零摩擦，≤3 秒）",
+        "15 分钟班次捞起 → 下载 480p + Whisper 转写 + DeepSeek 总结",
+        "产出待确认卡推你飞书 → 你点✅ → 归档进 抖音/",
+        "值得留：划重点勾选 → 经 bm 写入 wiki（图谱生长）；没人理：15 天进待删清单，你点头才进回收站"
       ]
     },
     {
       "dot": "amber",
-      "title": "自动化时刻表 + 基础设施",
+      "title": "自动化时刻表",
       "items": [
-        "15 分钟：分发班次（links→media→todos→highlights）；03:00 decay 分层；03:20 bm 索引重建；07:53 晨报（含判断复盘卡）；周日 周报；03:00 库 git 快照",
-        "Syncthing 手机↔电脑实时双向（WireGuard 内网，不公网暴露）；飞书长连接 daemon 常驻收消息；MinerU OCR 常驻服务；生产环境 Python 3.12",
-        "成本护栏：捕获期零 API；DeepSeek 每篇≤1 次、超 6000 字跳过；Whisper GPU 优先；失败 3 次熔断"
+        "常驻：飞书桥 · MinerU OCR · 每 15 分钟分发班次",
+        "03:00 衰减+git快照 · 03:20 bm 索引重建 · 07:53 晨报（含判断复盘卡）",
+        "21:17 待确认提醒 · 21:30 每日四问 · 周日 09:13 周回顾"
       ]
     },
     {
@@ -530,8 +357,7 @@
       "items": [
         "笔记创建后机器绝不改写/移动/删除；原件只增不减；动态状态只进 sidecar",
         "三人工例外：你点按钮机器才动——删「待确认」/删「待办」/归档移动单篇",
-        "删除只有一条路：pending_delete → review → 你 CLI 点头 → trash/（可恢复）",
-        "大视频超飞书上限有回执两条出路：发链接 / 电脑拖 attachments/媒体/（2026-09-13 E6 真机验证规矩）"
+        "删除只有一条路：待删标记 → 清单 → 你点头 → trash/（可恢复）"
       ]
     }
   ]
