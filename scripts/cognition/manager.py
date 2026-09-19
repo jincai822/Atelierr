@@ -21,11 +21,14 @@ from __future__ import annotations
 import json
 import os
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
-from typing import Callable, Dict, List, Literal, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterator, List, Literal, Optional, Sequence, Tuple
+
+import fcntl
 
 import frontmatter
 
@@ -276,6 +279,9 @@ class CognitionEntry:
     related: Tuple[str, ...]
     supersedes: Optional[str]
     content: str
+    # v1.2 decision 生命周期字段：仅 decision 可携带；2026-09-19 评审修复——
+    # 此前只在解析时校验却不进对象模型，任何获批更新回写后字段静默丢失
+    review_at: Optional[str] = None
 
     @property
     def type(self) -> str:
@@ -459,6 +465,26 @@ class CognitionManager:
     def _save_proposals(self, proposals: Dict[str, dict]) -> None:
         """原子写 proposal 队列。"""
         self._write_json(self.proposals_path, proposals)
+
+    @contextmanager
+    def _proposals_transaction(self) -> Iterator[Dict[str, dict]]:
+        """flock 保护的「读最新 → 改 → 原子写」事务（2026-09-19 评审 4B）。
+
+        proposal 队列的写者通常在飞书守护单进程内（串行），但 CLI 与
+        车间会话是独立进程——无锁读改写在他方插入时会丢更新。事务内
+        读磁盘最新版，提交时原子写。**同进程不得嵌套**（flock 换 fd
+        自锁）；与 memory sidecar 的 ``_index_transaction`` 同规。
+        """
+        lock_path = self.proposals_path.with_name(self.proposals_path.name + ".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "w", encoding="utf-8") as lock_fh:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            try:
+                proposals = self._load_proposals()
+                yield proposals
+                self._save_proposals(proposals)
+            finally:
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
 
     @staticmethod
     def _read_json(path: Path) -> Dict[str, dict]:
@@ -647,6 +673,7 @@ class CognitionManager:
             related=_str_tuple(meta.get("related"), "related"),
             supersedes=supersedes,
             content=content,
+            review_at=review_at,
         )
 
     # ------------------------------------------------------------------
@@ -875,6 +902,14 @@ class CognitionManager:
         entry = sidecar.get(memory_id)
         return entry if isinstance(entry, dict) else None
 
+    def _memory_rel_path(self, source_path: Path) -> str:
+        """来源笔记的 $OV 相对 POSIX 路径（溯源字段；2026-09-19 评审修复：
+        此前只存 basename，嵌套目录与同名文件在溯源里不可区分）。"""
+        try:
+            return source_path.relative_to(self.ov_path).as_posix()
+        except ValueError:
+            return source_path.name
+
     def memory_dependencies(self, memory_id: str) -> List[CognitionEntry]:
         """列出 origin/evidence 引用该 memory 的在研（active/testing/questioned）条目。
 
@@ -974,6 +1009,9 @@ class CognitionManager:
             meta["certainty"] = entry.certainty
             meta["certainty_updated_at"] = entry.certainty_updated_at
             meta["certainty_source"] = entry.certainty_source
+        # v1.2：decision 的 review_at 随更新回写（此前不回写导致字段丢失）
+        if entry.entry_type == "decision" and entry.review_at is not None:
+            meta["review_at"] = entry.review_at
         return meta
 
     def _validate_type_status_certainty(
@@ -1278,7 +1316,7 @@ class CognitionManager:
         proposal = PromotionProposal(
             id=f"prop_{generate_id()}",
             memory_id=memory_id,
-            memory_path=source_path.name,
+            memory_path=self._memory_rel_path(source_path),
             entry_type=entry_type,
             title=title,
             statement=statement,
@@ -1287,9 +1325,8 @@ class CognitionManager:
             proposed_certainty=proposed_certainty,
             warnings=warnings,
         )
-        proposals = self._load_proposals()
-        proposals[proposal.id] = self._proposal_to_dict(proposal)
-        self._save_proposals(proposals)
+        with self._proposals_transaction() as proposals:
+            proposals[proposal.id] = self._proposal_to_dict(proposal)
         return proposal
 
     def list_promotion_proposals(
@@ -1331,15 +1368,14 @@ class CognitionManager:
         reason: str,
         resolution: Optional[str] = None,
     ) -> None:
-        """把 proposal 置为终态并原子写盘（读现值后整体替换）。"""
-        proposals = self._load_proposals()
-        data = proposals[proposal_id]
-        data["status"] = status
-        data["decided_at"] = _now_iso()
-        data["decision_reason"] = reason
-        if resolution is not None:
-            data["resolution"] = resolution
-        self._save_proposals(proposals)
+        """把 proposal 置为终态并原子写盘（flock 事务内读现值后替换）。"""
+        with self._proposals_transaction() as proposals:
+            data = proposals[proposal_id]
+            data["status"] = status
+            data["decided_at"] = _now_iso()
+            data["decision_reason"] = reason
+            if resolution is not None:
+                data["resolution"] = resolution
 
     def plan_approve_promotion(
         self,

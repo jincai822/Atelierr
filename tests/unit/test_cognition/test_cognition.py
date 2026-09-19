@@ -644,3 +644,90 @@ def test_review_at_rejected_on_belief(manager):
     _hand_file(manager, "b1.md", {"type": "belief", "review_at": now})
     report = manager.validate()
     assert any("review_at" in err for err in report.errors)
+
+
+# ---------- 2026-09-19 评审修复回归：review_at 保留 / 相对路径 / proposals 事务 ----------
+
+
+def test_review_at_preserved_through_updates(manager):
+    """P1 回归：decision 的 review_at 经 reassess→archive 后仍在文件与对象里
+    （此前只在解析时校验、不进对象模型，任何获批更新回写后字段静默丢失）。"""
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    path = _hand_file(
+        manager,
+        "d1.md",
+        {"type": "decision", "certainty": None, "review_at": now},
+    )
+    # _hand_file 默认 belief 元数据带 certainty 三件套；decision 允许无 certainty
+    text = path.read_text(encoding="utf-8")
+    assert "review_at" in text
+    entry = manager.get_entry(path.read_text(encoding="utf-8").split('id: ')[1].split("\n")[0].strip("'\""))
+    assert entry.review_at == now
+
+    manager.reassess_entry(
+        entry.id,
+        evidence=[],
+        certainty=None,
+        status="reviewing",
+        rationale="到期复盘",
+        approval=APPROVAL,
+    )
+    assert "review_at" in path.read_text(encoding="utf-8")
+
+    manager.archive_entry(entry.id, reason="复盘归档", approval=APPROVAL)
+    text = path.read_text(encoding="utf-8")
+    assert "review_at" in text
+    assert manager.get_entry(entry.id).review_at == now
+
+
+def test_nominate_stores_relative_path(manager):
+    """P3 回归：嵌套来源提名/批准后，溯源字段存 $OV 相对路径（不再截成 basename）。"""
+    topic = manager.ov_path / "memory" / "topic"
+    topic.mkdir(parents=True)
+    note = topic / "src.md"
+    note.write_text(
+        "---\nid: TESTID-NEST\ntitle: 嵌套来源\ncreated: '2026-09-19T10:00:00+08:00'\n---\n\n# 嵌套来源\n",
+        encoding="utf-8",
+    )
+    prop = manager.nominate_memory(
+        "TESTID-NEST",
+        entry_type="belief",
+        title="嵌套判断",
+        statement="嵌套目录的来源应可溯源",
+        rationale="r",
+        proposed_status="active",
+    )
+    assert prop.memory_path == "memory/topic/src.md"
+
+    entry = manager.approve_promotion(
+        prop.id, status="active", certainty=0.7, approval=APPROVAL
+    )
+    assert entry.origin["memory_path"] == "memory/topic/src.md"
+    assert entry.evidence[0].path == "memory/topic/src.md"
+
+
+def test_proposals_transaction_keeps_concurrent_writes(manager):
+    """P3 回归：两实例交错提名互不丢更新（flock 事务覆盖读改写）。"""
+    other = CognitionManager(manager.ov_path, state_dir=manager.state_dir)
+    for index, (mgr, tag) in enumerate(
+        [(manager, "a"), (other, "b"), (manager, "c"), (other, "d")]
+    ):
+        topic = manager.ov_path / "memory"
+        topic.mkdir(exist_ok=True)
+        (topic / f"n{index}.md").write_text(
+            f"---\nid: TID-{tag}\ntitle: t\ncreated: '2026-09-19T10:00:00+08:00'\n---\n\n# t\n",
+            encoding="utf-8",
+        )
+        mgr.nominate_memory(
+            f"TID-{tag}",
+            entry_type="belief",
+            title=f"判断{tag}",
+            statement=f"并发提名 {tag}",
+            rationale="r",
+            proposed_status="active",
+        )
+    pending = manager.list_promotion_proposals()
+    assert len(pending) == 4
+    assert {p.statement for p in pending} == {
+        "并发提名 a", "并发提名 b", "并发提名 c", "并发提名 d"
+    }
