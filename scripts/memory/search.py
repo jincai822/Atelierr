@@ -387,7 +387,13 @@ class MemorySearcher:
             rel = hit.get("rel_path") or ""
             if not rel:
                 continue
-            path = self.tree.notes_dir / rel
+            # bm permalink 的 ASCII 段会被小写化（TP391-… → tp391-…），
+            # 与磁盘真实路径大小写不合——按文件系统逐级大小写不敏感解析
+            # 回真实路径（2026-09-19 实证，书籍卡命中因此被丢）
+            path = self._resolve_case_insensitive(rel)
+            if path is None:
+                continue  # 索引陈旧实体
+            rel = path.relative_to(self.tree.notes_dir).as_posix()
             try:
                 stat = path.stat()
                 text = path.read_text(encoding="utf-8")
@@ -409,6 +415,36 @@ class MemorySearcher:
             if memory is not None:
                 results.append(memory)
         return results
+
+    def _resolve_case_insensitive(self, rel: str) -> Optional[Path]:
+        """把可能大小写漂移的相对路径解析回磁盘真实路径。
+
+        bm permalink 的 ASCII 段一律小写（2026-09-19 实证 TP391 → tp391），
+        直接 ``notes_dir / rel`` 会找不到文件。逐级精确匹配、失败时按
+        大小写不敏感匹配同级唯一候选；多级歧义或不存在返回 None。
+
+        Args:
+            rel: bm 返回的相对路径（可能大小写漂移）。
+
+        Returns:
+            Optional[Path]: 真实绝对路径；解析不出为 None。
+        """
+        current = self.tree.notes_dir
+        for part in rel.replace("\\", "/").split("/"):
+            candidate = current / part
+            if candidate.exists():
+                current = candidate
+                continue
+            try:
+                matches = [
+                    item for item in current.iterdir() if item.name.lower() == part.lower()
+                ]
+            except OSError:
+                return None
+            if len(matches) != 1:
+                return None
+            current = matches[0]
+        return current
 
     # ------------------------------------------------------------------
     # 资料全文组（方案 B：attachments/**/*.md 的外置全文）

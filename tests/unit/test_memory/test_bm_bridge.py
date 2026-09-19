@@ -111,3 +111,31 @@ def test_semantic_search_falls_back_on_bridge_failure(memory_tree, monkeypatch):
 
     monkeypatch.setattr("scripts.memory.bm_bridge.search", lambda query, limit: [])
     assert MemorySearcher(memory_tree).semantic_search("x") == []
+
+
+def test_semantic_search_resolves_bm_lowercase_drift(memory_tree, monkeypatch):
+    """bm permalink 的 ASCII 段小写化（TP391→tp391）：按大小写不敏感解析
+    回真实路径，命中不丢（2026-09-19 实证：书籍卡命中因此被当陈旧实体跳过）。"""
+    from scripts.memory.search import MemorySearcher
+
+    target = memory_tree.notes_dir / "书籍" / "TP391-自然语言处理"
+    target.mkdir(parents=True)
+    (target / "书籍-测试-1.md").write_text(
+        "---\ntitle: 测试书卡\n---\n\n# 测试书卡\nTransformer 讲解\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "scripts.memory.bm_bridge.search",
+        lambda query, limit: [
+            {
+                "title": "测试书卡",
+                "permalink": "atelierr/书籍/tp391-自然语言处理/书籍-测试-1",
+                "rel_path": "书籍/tp391-自然语言处理/书籍-测试-1.md",
+                "score": 1.5,
+                "snippet": "x",
+            }
+        ],
+    )
+    results = MemorySearcher(memory_tree).semantic_search("Transformer", limit=5)
+    assert len(results) == 1
+    assert results[0].path.name == "书籍-测试-1.md"
