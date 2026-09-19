@@ -222,7 +222,7 @@ def build_questions(tree, kind: str) -> List[str]:
     return questions[:_MAX_QUESTIONS]
 
 
-def open_ritual(tree, kind: str, send: bool = True) -> Dict[str, Any]:
+def open_ritual(tree, kind: str, send: bool = True, respect_quiet: bool = True) -> Dict[str, Any]:
     """开启回顾会话并推表单卡。
 
     周/月回顾：已有会话在跑时跳过（不覆盖）。
@@ -274,7 +274,9 @@ def open_ritual(tree, kind: str, send: bool = True) -> Dict[str, Any]:
             KIND_DAILY: "🌛 今日四问",
         }[kind]
         intro = build_intro(tree, kind)
-        send_feishu_card(prompt_form_card(title, intro, questions))
+        send_feishu_card(
+            prompt_form_card(title, intro, questions), respect_quiet=respect_quiet
+        )
     return {"opened": True, "questions": questions}
 
 

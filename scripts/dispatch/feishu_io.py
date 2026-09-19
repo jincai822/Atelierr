@@ -67,6 +67,19 @@ JUDGMENT_REVIEW_ACTION = "judgment_review"
 #: 问答表单卡的问题数上限（卡片长度护栏；周回顾四问远未触及）
 PROMPT_FORM_MAX_QUESTIONS = 8
 
+#: 安静时段（本地时间 23:00–07:00）：主动推送一律静音
+#: （2026-09-19 脑科学建议③：睡眠是记忆固化主战场，夜间推送是
+#: 固化杀手+注意力残留；用户主动操作的交互回执经 respect_quiet=False
+#: 旁路——交互不是打扰。现有定时班次本就在窗外，这是防未来回归的硬闸）
+QUIET_START_HOUR = 23
+QUIET_END_HOUR = 7
+
+
+def quiet_hours_active(now: Optional[datetime] = None) -> bool:
+    """当前是否安静时段（本地 23:00–07:00；注入 now 供测试）。"""
+    moment = now or datetime.now()
+    return moment.hour >= QUIET_START_HOUR or moment.hour < QUIET_END_HOUR
+
 def _import_lark() -> Any:
     """惰性导入 lark-oapi（可选依赖；缺失时报清晰错误）。"""
     try:
@@ -141,6 +154,7 @@ def send_feishu(
     confirm_note: Optional[str] = None,
     pin: bool = False,
     pin_state: Optional[Path] = None,
+    respect_quiet: bool = True,
 ) -> bool:
     """发一条飞书卡片推送；未配置或失败返回 False（绝不抛异常）。
 
@@ -153,6 +167,8 @@ def send_feishu(
     ``pin=True`` 时发送成功把卡片置顶（晨报盘面第一眼可见），并先摘下
     ``pin_state`` 登记表里的上一条（每日替换不堆积）；置顶失败只 log，
     不影响发送结果。
+    ``respect_quiet=True``（默认）时安静时段（23:00–07:00）直接返回
+    False 不发送——主动推送静音；交互回执传 False 旁路。
 
     Args:
         title: 通知标题。
@@ -161,10 +177,13 @@ def send_feishu(
         confirm_note: 待确认笔记文件名；None 不加确认/归档按钮。
         pin: 发送成功后是否置顶该卡片。
         pin_state: 置顶登记表（存上一条 message_id）；None 只置顶不替换。
+        respect_quiet: 是否遵守安静时段（主动推送默认遵守）。
 
     Returns:
         bool: 发送成功且服务端 success 返回 True。
     """
+    if respect_quiet and quiet_hours_active():
+        return False
     app_id = os.environ.get(ENV_APP_ID, "").strip()
     app_secret = os.environ.get(ENV_APP_SECRET, "").strip()
     target = (chat_id or os.environ.get(ENV_CHAT_ID, "")).strip()
@@ -336,19 +355,25 @@ def send_feishu_card(
     chat_id: Optional[str] = None,
     app_id: Optional[str] = None,
     app_secret: Optional[str] = None,
+    respect_quiet: bool = True,
 ) -> bool:
     """发一张自定义交互卡片；未配置或失败返回 False（绝不抛异常）。
 
     卡片发送失败时降级为纯文本（取卡片头标题）再试一次。
+    ``respect_quiet=True``（默认）时安静时段（23:00–07:00）直接返回
+    False 不发送——主动推送静音；交互回执（桥 _send_card）传 False 旁路。
 
     Args:
         card: 卡片 JSON（legacy schema：header + elements）。
         chat_id: 目标会话；缺省读 ``FEISHU_CHAT_ID`` 环境变量。
         app_id / app_secret: 凭据覆盖；缺省读环境变量（桥实例传入自身凭据）。
+        respect_quiet: 是否遵守安静时段（主动推送默认遵守）。
 
     Returns:
         bool: 发送成功且服务端 success 返回 True。
     """
+    if respect_quiet and quiet_hours_active():
+        return False
     app_id = (app_id or os.environ.get(ENV_APP_ID, "")).strip()
     app_secret = (app_secret or os.environ.get(ENV_APP_SECRET, "")).strip()
     target = (chat_id or os.environ.get(ENV_CHAT_ID, "")).strip()

@@ -1096,9 +1096,14 @@ class FeishuBridge:
             print(f"[feishu] feedback fail: {exc}", flush=True)
 
     def _send_card(self, chat_id: Optional[str], card: Dict[str, Any]) -> bool:
-        """向会话发一张交互卡片（模块级 send_feishu_card 的实例凭据版）。"""
+        """向会话发一张交互卡片（模块级 send_feishu_card 的实例凭据版）。
+
+        交互回执（用户刚点了按钮/发了指令）不受安静时段限制——
+        交互不是打扰（2026-09-19 建议③），故 respect_quiet=False。
+        """
         return send_feishu_card(
-            card, chat_id, app_id=self.app_id, app_secret=self.app_secret
+            card, chat_id, app_id=self.app_id, app_secret=self.app_secret,
+            respect_quiet=False,
         )
 
     def _answer_search(self, chat_id: Optional[str], query: str) -> None:
@@ -1183,7 +1188,9 @@ class FeishuBridge:
 
         review_ritual.unpause_daily(self.tree)
         try:
-            report = review_ritual.open_ritual(self.tree, review_ritual.KIND_DAILY)
+            report = review_ritual.open_ritual(
+                self.tree, review_ritual.KIND_DAILY, respect_quiet=False
+            )
         except Exception as exc:  # noqa: BLE001 - 发卡失败回文字，不中断守护
             print(f"[feishu] daily review open fail: {exc}", flush=True)
             self._send_feedback(chat_id, "⚠️ 四问卡片发送失败，请稍后重试")
