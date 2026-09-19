@@ -16,13 +16,16 @@ def test_permalink_roundtrip():
 
 
 def test_search_normalizes_hits(monkeypatch):
-    """search：调 search_notes 并把结果归一化为 title/rel_path/score/snippet。"""
+    """search：走 CLI 子进程（2026-09-19 改，进程内调用泄漏 anyio 线程）
+    并把 stdout JSON 归一化为 title/rel_path/score/snippet。"""
+    import json
+
     calls = {}
 
-    class _FakeTools:
-        def search_notes(self, **kwargs):
-            calls.update(kwargs)
-            return {
+    def _fake_cli(args, *, input_text=None, timeout):
+        calls["args"] = args
+        return json.dumps(
+            {
                 "results": [
                     {
                         "title": "内核稳定",
@@ -32,17 +35,18 @@ def test_search_normalizes_hits(monkeypatch):
                     }
                 ]
             }
+        )
 
-    monkeypatch.setattr(bridge, "_run", lambda coro: coro)
-    monkeypatch.setattr(
-        "basic_memory.mcp.tools.search_notes", _FakeTools().search_notes
-    )
+    monkeypatch.setattr(bridge, "_run_cli", _fake_cli)
 
     hits = bridge.search("内核", limit=5, note_types=["Excerpt"], tags=["B站"])
 
-    assert calls["project"] == "atelierr"
-    assert calls["page_size"] == 5
-    assert calls["note_types"] == ["Excerpt"]
+    args = calls["args"]
+    assert args[:2] == ["tool", "search-notes"]
+    assert "--project" in args and args[args.index("--project") + 1] == "atelierr"
+    assert "--page-size" in args and args[args.index("--page-size") + 1] == "5"
+    assert "--type" in args and args[args.index("--type") + 1] == "Excerpt"
+    assert "--tag" in args and args[args.index("--tag") + 1] == "B站"
     assert hits == [
         {
             "title": "内核稳定",
@@ -55,10 +59,9 @@ def test_search_normalizes_hits(monkeypatch):
 
 
 def test_search_error_text_raises(monkeypatch):
-    """search_notes 返回错误文本时抛 RuntimeError（调用方据此降级）。"""
-    monkeypatch.setattr(bridge, "_run", lambda coro: coro)
+    """CLI 返回非 JSON（错误文本）时抛 RuntimeError（调用方据此降级）。"""
     monkeypatch.setattr(
-        "basic_memory.mcp.tools.search_notes", lambda **kwargs: "project not found"
+        bridge, "_run_cli", lambda args, *, input_text=None, timeout: "project not found"
     )
     import pytest
 
@@ -66,11 +69,25 @@ def test_search_error_text_raises(monkeypatch):
         bridge.search("x")
 
 
+def test_run_cli_nonzero_exit_raises(monkeypatch):
+    """_run_cli：子进程非零退出抛 RuntimeError（带 stderr 尾部）。"""
+    import subprocess
+
+    def _boom(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, "", "boom: db locked")
+
+    monkeypatch.setattr(bridge.subprocess, "run", _boom)
+    import pytest
+
+    with pytest.raises(RuntimeError, match="db locked"):
+        bridge._run_cli(["reindex"], timeout=1)
+
+
 def test_semantic_search_fuses_confidence(memory_tree, make_note, monkeypatch):
     """semantic_search（方案三 P3）：bm 召回 × live confidence 融合排序。"""
     from scripts.memory.search import MemorySearcher
 
-    note = make_note(memory_tree, filename="a.md", content="内核稳定的内容", idle_days=0)
+    make_note(memory_tree, filename="a.md", content="内核稳定的内容", idle_days=0)
     monkeypatch.setattr(
         "scripts.memory.bm_bridge.search",
         lambda query, limit: [

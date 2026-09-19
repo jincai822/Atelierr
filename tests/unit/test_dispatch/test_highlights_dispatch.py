@@ -10,7 +10,10 @@ from __future__ import annotations
 import json
 
 import frontmatter
+import pytest as _pytest
 
+from scripts.dispatch.highlights import HighlightsDispatcher
+from scripts.wiki.manager import WikiManager
 
 
 def _fake_bm_write(monkeypatch):
@@ -36,18 +39,12 @@ def _fake_bm_write(monkeypatch):
 _fake_bm_write.bases = []
 
 
-
-import pytest as _pytest
-
-
 @_pytest.fixture(autouse=True)
 def _bm_double(memory_tree, monkeypatch):
     _fake_bm_write.bases = [memory_tree.notes_dir]
     _fake_bm_write(monkeypatch)
     yield
 
-from scripts.dispatch.highlights import HighlightsDispatcher
-from scripts.wiki.manager import WikiManager
 
 _CHECKLIST = """# 划重点清单：测试书
 
