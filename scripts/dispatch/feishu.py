@@ -1112,13 +1112,12 @@ class FeishuBridge:
         from scripts.memory.search import MemorySearcher
 
         try:
-            # 先语义（方案三 P3：意思命中），召回为空退回全文（关键词命中）
+            # 语义检索全权（方案三完成形态，2026-09-19 用户裁决拆全文兜底）：
+            # bm 默认检索语义+字面双覆盖（同日实测三模式一致），bm 故障
+            # 显式告知，不再静默降级全文——替换是真的，不做面子工程
             searcher = MemorySearcher(self.tree)
             results = searcher.semantic_search(query, limit=SEARCH_LIMIT)
             engine = "语义"
-            if not results:
-                results = searcher.search(query, limit=SEARCH_LIMIT)
-                engine = "全文"
         except Exception as exc:  # noqa: BLE001 - 搜索失败文字告知，不中断守护
             print(f"[feishu] search fail: {exc}", flush=True)
             self._send_feedback(chat_id, "⚠️ 搜索失败，请稍后重试")

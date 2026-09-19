@@ -1271,6 +1271,20 @@ def test_search_command_returns_result_card(memory_tree, monkeypatch):
         source="test",
         tags=["内核稳定"],
     )
+    # 语义检索已 100% 委托（方案三完成形态）：引擎不在本测试射程内，mock 之
+    from scripts.memory.search import Memory, MemorySearcher
+
+    monkeypatch.setattr(
+        MemorySearcher,
+        "semantic_search",
+        lambda self, query, limit=10: [
+            Memory(
+                path=memory_tree.notes_dir / "n1.md",
+                title="内核稳定",
+                confidence=0.9,
+            )
+        ],
+    )
     bridge = _bridge(memory_tree)
     cards = []
     monkeypatch.setattr(
@@ -1301,6 +1315,15 @@ def test_search_command_returns_result_card(memory_tree, monkeypatch):
 def test_search_prefix_sousuo_variant(memory_tree, monkeypatch):
     """「搜索 xxx」与「搜 xxx」同效。"""
     memory_tree.create_note("n1.md", "睡眠很重要", source="test")
+    from scripts.memory.search import Memory, MemorySearcher
+
+    monkeypatch.setattr(
+        MemorySearcher,
+        "semantic_search",
+        lambda self, query, limit=10: [
+            Memory(path=memory_tree.notes_dir / "n1.md", title="n1", confidence=0.8)
+        ],
+    )
     bridge = _bridge(memory_tree)
     cards = []
     monkeypatch.setattr(
