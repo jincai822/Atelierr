@@ -91,6 +91,55 @@ DAILY_NOTE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")  # 日记不算知识候选
 DASHBOARD_STEMS = frozenset({"主页", "控制台"})  # 门面文件不算候选
 DISTILL_EXCLUDED_SOURCES = frozenset({"digest", "highlights"})  # 摘要/清单容器
 
+#: 目标目录（候选排序的语义加成来源，2026-09-19 backlog④）
+GOALS_SUBDIR = "目标"
+#: 目标语义召回的条数上限（一次 bm 调用的成本换全库相关度图）
+GOAL_SEARCH_HITS = 30
+
+
+def _goal_relevant_stems(tree: MemoryTree, hit_limit: int = GOAL_SEARCH_HITS) -> frozenset:
+    """与当前目标语义相关的笔记 stem 集（小写；2026-09-19 backlog④）。
+
+    把 ``memory/目标/`` 下全部目标的标题拼成一条查询，经 bm 语义索引
+    一次召回（约 4–8s，每日晨报/起草各一次可承受）。任何失败（无目标
+    目录/目标为空/bm 不可用）都返回空集——候选排序退化为原三路口径，
+    语义层只是加成，绝不拖累晨报。
+
+    Args:
+        tree: MemoryTree。
+        hit_limit: bm 召回条数上限。
+
+    Returns:
+        frozenset: 相关笔记 stem 的小写集合（bm 的 ASCII 段会小写化，
+        比较一律走小写，与 search.py 的大小写漂移修复同源）。
+    """
+    goals_dir = Path(tree.notes_dir) / GOALS_SUBDIR
+    try:
+        goal_files = sorted(goals_dir.glob("*.md"))
+    except OSError:
+        return frozenset()
+    titles: List[str] = []
+    for path in goal_files:
+        try:
+            post = frontmatter.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        titles.append(str(post.get("title") or path.stem))
+    query = " ".join(titles).strip()
+    if not query:
+        return frozenset()
+    try:
+        from scripts.memory.bm_bridge import search as bm_search
+
+        hits = bm_search(query, limit=hit_limit)
+    except Exception:  # noqa: BLE001 - 语义层失败退化为原排序
+        return frozenset()
+    return frozenset(
+        Path(str(hit.get("rel_path") or "")).stem.lower()
+        for hit in hits
+        if hit.get("rel_path")
+    )
+
 
 def _interruption_line(tree: MemoryTree, yesterday: str) -> Optional[str]:
     """打扰账单（2026-09-18 脑科学评审 P1）：昨日系统推卡数 + 捕获时点分布。
@@ -595,7 +644,9 @@ def compute_distill_candidates(
 ) -> List[str]:
     """提炼候选：从未进压缩层且值得动笔的笔记 stem（截断到上限）。
 
-    三路汇合，去重后推送多的在前、其次被引用多的、最后最旧的在前：
+    三路汇合，去重后推送多的在前、其次被引用多的、最后最旧的在前；
+    **组内同级让与当前目标语义相关的候选优先**（2026-09-19 backlog④，
+    :func:`_goal_relevant_stems`，失败退化为原口径）：
     - 反复推送：ResponseProbe 累计推送 ≥MIN_PUSH_COUNT 次；
     - 被引用：别的笔记 [[wikilink]] 引用 ≥1 次（2026-09-12 裁决②：
       沉淀从"自己的笔记长出来"——被引用的已是枢纽，与每日衰减同源
@@ -657,7 +708,26 @@ def compute_distill_candidates(
         created = str(post.get("created") or "")[:10]
         if created and created <= cutoff:
             settled.append((created, stem))
-    picked = [stem for _, stem in sorted(pushed)]
-    picked += [stem for _, stem in sorted(linked)]
-    picked += [stem for _, stem in sorted(settled)]
+    # 语义加成（backlog④）：三路各自的组内排序让「与当前目标相关」的
+    # 候选优先（层级边界不动——推送多/被引用/沉一沉的分层不变）；
+    # 目标为空或语义层失败时 goal_stems 为空集，排序与原口径完全一致
+    goal_stems = _goal_relevant_stems(tree)
+    picked = [
+        stem
+        for _, stem in sorted(
+            pushed, key=lambda item: (item[1].lower() not in goal_stems, item[0], item[1])
+        )
+    ]
+    picked += [
+        stem
+        for _, stem in sorted(
+            linked, key=lambda item: (item[1].lower() not in goal_stems, item[0], item[1])
+        )
+    ]
+    picked += [
+        stem
+        for _, stem in sorted(
+            settled, key=lambda item: (item[1].lower() not in goal_stems, item[0], item[1])
+        )
+    ]
     return picked[:limit]

@@ -309,6 +309,48 @@ def test_digest_distill_candidates_capped_oldest_first(memory_tree):
     assert "[[n6]]" not in section
 
 
+def test_digest_distill_candidates_goal_boost(memory_tree, monkeypatch):
+    """语义加成（2026-09-19 backlog④）：同级候选里与目标语义相关的排前。"""
+    goals = memory_tree.notes_dir / "目标"
+    goals.mkdir()
+    (goals / "目标-内核.md").write_text(
+        "---\ntitle: 稳住内核\n---\n\n# 稳住内核\n", encoding="utf-8"
+    )
+    memory_tree.create_note("aaa.md", "与目标无关的旧笔记")
+    _backdate_created(memory_tree, "aaa.md", "2026-08-20")
+    memory_tree.create_note("zzz.md", "讲内核稳定的新一点的笔记")
+    _backdate_created(memory_tree, "zzz.md", "2026-08-25")
+    monkeypatch.setattr(
+        "scripts.memory.bm_bridge.search",
+        lambda query, limit: [
+            {"title": "zzz", "permalink": "atelierr/zzz", "rel_path": "zzz.md",
+             "score": 1.2, "snippet": "x"}
+        ],
+    )
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-10")
+
+    section = report["markdown"].split("## 🧠 提炼候选")[1].split("## ✅")[0]
+    assert section.index("[[zzz]]") < section.index("[[aaa]]")  # 目标相关排前
+
+
+def test_digest_distill_candidates_goal_boost_degrades(memory_tree, monkeypatch):
+    """语义层失败/无目标目录：候选排序退化为原口径（最旧在前），不拖累晨报。"""
+    monkeypatch.setattr(
+        "scripts.memory.bm_bridge.search",
+        lambda query, limit: (_ for _ in ()).throw(RuntimeError("bm down")),
+    )
+    memory_tree.create_note("aaa.md", "更旧")
+    _backdate_created(memory_tree, "aaa.md", "2026-08-20")
+    memory_tree.create_note("zzz.md", "较新")
+    _backdate_created(memory_tree, "zzz.md", "2026-08-25")
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-10")
+
+    section = report["markdown"].split("## 🧠 提炼候选")[1].split("## ✅")[0]
+    assert section.index("[[aaa]]") < section.index("[[zzz]]")  # 原序不动
+
+
 def _touch(path, age_s):
     """写入文件并把 mtime 拨到 age_s 秒前。"""
     import os
