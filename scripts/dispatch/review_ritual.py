@@ -45,6 +45,17 @@ _STALE_DAYS = 7
 #: 表单问题数上限（卡片长度护栏；与 PROMPT_FORM_MAX_QUESTIONS 同纪律）
 _MAX_QUESTIONS = 6
 
+#: 盲测小节（2026-09-19 脑科学建议①）：周回顾从本周新入库笔记抽 N 条，
+#: 先自由回忆再给原文对照——自由回忆是最强的固化手段（回忆+生成+即时
+#: 反馈三效合一），治「看着眼熟就点确认」的再认惯性（数字失忆症防线）
+BLIND_RECALL_DAYS = 7
+BLIND_RECALL_LIMIT = 3
+
+#: 盲测候选排除：机器产物/知识层不算"本周新收的笔记"
+_BLIND_EXCLUDED_DIRS = frozenset({"wiki", "distilled", "系统", "templates"})
+_BLIND_EXCLUDED_SOURCES = frozenset({"digest", "highlights", "system", "todo"})
+_BLIND_EXCLUDED_STEMS = frozenset({"主页", "控制台"})
+
 #: 连续未答天数上限：达到即自动暂停推送（防推送疲劳护栏）
 _DAILY_MAX_UNANSWERED = 3
 
@@ -219,7 +230,103 @@ def build_questions(tree, kind: str) -> List[str]:
         "本周有什么反复出现的主题或念头？",
         "下周想重点关注什么？",
     ]
+    # 盲测小节（建议①）：本周新收的笔记先自由回忆，答完发原文对照
+    for index, item in enumerate(blind_recall_items(tree), start=1):
+        title = item["title"]
+        if len(title) > 24:
+            title = title[:24] + "…"
+        questions.append(
+            f"盲测{index}：本周你收了「{title}」——不看笔记，一句话说出它讲了什么？"
+        )
     return questions[:_MAX_QUESTIONS]
+
+
+def blind_recall_items(
+    tree, days: int = BLIND_RECALL_DAYS, limit: int = BLIND_RECALL_LIMIT
+) -> List[Dict[str, str]]:
+    """本周新入库笔记（周回顾盲测候选）：created 在 days 天内、非日报/
+    非机器容器/非待办待确认/非知识层，按新到旧取前 limit 条。
+
+    Args:
+        tree: MemoryTree。
+        days: 回看窗口（天）。
+        limit: 条数上限。
+
+    Returns:
+        List[Dict]: [{title, rel, created}]，created 降序。
+    """
+    from scripts.memory.core import DAILY_NOTE_RE
+
+    cutoff = datetime.now().astimezone() - timedelta(days=days)
+    items: List[Dict[str, str]] = []
+    for path in sorted(tree.notes_dir.rglob("*.md")):
+        rel = path.relative_to(tree.notes_dir)
+        if any(part in _BLIND_EXCLUDED_DIRS for part in rel.parts[:-1]):
+            continue
+        stem = path.stem
+        if stem in _BLIND_EXCLUDED_STEMS or stem.startswith("todo-"):
+            continue
+        if DAILY_NOTE_RE.match(path.name):
+            continue
+        try:
+            post = frontmatter.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if str(post.get("source") or "") in _BLIND_EXCLUDED_SOURCES:
+            continue
+        tags = {str(tag) for tag in (post.get("tags") or [])}
+        if tags & {"待办", "待确认"}:
+            continue
+        try:
+            created = datetime.fromisoformat(str(post.get("created") or ""))
+        except ValueError:
+            continue
+        if created.tzinfo is None:
+            created = created.astimezone()
+        if created < cutoff:
+            continue
+        items.append(
+            {
+                "title": str(post.get("title") or stem),
+                "rel": rel.as_posix(),
+                "created": created.isoformat(),
+            }
+        )
+    items.sort(key=lambda item: item["created"], reverse=True)
+    return items[:limit]
+
+
+def blind_comparison(
+    tree, closed: Dict[str, Any], excerpt_chars: int = 200
+) -> Optional[str]:
+    """盲测对照文本：读已关闭会话 blind 负载里的笔记原文开头。
+
+    在答案提交后发送（先回忆后对照——顺序是效果本身，不可提前）。
+
+    Args:
+        tree: MemoryTree。
+        closed: 已关闭会话数据（含 blind 负载时才有输出）。
+        excerpt_chars: 每条原文截取长度。
+
+    Returns:
+        Optional[str]: 逐条「标题：原文开头…」；无 blind 负载为 None。
+    """
+    blind = closed.get("blind") if isinstance(closed, dict) else None
+    if not blind:
+        return None
+    parts: List[str] = []
+    for item in list(blind)[:BLIND_RECALL_LIMIT]:
+        rel = str((item or {}).get("rel") or "")
+        title = str((item or {}).get("title") or rel or "（无题）")
+        try:
+            post = frontmatter.loads(
+                (tree.notes_dir / rel).read_text(encoding="utf-8")
+            )
+            body = " ".join(str(post.content).split())
+        except (OSError, ValueError):
+            body = ""
+        parts.append(f"• 「{title}」：{body[:excerpt_chars] or '（原文读取失败）'}")
+    return "\n".join(parts) if parts else None
 
 
 def open_ritual(tree, kind: str, send: bool = True, respect_quiet: bool = True) -> Dict[str, Any]:
@@ -267,6 +374,13 @@ def open_ritual(tree, kind: str, send: bool = True, respect_quiet: bool = True) 
         return {"opened": False, "questions": [], "paused": True}
     questions = build_questions(tree, kind)
     store.open(kind, questions)
+    if kind == KIND_WEEKLY:
+        # 盲测负载随会话存档（答案提交后发原文对照，见 blind_comparison）
+        blind = blind_recall_items(tree)
+        if blind:
+            store.set_extra(
+                "blind", [{"title": b["title"], "rel": b["rel"]} for b in blind]
+            )
     if send:
         title = {
             KIND_WEEKLY: "🌿 周回顾",
@@ -274,9 +388,13 @@ def open_ritual(tree, kind: str, send: bool = True, respect_quiet: bool = True) 
             KIND_DAILY: "🌛 今日四问",
         }[kind]
         intro = build_intro(tree, kind)
-        send_feishu_card(
-            prompt_form_card(title, intro, questions), respect_quiet=respect_quiet
-        )
+        # 默认路径保持原调用形（既有测试以 lambda card 单参 mock 本函数）；
+        # 仅交互旁路（用户手动「复盘」）才显式传 respect_quiet=False
+        card = prompt_form_card(title, intro, questions)
+        if respect_quiet:
+            send_feishu_card(card)
+        else:
+            send_feishu_card(card, respect_quiet=False)
     return {"opened": True, "questions": questions}
 
 

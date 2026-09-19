@@ -309,3 +309,110 @@ def test_daily_answers_file_matches_atelier_glob(memory_tree):
     post = frontmatter.loads(path.read_text(encoding="utf-8"))
     assert post.metadata["source"] == "reflection"
     assert "每日四问" in str(post.metadata["tags"])
+
+
+# ---------- 盲测小节（2026-09-19 脑科学建议①：先自由回忆后对照） ----------
+
+
+def _make_recent_note(memory_tree, name="fresh.md", title="健脑新知", days=2):
+    """造一条 days 天前入库的普通笔记（盲测候选）。"""
+    memory_tree.create_note(name, "正文：保护大脑的三件事。\n", source="link")
+    path = memory_tree.notes_dir / name
+    post = frontmatter.loads(path.read_text(encoding="utf-8"))
+    post.metadata["created"] = (
+        datetime.now().astimezone() - timedelta(days=days)
+    ).isoformat(timespec="seconds")
+    post.metadata["title"] = title
+    path.write_text(frontmatter.dumps(post), encoding="utf-8")
+    return path
+
+
+def test_blind_recall_items_selects_recent_only(memory_tree):
+    """候选口径：本周新入库入选；超窗/日报/todo/待确认/知识层全部排除。"""
+    _make_recent_note(memory_tree, "fresh.md", "健脑新知", days=2)
+    _make_recent_note(memory_tree, "old.md", "旧笔记", days=30)
+    _make_recent_note(memory_tree, "2026-09-19.md", "日记", days=1)
+    _make_recent_note(memory_tree, "todo-2026-x.md", "待办", days=1)
+    memory_tree.create_note("pend.md", "未确认\n", source="link", tags=["待确认"])
+    wiki_dir = memory_tree.notes_dir / "wiki"
+    wiki_dir.mkdir(parents=True, exist_ok=True)
+    (wiki_dir / "card.md").write_text(
+        "---\ntitle: 知识卡\ncreated: '2026-09-19T10:00:00+08:00'\n---\n\n# 卡\n",
+        encoding="utf-8",
+    )
+
+    items = review_ritual.blind_recall_items(memory_tree)
+
+    assert [item["rel"] for item in items] == ["fresh.md"]
+    assert items[0]["title"] == "健脑新知"
+
+
+def test_weekly_questions_include_blind(memory_tree):
+    """周回顾问题含盲测题（在标准问题之后、上限 6 截断）。"""
+    _make_recent_note(memory_tree, "fresh.md", "健脑新知", days=2)
+
+    questions = review_ritual.build_questions(memory_tree, review_ritual.KIND_WEEKLY)
+
+    blind = [q for q in questions if q.startswith("盲测")]
+    assert len(blind) == 1
+    assert "健脑新知" in blind[0]
+    assert "不看笔记" in blind[0]
+    assert len(questions) <= 6
+
+
+def test_open_weekly_stores_blind_payload(memory_tree):
+    """开启周回顾：blind 负载随会话存档（答案提交后对照用）。"""
+    _make_recent_note(memory_tree, "fresh.md", "健脑新知", days=2)
+
+    report = review_ritual.open_ritual(
+        memory_tree, review_ritual.KIND_WEEKLY, send=False
+    )
+
+    assert report["opened"] is True
+    data = PromptStore(memory_tree.state_dir).load()
+    assert data["blind"] == [{"title": "健脑新知", "rel": "fresh.md"}]
+
+
+def test_blind_comparison_reads_excerpt(memory_tree):
+    """对照文本：读原文开头（无 blind 负载返回 None）。"""
+    _make_recent_note(memory_tree, "fresh.md", "健脑新知", days=2)
+    closed = {"blind": [{"title": "健脑新知", "rel": "fresh.md"}]}
+
+    text = review_ritual.blind_comparison(memory_tree, closed)
+
+    assert "健脑新知" in text
+    assert "保护大脑的三件事" in text
+    assert review_ritual.blind_comparison(memory_tree, {}) is None
+
+
+def test_bridge_submit_sends_blind_comparison(memory_tree, monkeypatch):
+    """提交答案后：先落盘，随后发盲测原文对照（顺序不可颠倒）。"""
+    from types import SimpleNamespace
+
+    from scripts.dispatch.feishu import FeishuBridge
+
+    _make_recent_note(memory_tree, "fresh.md", "健脑新知", days=2)
+    bridge = FeishuBridge(memory_tree, app_id="x", app_secret="y")
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat_id, text: sent.append(text)
+    )
+    store = PromptStore(memory_tree.state_dir)
+    store.open(review_ritual.KIND_WEEKLY, ["盲测1：「健脑新知」讲了什么？"])
+    store.set_extra("blind", [{"title": "健脑新知", "rel": "fresh.md"}])
+
+    event = SimpleNamespace(
+        event=SimpleNamespace(
+            action=SimpleNamespace(
+                value={"action": "prompt_submit"}, form_value={"q1": "讲护脑的"}
+            ),
+            context=None,
+            operator=None,
+        )
+    )
+    resp = bridge.handle_card_action(event)
+
+    assert resp["toast"]["type"] == "success"
+    comparison = [t for t in sent if "盲测对照" in t]
+    assert len(comparison) == 1
+    assert "保护大脑的三件事" in comparison[0]

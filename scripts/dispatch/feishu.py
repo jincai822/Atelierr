@@ -778,6 +778,12 @@ class FeishuBridge:
                     self._send_feedback(
                         chat_id, f"答案已存进 {written.name}（下次会话综合成文）"
                     )
+                # 盲测对照：答案收齐后才给原文（先回忆后对照，顺序是效果本身）
+                comparison = review_ritual.blind_comparison(self.tree, closed)
+                if comparison:
+                    self._send_feedback(
+                        chat_id, f"📖 盲测对照（原文开头）：\n{comparison}"
+                    )
             except Exception as exc:  # noqa: BLE001 - 钩子是附加动作
                 print(f"[feishu] review dump fail: {exc}", flush=True)
         self._send_feedback(chat_id, f"已收到全部 {len(answers)} 条回答，问答结束 ✅")

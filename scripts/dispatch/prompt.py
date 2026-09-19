@@ -74,6 +74,14 @@ class PromptStore:
             }
         )
 
+    def set_extra(self, key: str, value: Any) -> None:
+        """给 open 会话附加自定义负载（如周回顾盲测条目）；无会话不写盘。"""
+        data = self.load()
+        if not data or data.get("status") != "open":
+            return
+        data[key] = value
+        self._save(data)
+
     def append(self, text: str) -> int:
         """追加一条回答，返回累计条数；无 open 会话时返回 0（不写盘）。"""
         data = self.load()
