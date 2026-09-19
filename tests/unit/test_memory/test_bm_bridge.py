@@ -100,14 +100,15 @@ def test_semantic_search_fuses_confidence(memory_tree, make_note, monkeypatch):
 
 
 def test_semantic_search_falls_back_on_bridge_failure(memory_tree, monkeypatch):
-    """语义层失败/无召回 → 空列表（调用方退回全文，降级是设计的一部分）。"""
+    """语义层故障显形（2026-09-19 评审修复）：后端异常 → None（不可用）；
+    后端正常无召回 → []（真没有）——调用方据此区分文案，不再静默误报。"""
     from scripts.memory.search import MemorySearcher
 
     def _boom(query, limit):
         raise RuntimeError("basic-memory down")
 
     monkeypatch.setattr("scripts.memory.bm_bridge.search", _boom)
-    assert MemorySearcher(memory_tree).semantic_search("x") == []
+    assert MemorySearcher(memory_tree).semantic_search("x") is None
 
     monkeypatch.setattr("scripts.memory.bm_bridge.search", lambda query, limit: [])
     assert MemorySearcher(memory_tree).semantic_search("x") == []

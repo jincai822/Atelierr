@@ -1124,14 +1124,23 @@ class FeishuBridge:
 
         try:
             # 语义检索全权（方案三完成形态，2026-09-19 用户裁决拆全文兜底）：
-            # bm 默认检索语义+字面双覆盖（同日实测三模式一致），bm 故障
-            # 显式告知，不再静默降级全文——替换是真的，不做面子工程
+            # bm 默认检索语义+字面双覆盖（同日实测三模式一致），不再静默
+            # 降级全文；后端故障显式告知（同日评审修复：故障曾被误报为
+            # 「没有找到」——None=后端不可用，[]=真没有匹配）
             searcher = MemorySearcher(self.tree)
             results = searcher.semantic_search(query, limit=SEARCH_LIMIT)
             engine = "语义"
         except Exception as exc:  # noqa: BLE001 - 搜索失败文字告知，不中断守护
             print(f"[feishu] search fail: {exc}", flush=True)
             self._send_feedback(chat_id, "⚠️ 搜索失败，请稍后重试")
+            return
+        if results is None:
+            print(f"[feishu] search q={query!r} backend-down", flush=True)
+            self._send_feedback(
+                chat_id,
+                "⚠️ 语义搜索后端暂时不可用（basic-memory 故障），请稍后重试——"
+                "笔记都在，是搜索引擎在闹脾气",
+            )
             return
         print(f"[feishu] search q={query!r} hits={len(results)} engine={engine}", flush=True)
         if not results:

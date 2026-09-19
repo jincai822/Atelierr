@@ -1350,6 +1350,28 @@ def test_search_no_results_text_feedback(memory_tree, monkeypatch):
     assert sent == ["没有找到匹配「不存在的东西xyz」的笔记"]
 
 
+def test_search_backend_down_distinct_message(memory_tree, monkeypatch):
+    """后端故障 → 明确「暂时不可用」，**不**误报为「没有找到」
+    （2026-09-19 评审修复：None=后端不可用，[]=真无匹配）。"""
+    from scripts.memory.search import MemorySearcher
+
+    monkeypatch.setattr(
+        MemorySearcher, "semantic_search", lambda self, query, limit=10: None
+    )
+    bridge = _bridge(memory_tree)
+    sent = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat, text: sent.append(text)
+    )
+    event = _event("m-search-down", "text", {"text": "搜 内核"})
+    event.event.message.chat_id = "oc_demo"
+    bridge.handle_event(event)
+
+    assert len(sent) == 1
+    assert "暂时不可用" in sent[0]
+    assert "没有找到" not in sent[0]
+
+
 def test_search_bare_prefix_usage_hint(memory_tree, monkeypatch):
     """只发「搜」→ 用法提示，不查库。"""
     bridge = _bridge(memory_tree)

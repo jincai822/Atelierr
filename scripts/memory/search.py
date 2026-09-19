@@ -356,22 +356,24 @@ class MemorySearcher:
         results.extend(self._search_reference(query_lower))
         return results
 
-    def semantic_search(self, query: str, limit: int = 10) -> List[Memory]:
+    def semantic_search(self, query: str, limit: int = 10) -> Optional[List[Memory]]:
         """语义搜索（方案三 P3，2026-09-19 用户裁决）：basic-memory 语义
         召回 × live confidence 融合排序。
 
         召回走 bm_bridge（atelierr 项目的语义索引）；排序分 =
         bm 相关度 × live confidence（机器搬运来源再乘
         MACHINE_SOURCE_WEIGHT，与全文搜索同规）；索引里的陈旧实体
-        （文件已不在库）跳过。basic-memory 不可用/失败返回空列表——
-        调用方据此退回 search() 全文匹配（降级是设计的一部分）。
+        （文件已不在库）跳过。
 
         Args:
             query: 查询文本。
             limit: 返回条数上限。
 
         Returns:
-            List[Memory]: 按融合分降序；语义层失败/无召回为空列表。
+            Optional[List[Memory]]: 按融合分降序的命中列表；**后端故障
+            返回 None，后端正常但无召回返回 []**——调用方必须区分
+            「没有找到」与「后端不可用」（2026-09-19 评审修复：此前故障
+            也返回 []，飞书入口把后端宕机误报为"没有找到"）。
         """
         if limit < 1 or not query.strip():
             return []
@@ -379,8 +381,8 @@ class MemorySearcher:
             from scripts.memory.bm_bridge import search as bm_search
 
             hits = bm_search(query, limit=max(limit * 2, 10))
-        except Exception:  # noqa: BLE001 - 语义层失败退回全文（调用方兜底）
-            return []
+        except Exception:  # noqa: BLE001 - 后端故障显形为 None（不静默误报）
+            return None
         entry_map = self._entry_map()
         fused: List[Tuple[float, float, str, str, str, Any]] = []
         for hit in hits:
