@@ -65,8 +65,6 @@ def _success_line(title: str, detail: str, confirm_only: bool) -> str:
         if detail == "ok":
             return f"✅ 已确认：{title}"
         return f"ℹ️ 没有「待确认」标签，无需确认：{title}"
-    if detail == "confirm_only":
-        return f"✅ 已确认（推导不出归档目录，留在收件箱）：{title}"
     if detail == "tag_fail":
         return f"⚠️ 已归档，「待确认」标签请到 Obsidian 手动摘除：{title}"
     return f"📁 已确认并归档到 {detail}/：{title}"

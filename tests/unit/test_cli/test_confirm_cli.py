@@ -51,8 +51,8 @@ def test_archive_moves_note_and_strips_tag(tmp_path, memory_tree):
     assert MemoryTree.from_config(str(config)).layer_of(moved) == "short-term"
 
 
-def test_archive_fallback_confirm_only_when_no_platform(tmp_path, memory_tree):
-    """推导不出平台：退化为仅确认——留原处、摘标签、文案说明。"""
+def test_archive_fallback_biji_when_no_platform(tmp_path, memory_tree):
+    """推导不出平台（手写/无来源）：落默认类目 笔记/（2026-09-20 裁决）。"""
     config, notes_dir = _make_config(tmp_path)
     memory_tree.create_note(
         "闪念.md", "---\nsource: link\ntags: [待确认]\n---\n一句话\n", inbox=True
@@ -60,12 +60,32 @@ def test_archive_fallback_confirm_only_when_no_platform(tmp_path, memory_tree):
 
     result = _invoke(config, "闪念.md")
     assert result.exit_code == 0, result.output
-    assert "留在收件箱" in result.output
+    assert "📁 已确认并归档到 笔记/" in result.output
 
-    stayed = tmp_path / "inbox" / "闪念.md"
-    assert stayed.exists()
-    post = frontmatter.loads(stayed.read_text(encoding="utf-8"))
+    moved = notes_dir / "笔记" / "闪念.md"
+    assert moved.exists()
+    assert not (tmp_path / "inbox" / "闪念.md").exists()
+    post = frontmatter.loads(moved.read_text(encoding="utf-8"))
     assert post.metadata["tags"] == []
+
+
+def test_archive_fallback_biji_with_cclass_subdir(tmp_path, memory_tree):
+    """手写笔记带中图法标签：落 笔记/<分类> 二级目录（平台缺省、分类保留）。"""
+    config, notes_dir = _make_config(tmp_path)
+    memory_tree.create_note(
+        "心流笔记.md",
+        "---\nsource: web\ntags: [待确认, B84-心理学]\n---\n状态记录\n",
+        inbox=True,
+    )
+
+    result = _invoke(config, "心流笔记.md")
+    assert result.exit_code == 0, result.output
+    assert "📁 已确认并归档到 笔记/B84-心理学/" in result.output
+
+    moved = notes_dir / "笔记" / "B84-心理学" / "心流笔记.md"
+    assert moved.exists()
+    post = frontmatter.loads(moved.read_text(encoding="utf-8"))
+    assert post.metadata["tags"] == ["B84-心理学"]
 
 
 def test_confirm_only_flag_is_idempotent(tmp_path, memory_tree):

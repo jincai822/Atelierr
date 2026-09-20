@@ -167,8 +167,9 @@ __all__ = [
 ]
 
 #: 平台推不出时归档按钮的兜底一级目录（与建议归档行的"省略"不同：
-#: 按钮必须给一个去处）
-FALLBACK_ARCHIVE_DIR = "媒体"
+#: 按钮必须给一个去处；2026-09-20 裁决：手写/无来源笔记落 笔记/，
+#: 与 archive.HANDWRITTEN_ARCHIVE_DIR 同值）
+FALLBACK_ARCHIVE_DIR = "笔记"
 
 #: 已处理 message_id 登记表上限（超出裁掉最旧的，防无限膨胀）
 _SEEN_CAP = 2000
@@ -593,25 +594,6 @@ class FeishuBridge:
         print(f"[feishu] archive note={filename} {'ok' if ok else 'fail'}", flush=True)
         if not ok:
             return self._fail_response(chat_id, filename, detail)
-        if detail == "confirm_only":
-            # 推导不出归档目录：只确认不移动（留在收件箱由人日后归类）
-            title = self._feedback_title(filename)
-            self._send_feedback(
-                chat_id, f"✅ 已确认（推导不出归档目录，留在收件箱）：{title}"
-            )
-            return {
-                "toast": {"type": "success", "content": "已确认（留在收件箱）"},
-                "card": {
-                    "type": "raw",
-                    "data": self._completion_card(
-                        filename,
-                        "已移除「待确认」标签；推导不出归档目录，留在收件箱",
-                        "✅ 已确认",
-                        batch,
-                        chat_id,
-                    ),
-                },
-            }
         if detail == "tag_fail":
             # 移动成功但删标签失败：不回滚，卡片提示手动摘除
             title = self._feedback_title(filename)

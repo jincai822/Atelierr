@@ -717,18 +717,18 @@ def test_card_archive_lark_and_fallback_media_dirs(memory_tree):
     assert (memory_tree.notes_dir / "媒体" / "ocr-截图.md").exists()
 
 
-def test_card_archive_underivable_confirm_only(memory_tree):
-    """推导不出平台（无 source 映射、无平台标签）：退化为仅确认不移动
-    （2026-09-12 裁决；防兜底乱移 媒体/）。"""
+def test_card_archive_underivable_defaults_to_biji(memory_tree):
+    """推导不出平台（手写/无来源笔记）：落默认类目 笔记/
+    （2026-09-20 用户裁决，取代 09-12 退化为仅确认留收件箱）。"""
     bridge = _bridge(memory_tree)
     memory_tree.create_note("速记碎片.md", "正文\n", source="sync", tags=["待确认"])
 
     resp = bridge.handle_card_action(_card_archive("速记碎片.md"))
 
-    assert resp["toast"]["content"] == "已确认（留在收件箱）"
-    note = memory_tree.notes_dir / "速记碎片.md"
-    assert note.exists()  # 没移动
-    assert not (memory_tree.notes_dir / "媒体" / "速记碎片.md").exists()
+    assert resp["toast"]["content"] == "已确认并归档到 笔记/"
+    note = memory_tree.notes_dir / "笔记" / "速记碎片.md"
+    assert note.exists()
+    assert not (memory_tree.notes_dir / "速记碎片.md").exists()  # 已移出收件箱
     assert "待确认" not in frontmatter.loads(
         note.read_text(encoding="utf-8")
     ).metadata["tags"]

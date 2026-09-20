@@ -3,8 +3,10 @@
 规则（与用户在 Obsidian 的手动归档约定一致）：
 - 一级目录 = 平台：source=lark → 飞书；source=media → 媒体；
   source=link 或其它 → 取 frontmatter tags 里第一个平台标签
-  （排除「待确认」与中图法类目标签，如 抖音/小红书）；取不到 → None
-  （调用方自行 fallback：归档按钮落 媒体/，建议归档行省略）；
+  （排除「待确认」与中图法类目标签，如 抖音/小红书）；取不到 →
+  默认类目 笔记/（2026-09-20 用户裁决：手写/无来源笔记也有固定
+  格子，取代 09-12"退化为仅确认留收件箱"；derive 本身仍返回
+  None，兜底在 archive_note 与飞书目录选择卡里）；
 - 二级目录（可选）= 中图法分类标签：tags 里第一个匹配
   ``^[A-Z]{1,3}\\d*-`` 的标签（如 B84-心理学），没有就只进一级目录。
 
@@ -34,6 +36,10 @@ REVIEW_TAG = "待确认"
 
 #: source → 归档一级目录（平台）名
 PLATFORM_BY_SOURCE = {"lark": "飞书", "media": "媒体"}
+
+#: 平台推不出时的默认一级目录（手写/无来源笔记的固定格子，
+#: 2026-09-20 用户裁决；飞书 FALLBACK_ARCHIVE_DIR 同值）
+HANDWRITTEN_ARCHIVE_DIR = "笔记"
 
 
 def derive_archive_dir(post) -> Tuple[Optional[str], Optional[str]]:
@@ -182,9 +188,9 @@ def archive_note(
     """「📁 确认并归档」核心（2026-09-07 批准的人工例外之二；09-09 起人点目录）。
 
     定位（与确认同）→ 目标目录：显式给定（先经 valid_archive_dir 校验）
-    或机器推导（平台[/分类]，规则见 derive_archive_dir；**平台推不出时
-    不再兜底移动**——2026-09-12 裁决：退化为仅确认（只删标签、留在
-    收件箱），返回 "confirm_only"）→ 已在目标目录则只删标签（幂等，
+    或机器推导（平台[/分类]，规则见 derive_archive_dir；平台推不出 =
+    手写/无来源笔记 → 默认类目 笔记/，2026-09-20 用户裁决，取代
+    09-12"退化为仅确认留收件箱"）→ 已在目标目录则只删标签（幂等，
     不移动）→ 否则：目标重名检查（绝不覆盖）→ mkdir → rename →
     sidecar 按 id 即时迁移 path（MemoryTree.relocate_entry，动态状态
     原样保留，不等 watcher 班次）→ 删「待确认」标签。移动成功但删
@@ -197,8 +203,7 @@ def archive_note(
             既有替换点与日志路径不变。
 
     Returns:
-        Tuple[bool, str]: 成功返回 (True, 目标相对目录)、
-            (True, "confirm_only")（推导不出平台，仅确认未移动）或
+        Tuple[bool, str]: 成功返回 (True, 目标相对目录) 或
             (True, "tag_fail")；失败返回 (False, 错误详情串)。
     """
     strip = strip_review_fn or _strip_review_default
@@ -209,9 +214,9 @@ def archive_note(
         post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
         platform, category = derive_archive_dir(post)
         if platform is None:
-            # 推导不出平台：退化为仅确认（留在收件箱），不兜底乱移
-            strip(note_path)
-            return True, "confirm_only"
+            # 平台推不出 = 手写/无来源笔记：落默认类目 笔记/（2026-09-20
+            # 用户裁决，取代 09-12"退化为仅确认留收件箱"）
+            platform = HANDWRITTEN_ARCHIVE_DIR
         target_dir = platform if not category else f"{platform}/{category}"
     elif not valid_archive_dir(target_dir):
         return False, "非法目录"
