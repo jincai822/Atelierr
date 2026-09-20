@@ -194,9 +194,11 @@ class DecayManager:
 
         步骤：反链统计 → 对每个 .md 笔记无状态重算 confidence →
         定 layer、pending_delete → （非 dry_run）写 sidecar 与报告。
-        只写 sidecar/报告，绝不改动笔记文件；无 frontmatter 的裸
-        文件跳过计入 skipped；有 frontmatter+id 但未登记的允许纯
-        sidecar 登记后处理。
+        pending_delete 为粘性语义（2026-09-20 用户裁决）：机器触及
+        阈值时置位，但已置位的标记（人标/机器标）不因重算而摘除，
+        只有 review 流程能摘。只写 sidecar/报告，绝不改动笔记文件；
+        无 frontmatter 的裸文件跳过计入 skipped；有 frontmatter+id
+        但未登记的允许纯 sidecar 登记后处理。
 
         Args:
             dry_run: True 时不写任何文件（sidecar 与报告都不写）。
@@ -299,7 +301,10 @@ class DecayManager:
                         confidence=confidence,
                         layer=layer,
                         references=refs,
-                        pending_delete=pending,
+                        # 粘性语义（2026-09-20 用户裁决）：已置的
+                        # pending_delete（无论人标还是机器标）只有
+                        # review 能摘，衰减班次不得回写冲掉
+                        pending_delete=pending or entry.get("pending_delete", False),
                     )
 
         report_path: Optional[Path] = None

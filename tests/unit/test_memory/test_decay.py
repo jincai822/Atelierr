@@ -58,6 +58,18 @@ def test_pending_delete_is_mark_only(memory_tree, make_note):
     assert memory_tree.is_pending_delete(note)
 
 
+def test_manual_pending_delete_survives_decay(memory_tree, make_note):
+    """人工标记粘性（2026-09-20 用户裁决）：高置信笔记人工标
+    pending_delete 后跑衰减班次，标记不被重算冲掉，只有 review 能摘。"""
+    note = make_note(memory_tree, idle_days=0)  # 新鲜笔记，conf 远高于阈值
+    assert memory_tree.set_pending_delete(note) is True
+
+    DecayManager(memory_tree).run()
+
+    assert memory_tree.is_pending_delete(note)
+    assert note.exists()
+
+
 def test_backlinks_boost_confidence(memory_tree, make_note):
     """反链：B 引用 [[A-stem]] → A 的 references>=1 且同龄时比无引用者 conf 高。"""
     target = make_note(
