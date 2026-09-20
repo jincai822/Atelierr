@@ -123,3 +123,6 @@ tests/fixtures/test_scanned.pdf
 tests/fixtures/test_with_images.pdf
 tests/fixtures/test_audio.wav
 tests/fixtures/test_video.mp4
+
+# MinerU intermediate artifacts (accidental repo-root output)
+blobs/
