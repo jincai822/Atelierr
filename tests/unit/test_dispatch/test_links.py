@@ -66,10 +66,10 @@ def test_processes_douyin_link(memory_tree):
 
     assert report["found"] == 1
     assert report["created"] == ["douyin-vid123.md"]
-    created = memory_tree.inbox_dir / "douyin-vid123.md"
+    created = memory_tree.notes_dir / "personal" / "douyin-vid123.md"
     assert created.exists()
     post = frontmatter.loads(created.read_text(encoding="utf-8"))
-    assert post["tags"] == ["待确认", "抖音"]
+    assert post["tags"] == ["抖音"]  # 放权：产出即归档即摘待确认
     assert post["source"] == "link"
     assert "## 转写全文" in post.content
     # 源笔记不被改写
@@ -174,7 +174,7 @@ def test_cli_links_command(memory_tree, tmp_path, monkeypatch):
     code = DispatchCLI(config_path=str(config)).main(["links"])
 
     assert code == 0
-    assert (memory_tree.inbox_dir / "douyin-vid123.md").exists()
+    assert (memory_tree.notes_dir / "personal" / "douyin-vid123.md").exists()
 
 
 XHS_URL = "https://xhslink.cn/o/2Vhl2blNpHM"
@@ -201,10 +201,10 @@ def test_processes_xhs_link(memory_tree):
 
     assert report["found"] == 1
     assert report["created"] == ["xhs-n123.md"]
-    created = memory_tree.inbox_dir / "xhs-n123.md"
+    created = memory_tree.notes_dir / "personal" / "xhs-n123.md"
     assert created.exists()
     post = frontmatter.loads(created.read_text(encoding="utf-8"))
-    assert post["tags"] == ["待确认", "小红书"]
+    assert post["tags"] == ["小红书"]
     assert post["source"] == "link"
     # 源笔记不被改写
     assert memory_tree.read_note(memory_tree.notes_dir / "daily.md").startswith("看看这个")
@@ -282,7 +282,7 @@ def test_title_based_filename(memory_tree):
     report = LinkDispatcher(memory_tree, processor_factory=_TitledProcessor).run()
 
     assert report["created"] == ["抖音-健脑小课堂-运动篇.md"]
-    assert (memory_tree.inbox_dir / "抖音-健脑小课堂-运动篇.md").exists()
+    assert (memory_tree.notes_dir / "personal" / "抖音-健脑小课堂-运动篇.md").exists()
 
 
 def test_title_fallback_to_id(memory_tree):
@@ -312,7 +312,7 @@ def test_title_collision_appends_doc_id(memory_tree):
     report = LinkDispatcher(memory_tree, processor_factory=_CollisionProcessor).run()
 
     assert report["created"] == ["抖音-撞名-v789.md"]
-    assert (memory_tree.inbox_dir / "抖音-撞名-v789.md").exists()
+    assert (memory_tree.notes_dir / "personal" / "抖音-撞名-v789.md").exists()
 
 
 def test_video_blob_saved_to_platform_dir(memory_tree):
@@ -451,10 +451,10 @@ def test_processes_bilibili_link(memory_tree):
     report = LinkDispatcher(memory_tree, processor_factory=_BiliProcessor).run()
 
     assert report["created"] == ["B站-认知科学入门.md"]
-    created = memory_tree.inbox_dir / "B站-认知科学入门.md"
+    created = memory_tree.notes_dir / "personal" / "B站-认知科学入门.md"
     assert created.exists()
     post = frontmatter.loads(created.read_text(encoding="utf-8"))
-    assert post["tags"] == ["待确认", "B站"]
+    assert post["tags"] == ["B站"]
     assert post["source"] == "link"
 
 
@@ -602,7 +602,7 @@ def test_comment_injected_into_note_body(memory_tree):
 
     LinkDispatcher(memory_tree, processor_factory=_SourceLineProcessor).run()
 
-    card = memory_tree.inbox_dir / "douyin-vid123.md"
+    card = memory_tree.notes_dir / "personal" / "douyin-vid123.md"
     text = card.read_text(encoding="utf-8")
     lines = text.splitlines()
     source_idx = next(i for i, ln in enumerate(lines) if ln.startswith("> 来源："))

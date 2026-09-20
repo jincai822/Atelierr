@@ -1508,4 +1508,5 @@ def test_category_dash_normalized_for_archive(fake_pipeline, monkeypatch):
     post = frontmatter.loads(result.markdown)
     assert "R15-营养·饮食" in (post.metadata.get("tags") or [])
     from scripts.dispatch.archive import derive_archive_dir
-    assert derive_archive_dir(post)[1] == "R15-营养·饮食"
+    # 2026-09-21 领域制：R15 → health/（第二位恒 None，二级目录已取消）
+    assert derive_archive_dir(post) == ("health", None)

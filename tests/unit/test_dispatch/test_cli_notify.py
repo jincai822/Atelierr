@@ -90,7 +90,7 @@ def test_links_success_no_push(cli, memory_tree, pushes, monkeypatch):
     memory_tree.create_note("daily.md", f"链接 {DOUYIN_URL}", source="test")
 
     assert cli.main(["links"]) == 0
-    assert (memory_tree.inbox_dir / "douyin-vid123.md").exists()
+    assert (memory_tree.notes_dir / "personal" / "douyin-vid123.md").exists()  # 放权自动归档
     assert pushes == []
 
 
@@ -302,12 +302,12 @@ def test_media_success_no_push(cli, memory_tree, pushes, monkeypatch):
     _add_attachment(memory_tree)
 
     assert cli.main(["media"]) == 0
-    assert list(memory_tree.inbox_dir.glob("media-*.md"))
+    assert list(Path(memory_tree.notes_dir).rglob("media-*.md"))  # 放权自动归档
     assert pushes == []
 
 
 # ----------------------------------------------------------------------
-# 建议归档行（_notify_created_notes 正文附 建议归档：<平台>/[<类目>/]）
+# 建议归档行（_notify_created_notes 正文附 建议归档：<领域>/）
 # ----------------------------------------------------------------------
 
 @pytest.fixture
@@ -340,7 +340,7 @@ def _notify_created(memory_tree, calls, filename, **kwargs):
 
 
 def test_archive_hint_link_with_cclass(memory_tree, feishu_sends):
-    """link 笔记带中图法标签：建议归档 平台/类目/ 两段齐全。"""
+    """link 笔记带中图法标签：建议归档给出领域目录（B84 → health/）。"""
     memory_tree.create_note(
         "抖音-如何戒掉短视频.md",
         "正文",
@@ -352,32 +352,31 @@ def test_archive_hint_link_with_cclass(memory_tree, feishu_sends):
     )
     assert body == (
         "链接笔记已转写入库：抖音-如何戒掉短视频.md\n"
-        "建议归档：抖音/B84-心理学/"
+        "建议归档：health/"
     )
     assert kwargs == {"confirm_note": "抖音-如何戒掉短视频.md"}
 
 
 def test_archive_hint_link_without_cclass(memory_tree, feishu_sends):
-    """link 笔记无中图法标签：只写平台段。"""
+    """link 笔记无中图法标签：领域推不出，建议归档行省略。"""
     memory_tree.create_note(
         "小红书-旅行清单.md", "正文", source="link", tags=["待确认", "小红书"]
     )
     _, body, _ = _notify_created(memory_tree, feishu_sends, "小红书-旅行清单.md")
-    assert "建议归档：小红书/" in body
-    assert "\n建议归档：小红书/\n" not in body  # 类目段不出现
+    assert "建议归档" not in body  # 无中图法 → 领域推不出 → 省略
 
 
 def test_archive_hint_platform_by_source(memory_tree, feishu_sends):
-    """source 推平台：media → 媒体/，lark → 飞书/（不看 tags）。"""
+    """领域只看中图法标签、不看 source（media/lark 无标签一律省略）。"""
     memory_tree.create_note(
         "媒体-截图.md", "正文", source="media", tags=["待确认", "截图", "B84-心理学"]
     )
     _, body, _ = _notify_created(memory_tree, feishu_sends, "媒体-截图.md")
-    assert "建议归档：媒体/B84-心理学/" in body
+    assert "建议归档：health/" in body
 
     memory_tree.create_note("飞书-想法.md", "正文", source="lark", tags=["待确认"])
     _, body2, _ = _notify_created(memory_tree, feishu_sends, "飞书-想法.md")
-    assert "建议归档：飞书/" in body2
+    assert "建议归档" not in body2
 
 
 def test_archive_hint_omitted_when_platform_unknown(memory_tree, feishu_sends):
@@ -425,7 +424,8 @@ def test_digest_push_appends_health_warning(cli, memory_tree, pushes, feishu_sen
 def test_notify_created_notes_with_extras(memory_tree, feishu_sends):
     """extras 附加行（链接评论）插在前缀与建议归档行之间。"""
     memory_tree.create_note(
-        "抖音-如何戒掉短视频.md", "正文", source="link", tags=["待确认", "抖音"]
+        "抖音-如何戒掉短视频.md", "正文", source="link",
+        tags=["待确认", "抖音", "B84-心理学"],
     )
     _, body, _ = _notify_created(
         memory_tree,
@@ -436,7 +436,7 @@ def test_notify_created_notes_with_extras(memory_tree, feishu_sends):
     assert body == (
         "链接笔记已转写入库：抖音-如何戒掉短视频.md\n"
         "你的评论：这个讲得真好\n"
-        "建议归档：抖音/"
+        "建议归档：health/"
     )
 
 

@@ -36,6 +36,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 import frontmatter
 
+from scripts.dispatch.archive import auto_archive
+
 from scripts.memory.core import DAILY_NOTE_RE, LAYERS, MemoryTree
 from scripts.utils.file_utils import write_text_skip_existing
 from scripts.utils.state_store import read_json, write_json
@@ -216,6 +218,7 @@ class LinkDispatcher:
             "skipped": 0,
             "comments": {},
             "duplicates": [],
+            "archived": {},
         }
         for url in self._collect_urls(report):
             entry = state.get(url)
@@ -374,6 +377,10 @@ class LinkDispatcher:
                 report["comments"][filename] = comment
             self._annotate_source(url, filename)
             report["created"].append(filename)
+            # 放权自动归档（2026-09-21 裁决：产出即归档，失败留 inbox 人工兜底）
+            domain = auto_archive(self.tree, filename)
+            if domain:
+                report["archived"][filename] = domain
             return
         entry["last_error"] = (result.error or "")[:300]
         if entry["attempts"] >= MAX_ATTEMPTS:

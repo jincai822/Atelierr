@@ -135,7 +135,7 @@ class _FakeBookProcessor:
 
 
 def _book_card_paths(tree):
-    return sorted(Path(tree.inbox_dir).glob("书籍-*.md"))
+    return sorted(Path(tree.notes_dir).rglob("书籍-*.md"))  # 放权后档案卡在领域目录
 
 
 def test_pdf_book_creates_card_in_inbox(memory_tree):
@@ -157,14 +157,14 @@ def test_pdf_book_creates_card_in_inbox(memory_tree):
     assert post["source"] == "book"
     assert post["reading_status"] == "想读"
     assert post["level_suggestion"] == "L2"
-    assert post["tags"] == ["待确认", "书籍", "B84-心理学"]
+    assert post["tags"] == ["书籍", "B84-心理学"]  # 放权摘待确认
     assert post["book_key"]
     assert "[[attachments/书籍/认知觉醒.pdf]]" not in post.content  # 附件在顶层
     assert "[[attachments/认知觉醒.pdf]]" in post.content
     assert "[[划重点-认知觉醒-" in post.content  # 清单双链
-    # 归档路由：书籍/[中图法/]（derive_archive_dir 单一规则源）
+    # 归档路由：中图法 → 领域（derive_archive_dir 单一规则源；B84 → health/）
     from scripts.dispatch.archive import derive_archive_dir
-    assert derive_archive_dir(post) == ("书籍", "B84-心理学")
+    assert derive_archive_dir(post) == ("health", None)
     assert (memory_tree.notes_dir / card_rel[len("inbox/"):]).exists() is False  # 在 inbox 不在 memory
 
 
@@ -227,24 +227,22 @@ def test_reader_context_reads_goals_and_todos(memory_tree):
 
 
 def test_pdf_book_card_dedupes_after_archival(memory_tree):
-    """档案卡归档进 书籍/中图法/ 子目录后，查重仍命中（递归扫描）+报人工。"""
+    """档案卡放权自动归档进领域目录后，查重仍命中（全树扫描）+报人工。"""
     _add_pdf(memory_tree, name="认知觉醒.pdf")
     dispatcher = MediaDispatcher(memory_tree, highlights_factory=_FakeBookProcessor)
     dispatcher.run()
     card = _book_card_paths(memory_tree)[0]
-    # 模拟 ✅ 确认归档：移进 memory/书籍/B84-心理学/
-    target_dir = Path(memory_tree.notes_dir) / "书籍" / "B84-心理学"
-    target_dir.mkdir(parents=True)
-    card.rename(target_dir / card.name)
+    # 放权（2026-09-21）：产出即自动归档（B84 → health/），无需手动模拟
+    assert card.parent == Path(memory_tree.notes_dir) / "health"
 
     # 状态丢失重跑同一 PDF：查重必须命中已归档的卡，不再建、且报人工
     dispatcher2 = MediaDispatcher(memory_tree, highlights_factory=_FakeBookProcessor)
     dispatcher2.state_path.unlink()
     report = dispatcher2.run()
 
-    assert _book_card_paths(memory_tree) == []  # inbox 没有新卡
+    assert not list(Path(memory_tree.inbox_dir).glob("书籍-*.md"))  # inbox 没有新卡
     assert report.get("deduped") == ["认知觉醒"]
-    assert len(list(target_dir.glob("书籍-*.md"))) == 1  # 原卡原地不动
+    assert len(list(card.parent.glob("书籍-*.md"))) == 1  # 原卡原地不动
 
 
 # ----------------------------------------------------------------------

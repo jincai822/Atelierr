@@ -107,8 +107,9 @@ def _add_attachment(tree, name="IMG_001.png", age_seconds=60, subdir="", content
 
 
 def _created_note(tree):
-    # 产出卡落中转站（2026-09-13 拆分：memory/ 只存真记忆）
-    notes = list(Path(tree.inbox_dir).glob("media-*.md"))
+    # 放权后（2026-09-21 裁决）产出即自动归档进领域目录（无中图法 →
+    # personal/ 兜底）；失败降级的才留在 inbox。全树查找即可。
+    notes = [p for p in Path(tree.notes_dir).rglob("media-*.md")]
     assert len(notes) == 1
     return notes[0]
 
@@ -123,7 +124,7 @@ def test_image_creates_note(memory_tree):
     assert len(report["created"]) == 1
     note = _created_note(memory_tree)
     post = frontmatter.loads(note.read_text(encoding="utf-8"))
-    assert post["tags"] == ["待确认", "截图"]
+    assert post["tags"] == ["截图"]  # 放权：产出即归档即摘待确认
     assert post["source"] == "media"
     assert "![[attachments/IMG_001.png]]" in post.content
     assert "## OCR 全文" in post.content
@@ -143,7 +144,7 @@ def test_audio_creates_note(memory_tree):
     assert report["found"] == 1
     note = _created_note(memory_tree)
     post = frontmatter.loads(note.read_text(encoding="utf-8"))
-    assert post["tags"] == ["待确认", "录音"]
+    assert post["tags"] == ["录音"]
     assert "![[attachments/voice_001.m4a]]" in post.content
     assert "## 转写全文" in post.content
     assert "转写文本。" in post.content
@@ -188,7 +189,7 @@ def test_content_duplicate_skipped(memory_tree):
     assert dup["duplicate"] is True
     assert dup["note"] == origin["note"]
     assert dup["file_hash"] == origin["file_hash"]
-    notes = list(Path(memory_tree.inbox_dir).glob("media-*.md"))
+    notes = list(Path(memory_tree.notes_dir).rglob("media-*.md"))
     assert len(notes) == 1
 
 
@@ -260,6 +261,7 @@ def test_missing_attachments_dir_noop(memory_tree):
 
     assert report == {
         "scanned": 0, "found": 0, "created": [], "failed": [], "skipped": 0,
+        "archived": {},
         "imported": 0, "duplicates": [],
     }
 
@@ -301,7 +303,7 @@ def test_dry_run_creates_nothing(memory_tree):
     assert report["found"] == 1
     assert report["created"] == []
     assert constructed == []
-    assert not list(Path(memory_tree.inbox_dir).glob("media-*.md"))
+    assert not list(Path(memory_tree.notes_dir).rglob("media-*.md"))
     assert not (memory_tree.state_dir / "processed_media.json").exists()
 
 
@@ -358,7 +360,7 @@ def test_same_name_in_two_subdirs_both_processed(memory_tree):
 
     assert report["found"] == 2
     assert len(report["created"]) == 2
-    assert len(list(Path(memory_tree.inbox_dir).glob("media-*.md"))) == 2
+    assert len(list(Path(memory_tree.notes_dir).rglob("media-*.md"))) == 2
 
 
 def test_video_in_platform_dir_referenced_skipped(memory_tree):
@@ -506,7 +508,7 @@ def test_video_creates_note_and_replaces_with_480p(memory_tree, monkeypatch):
     assert len(report["created"]) == 1
     note = _created_note(memory_tree)
     post = frontmatter.loads(note.read_text(encoding="utf-8"))
-    assert post["tags"] == ["待确认", "视频"]
+    assert post["tags"] == ["视频"]
     assert post["source"] == "media"
     assert "![[attachments/媒体/clip.mp4]]" in post.content
     assert "## 转写全文" in post.content
@@ -707,11 +709,11 @@ def test_rapid_images_merge_into_one_batch_card(memory_tree):
 
     assert report["found"] == 4
     assert len(report["created"]) == 2
-    notes = sorted(Path(memory_tree.inbox_dir).glob("media-*.md"))
+    notes = sorted(Path(memory_tree.notes_dir).rglob("media-*.md"))
     assert len(notes) == 2
     batch = max(notes, key=lambda p: p.stat().st_size)
     post = frontmatter.loads(batch.read_text(encoding="utf-8"))
-    assert post["tags"] == ["待确认", "截图"]
+    assert post["tags"] == ["截图"]  # 放权：产出即归档即摘待确认
     assert "（3 张）" in post.content
     assert post.content.count("![[attachments/媒体/") == 3
     assert "—— 第 1 页 ——" in post.content
@@ -806,7 +808,7 @@ def test_video_card_has_summary_and_tags(memory_tree, monkeypatch):
     assert len(report["created"]) == 1
     note = _created_note(memory_tree)
     post = frontmatter.loads(note.read_text(encoding="utf-8"))
-    assert post["tags"] == ["待确认", "视频", "B84-心理学", "认知负荷"]
+    assert post["tags"] == ["视频", "B84-心理学", "认知负荷"]  # 放权摘待确认
     assert "## 观点总结" in post.content
     assert "1. 观点一。" in post.content
     assert "- 某概念" in post.content
@@ -899,7 +901,7 @@ def test_audio_card_summarize_failure_annotated(memory_tree):
 
     note = _created_note(memory_tree)
     post = frontmatter.loads(note.read_text(encoding="utf-8"))
-    assert post["tags"] == ["待确认", "录音"]
+    assert post["tags"] == ["录音"]
     assert "⚠️ 自动总结失败" in post.content
     assert "## 观点总结" not in post.content
 
@@ -920,7 +922,7 @@ def test_screenshot_card_summarized(memory_tree):
 
     note = _created_note(memory_tree)
     post = frontmatter.loads(note.read_text(encoding="utf-8"))
-    assert post["tags"] == ["待确认", "截图", "B84-心理学", "认知负荷"]
+    assert post["tags"] == ["截图", "B84-心理学", "认知负荷"]
     assert "## 观点总结" in post.content
 
 
@@ -942,7 +944,7 @@ def test_batch_card_summarized(memory_tree):
     assert len(report["created"]) == 1
     note = _created_note(memory_tree)
     post = frontmatter.loads(note.read_text(encoding="utf-8"))
-    assert post["tags"] == ["待确认", "截图", "B84-心理学", "认知负荷"]
+    assert post["tags"] == ["截图", "B84-心理学", "认知负荷"]
     assert "## 观点总结" in post.content
     # 总结输入是分页 OCR 汇总（含页码标记）
     assert seen and "—— 第 1 页 ——" in seen[0] and "—— 第 2 页 ——" in seen[0]

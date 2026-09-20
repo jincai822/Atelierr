@@ -609,7 +609,7 @@ def _card_archive(filename):
 
 
 def test_card_archive_moves_note_and_strips_tag(memory_tree):
-    """📁 确认并归档：文件到 抖音/、标签删、index path 即时迁移。"""
+    """📁 确认并归档：文件到领域目录、标签删、index path 即时迁移。"""
     bridge = _bridge(memory_tree)
     note = memory_tree.create_note(
         "douyin-x.md", "正文行\n", source="link", tags=["待确认", "抖音"]
@@ -622,10 +622,10 @@ def test_card_archive_moves_note_and_strips_tag(memory_tree):
 
     resp = bridge.handle_card_action(_card_archive("douyin-x.md"))
 
-    assert resp["toast"] == {"type": "success", "content": "已确认并归档到 抖音/"}
+    assert resp["toast"] == {"type": "success", "content": "已确认并归档到 personal/"}
     assert resp["card"]["type"] == "raw"
-    assert "已归档到 抖音/" in resp["card"]["data"]["elements"][0]["text"]["content"]
-    target = memory_tree.notes_dir / "抖音" / "douyin-x.md"
+    assert "已归档到 personal/" in resp["card"]["data"]["elements"][0]["text"]["content"]
+    target = memory_tree.notes_dir / "personal" / "douyin-x.md"
     assert target.exists()
     assert not note.exists()
     post = frontmatter.loads(target.read_text(encoding="utf-8"))
@@ -634,14 +634,14 @@ def test_card_archive_moves_note_and_strips_tag(memory_tree):
     # sidecar 已即时迁移（不等 watcher），动态状态原样保留
     entry = memory_tree._load_index().get(str(note_id))
     assert entry is not None
-    assert entry["path"] == "抖音/douyin-x.md"
+    assert entry["path"] == "personal/douyin-x.md"
     assert entry["layer"] == "mid-term"
     assert entry["last_accessed"] == entry_before["last_accessed"]
 
 
 def test_card_archive_inbox_prefixed_filename_no_nested_dir(memory_tree):
     """卡片 value 带 inbox/ 虚拟前缀时，归档用实体文件名落位——
-    不得拼出 平台/分类/inbox/ 嵌套目录（2026-09-17 实证 bug）。"""
+    不得拼出嵌套目录（2026-09-17 实证 bug）；TP391 → career/。"""
     bridge = _bridge(memory_tree)
     memory_tree.create_note(
         "book-x.md",
@@ -654,10 +654,10 @@ def test_card_archive_inbox_prefixed_filename_no_nested_dir(memory_tree):
     resp = bridge.handle_card_action(_card_archive("inbox/book-x.md"))
 
     assert resp["toast"]["type"] == "success"
-    target = memory_tree.notes_dir / "书籍" / "TP391-自然语言处理" / "book-x.md"
+    target = memory_tree.notes_dir / "career" / "book-x.md"
     assert target.exists()
     # 不存在嵌套 inbox 目录
-    assert not (memory_tree.notes_dir / "书籍" / "TP391-自然语言处理" / "inbox").exists()
+    assert not (memory_tree.notes_dir / "career" / "inbox").exists()
 
 
 def test_card_archive_pick_two_level_dir_accepted(memory_tree):
@@ -682,7 +682,7 @@ def test_card_archive_pick_two_level_dir_accepted(memory_tree):
 
 
 def test_card_archive_uses_cclass_subdir(memory_tree):
-    """带中图法分类标签：归档进 平台/分类/ 二级目录。"""
+    """带中图法分类标签：映射进对应领域目录（B84 → health/）。"""
     bridge = _bridge(memory_tree)
     memory_tree.create_note(
         "douyin-psy.md",
@@ -693,8 +693,8 @@ def test_card_archive_uses_cclass_subdir(memory_tree):
 
     resp = bridge.handle_card_action(_card_archive("douyin-psy.md"))
 
-    assert resp["toast"]["content"] == "已确认并归档到 抖音/B84-心理学/"
-    target = memory_tree.notes_dir / "抖音" / "B84-心理学" / "douyin-psy.md"
+    assert resp["toast"]["content"] == "已确认并归档到 health/"
+    target = memory_tree.notes_dir / "health" / "douyin-psy.md"
     assert target.exists()
     assert not (memory_tree.notes_dir / "douyin-psy.md").exists()
     assert "待确认" not in frontmatter.loads(
@@ -703,30 +703,31 @@ def test_card_archive_uses_cclass_subdir(memory_tree):
 
 
 def test_card_archive_lark_and_fallback_media_dirs(memory_tree):
-    """source=lark → 飞书/；media（媒体类附件）→ 媒体/。"""
+    """无中图法标签的笔记（lark/media 皆然）：一律 personal/ 兜底
+    （2026-09-21 领域制：source 不再决定目录）。"""
     bridge = _bridge(memory_tree)
     memory_tree.create_note("fl-想法.md", "正文\n", source="lark", tags=["待确认"])
     memory_tree.create_note("ocr-截图.md", "正文\n", source="media", tags=["待确认", "截图"])
 
     resp = bridge.handle_card_action(_card_archive("fl-想法.md"))
-    assert resp["toast"]["content"] == "已确认并归档到 飞书/"
-    assert (memory_tree.notes_dir / "飞书" / "fl-想法.md").exists()
+    assert resp["toast"]["content"] == "已确认并归档到 personal/"
+    assert (memory_tree.notes_dir / "personal" / "fl-想法.md").exists()
 
     resp = bridge.handle_card_action(_card_archive("ocr-截图.md"))
-    assert resp["toast"]["content"] == "已确认并归档到 媒体/"
-    assert (memory_tree.notes_dir / "媒体" / "ocr-截图.md").exists()
+    assert resp["toast"]["content"] == "已确认并归档到 personal/"
+    assert (memory_tree.notes_dir / "personal" / "ocr-截图.md").exists()
 
 
 def test_card_archive_underivable_defaults_to_biji(memory_tree):
-    """推导不出平台（手写/无来源笔记）：落默认类目 笔记/
-    （2026-09-20 用户裁决，取代 09-12 退化为仅确认留收件箱）。"""
+    """推导不出领域（手写/无来源笔记）：落默认 personal/
+    （2026-09-21 用户裁决）。"""
     bridge = _bridge(memory_tree)
     memory_tree.create_note("速记碎片.md", "正文\n", source="sync", tags=["待确认"])
 
     resp = bridge.handle_card_action(_card_archive("速记碎片.md"))
 
-    assert resp["toast"]["content"] == "已确认并归档到 笔记/"
-    note = memory_tree.notes_dir / "笔记" / "速记碎片.md"
+    assert resp["toast"]["content"] == "已确认并归档到 personal/"
+    note = memory_tree.notes_dir / "personal" / "速记碎片.md"
     assert note.exists()
     assert not (memory_tree.notes_dir / "速记碎片.md").exists()  # 已移出收件箱
     assert "待确认" not in frontmatter.loads(
@@ -741,12 +742,12 @@ def test_card_archive_idempotent_when_already_in_target(memory_tree):
         "douyin-x.md", "正文行\n", source="link", tags=["待确认", "抖音"]
     )
     bridge.handle_card_action(_card_archive("douyin-x.md"))
-    target = memory_tree.notes_dir / "抖音" / "douyin-x.md"
+    target = memory_tree.notes_dir / "personal" / "douyin-x.md"
     before = (target.read_bytes(), target.stat().st_mtime_ns)
 
     resp = bridge.handle_card_action(_card_archive("douyin-x.md"))
 
-    assert resp["toast"] == {"type": "success", "content": "已确认并归档到 抖音/"}
+    assert resp["toast"] == {"type": "success", "content": "已确认并归档到 personal/"}
     assert (target.read_bytes(), target.stat().st_mtime_ns) == before  # 文件未再动
     assert target.exists()
 
@@ -759,7 +760,7 @@ def test_card_archive_target_collision_no_overwrite(memory_tree):
     )
     # 同名 .md 会被定位歧义前置拦截；此处用同名目录占位目标路径，
     # 命中"目标重名"防御分支（不覆盖目录/文件）
-    collide_dir = memory_tree.notes_dir / "抖音"
+    collide_dir = memory_tree.notes_dir / "personal"
     collide_dir.mkdir(parents=True)
     (collide_dir / "douyin-x.md").mkdir()
     collide_marker = collide_dir / "douyin-x.md" / "占位.txt"
@@ -875,12 +876,12 @@ def test_card_feedback_archive_success_uses_filename_without_title(memory_tree, 
 
     resp = bridge.handle_card_action(_card_action({"action": "archive_note", "note": "plain-x.md"}))
 
-    assert resp["toast"]["content"] == "已确认并归档到 抖音/"
-    target = memory_tree.notes_dir / "抖音" / "plain-x.md"
+    assert resp["toast"]["content"] == "已确认并归档到 personal/"
+    target = memory_tree.notes_dir / "personal" / "plain-x.md"
     assert target.exists()
     assert len(sent) == 1
     assert sent[0][1] == "text"
-    assert _sent_text(sent) == "📁 已确认并归档到 抖音/：plain-x.md"
+    assert _sent_text(sent) == "📁 已确认并归档到 personal/：plain-x.md"
 
 
 def test_card_feedback_confirm_failure_reason_and_toast(memory_tree, monkeypatch):
@@ -976,7 +977,7 @@ def test_card_feedback_archive_tag_fail_hint(memory_tree, monkeypatch):
 
     assert resp["toast"]["type"] == "warning"
     assert "已归档" in resp["toast"]["content"]
-    assert (memory_tree.notes_dir / "抖音" / "douyin-x.md").exists()  # 移动不回滚
+    assert (memory_tree.notes_dir / "personal" / "douyin-x.md").exists()  # 移动不回滚
     assert len(sent) == 1
     assert _sent_text(sent) == "⚠️ 已归档，标签请到 Obsidian 手动摘除：跑步教学合集"
 
@@ -1633,7 +1634,7 @@ def test_archive_pick_shows_dirs_without_moving(memory_tree):
         for a in e["actions"]
     ]
     labels = [b["text"]["content"] for b in buttons]
-    assert labels[0] == "抖音（推荐）"
+    assert labels[0] == "personal（推荐）"  # 无中图法标签 → 兜底领域
     assert "书籍" in labels
     assert "系统" not in labels
     assert labels[-1] == "取消"
@@ -1641,7 +1642,7 @@ def test_archive_pick_shows_dirs_without_moving(memory_tree):
     assert dir_values[0] == {
         "action": "archive_note",
         "note": "douyin-x.md",
-        "dir": "抖音",
+        "dir": "personal",
     }
     assert buttons[-1]["behaviors"][0]["value"] == {
         "action": "archive_cancel",
@@ -2329,8 +2330,8 @@ def test_batch_archive_rebuilds_digest_card(memory_tree):
     ]
     assert any("mb" in text for text in texts)  # 剩余条目还在
     assert not any("ma" in text and "💭" not in text for text in texts if "ma" in text)
-    # ma.md 本身已归档
-    assert (memory_tree.notes_dir / "媒体" / "ma.md").exists()
+    # ma.md 本身已归档（无中图法标签 → personal/ 兜底）
+    assert (memory_tree.notes_dir / "personal" / "ma.md").exists()
 
 
 def test_batch_last_item_gets_remark_completion_card(memory_tree, monkeypatch):

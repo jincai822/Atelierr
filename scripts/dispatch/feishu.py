@@ -166,10 +166,10 @@ __all__ = [
     "send_todo_feishu",
 ]
 
-#: 平台推不出时归档按钮的兜底一级目录（与建议归档行的"省略"不同：
-#: 按钮必须给一个去处；2026-09-20 裁决：手写/无来源笔记落 笔记/，
+#: 领域推不出时归档按钮的兜底一级目录（与建议归档行的"省略"不同：
+#: 按钮必须给一个去处；2026-09-21 裁决：手写/无来源笔记落 personal/，
 #: 与 archive.HANDWRITTEN_ARCHIVE_DIR 同值）
-FALLBACK_ARCHIVE_DIR = "笔记"
+FALLBACK_ARCHIVE_DIR = "personal"
 
 #: 已处理 message_id 登记表上限（超出裁掉最旧的，防无限膨胀）
 _SEEN_CAP = 2000

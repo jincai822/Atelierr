@@ -277,7 +277,7 @@ class ClipDispatcher:
 
     @staticmethod
     def _archive_hint(clip: Dict[str, Any]) -> Optional[str]:
-        """「建议归档：<平台>/[<中图法标签>/]」；规则与链接卡片同源。"""
+        """「建议归档：<领域>/」；规则与链接卡片同源（2026-09-21 领域制）。"""
         platform, category = derive_archive_dir(clip["post"])
         if not platform:
             return None

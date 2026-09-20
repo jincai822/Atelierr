@@ -1,14 +1,14 @@
 """归档目录推导：飞书卡片「📁 确认并归档」按钮与通知「建议归档」行共用。
 
-规则（与用户在 Obsidian 的手动归档约定一致）：
-- 一级目录 = 平台：source=lark → 飞书；source=media → 媒体；
-  source=link 或其它 → 取 frontmatter tags 里第一个平台标签
-  （排除「待确认」与中图法类目标签，如 抖音/小红书）；取不到 →
-  默认类目 笔记/（2026-09-20 用户裁决：手写/无来源笔记也有固定
-  格子，取代 09-12"退化为仅确认留收件箱"；derive 本身仍返回
-  None，兜底在 archive_note 与飞书目录选择卡里）；
-- 二级目录（可选）= 中图法分类标签：tags 里第一个匹配
-  ``^[A-Z]{1,3}\\d*-`` 的标签（如 B84-心理学），没有就只进一级目录。
+规则（2026-09-21 原教旨改造第 4 条，用户拍板并放权）：
+- 一级目录 = **领域**：取 frontmatter tags 里第一个中图法标签
+  （``^[A-Z]{1,3}\\d*-``，如 B84-心理学），按 CLC_TO_DOMAIN 映射成
+  领域目录（health/work/career/finance/personal/...）；字母前缀
+  逐级回退（TN→T；TP 命中 career 优先于 T→work）；推导不出 →
+  默认 personal/（兜底，同裁决：分不出的一律有固定格子）；
+- 平台（抖音/小红书/书籍）与中图法分类号**降级为标签**，不再做
+  文件夹——找东西按主题（领域）找，不按来源找；
+- 二级目录取消（中图法只做映射依据，不再做文件夹）。
 
 确认/归档的库级核心逻辑（locate_note / strip_tag / confirm_note /
 archive_note 等）也住这里：飞书卡片回调（dispatch/feishu.py）与
@@ -27,48 +27,59 @@ import frontmatter
 
 from scripts.memory.core import NOTE_EXCLUDED_DIRS, MemoryTree
 
-#: 中图法分类标签（如 B84-心理学 / TP311.5-软件测试）→ 归档二级目录名
+#: 中图法分类标签（如 B84-心理学 / TP311.5-软件测试）→ 领域映射依据
 CCLASS_RE = re.compile(r"^[A-Z]{1,3}\d*-")
 
 #: 待确认标签（与 dispatch/links.py、dispatch/media.py 的 REVIEW_TAG、
-#: dispatch/feishu.py 的 CONFIRM_TAG 同值）；推导平台时不算平台标签
+#: dispatch/feishu.py 的 CONFIRM_TAG 同值）
 REVIEW_TAG = "待确认"
 
-#: source → 归档一级目录（平台）名
-PLATFORM_BY_SOURCE = {"lark": "飞书", "media": "媒体"}
+#: 中图法字母前缀 → 领域目录（2026-09-21 用户拍板）。
+#: 匹配时前缀逐级回退：TN→T、TP 直接命中（优先于 T）。
+CLC_TO_DOMAIN = {
+    "B": "health",   # 哲学/心理学 → 稳定内核
+    "R": "health",   # 医药卫生
+    "TP": "career",  # 计算机/AI → 搞懂 Agent
+    "G": "career",   # 教育/自我提升
+    "U": "work",     # 交通/汽车 → 汽车零部件
+    "T": "work",     # 工业技术兜底（TP 优先命中 career）
+    "F": "finance",  # 经济
+    "I": "personal", "J": "personal", "K": "personal",  # 文艺史
+    "Z": "personal",  # 综合
+}
 
-#: 平台推不出时的默认一级目录（手写/无来源笔记的固定格子，
-#: 2026-09-20 用户裁决；飞书 FALLBACK_ARCHIVE_DIR 同值）
-HANDWRITTEN_ARCHIVE_DIR = "笔记"
+#: 领域推不出时的默认一级目录（手写/无来源/无中图法标签的固定格子，
+#: 2026-09-21 裁决；飞书 FALLBACK_ARCHIVE_DIR 同值）
+HANDWRITTEN_ARCHIVE_DIR = "personal"
+
+
+def _clc_domain(tag: str) -> Optional[str]:
+    """中图法标签 → 领域：字母前缀逐级回退查 CLC_TO_DOMAIN。"""
+    m = re.match(r"^([A-Z]+)", tag)
+    prefix = m.group(1) if m else ""
+    for i in range(len(prefix), 0, -1):
+        domain = CLC_TO_DOMAIN.get(prefix[:i])
+        if domain:
+            return domain
+    return None
 
 
 def derive_archive_dir(post) -> Tuple[Optional[str], Optional[str]]:
-    """从一篇笔记的 frontmatter Post 推导归档目录 (平台, 分类标签)。
+    """从一篇笔记的 frontmatter Post 推导归档目录 (领域, None)。
 
     Args:
         post: python-frontmatter 的 Post 对象（metadata 含 source/tags）。
 
     Returns:
-        Tuple[Optional[str], Optional[str]]: (平台目录名, 中图法分类
-        标签)；平台推不出为 None，分类没有为 None。目录相对串 =
-        ``平台 + ("/" + 分类 if 分类)``。
+        Tuple[Optional[str], Optional[str]]: (领域目录名, None)；领域
+        推不出为 None（兜底在 archive_note 与飞书目录选择卡）。第二
+        位保留只为兼容旧调用形状——二级目录已取消（2026-09-21）。
     """
-    metadata = post.metadata
-    source = str(metadata.get("source") or "")
-    tags = [str(tag) for tag in (metadata.get("tags") or [])]
-    if source in PLATFORM_BY_SOURCE:
-        platform = PLATFORM_BY_SOURCE[source]
-    else:
-        platform = next(
-            (
-                tag
-                for tag in tags
-                if tag != REVIEW_TAG and not CCLASS_RE.match(tag)
-            ),
-            None,
-        )
-    category = next((tag for tag in tags if CCLASS_RE.match(tag)), None)
-    return platform, category
+    tags = [str(tag) for tag in (post.metadata.get("tags") or [])]
+    clc = next((tag for tag in tags if CCLASS_RE.match(tag)), None)
+    if clc is None:
+        return None, None
+    return _clc_domain(clc), None
 
 
 #: 文件名/目录段非法字符（与 dispatch/feishu.py 的 _ILLEGAL_RE 同值；
@@ -188,9 +199,9 @@ def archive_note(
     """「📁 确认并归档」核心（2026-09-07 批准的人工例外之二；09-09 起人点目录）。
 
     定位（与确认同）→ 目标目录：显式给定（先经 valid_archive_dir 校验）
-    或机器推导（平台[/分类]，规则见 derive_archive_dir；平台推不出 =
-    手写/无来源笔记 → 默认类目 笔记/，2026-09-20 用户裁决，取代
-    09-12"退化为仅确认留收件箱"）→ 已在目标目录则只删标签（幂等，
+    或机器推导（领域，规则见 derive_archive_dir；领域推不出 = 手写/
+    无来源笔记 → 默认 personal/，2026-09-21 用户裁决）→ 已在目标目录
+    则只删标签（幂等，
     不移动）→ 否则：目标重名检查（绝不覆盖）→ mkdir → rename →
     sidecar 按 id 即时迁移 path（MemoryTree.relocate_entry，动态状态
     原样保留，不等 watcher 班次）→ 删「待确认」标签。移动成功但删
@@ -212,12 +223,12 @@ def archive_note(
         return False, err
     if target_dir is None:
         post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
-        platform, category = derive_archive_dir(post)
-        if platform is None:
-            # 平台推不出 = 手写/无来源笔记：落默认类目 笔记/（2026-09-20
-            # 用户裁决，取代 09-12"退化为仅确认留收件箱"）
-            platform = HANDWRITTEN_ARCHIVE_DIR
-        target_dir = platform if not category else f"{platform}/{category}"
+        domain, _none = derive_archive_dir(post)
+        if domain is None:
+            # 领域推不出 = 手写/无来源/无中图法标签：落默认 personal/
+            #（2026-09-21 用户裁决，兜底）
+            domain = HANDWRITTEN_ARCHIVE_DIR
+        target_dir = domain
     elif not valid_archive_dir(target_dir):
         return False, "非法目录"
     current_rel = tree._rel_key(note_path)
@@ -248,3 +259,33 @@ def archive_note(
         )
         return True, "tag_fail"
     return True, target_dir
+
+
+def auto_archive(tree: MemoryTree, filename: str) -> Optional[str]:
+    """放权自动归档（2026-09-21 用户裁决：机器产出的新笔记产出即归档，
+    不再逐条人工审批）。
+
+    就是 archive_note 的"不问人"包装：成功返回领域目录名（通知文案
+    用）；任何失败返回 None——笔记留在 inbox 带「待确认」，照旧走
+    人工确认卡（放权只放顺利路径，异常一律留人兜底，绝不硬搬）。
+
+    Args:
+        tree: MemoryTree。
+        filename: 刚产出的笔记文件名（可带 inbox/ 虚拟前缀）。
+    """
+    ok, detail = archive_note(tree, filename)
+    if not ok:
+        return None
+    if detail == "tag_fail":
+        # 移动成功仅标签摘除失败：按已归档算（标签人工后补），
+        # 目录名 archive_note 没带回，重推一次
+        note_path, _err = locate_note(tree, filename)
+        if note_path is None:
+            return None
+        try:
+            post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - 读不出按未归档降级
+            return None
+        domain, _none = derive_archive_dir(post)
+        return domain or HANDWRITTEN_ARCHIVE_DIR
+    return detail

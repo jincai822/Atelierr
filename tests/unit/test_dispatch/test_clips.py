@@ -121,7 +121,7 @@ def test_new_clip_gets_card(memory_tree):
     assert "1. 甲一" in call["message"]
     assert "3. 丙三" in call["message"]
     assert "4. 丁四" not in call["message"]  # 卡片至多 3 条要点
-    assert "建议归档：剪藏/" in call["message"]
+    assert "建议归档" not in call["message"]  # tags 无中图法 → 领域推不出，省略
     # LLM 用网页剪藏提示词（与链接同一管道、同一中图法标准）
     assert _FakeSummarizer.calls[0]["prompt"] == _SUMMARIZE_CLIP_PROMPT
     assert "网页文章" in _FakeSummarizer.calls[0]["prompt"]

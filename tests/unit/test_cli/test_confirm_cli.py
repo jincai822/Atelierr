@@ -28,7 +28,7 @@ def _invoke(config, *args):
 
 
 def test_archive_moves_note_and_strips_tag(tmp_path, memory_tree):
-    """推导归档：inbox 待确认卡 → memory/抖音/，摘标签、sidecar 随迁、正文原样。"""
+    """推导归档：inbox 待确认卡 → 领域目录（无中图法 → personal/兜底），摘标签、sidecar 随迁、正文原样。"""
     config, notes_dir = _make_config(tmp_path)
     memory_tree.create_note(
         "douyin-x.md",
@@ -38,10 +38,10 @@ def test_archive_moves_note_and_strips_tag(tmp_path, memory_tree):
 
     result = _invoke(config, "inbox/douyin-x.md")
     assert result.exit_code == 0, result.output
-    assert "📁 已确认并归档到 抖音/" in result.output
+    assert "📁 已确认并归档到 personal/" in result.output
     assert "跑步教学合集" in result.output
 
-    moved = notes_dir / "抖音" / "douyin-x.md"
+    moved = notes_dir / "personal" / "douyin-x.md"
     assert moved.exists()
     assert not (tmp_path / "inbox" / "douyin-x.md").exists()
     post = frontmatter.loads(moved.read_text(encoding="utf-8"))
@@ -52,7 +52,7 @@ def test_archive_moves_note_and_strips_tag(tmp_path, memory_tree):
 
 
 def test_archive_fallback_biji_when_no_platform(tmp_path, memory_tree):
-    """推导不出平台（手写/无来源）：落默认类目 笔记/（2026-09-20 裁决）。"""
+    """推导不出领域（手写/无来源）：落默认 personal/（2026-09-21 裁决）。"""
     config, notes_dir = _make_config(tmp_path)
     memory_tree.create_note(
         "闪念.md", "---\nsource: link\ntags: [待确认]\n---\n一句话\n", inbox=True
@@ -60,9 +60,9 @@ def test_archive_fallback_biji_when_no_platform(tmp_path, memory_tree):
 
     result = _invoke(config, "闪念.md")
     assert result.exit_code == 0, result.output
-    assert "📁 已确认并归档到 笔记/" in result.output
+    assert "📁 已确认并归档到 personal/" in result.output
 
-    moved = notes_dir / "笔记" / "闪念.md"
+    moved = notes_dir / "personal" / "闪念.md"
     assert moved.exists()
     assert not (tmp_path / "inbox" / "闪念.md").exists()
     post = frontmatter.loads(moved.read_text(encoding="utf-8"))
@@ -70,7 +70,7 @@ def test_archive_fallback_biji_when_no_platform(tmp_path, memory_tree):
 
 
 def test_archive_fallback_biji_with_cclass_subdir(tmp_path, memory_tree):
-    """手写笔记带中图法标签：落 笔记/<分类> 二级目录（平台缺省、分类保留）。"""
+    """手写笔记带中图法标签：映射进领域目录（B84 → health/，二级目录已取消）。"""
     config, notes_dir = _make_config(tmp_path)
     memory_tree.create_note(
         "心流笔记.md",
@@ -80,9 +80,9 @@ def test_archive_fallback_biji_with_cclass_subdir(tmp_path, memory_tree):
 
     result = _invoke(config, "心流笔记.md")
     assert result.exit_code == 0, result.output
-    assert "📁 已确认并归档到 笔记/B84-心理学/" in result.output
+    assert "📁 已确认并归档到 health/" in result.output
 
-    moved = notes_dir / "笔记" / "B84-心理学" / "心流笔记.md"
+    moved = notes_dir / "health" / "心流笔记.md"
     assert moved.exists()
     post = frontmatter.loads(moved.read_text(encoding="utf-8"))
     assert post.metadata["tags"] == ["B84-心理学"]

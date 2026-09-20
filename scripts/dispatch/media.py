@@ -81,6 +81,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import frontmatter
 
+from scripts.dispatch.archive import auto_archive
 from scripts.dispatch.highlights import CHECKLIST_SOURCE, ITEM_TAG
 from scripts.dispatch.links import (
     _BACKLINK_RE,
@@ -283,6 +284,7 @@ class MediaDispatcher:
             "skipped": 0,
             "imported": 0,
             "duplicates": [],
+            "archived": {},
         }
         self._import_inbox(report, dry_run)
         pending: List[Path] = []
@@ -555,6 +557,10 @@ class MediaDispatcher:
             if path not in ok_paths:
                 entry["ocr"] = "failed"  # 图已进卡，OCR 不再重试
         report["created"].append(filename)
+        # 放权自动归档（2026-09-21 裁决：产出即归档，失败留 inbox 人工兜底）
+        domain = auto_archive(self.tree, filename)
+        if domain:
+            report["archived"][filename] = domain
 
     def _batch_note_filename(self, paths: List[Path]) -> str:
         """图集卡文件名：media-<首张日期>-<全部相对路径哈希前6>.md。"""
@@ -749,7 +755,8 @@ class MediaDispatcher:
                     entry["file_hash"] = file_hash
                 report["created"].append(rel)
                 # 书籍模式（2026-09-14 裁决，对齐 Cognitive OS 准入协议）：
-                # 档案卡进 inbox 待确认，✅ 一步归档进 memory/书籍/[中图法/]
+                # 档案卡产出即自动归档进领域目录（2026-09-21 放权裁决，
+                # 取代原"待确认 → ✅ 一步归档进 memory/书籍/[中图法/]"）
                 book = (result.metadata or {}).get("book")
                 if book:
                     card = self._create_book_card(
@@ -757,6 +764,9 @@ class MediaDispatcher:
                     )
                     if card:
                         report["created"].append(card)
+                        domain = auto_archive(self.tree, card)
+                        if domain:
+                            report["archived"][card] = domain
                 return
             suffix = path.suffix.lower()
             kind = "视频" if suffix in _VIDEO_EXTS else _KIND_BY_EXT[suffix]
@@ -812,6 +822,10 @@ class MediaDispatcher:
             if file_hash:
                 entry["file_hash"] = file_hash
             report["created"].append(filename)
+            # 放权自动归档（2026-09-21 裁决）
+            domain = auto_archive(self.tree, filename)
+            if domain:
+                report["archived"][filename] = domain
             return
         entry["last_error"] = (result.error or "")[:300]
         final = entry["attempts"] >= MAX_ATTEMPTS
@@ -1035,28 +1049,28 @@ class MediaDispatcher:
         return f"inbox/{filename}"
 
     def _find_book_card(self, book_key: str, title: str) -> Optional[Tuple[str, str]]:
-        """书籍档案查重：扫 inbox/ 与 memory/书籍/ 的既有档案卡。
+        """书籍档案查重：全树扫既有档案卡（inbox + 各领域目录）。
+
+        2026-09-21 放权后档案卡产出即归档进领域目录（health/career/…），
+        不再固定落 书籍/，查重必须全树扫（iter_all_note_files 已排除
+        wiki/attachments 等机器目录）。
 
         Returns:
             (book_key, stem) 完全同一份；("", stem) 同名不同版本；
             None 无重复。
         """
-        dirs = [Path(self.tree.inbox_dir), Path(self.tree.notes_dir) / BOOK_SUBDIR]
-        for dirpath in dirs:
-            if not dirpath.is_dir():
+        for card in sorted(self.tree.iter_all_note_files()):
+            if not card.name.startswith("书籍-"):
                 continue
-            # 书籍目录递归扫：确认归档后卡在中图法子目录（书籍/B84-心理学/）
-            pattern = "书籍-*.md" if dirpath.name != BOOK_SUBDIR else "**/书籍-*.md"
-            for card in sorted(dirpath.glob(pattern)):
-                try:
-                    post = frontmatter.loads(card.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    continue
-                if str(post.get("book_key") or "") == book_key:
-                    return book_key, card.stem
-                card_title = str(post.get("title") or "").strip("《》")
-                if card_title and card_title == title:
-                    return "", card.stem
+            try:
+                post = frontmatter.loads(card.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if str(post.get("book_key") or "") == book_key:
+                return book_key, card.stem
+            card_title = str(post.get("title") or "").strip("《》")
+            if card_title and card_title == title:
+                return "", card.stem
         return None
 
     def _key(self, path: Path) -> str:

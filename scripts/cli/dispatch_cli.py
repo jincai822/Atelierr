@@ -122,20 +122,19 @@ def _feishu_ready() -> bool:
 
 
 def _archive_hint(note_path: Path) -> Optional[str]:
-    """产出「建议归档：<平台>/[<中图法标签>/]」提示行；取不到返回 None。
+    """产出「建议归档：<领域>/」提示行；取不到返回 None。
 
     目录推导与飞书卡片「📁 确认并归档」按钮共用
     ``scripts.dispatch.archive.derive_archive_dir``（单一规则源，防止
-    两处漂移）：lark → 飞书，media → 媒体，其它 source 取 tags 里
-    第一个平台标签（如 抖音/小红书）；中图法类目（``^[A-Z]{1,3}\\d*-``，
-    如 B84-心理学）有则进二级。平台推不出（提示行场景）返回 None——
-    建议行只是可选项，绝不影响通知发送；归档按钮场景则兜底 媒体/。
+    两处漂移）：2026-09-21 起一级目录 = 领域（中图法标签映射，规则见
+    archive.py；二级目录取消）；领域推不出（提示行场景）返回 None——
+    建议行只是可选项，绝不影响通知发送；归档按钮场景则兜底 personal/。
 
     Args:
         note_path: 笔记文件路径（通常刚产出在 memory/ 根层）。
 
     Returns:
-        Optional[str]: 如 ``建议归档：抖音/B84-心理学/`` 或 None。
+        Optional[str]: 如 ``建议归档：health/`` 或 None。
     """
     try:
         post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
@@ -160,6 +159,7 @@ def _notify_created_notes(
     skip_prefix: str = "",
     extras: Optional[Dict[str, str]] = None,
     defer_queue: Optional[Path] = None,
+    archived: Optional[Dict[str, str]] = None,
 ) -> None:
     """新产出笔记逐条推送带「✅ 确认」按钮的卡片（confirm_note=文件名）。
 
@@ -173,6 +173,10 @@ def _notify_created_notes(
     **无评论**的笔记不即时推卡，改为入队 pending_push（晚间
     「今日待确认清单」一张卡批量处理）；有评论（extras）的照旧即推。
 
+    放权分态（2026-09-21 裁决）：``archived`` 给定时，已自动归档的
+    笔记推**纯通知**（"已自动归档到 领域/"，无按钮、不入晚间清单）；
+    未归档（放权失败降级）的照旧走待确认卡流程。
+
     Args:
         title: 通知标题。
         message: 通知正文前缀。
@@ -181,6 +185,7 @@ def _notify_created_notes(
         skip_prefix: 按 basename 命中该前缀的不推送（如 划重点-）。
         extras: 按文件名附加的正文行（如链接笔记的「你的评论：…」，2026-09-10 裁决 C2）。
         defer_queue: sidecar 目录（tree.state_dir）；None 不分级全即推。
+        archived: 文件名 → 领域目录（放权自动归档结果）；None 未放权。
     """
     if not _feishu_ready():
         return
@@ -188,6 +193,13 @@ def _notify_created_notes(
         if skip_prefix and Path(filename).name.startswith(skip_prefix):
             continue
         comment = extras.get(filename) if extras else None
+        domain = archived.get(filename) if archived else None
+        if domain:
+            body = f"{message}：{Path(filename).name}\n已自动归档到 {domain}/"
+            if comment:
+                body = f"{body}\n你的评论：{comment}"
+            _send_and_log(f"已归档 {filename}", title, body)
+            continue
         if defer_queue is not None and not comment:
             pending_push.enqueue(defer_queue, filename)
             continue
@@ -381,6 +393,7 @@ class DispatchCLI:
                             tree=tree,
                             extras=report.get("comments"),
                             defer_queue=tree.state_dir,
+                            archived=report.get("archived"),
                         )
                 # 同班次扫网页剪藏：新剪藏推 LLM 摘要确认卡，同 url
                 # 重复剪藏标 pending_delete（详见 dispatch/clips.py）
@@ -582,6 +595,7 @@ class DispatchCLI:
                             notes_dir=tree.notes_dir,
                             tree=tree,
                             skip_prefix="划重点-",
+                            archived=report.get("archived"),
                         )
                 if dry_run:
                     click.echo("（dry-run：未做处理）")
