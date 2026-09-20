@@ -1,5 +1,18 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run \"$(git rev-parse --show-toplevel)/scripts/atelier/cues.py\" --hook --runtime codex",
+            "statusMessage": "Loading Atelier session cues",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
@@ -7,6 +20,11 @@
             "type": "command",
             "command": "[ -f \"${XDG_CONFIG_HOME:-$HOME/.config}/atelier/session-replay.toml\" ] || [ -n \"$ATELIER_SESSION_REPLAY_ENABLED\" ] && uv run \"$(git rev-parse --show-toplevel)/scripts/atelier/session_replay.py\" hook --runtime codex || true",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "uv run \"$(git rev-parse --show-toplevel)/scripts/atelier/cues.py\" --touch-lock",
+            "timeout": 3
           },
           {
             "type": "command",

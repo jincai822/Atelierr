@@ -30,8 +30,8 @@ Executable tooling for the Atelier knowledge layer. All scripts are stdlib-only 
 | `people.py` | Canonical person-note lookup by name fragment — pathlib walk (no xargs word-splitting); opt-in body-field matching via env var | ops | stdlib |
 | `cues.py` | Unified quiet-by-default cue checker for Claude `/hi` and Codex `$hi` session start; silent when nothing fires and runtime-native command syntax when a cue is due | ops | stdlib |
 | `render_runtime_edges.py` | Renders per-runtime edge files (Codex agent TOMLs, `$command` skills) from the registries; `--check` fails on any byte drift | ops | stdlib |
-| `recurring.py` | **Retired:** formerly managed recurring obligations in the removed GTD tier; retained only for rollback | ops | stdlib |
-| `todos.py` | **Retired:** formerly aggregated the removed GTD tier and `/daily-reflection`; retained only for rollback | ops | stdlib |
+| `recurring.py` | Manages recurring obligations in `$OV/gtd/recurring.md` — re-emerging tasks with `every:` / `last-done:` due computation, distinct from one-shot GTD items | ops | stdlib |
+| `todos.py` | Aggregate open TODOs from `$OV/gtd/` and reflection Next Action sections; computes priority from `due:` / `priority:` / age; flags closure candidates from daily-note language; subcommands `list`, `stale`, `closure-candidates`, `digest` — `digest` powers `/daily-reflection` Step 0 (reached via `/hi`) | ops | stdlib |
 | `session_log.py` | Session event log skeleton generator — handles late-sleep date rule and collision auto-increment | E | stdlib |
 | `session_replay.py` | Opt-in private native-transcript capture with prompt journaling, secret screening, and activation-aware inspection; disabled by default, enabled by machine-local preference or process override | ops | stdlib |
 | `context_bundle.py` | Builds route-first, byte-bounded profile and continuity projections from the intent registry | E | stdlib |

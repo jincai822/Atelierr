@@ -16,9 +16,9 @@ When the system needs a new behavior, choose the lightest primitive that covers 
 
 | Primitive | When | Trigger | Examples in this repo |
 |---|---|---|---|
-| **Hook** (`.claude/settings.json` or `.codex/hooks.json`) | Programmatic event handler. Safety gate, mechanical lint, or prompt routing. Always-on, no model judgment. | Runtime lifecycle or tool event | Intent coverage via `scripts/atelier/intent_coverage.py`; optional replay capture; shadow-log cleanup via `scripts/atelier/shadow.py` |
-| **Skill** (`.claude/skills/<name>/SKILL.md`) | Thin entry hint that auto-triggers on semantic match against user phrasing. Lowers friction of typing `/hi` first. Skills here forward to `/hi`; the canonical intent router (`harness/intents.toml`) stays the decision point. | Model judges the description matches user input | `.claude/skills/atelier/` |
-| **Command** (`.claude/commands/<name>.md`) | Explicit `/slash` invocation. User names the operation. | User types `/<name>` | `/hi`, `/weekly`, `/decision`, `/explore`, `/promote`, `/lint`, `/system-review` (with `/reflect` as the `hi` alias) |
+| **Hook** (`.claude/settings.json` or `.codex/hooks.json`) | Programmatic event handler. Safety gate, mechanical lint, session-start cue. Always-on, no model judgment. | Runtime lifecycle or tool event | SessionStart cues via `scripts/atelier/cues.py`; intent coverage via `scripts/atelier/intent_coverage.py`; shadow-log cleanup via `scripts/atelier/shadow.py` |
+| **Skill** (`.claude/skills/<name>/SKILL.md`) | Thin entry hint that auto-triggers on semantic match against user phrasing. Lowers friction of typing `/hi` first. Skills here forward to `/hi`; the canonical intent router (`harness/intents.toml`) stays the decision point. | Model judges the description matches user input | `.claude/skills/capture/`, `.claude/skills/reading/` |
+| **Command** (`.claude/commands/<name>.md`) | Explicit `/slash` invocation. User names the operation. | User types `/<name>` | `/curate`, `/sync`, `/lint`, `/promote`, `/hi` |
 | **Agent** (`.claude/agents/<name>.md`) | Delegated subprocess with isolated context. Use when the task needs research or tool use that would bloat main context, or when role/voice separation matters (Reviewer's voice is not Challenger's voice). | Orchestrator dispatches via the `Agent` tool | The cercle (Researcher, Reviewer, Challenger, Curator, ...) |
 
 Anti-patterns:
@@ -57,11 +57,10 @@ same profile, reflection, or session files.
    Challenger.
 2. **Focus Lock:** Only goal-related routes apply the declared focus.
    Researcher prioritizes its domain and Challenger leans questions toward it.
-   Changing focus requires an explicit routed session; do not switch focus silently.
+   Changing focus requires a full `/review` session.
 3. **Profile freshness:** Check `Last built:` only for profile files selected
-   by the route. If one is older than 7 days, surface the freshness gap in the
-   route context. Routes with empty `profile_reads` do not inspect profile
-   freshness.
+   by the route. If one is older than 7 days, suggest `/introspect`. Routes
+   with empty `profile_reads` do not inspect profile freshness.
 
 The selected intent declares a 4, 6, or 8 KB default budget in
 `harness/intents.toml`; an explicit workflow may raise it to at most 20 KB.
@@ -109,7 +108,7 @@ reflection, note operation, or daily-note write.
 All note writes are local file writes under `$OV/`. There are two writing paths, one cognitive and one mechanical:
 
 - **Cognitive (→ Curator):** the Curator drafts content operations (compactions, merges, new wiki entries, session-derived notes); the orchestrator owns `Write`/`Edit` and writes after user approval. Every proposal carries a `target_path` under `$OV/`.
-- **Mechanical (→ Scribe):** the Scribe records user-dictated raw content verbatim (reflection narrative, ordinary dining-log rows, action items, people-note stubs, generic passthrough). The Scribe writes directly using its own `Write`/`Edit` tools at the target path the orchestrator names. No user approval gate — verbatim preservation IS the trust property. **Narrow exception:** an explicitly trip-associated meal capture uses the application's confirmation-gated structured-write flow so it can add the optional trip-note reference. Ordinary meal captures remain Scribe-owned. See "Capture Operations" below and `.claude/agents/scribe.md`.
+- **Mechanical (→ Scribe):** the Scribe records user-dictated raw content verbatim (daily-note narrative, ordinary dining-log rows, GTD entries, people-note stubs, generic passthrough). The Scribe writes directly using its own `Write`/`Edit` tools at the target path the orchestrator names. No user approval gate — verbatim preservation IS the trust property. **Narrow exception:** an explicitly trip-associated meal capture hands off to `/dine` Intent C's existing confirmation-gated structured-write flow so it can add the optional trip-note reference; this also applies when the association emerges in Daily Reflection's Dining Pulse. Ordinary meal captures remain Scribe-owned. See "Capture Operations" below and `.claude/agents/scribe.md`.
 
 The orchestrator must not transcribe raw user content itself; that burns deep-cognition tokens on mechanical I/O and is the failure mode the Scribe role exists to prevent.
 
@@ -126,7 +125,7 @@ Reader handles routine reads. Scholar handles dense theory, foundational papers,
 Route to **Scholar** if any of:
 
 - `word_count > 8000` (≈ 30 minute read)
-- source path under `<paths.wiki>/` or `<paths.memory>/` (registered knowledge sources)
+- source path under `<paths.papers>/` or `<paths.preprints>/` (L3 sources)
 - frontmatter declares `difficulty: hard`
 
 Otherwise dispatch **Reader**.
@@ -139,13 +138,17 @@ Launch agents based on command type:
 | Command | Agents Launched |
 |---------|----------------|
 | `/hi` general fallback | No fixed agent; semantic handoff via `protocols/intent-general.md` |
-| `/hi daily reflection` or `/hi reflect on …` | No fixed agent; reflection handoff via `protocols/intent-reflection.md` |
+| `/daily-reflection` or `/hi daily reflection` | None at start (context bundle + inline semantic queries); Thinker optional at Step 4; Scribe at pre-output capture |
+| `/review` or `/hi review my goals` | None (inline retrieval and synthesis) |
 | `/weekly` or `/hi weekly review` | None (inline retrieval) |
 | `/decision` or `/hi should I…` | Thinker (dual-leg); retrieval inline |
 | `/explore` or `/hi explore` | None (inline wide-net searches) |
-| `/promote` or `/hi promote this` | Researcher → Curator; approval remains with the orchestrator |
-| `/lint` or `/hi run lint` | No fixed agent; active harness and structural checks |
-| `/system-review` | Internal and external reviewers under the explicit system-review flow |
+| `/energy-audit` or `/hi I'm drained` | None (inline retrieval; include amenity floor check) |
+| `/prm` | Researcher (daily-note scanning for DL0-1 mentions) + Challenger (vulnerability probing) |
+| Read mode (via `/hi`) | Reader (1-4 instances by lens) + Researcher + Scout + Thinker (parallel) |
+| Work meeting transcript | Meeting (Executive mode — action items + decisions) |
+| `/curate` or `/hi triage inbox` | Ad-hoc agent (goal-aware Readwise triage — see `commands/curate.md`) |
+| `/forget` (intent) or `/hi scan my wip` | Forgetter (mid-tier voices; bounded sweep, decay report under `<paths.agent_findings>/`) |
 
 ### Phase 2: Synthesize
 - Synthesizer takes Researcher's brief and produces structured output
@@ -182,6 +185,6 @@ Moved to `protocols/collaboration-matrix.md` (chains, parallel shapes, cross-val
 1. **Don't bottleneck.** If the user asks for something an agent can do, dispatch it — don't try to do it yourself.
 2. **Present, don't lecture.** Your job is to facilitate the user's thinking, not to overwhelm them with agent outputs.
 3. **One thing at a time.** Present findings incrementally, not all at once.
-4. **Ask before acting.** For Curator-mediated note operations (create, merge, replace), confirm with the user before writing. **Exception: Scribe capture operations** (`daily_note`, ordinary `dining_row`, `gtd_entry`, `people_stub`, `generic`) write directly without an approval gate — verbatim preservation is the trust property and the user has already authored the content via chat. Explicitly trip-associated meal captures instead use the application's confirmation gate. See "Note Writing" section above.
+4. **Ask before acting.** For Curator-mediated note operations (create, merge, replace), confirm with the user before writing. **Exception: Scribe capture operations** (`daily_note`, ordinary `dining_row`, `gtd_entry`, `people_stub`, `generic`) write directly without an approval gate — verbatim preservation is the trust property and the user has already authored the content via chat. Explicitly trip-associated meal captures instead use `/dine` Intent C's confirmation gate. See "Note Writing" section above.
 5. **Track dispatches.** Note which agents were invoked and their results in the session output.
 6. **Quality gate enforcement.** Check Gate outputs before presenting to user.

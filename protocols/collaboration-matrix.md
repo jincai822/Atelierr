@@ -21,6 +21,9 @@ The orchestrator should actively look for collaboration opportunities during ses
 | **Thinker → Challenger** | Thinker applies a framework | Challenger questions whether the framework fits | Prevents lazy framework application |
 | **Librarian → Researcher** | Librarian recommends a resource | Researcher checks if user already has notes on it | Avoids recommending what user already knows |
 | **Researcher → Curator** (focused-session default) | Researcher finds many overlapping notes during a focused session about ONE topic; user wants a quick compaction suggestion ("compact my notes on X") | Researcher flags → Curator proposes compaction on the specific overlap set | Proactive note hygiene with low ceremony — the right call when the user is already mid-flow on the topic |
+| **Researcher → Forgetter** (corpus-sweep escalation) | User is doing a corpus cleanup / sweep session and wants systematic decay analysis on a broader scope ("find what I should forget", "scan my drafts for decay"), OR Researcher finds 3+ overlapping notes and the user explicitly asks to widen the lens beyond the current topic | Researcher's overlap signal (or the user's sweep intent) → orchestrator dispatches Forgetter with `scope_path` set to the topic or working directory → Forgetter returns findings inline citing all four categories with evidence → orchestrator persists the decay report and surfaces its path → user decides on per-item Curator compaction or other action | Bounded, evidence-cited sweep across categories beyond redundancy; the right call when the user wants thoroughness over speed |
+| **Forgetter → Curator** | Forgetter's decay report flags Redundant items | Orchestrator surfaces report → user approves redundant set → Curator drafts compaction → orchestrator writes after approval | Decay analysis becomes note hygiene; verbatim claim preservation enforced at Curator gate |
+| **Forgetter → Challenger** | Forgetter's decay report flags Contradicted items in `<paths.wiki>/` | Orchestrator surfaces report → Challenger probes whether contradiction is genuine → if confirmed, Curator rewrites the wiki entry (claim update + Revision Log row) | Wiki entries get a verifier pair before mutation; Forgetter detects, Challenger probes, Curator rewrites |
 | **Meeting → Curator** | User approves meeting notes for saving | Meeting output → Curator drafts local note → orchestrator writes after approval | Turns transcript into permanent note |
 | **Reader → Synthesizer** | Multiple Reader lenses complete | Synthesizer combines all lens briefs into unified report | Multi-dimensional reading analysis |
 | **Reader → Challenger** | Reader surfaces a claim worth questioning | Challenger probes the claim against user's existing beliefs | Deepens engagement with the text |
@@ -34,7 +37,7 @@ The orchestrator should actively look for collaboration opportunities during ses
 | Pattern | Agents | When | Value |
 |---------|--------|------|-------|
 | **Deep Dive** | Researcher + 2-5× Scout + Librarian + Thinker | User picks Deep Dive | Full briefing: notes + multi-angle web intel + resources + framework |
-| **Reading Hub** | 2-4× Reader + Researcher + Scout + Thinker | User explicitly requests a multi-lens reading | Multi-lens analysis: lenses + notes + external + framework |
+| **Reading Hub** | 2-4× Reader + Researcher + Scout + Thinker | User picks Read or says "let's read" | Multi-lens analysis: lenses + notes + external + framework |
 | **Multi-topic Triage** | Multiple Researcher dispatches | User picks Note Triage | Scan several topic areas simultaneously |
 
 **Scout multi-dispatch rule:** Dispatch 2-5 Scout instances based on topic complexity. Simple topics: 2 (e.g., Mainstream + Contrarian). Complex or high-stakes topics: 3-5 (cover more directions). Each instance gets a different direction assignment from `.claude/agents/scout.md`. Use `AskUserQuestion` to let the user choose breadth if unclear.
@@ -113,20 +116,15 @@ During any session, actively look for these signals and chain agents:
 |--------|--------|
 | Challenger surfaces a contradiction with an old note | Offer: "Want to update [[Note]]?" → Curator |
 | Reviewer scores < 7 on a dimension | Flag to Evolver for system improvement |
-| Researcher finds 3+ notes on same topic | Suggest "These could be compacted" → Curator on the overlap set. Keep the proposal bounded to the current topic and write only after approval. |
+| Researcher finds 3+ notes on same topic | **Default (focused session):** suggest "These could be compacted" → Curator on the overlap set. **Escalation (sweep intent):** if the user is doing corpus cleanup or asks for a thorough sweep beyond the current topic, dispatch Forgetter with `scope_path` set to the topic directory; surface the resulting decay report path to the user. The default is the focused, low-ceremony Curator path; Forgetter is the systematic-sweep path. |
 | Thinker applies a framework | Route to Challenger for cross-validation |
 | Librarian recommends resources | Route to Researcher to check existing notes |
 | Any session scores low on surprise | Next session: Researcher should search older/deeper notes |
 | Researcher flags a Moment | Surface it to user, suggest `#moment` tag via Curator, note which direction it feeds |
 | Energy audit shows a life area below amenity floor | Flag it: "[Area] is below amenity floor." Amenity-floor definition lives in `protocols/session-scoring.md`. |
-| User tries to change focus mid-session | Enforce Focus Lock — redirect to an explicit `/weekly` or `/hi` routed session first |
+| User tries to change focus mid-session | Enforce Focus Lock — redirect to a full `/review` session first |
 | User says "this was great" or "this wasn't helpful" | Route feedback to Evolver |
 | User refines a strategic/directional claim 2+ times in one session | Treat as refinement-arc. Label the latest version as "working hypothesis (refinement N)", not "refined position." Auto-dispatch Challenger against the latest version with the previous version(s) as comparison set, before any write-back. Do not frame later iterations as monotonically better than earlier ones; apply equal rigor. The "Refinement-arc hygiene" semantic basis lives in `protocols/epistemic-hygiene.md`. |
 | Curator proposes a note (compact/merge) | **Verify Gate 4**: check media count match, size < 15KB, verbatim preservation. Block if any check fails. |
 | **Evolver returns with `review_tier`** | **Mandatory: dispatch reviewers for that tier. Never skip.** The Evolver does NOT commit — the orchestrator reviews the diff, dispatches reviewers, fixes issues, then commits. The orchestrator owns this gate. See Review Tiers above for which reviewers to dispatch per tier. |
 
-### Memory lifecycle boundary
-
-Memory decay and forgetting belong exclusively to the application module
-`scripts/memory/decay.py`. The harness has no decay or forget dispatch, scan,
-report persistence, or tier inference, and must never start a retired scanner.

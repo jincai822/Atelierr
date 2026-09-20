@@ -35,12 +35,33 @@ alias_of = "hi"
 description = "Alias of /hi."
 codex_prompt = "Execute the $reflect skill in this Codex thread using `.claude/commands/hi.md` as the authoritative spec."
 
+[commands.daily-reflection]
+source = ".claude/commands/daily-reflection.md"
+category = "session"
+status = "portable-adapted"
+description = "Daily reflection procedure — coaching flow grounded in profile, recent notes, and open TODOs. Routed via /hi or invoked directly."
+codex_prompt = "Execute the $daily-reflection skill in this Codex thread using `.claude/commands/daily-reflection.md` as the authoritative spec."
+
+[commands.read]
+source = ".claude/commands/read.md"
+category = "session"
+status = "portable-adapted"
+description = "Read & Discuss procedure — owns the three Read flows (Read & Discuss, Focused Read, Multi-Lens Read) and the Reader/Scholar selection, Readwise prefetch, and source-backup sub-procedures."
+codex_prompt = "Execute the $read skill in this Codex thread using `.claude/commands/read.md` as the authoritative spec."
+
 [commands.weekly]
 source = ".claude/commands/weekly.md"
 category = "session"
 status = "portable-adapted"
 description = "Structured weekly review over the past seven effective days."
 codex_prompt = "Execute the $weekly skill in this Codex thread using `.claude/commands/weekly.md` as the authoritative spec."
+
+[commands.review]
+source = ".claude/commands/review.md"
+category = "session"
+status = "portable-adapted"
+description = "Goal review for quarterly full reviews and monthly light pulses."
+codex_prompt = "Execute the $review skill in this Codex thread using `.claude/commands/review.md` as the authoritative spec."
 
 [commands.decision]
 source = ".claude/commands/decision.md"
@@ -49,12 +70,48 @@ status = "portable-adapted"
 description = "Structured decision journal with framework cross-validation."
 codex_prompt = "Execute the $decision skill in this Codex thread using `.claude/commands/decision.md` as the authoritative spec."
 
+[commands.energy-audit]
+source = ".claude/commands/energy-audit.md"
+category = "session"
+status = "portable-adapted"
+description = "Assessment of physical, mental, emotional, and social energy patterns."
+codex_prompt = "Execute the $energy-audit skill in this Codex thread using `.claude/commands/energy-audit.md` as the authoritative spec."
+
 [commands.explore]
 source = ".claude/commands/explore.md"
 category = "session"
 status = "portable-adapted"
 description = "Open-ended exploration for forgotten connections and emerging themes."
 codex_prompt = "Execute the $explore skill in this Codex thread using `.claude/commands/explore.md` as the authoritative spec."
+
+[commands.prm]
+source = ".claude/commands/prm.md"
+category = "session"
+status = "portable-adapted"
+direct_only = true
+description = "Personal relationship management audit grounded in local relationship notes."
+codex_prompt = "Execute the $prm skill in this Codex thread using `.claude/commands/prm.md` as the authoritative spec."
+
+[commands.introspect]
+source = ".claude/commands/introspect.md"
+category = "profile"
+status = "portable-adapted"
+description = "Build or refresh profile files from local notes and reading patterns."
+codex_prompt = "Execute the $introspect skill in this Codex thread using `.claude/commands/introspect.md` as the authoritative spec."
+
+[commands.curate]
+source = ".claude/commands/curate.md"
+category = "knowledge"
+status = "portable-adapted"
+description = "Goal-aware content curation and inbox triage."
+codex_prompt = "Execute the $curate skill in this Codex thread using `.claude/commands/curate.md` as the authoritative spec."
+
+[commands.sync]
+source = ".claude/commands/sync.md"
+category = "knowledge"
+status = "portable-adapted"
+description = "Digest the mobile-capture submodule into the persistent L2 destinations and stage zettelm deletions."
+codex_prompt = "Execute the $sync skill in this Codex thread using `.claude/commands/sync.md` as the authoritative spec."
 
 [commands.promote]
 source = ".claude/commands/promote.md"
@@ -68,7 +125,7 @@ resume_friendly = true
 source = ".claude/commands/lint.md"
 category = "ops"
 status = "portable-adapted"
-description = "Run harness, privacy, structural, and active-surface checks."
+description = "Run harness, privacy, structural, and staleness checks."
 codex_prompt = "Execute the $lint skill in this Codex thread using `.claude/commands/lint.md` as the authoritative spec."
 
 [commands.system-review]
@@ -78,3 +135,45 @@ status = "portable-adapted"
 direct_only = true
 description = "Review system-evolution changes with internal and external reviewers."
 codex_prompt = "Execute the $system-review skill in this Codex thread using `.claude/commands/system-review.md` as the authoritative spec."
+
+[commands.civ]
+source = ".claude/commands/civ.md"
+category = "dashboard"
+status = "portable-adapted"
+direct_only = true
+description = "Read-only life dashboard over resources, civilizations, and terminal values."
+codex_prompt = "Execute the $civ skill in this Codex thread using `.claude/commands/civ.md` as the authoritative spec."
+
+[commands.dine]
+source = ".claude/commands/dine.md"
+category = "dashboard"
+status = "portable-adapted"
+direct_only = true
+description = "Restaurant recommendation flow using local context and credit-burn signals."
+codex_prompt = "Execute the $dine skill in this Codex thread using `.claude/commands/dine.md` as the authoritative spec."
+
+[commands.autoevo-nightly]
+source = ".claude/commands/autoevo-nightly.md"
+category = "ops"
+status = "portable-adapted"
+direct_only = true
+user_facing = false
+description = "Autonomous nightly decay sweep with auto-commit; primary macOS launchd attempt at 05:00 local with hourly deferred recovery and wake catch-up."
+codex_prompt = "Execute the bot-only autoevo-nightly workflow under headless Codex; `.claude/commands/autoevo-nightly.md` is authoritative and no user-facing Codex skill is exposed."
+
+[commands.run-routine]
+source = ".claude/commands/run-routine.md"
+category = "ops"
+status = "portable-adapted"
+direct_only = true
+user_facing = false
+description = "Bot-only adapter for one archived private local-routine prompt."
+codex_prompt = "Execute the bot-only adapter in `.claude/commands/run-routine.md` for the named archived private prompt."
+
+[commands.autoevo-review]
+source = ".claude/commands/autoevo-review.md"
+category = "ops"
+status = "portable-adapted"
+direct_only = true
+description = "Triage the autoevo pending queue produced by /autoevo-nightly."
+codex_prompt = "Execute the $autoevo-review skill in this Codex thread using `.claude/commands/autoevo-review.md` as the authoritative spec."

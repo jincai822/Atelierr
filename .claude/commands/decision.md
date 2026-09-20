@@ -49,7 +49,7 @@ This determines how much analysis is appropriate.
 Pull prior thinking from the local vault.
 - `Bash: uv run scripts/atelier/semantic.py query "<decision topic>" --top 10 --context --format json` — **primary**: has the user thought about adjacent versions of this before? Reframe and retry if thin.
 - `Grep(pattern: "<key terms>", path: "$OV/")` — exact-match related notes for structural follow-up. Try both languages.
-- `Grep(pattern: "<goal keyword>", path: "<paths.inbox>/")` AND `Grep(pattern: "<goal keyword>", path: "<paths.wiki>/")` — two separate calls; `Grep`'s `path` takes a single root, not a space-separated list. Checks which active inbox items (including todos) and which certified directions (wiki) are affected by this decision.
+- `Grep(pattern: "<goal keyword>", path: "<paths.gtd>/")` AND `Grep(pattern: "<goal keyword>", path: "<paths.wiki>/")` — two separate calls; `Grep`'s `path` takes a single root, not a space-separated list. Checks which active goals (gtd) and which certified directions (wiki) are affected by this decision.
 
 #### Atelierr History Bridge (Read-Only)
 

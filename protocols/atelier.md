@@ -10,11 +10,11 @@ The system's narrative register draws from the impressionist atelier (master + s
 | user | **the Painter** | (you) |
 | vault root | **the œuvre** | `$OV/` |
 | agents collectively | **le cercle** | `.claude/agents/` |
-| daily reflection | **impression** | `<paths.reflections>/YYYY-MM-DD.md` |
+| daily reflection | **impression** | `<paths.daily_notes>/YYYY/MM/YYYY-MM-DD.md` |
 | weekly review | **étude** | `<paths.reflections>/*-weekly.md` |
 | wiki entry (L4) | **tableau** | `<paths.wiki>/<Title>.md` |
-| L2 working note | **sketch** | `<paths.inbox>/` or `<paths.memory>/` |
-| decision journal | **commission** | `<paths.reflections>/decisions/` |
+| L2 working note | **sketch** | `<paths.wip>/`, `<paths.research>/`, etc. |
+| decision journal | **commission** | `<paths.gtd>/decisions/` |
 | long-running theme | **série** | (e.g., Monet's haystacks across years) |
 | archive | **carnets** | `<paths.archive>/` |
 | Readwise inbox | **rough drawer** | cloud-only; `readwise` CLI |

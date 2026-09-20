@@ -2,7 +2,7 @@
 
 ## Purpose
 
-After Drive → `$OV` ingestion (see [[drive-zk-ingestion.md]]), `<paths.memory>/<domain>/raw/` accumulates categorical files. This protocol covers the next layer: **cross-cutting markdown indexes** that make raw lookups one-click via wikilinks.
+After Drive → `$OV` ingestion (see [[drive-zk-ingestion.md]]), `$OV/<domain>/raw/` accumulates categorical files. This protocol covers the next layer: **cross-cutting markdown indexes** that make raw lookups one-click via wikilinks.
 
 A raw-index is the navigational complement to the raw archive: raw is the source of truth, the index is the table of contents.
 
@@ -25,11 +25,11 @@ Skip when:
 
 | Index scope | Location pattern |
 |---|---|
-| Single domain (one-domain scope) | `<paths.memory>/<domain>/<category>-index.md` |
-| Cross-domain identity-level | `<paths.memory>/<category>-index.md` |
-| Per-holder (when household has multiple subjects) | `<paths.memory>/<holder>/<category>-index.md` |
+| Single domain (one-domain scope) | `$OV/<domain>/<category>-index.md` |
+| Cross-domain identity-level | `<paths.personal>/<category>-index.md` |
+| Per-holder (when household has multiple subjects) | `<paths.personal>/<holder>/<category>-index.md` |
 
-Index lives in `<paths.memory>/` (or its domain subdirectory), never under `raw/`. Raw stays unedited per ingestion protocol.
+Index lives in working tier (`$OV/<domain>/` or `<paths.personal>/`), never under `raw/`. Raw stays unedited per ingestion protocol.
 
 ## Required structure
 
@@ -39,7 +39,7 @@ last_verified: YYYY-MM-DD
 canonical: true
 scope: <one-line: 索引覆盖什么, 不覆盖什么>
 sources:
-  - <paths.memory>/<domain>/raw/ (relevant raw subtrees)
+  - $OV/<domain>/raw/ (relevant raw subtrees)
   - <other authoritative timeline/digest if any>
   - user input <date> (when manual confirmations were folded in)
 ---
@@ -85,7 +85,7 @@ sources:
 
 1. 表格加新行,旧行 status 改 🔴 superseded / expired
 2. raw/ 对应子目录加新文件
-3. 触发 cross-domain (e.g., DMV / payroll / another domain timeline)
+3. 触发 cross-domain (e.g., DMV / payroll / health portal / abroad timeline)
 4. `last_verified` frontmatter 更新
 
 ## Cross-references
@@ -95,12 +95,12 @@ sources:
 
 ## Wikilink rules
 
-- **Use vault-relative paths.** Wikilink resolvers expect paths from the vault root, not from the index file's directory. Write `[[<domain>/raw/<sub>/<file>.pdf]]`, not `[[../<domain>/...]]`.
-- **Include extension for non-md files.** PDFs, JPEGs, PNGs need the suffix to resolve: `[[<domain>/raw/<sub>/<file>.pdf]]`. Markdown files omit `.md`: `[[<domain>/timeline]]`.
+- **Use vault-relative paths.** Wikilink resolvers expect paths from the vault root, not from the index file's directory. Write `[[abroad/raw/<sub>/<file>.pdf]]`, not `[[../abroad/...]]`.
+- **Include extension for non-md files.** PDFs, JPEGs, PNGs need the suffix to resolve: `[[abroad/raw/<sub>/<file>.pdf]]`. Markdown files omit `.md`: `[[abroad/timeline]]`.
 - **Multi-file cells separator: ` · `** (U+00B7 middle dot, not comma). Reads cleanly when the cell has 3+ links.
 - **Spaces in paths are fine** inside `[[]]` — no escaping needed. Folder names with parentheses (`Photos (2)`) work; avoid square brackets in paths since they collide with link syntax.
 - **For directory-level references** (no specific file), use plain backticks not wikilinks: `` `<domain>/raw/<sub>/` ``. Wikilinks don't address folders.
-- **Date cells**: link to an existing reflection record under `<paths.reflections>/` when the date needs source context; leave the cell plain when no such record exists.
+- **Retrofitting plain date cells**: `scripts/atelier/log_backlinks.py` converts bare `YYYY-MM-DD` values in markdown-table date columns into `[[YYYY-MM-DD]]` daily-note wikilinks across an index file. Use it when adopting this convention on a pre-existing index.
 
 ## Multi-copy / duplicate handling
 
@@ -120,7 +120,7 @@ When the same logical document exists as multiple files (Drive-era duplicates, i
 
 ## Example: credentials index
 
-The canonical implementation lives under `<paths.memory>/` as an `<identity>-index.md` covering identification documents. Concrete holder names, jurisdictions, document types, and copy locations stay in the private vault and are out of scope for this committed protocol.
+The canonical implementation lives under `<paths.personal>/` (gitignored) as an `<identity>-index.md` covering identification documents. Concrete holder names, jurisdictions, document types, and copy locations stay in the private vault and are out of scope for this committed protocol.
 
 Generic structural elements (use as template):
 
@@ -133,6 +133,6 @@ Use the structure as a template; do not copy private content from the vault impl
 
 ## Cross-references
 
-- [[drive-zk-ingestion.md]] — how raw files arrive in `<paths.memory>/<domain>/raw/` (the prerequisite)
+- [[drive-zk-ingestion.md]] — how raw files arrive in `$OV/<domain>/raw/` (the prerequisite)
 - [[local-first-architecture.md]] — tier model context (indexes live in working tier)
 - [[epistemic-hygiene.md]] — validation-depth applies: index entries are alloy unless user-verified (last_verified frontmatter)

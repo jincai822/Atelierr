@@ -43,31 +43,6 @@ import semantic_eval
 ROOT = Path(__file__).resolve().parents[2]
 PYTHON = sys.executable
 
-# The workshop surgery intentionally narrows the portable surface. Keep these
-# contracts explicit so the smoke suite cannot silently accept another stale
-# registry shape after a future cleanup.
-EXPECTED_USER_FACING_COMMANDS = frozenset(
-    {"hi", "reflect", "weekly", "decision", "explore", "promote", "lint", "system-review"}
-)
-EXPECTED_ACTIVE_INTENTS = frozenset(
-    {"weekly", "decision", "explore", "promote", "lint", "reflection", "general"}
-)
-EXPECTED_ACTIVE_PATHS = frozenset(
-    {
-        "wiki",
-        "reflections",
-        "memory",
-        "cognition",
-        "inbox",
-        "cache",
-        "sessions",
-        "archive",
-        "meta",
-        "routine_prompts",
-        "private_features",
-    }
-)
-
 
 class SmokeFailure(Exception):
     pass
@@ -157,42 +132,15 @@ def check_harness_lint() -> None:
     )
 
 
-def check_active_registry_contract() -> None:
-    with (ROOT / "harness" / "commands.toml").open("rb") as handle:
-        commands = tomllib.load(handle)["commands"]
-    with (ROOT / "harness" / "intents.toml").open("rb") as handle:
-        intents = tomllib.load(handle)["intents"]
-    with (ROOT / "harness" / "paths.toml").open("rb") as handle:
-        paths = tomllib.load(handle)["paths"]
-
-    expect(
-        set(commands) == EXPECTED_USER_FACING_COMMANDS,
-        "command registry no longer matches the 8 retained portable commands",
-    )
-    expect(
-        set(intents) == EXPECTED_ACTIVE_INTENTS,
-        "intent registry no longer matches the 7 retained /hi intents",
-    )
-    scalar_paths = {name for name, value in paths.items() if isinstance(value, str)}
-    expect(
-        scalar_paths == EXPECTED_ACTIVE_PATHS,
-        "path registry no longer matches the 11 retained canonical paths",
-    )
-
-
 def check_codex_command_skills() -> None:
     with (ROOT / "harness" / "commands.toml").open("rb") as handle:
         commands = tomllib.load(handle)["commands"]
     expected = {
-        name: commands[name]
-        for name in EXPECTED_USER_FACING_COMMANDS
-        if isinstance(commands.get(name), dict)
-        and commands[name].get("user_facing", True) is not False
+        name: entry
+        for name, entry in commands.items()
+        if isinstance(entry, dict) and entry.get("user_facing", True) is not False
     }
-    expect(
-        set(expected) == EXPECTED_USER_FACING_COMMANDS,
-        "expected the exact 8 user-facing portable commands",
-    )
+    expect(len(expected) >= 10, "expected user-facing portable commands")
     actual = {
         path.parent.name
         for path in (ROOT / ".agents" / "skills").glob("*/SKILL.md")
@@ -681,7 +629,10 @@ def check_semantic_maintenance() -> None:
         "semantic maintenance plist does not invoke its deterministic runner",
     )
 
-    for path in (ROOT / "protocols" / "autoevo.md",):
+    for path in (
+        ROOT / ".claude" / "commands" / "autoevo-nightly.md",
+        ROOT / "protocols" / "autoevo.md",
+    ):
         expect(
             "lazy rebuild" not in path.read_text(encoding="utf-8").lower(),
             f"{path.relative_to(ROOT)} still claims query refreshes the index",
@@ -3989,11 +3940,11 @@ def check_context_bundle() -> None:
             encoding="utf-8",
         )
 
-        general_stdout = run(
+        capture_stdout = run(
             [
                 "scripts/atelier/context_bundle.py",
                 "--intent",
-                "general",
+                "capture",
                 "--vault",
                 str(vault),
                 "--effective-date",
@@ -4002,22 +3953,22 @@ def check_context_bundle() -> None:
                 "json",
             ]
         )
-        general = json.loads(general_stdout)
+        capture = json.loads(capture_stdout)
         expect(
-            not any(row["component"] == "profile" for row in general["excerpts"]),
+            not any(row["component"] == "profile" for row in capture["excerpts"]),
             "empty profile_reads unexpectedly loaded profile content",
         )
         expect(
-            not any(row["component"] == "daily" for row in general["excerpts"]),
+            not any(row["component"] == "daily" for row in capture["excerpts"]),
             "daily context must remain opt-in",
         )
         expect(
-            general["budget"]["output_bytes"] == len(general_stdout.encode("utf-8")),
+            capture["budget"]["output_bytes"] == len(capture_stdout.encode("utf-8")),
             "context bundle JSON byte accounting drift",
         )
         expect(
-            general["budget"]["limit_bytes"] == 4096,
-            "general route did not use its registry context budget",
+            capture["budget"]["limit_bytes"] == 4096,
+            "capture route did not use its registry context budget",
         )
 
         reflection_stdout = run(
@@ -4077,16 +4028,96 @@ def check_context_bundle() -> None:
             "context bundle exceeded its selected byte budget",
         )
 
+        reading = json.loads(
+            run(
+                [
+                    "scripts/atelier/context_bundle.py",
+                    "--intent",
+                    "reading",
+                    "--vault",
+                    str(vault),
+                    "--effective-date",
+                    "2099-01-03",
+                    "--format",
+                    "json",
+                ]
+            )
+        )
+        expect(
+            any(
+                row["section"] == "Reading Capsule"
+                and row["source"] == "sessions/2099-01-02-reading.md"
+                and "discussion-open" in row["content"]
+                for row in reading["excerpts"]
+            ),
+            "reading route did not receive the latest reading capsule",
+        )
+        expect(
+            reading["budget"]["limit_bytes"] == 6144,
+            "reading route did not use its registry context budget",
+        )
+        talk = json.loads(
+            run(
+                [
+                    "scripts/atelier/context_bundle.py",
+                    "--intent",
+                    "talk",
+                    "--vault",
+                    str(vault),
+                    "--effective-date",
+                    "2099-01-03",
+                    "--format",
+                    "json",
+                ]
+            )
+        )
+        expect(
+            any(
+                row["section"] == "Reading Capsule"
+                and row["source"] == "sessions/2099-01-02-reading.md"
+                for row in talk["excerpts"]
+            ),
+            "talk route did not receive the latest reading capsule",
+        )
         expect(
             not any(
                 row["section"] == "Reading Capsule" for row in reflection["excerpts"]
             ),
             "non-reading route leaked a reading capsule",
         )
+        for offset in range(1, 102):
+            session_day = date(2099, 1, 2) + timedelta(days=offset)
+            (vault / "sessions" / f"{session_day.isoformat()}-review.md").write_text(
+                "## Continuity\nnewer non-reading session\n",
+                encoding="utf-8",
+            )
+        late_reading = json.loads(
+            run(
+                [
+                    "scripts/atelier/context_bundle.py",
+                    "--intent",
+                    "reading",
+                    "--vault",
+                    str(vault),
+                    "--effective-date",
+                    "2099-05-01",
+                    "--format",
+                    "json",
+                ]
+            )
+        )
+        expect(
+            any(
+                row["section"] == "Reading Capsule"
+                and row["source"] == "sessions/2099-01-02-reading.md"
+                for row in late_reading["excerpts"]
+            ),
+            "reading recovery stopped after 100 newer non-reading session logs",
+        )
 
         injected = json.dumps(
             {
-                "name": "general",
+                "name": "capture",
                 "mode": "wrong",
                 "procedure": "../../outside.md",
                 "context_budget_bytes": 9999,
@@ -4258,7 +4289,7 @@ def check_privacy_scanner() -> None:
 def check_codex_intent_hook() -> None:
     with tempfile.TemporaryDirectory(prefix="atelier-codex-hook-") as temp_dir:
         exact_payload = {
-            "prompt": "$hi weekly review my goals",
+            "prompt": "$hi review my goals",
             "session_id": "smoke-exact-session",
         }
         exact_output = run(
@@ -4272,10 +4303,10 @@ def check_codex_intent_hook() -> None:
             exact_route.get("source") == "harness/intents.toml",
             "intent route source drift",
         )
-        expect(exact_route.get("name") == "weekly", "Codex exact route winner drift")
-        expect(exact_route.get("mode") == "weekly-review", "Codex exact route mode drift")
+        expect(exact_route.get("name") == "review", "Codex exact route winner drift")
+        expect(exact_route.get("mode") == "goal-review", "Codex exact route mode drift")
         expect(
-            exact_route.get("procedure") == ".claude/commands/weekly.md",
+            exact_route.get("procedure") == ".claude/commands/review.md",
             "Codex exact route procedure drift",
         )
         expect(
@@ -4283,9 +4314,9 @@ def check_codex_intent_hook() -> None:
             "Codex exact route context budget drift",
         )
         with (ROOT / "harness" / "intents.toml").open("rb") as handle:
-            weekly_row = tomllib.load(handle)["intents"]["weekly"]
+            review_row = tomllib.load(handle)["intents"]["review"]
         expect(
-            exact_route.get("agents") == list(weekly_row.get("agents", [])),
+            exact_route.get("agents") == list(review_row.get("agents", [])),
             "Codex exact route agents drift (route packet must mirror the registry row)",
         )
         expect(
@@ -4409,11 +4440,11 @@ def check_claude_intent_hook() -> None:
     with tempfile.TemporaryDirectory(prefix="atelier-claude-hook-") as temp_dir:
         exact_output = run(
             ["scripts/atelier/intent_coverage.py", "intent-hook", "--runtime", "claude-code"],
-            input_text=json.dumps({"prompt": "/hi weekly review my goals"}),
+            input_text=json.dumps({"prompt": "/hi review my goals"}),
             env_overrides={"OV": temp_dir},
         )
         exact_route, _ = parse_intent_route(exact_output)
-        expect(exact_route.get("name") == "weekly", "Claude exact route winner drift")
+        expect(exact_route.get("name") == "review", "Claude exact route winner drift")
 
         for prompt in (
             "/hi qzxv-claude-hook-smoke",
@@ -4513,11 +4544,21 @@ def check_public_regression_tests() -> None:
             "tests.test_session_log",
             "tests.test_session_replay",
             "tests.test_signal_facts",
+            "tests.test_paths",
+            "tests.test_autoevo_preflight",
+            "tests.test_autoevo_pending",
+            "tests.test_cues",
+            "tests.test_lint_guards",
             "tests.test_session_replay_default",
             "tests.test_render_edges",
+            "tests.test_autoevo_commit",
+            "tests.test_autoevo_run",
             "tests.test_shadow_group",
             "tests.test_privacy_action",
+            "tests.test_intent_routing",
+            "tests.test_intent_overlay",
             "tests.test_session_stats",
+            "tests.test_decay_scan",
             "tests.test_dine_rank",
         ],
         cwd=ROOT,
@@ -4563,18 +4604,22 @@ def check_ruff_strict_core() -> None:
 def main() -> int:
     checks = [
         ("harness lint", check_harness_lint),
-        ("active registry contract", check_active_registry_contract),
         ("Codex command skills", check_codex_command_skills),
         ("Codex native agents", check_codex_native_agents),
+        ("paper cache", check_paper_cache),
         ("dining audit", check_dining_audit),
         ("semantic cache-first", check_semantic_cache_first),
         ("semantic maintenance", check_semantic_maintenance),
         ("semantic corpus policy", check_semantic_corpus_policy),
+        ("autoevo reliability", check_autoevo_reliability),
         ("runtime selector", check_runtime_selector),
+        ("runtime cue syntax", check_runtime_cue_syntax),
         ("bounded context projection", check_context_bundle),
         ("public session-log, replay, and signal regressions", check_public_regression_tests),
         ("ruff strict-core lint", check_ruff_strict_core),
         ("privacy scanner", check_privacy_scanner),
+        ("Codex routine runner", check_codex_routine_runner),
+        ("routine capability profiles", check_routine_profiles),
         ("routine owner", check_routine_owner),
         ("atomic routine claim", check_routine_claim),
         ("routine delivery result", check_routine_result),

@@ -193,7 +193,7 @@ Required fields:
 
 **Type:** `decay-report`
 
-The retired Forgetter contract is read-only (no `Write` tool); if a rollback audit is ever inspected, the orchestrator persists its categorized findings under `<paths.meta>/decay-<RUN_TS>-<scope-slug>.md` using the inline content verbatim. This single-mode envelope eliminates the prior "filesystem-output is the contract" assumption, which was broken at runtime by Claude Code's subagent system-prompt directive blocking report-shaped file writes.
+Forgetter is read-only (no `Write` tool); it returns the categorized findings inline. The orchestrator persists the report to disk at `<paths.agent_findings>/decay-<RUN_TS>-<scope-slug>.md` using the inline content verbatim. This single-mode envelope eliminates the prior "filesystem-output is the contract" assumption, which was broken at runtime by Claude Code's subagent system-prompt directive blocking report-shaped file writes.
 
 Required fields:
 - `from`: `forgetter`

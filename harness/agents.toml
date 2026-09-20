@@ -85,12 +85,6 @@
 # `used_by` lists intents (`intents.<name>` from `harness/intents.toml`)
 # and commands (`commands.<name>` from `harness/commands.toml`) that
 # dispatch the agent. Empty `used_by` is an orphan signal (lint WARN).
-# Roles that are reached outside those registries must use one of the two
-# explicit evidence fields below, never a bare role mention. Each entry is a
-# table `{source, marker}`; the source is one of the canonical orchestration
-# documents, and the exact marker must occur on the same line as the role.
-# `indirect_callers` is for an internal dispatch/handoff. `manual_entrypoints`
-# is for a user-facing action that can select the portable role directly.
 # `python3 scripts/atelier/harness_lint.py --fix-used-by` regenerates from the walk.
 
 [agents.challenger]
@@ -103,9 +97,15 @@ description = "Probes the painter's thoughts with sharp questions; affirms or co
 codex_prompt = "Run the Challenger role through native Codex agent `challenger`; `.claude/agents/challenger.md` remains authoritative."
 pattern = "generator-verifier"
 used_by = [
-]
-manual_entrypoints = [
-    { source = "protocols/orchestrator-actions.md", marker = "Challenge my assumption about X" },
+    "commands.autoevo-nightly",
+    "commands.autoevo-review",
+    "commands.introspect",
+    "commands.prm",
+    "commands.read",
+    "commands.sync",
+    "intents.introspect",
+    "intents.meeting",
+    "intents.sync",
 ]
 
 [agents.curator]
@@ -118,8 +118,13 @@ description = "Drafts note-content operations (compactions, merges, new notes, w
 codex_prompt = "Run the Curator role through native Codex agent `curator`; `.claude/agents/curator.md` remains authoritative."
 pattern = "orchestrator-subagent"
 used_by = [
+    "commands.autoevo-nightly",
+    "commands.autoevo-review",
     "commands.promote",
+    "commands.sync",
+    "intents.meeting",
     "intents.promote",
+    "intents.sync",
 ]
 
 [agents.evolver]
@@ -133,6 +138,21 @@ codex_prompt = "Run the Evolver role through native Codex agent `evolver`; `.cla
 pattern = "orchestrator-subagent"
 used_by = [
     "commands.system-review",
+]
+
+[agents.forgetter]
+source = ".claude/agents/forgetter.md"
+voices = { native = "sonnet", direct = "deepseek_pro" }
+kinds = ["app"]
+dispatch_rationale = ["context-isolation", "tool-isolation"]
+status = "portable-adapted"
+description = "Active decay scanner over $OV/: redundant / time-stale / contradicted / low-signal. Proposes; never deletes. Returns findings inline via envelope; the orchestrator persists them to $OV/agent-findings/. Le cercle archetype: The Conservator."
+codex_prompt = "Run the Forgetter role through native Codex agent `forgetter`; `.claude/agents/forgetter.md` remains authoritative. Hard contract: propose, never delete; return findings inline via the `---forgetter-result---` / `---end-result---` envelope. The orchestrator persists them; do not write the report yourself."
+pattern = "generator-verifier"
+used_by = [
+    "commands.autoevo-nightly",
+    "commands.autoevo-review",
+    "intents.forget",
 ]
 
 [agents.librarian]
@@ -161,9 +181,7 @@ description = "Processes work meeting transcripts into structured notes with act
 codex_prompt = "Run the Meeting role through native Codex agent `meeting`; `.claude/agents/meeting.md` remains authoritative."
 pattern = "orchestrator-subagent"
 used_by = [
-]
-manual_entrypoints = [
-    { source = "protocols/orchestrator-actions.md", marker = "Process this meeting transcript" },
+    "intents.meeting",
 ]
 
 [agents.reader]
@@ -176,9 +194,9 @@ description = "Reads articles and notes through critical, structural, practical,
 codex_prompt = "Run the Reader role through native Codex agent `reader`; `.claude/agents/reader.md` remains authoritative."
 pattern = "agent-team"
 used_by = [
-]
-manual_entrypoints = [
-    { source = "protocols/orchestrator-actions.md", marker = "Read [[Article]]" },
+    "commands.read",
+    "intents.reading",
+    "intents.talk",
 ]
 
 [agents.scholar]
@@ -191,9 +209,7 @@ description = "Deep-cognition variant of Reader: same lenses, same workflow, dis
 codex_prompt = "Run the Scholar role through native Codex agent `scholar`; `.claude/agents/scholar.md` remains authoritative."
 pattern = "agent-team"
 used_by = [
-]
-indirect_callers = [
-    { source = "protocols/orchestrator.md", marker = "Route to **Scholar** if any of:" },
+    "commands.read",
 ]
 
 [agents.researcher]
@@ -206,8 +222,15 @@ description = "Gathers raw context from the painter's œuvre ($OV/). Le cercle a
 codex_prompt = "Run the Researcher role through native Codex agent `researcher`; `.claude/agents/researcher.md` remains authoritative."
 pattern = "orchestrator-subagent"
 used_by = [
+    "commands.civ",
+    "commands.prm",
     "commands.promote",
+    "commands.read",
+    "commands.sync",
     "intents.promote",
+    "intents.reading",
+    "intents.sync",
+    "intents.talk",
 ]
 
 [agents.reviewer]
@@ -220,8 +243,14 @@ description = "Quality-checks session outputs and system evolution changes. Le c
 codex_prompt = "Run the Reviewer role through native Codex agent `reviewer`; `.claude/agents/reviewer.md` remains authoritative."
 pattern = "generator-verifier"
 used_by = [
+    "commands.introspect",
+    "commands.prm",
     "commands.promote",
+    "commands.read",
+    "commands.sync",
     "commands.system-review",
+    "intents.introspect",
+    "intents.sync",
 ]
 
 [agents.scout]
@@ -234,9 +263,7 @@ description = "Gathers external context from outside the œuvre: articles, discu
 codex_prompt = "Run the Scout role through native Codex agent `scout`; `.claude/agents/scout.md` remains authoritative."
 pattern = "agent-team"
 used_by = [
-]
-indirect_callers = [
-    { source = "protocols/collaboration-matrix.md", marker = "Dispatch 2-5 Scout instances" },
+    "commands.read",
 ]
 
 [agents.synthesizer]
@@ -249,9 +276,8 @@ description = "Composes gathered context into structured reflections, summaries,
 codex_prompt = "Run the Synthesizer role through native Codex agent `synthesizer`; `.claude/agents/synthesizer.md` remains authoritative."
 pattern = "orchestrator-subagent"
 used_by = [
-]
-manual_entrypoints = [
-    { source = "protocols/orchestrator-actions.md", marker = "Summarize [[Note]]" },
+    "commands.civ",
+    "commands.read",
 ]
 
 [agents.thinker]
@@ -264,8 +290,11 @@ description = "Applies structured thinking frameworks for outside-view reasoning
 codex_prompt = "Run the Thinker role through native Codex agent `thinker`; `.claude/agents/thinker.md` remains authoritative."
 pattern = "orchestrator-subagent"
 used_by = [
+    "commands.daily-reflection",
     "commands.decision",
+    "commands.read",
     "intents.decision",
+    "intents.reflection",
 ]
 
 [agents.privacy-reviewer]
@@ -291,9 +320,11 @@ description = "Records user-dictated raw content to the named target file verbat
 codex_prompt = "Run the Scribe role through native Codex agent `scribe`; `.claude/agents/scribe.md` remains authoritative. Verbatim preservation is the trust property; no paraphrasing, summarizing, or editorialization."
 pattern = "solo"
 used_by = [
-]
-indirect_callers = [
-    { source = "protocols/collaboration-matrix.md", marker = "dispatches one Scribe per surface" },
+    "commands.daily-reflection",
+    "commands.sync",
+    "intents.capture",
+    "intents.reflection",
+    "intents.sync",
 ]
 
 [agents.external-reviewer]
