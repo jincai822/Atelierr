@@ -96,14 +96,14 @@ systemctl --user daemon-reload
 #
 # 每日 03:00 执行衰减；cd 到仓库根（python -m 依赖 CWD），
 # stdout/stderr 追加到日志
-0 3 * * * cd /srv/workspaces/Atelierr && /srv/workspaces/Atelierr/.venv-atelierr/bin/python -m scripts.cli.memory_cli decay >> /home/cj1024/atelierr-data/state/logs/decay.log 2>&1
+0 3 * * * cd /srv/workspaces/Atelierr && /srv/workspaces/Atelierr/.venv-atelierr-312/bin/python -m scripts.cli.memory_cli decay >> /home/cj1024/atelierr-data/state/logs/decay.log 2>&1
 ```
 
 要点：
 
 - `cd /srv/workspaces/Atelierr` 不可省：`python -m scripts.cli.memory_cli`
   从当前目录导入 `scripts` 包；
-- 使用绝对路径的 venv python（`/srv/workspaces/Atelierr/.venv-atelierr/bin/python`）；
+- 使用绝对路径的 venv python（`/srv/workspaces/Atelierr/.venv-atelierr-312/bin/python`）；
 - 日志路径中的 `/home/cj1024` 换成你的 home；
 - 配置通过 `config/memory.yaml`（CWD 相对）解析；也可显式加
   `ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml` 环境变量。

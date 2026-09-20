@@ -823,7 +823,7 @@ def test_revision_conflict_prevents_lost_update(): ...        # COG-INDEX-04
 **验收检查**:
 
 ```bash
-.venv-atelierr/bin/pytest
+.venv-atelierr-312/bin/pytest
 python tools/acceptance_test.py
 .venv/bin/python scripts/atelier/harness_smoke.py  # 必须 exit 0
 
@@ -884,11 +884,11 @@ def test_cognition_capacity_correctness_at_10000_entries(): ... # COG-SCALE-01
 **验收检查**:
 
 ```bash
-.venv-atelierr/bin/pytest tests/unit/test_memory/test_cognition.py -v
-.venv-atelierr/bin/pytest tests/unit/test_cli/test_cognition_cli.py -v
-.venv-atelierr/bin/pytest tests/integration/test_cognition_memory.py -v
-.venv-atelierr/bin/pytest tests/e2e/test_cognition_lifecycle.py -v
-.venv-atelierr/bin/pytest tests/performance/test_cognition_capacity.py -v
+.venv-atelierr-312/bin/pytest tests/unit/test_memory/test_cognition.py -v
+.venv-atelierr-312/bin/pytest tests/unit/test_cli/test_cognition_cli.py -v
+.venv-atelierr-312/bin/pytest tests/integration/test_cognition_memory.py -v
+.venv-atelierr-312/bin/pytest tests/e2e/test_cognition_lifecycle.py -v
+.venv-atelierr-312/bin/pytest tests/performance/test_cognition_capacity.py -v
 ✅ COG-* 映射中的测试全部通过
 ```
 

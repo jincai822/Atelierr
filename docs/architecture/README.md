@@ -39,7 +39,7 @@ node $ARCH/renderers/dataflow/render-dataflow.mjs \
 node $ARCH/renderers/dataflow/render-dataflow.mjs \
   docs/architecture/atelierr-ingest-detail.dataflow.json /tmp/atelierr-ingest-detail.html
 # 注入流线动画（archify 无动画能力，渲染后加 CSS）：
-.venv-atelierr/bin/python tools/archify_animate.py \
+.venv-atelierr-312/bin/python tools/archify_animate.py \
   /tmp/atelierr-plan.html /tmp/atelierr-flow.html \
   /tmp/atelierr-flow-pipeline.html /tmp/atelierr-flow-loop.html \
   /tmp/atelierr-flow-feishu.html \

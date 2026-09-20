@@ -44,7 +44,7 @@
 
 ```bash
 set -a; source ~/.config/atelierr/env; set +a
-.venv-atelierr/bin/python -m scripts.cli.dispatch_cli prompt-open weekly \
+.venv-atelierr-312/bin/python -m scripts.cli.dispatch_cli prompt-open weekly \
   "本周回顾" --form "这周最有价值的事？" --form "这周卡在哪？" \
   --form "下周重点？" --form "要清理什么？"
 ```

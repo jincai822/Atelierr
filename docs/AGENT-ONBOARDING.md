@@ -64,7 +64,7 @@ pip install -r requirements.txt         # 含 mineru、basic-memory、whisper �
 ## 测试与验证
 
 ```bash
-.venv-atelierr-312/bin/python -m pytest -q        # 全量（当前 937，覆盖率 ≥80%）
+.venv-atelierr-312/bin/python -m pytest -q        # 全量（当前 952，覆盖率 ≥80%；什么参数都别加，pytest.ini 已配好）
 .venv-atelierr-312/bin/python tools/acceptance_test.py   # 端到端验收（当前 8/8）
 .venv/bin/python scripts/atelier/harness_smoke.py        # 框架烟测（只读跑，exit 0）
 ```
