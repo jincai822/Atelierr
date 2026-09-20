@@ -1,5 +1,5 @@
 ---
-description: Run harness, privacy, structural, and staleness checks.
+description: Run harness, privacy, structural, and active-surface checks.
 ---
 # /lint — Structural + corpus-level checks over `<paths.wiki>/`
 
@@ -9,7 +9,7 @@ description: Run harness, privacy, structural, and staleness checks.
 
 Deterministic Python pass. The LLM never hand-checks structure — `scripts/atelier/lint.py` is the single source of truth, mirroring the `scripts/atelier/trust.py` pattern.
 
-**Scope:** Three passes. (0) Harness portability, $OV ingestion hygiene, and privacy checks. (1) Structural: everything under `<paths.wiki>/`. (2) Staleness: L2 working-layer directories (`<paths.agent_findings>/`, `<paths.wip>/`, `<paths.gtd>/`, `<paths.preprints>/`, `<paths.reflections>/`, `<paths.research>/`). Structural lint enforces the wiki schema; staleness lint surfaces L2 notes that need attention (archival, compaction, or promotion to L4).
+**Scope:** Two active phases. (0) Harness portability, $OV ingestion hygiene, privacy, and auto-memory checks. (1) Structural: everything under `<paths.wiki>/`. The former L2 staleness sweep is frozen because it referenced retired tiers; do not invoke `scripts/atelier/staleness.py`, decay scans, or forgetter workflows. Structural lint remains the source of truth for the registered active surfaces.
 
 **What gets checked:**
 
@@ -174,23 +174,12 @@ Parse the JSON. It has the shape:
 }
 ```
 
-### Phase 1b: Staleness lint
+### Phase 1b: Retired-tier staleness boundary
 
-```
-Bash: python3 scripts/atelier/staleness.py --json
-```
-
-Parse the JSON. Shape:
-
-```json
-{
-  "thresholds": { "stale": 90, "dormant": 45, ... },
-  "counts": { "stale": N, "dormant": N, "promote": N, "active": N, "total": N },
-  "notes": [{ "path": "...", "staleness": N, "category": "stale|dormant|promote|active", ... }]
-}
-```
-
-Staleness findings are always advisory (no ERROR level). They surface L2 notes that have gone cold, using the formula `days_since_modified / (1 + log(1 + reference_count))`. Notes referenced from wiki entries or recent reflections decay slower.
+The former `scripts/atelier/staleness.py` phase is frozen. It depended on retired
+tier names and is not part of `/lint`; do not invoke it or substitute a
+decay/forgetter scan. The active harness, ingestion, privacy, auto-memory, and
+structural checks above are the complete lint run.
 
 ### Phase 2: Present
 
@@ -202,11 +191,8 @@ For WARN-level findings: show them but mark them as non-blocking.
 
 For INFO-level findings: roll them up into a one-line summary (e.g., "4 entries with no outbound `@cite`: consider adding cross-references") unless the user asks for the full list.
 
-**Staleness section** (from Phase 1b): present after the structural findings, under a separate heading. Group by category:
-- **stale** notes: list paths, suggest archiving to `<paths.archive>/`
-- **dormant** notes: list paths, suggest review or compaction
-- **promote** candidates: list paths, suggest `/promote` to create L4 wiki entries
-- If all notes are active, say so in one line and move on.
+Do not fabricate a staleness section: the retired-tier scan is frozen and has no
+runtime output. Present findings from the active checks above.
 
 ### Phase 3: Offer fixes
 

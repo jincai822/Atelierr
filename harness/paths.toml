@@ -3,7 +3,7 @@
 # Canonical logical-name → physical-path mapping for every L1–L4 surface in
 # the user's vault. Committed. Generic shape that every OSS user inherits.
 #
-# Renames happen here. A tier rename (e.g., `drafts` → `wip`) used to touch
+# Renames happen here. A tier rename (e.g., `drafts` → `reflections`) used to touch
 # every doc that mentioned the path; now it's one edit in this file. The
 # `harness_lint.py path-literal` check enforces no committed `.md` hardcodes
 # an `$OV/<segment>/` literal whose `<segment>` is not in this registry.
@@ -14,7 +14,7 @@
 #
 # Resolution rule: every value resolves under `$OV` unless it starts with
 # `/` (absolute path). The leading `$OV/` is implicit; do not repeat it.
-# So `wip = "wip"` resolves to `$OV/wip/`. Use `$OV/` prefix only when you
+# So `reflections = "memory/wiki/reflections"` resolves under `$OV/`. Use `$OV/` prefix only when you
 # explicitly need to denote vault-root anchoring in prose; the registry
 # itself stores bare segment paths.
 
@@ -23,38 +23,11 @@
 # `memory/wiki`; localized variants live under `[paths.wiki_localized]` per user.
 wiki            = "memory/wiki"
 
-# L3 — externally certified
-papers          = "papers"
-preprints       = "preprints"
-
-# L2 — working / half-baked. Persistent surfaces; session reflections live in
-# the framework-owned room under the wiki library.
-daily_notes     = "daily-notes"
+# Framework-owned session reflections live under the wiki library.
 reflections     = "memory/wiki/reflections"
-research        = "research"
-agent_findings  = "agent-findings"
-wip             = "wip"
-gtd             = "gtd"
-travel          = "travel"
-health          = "health"
-work            = "work"
-career          = "career"
-people          = "people"
-talent          = "career/talent"
-finance         = "finance"
-personal        = "personal"
-housing         = "personal/housing"
-auto            = "personal/auto"
-abroad          = "personal/abroad"
-secure          = "personal/secure"
-dev             = "personal/dev"
-projects        = "personal/projects"
 archive         = "archive"
 sessions        = "sessions"
 # Note: `profile/` is repo-side gitignored config, NOT a vault tier. Do not register here.
-
-# L2 transient — mobile-capture submodule, digested then cleared by /sync.
-zettelm         = "zettelm"
 
 # Operational state (bot claims, queues, watch registries, miss logs) and
 # archived private routine prompts. Underscore prefix keeps them sorted apart
@@ -66,12 +39,9 @@ routine_prompts = "_routine_prompts"
 inbox           = "inbox"
 cache           = "cache"
 
-# Atelierr memory module (three-layer note storage: short-term / mid-term /
-# long-term). Managed by scripts/memory/; served to Flatnotes via Docker mount.
+# Atelierr memory module (three-layer note storage) and cognition surface.
+# Managed by scripts/memory/.
 memory          = "memory"
-
-# Atelierr cognition module (approved belief/hypothesis/question knowledge
-# surface), kept as an application-owned read-only room under the wiki library.
 cognition       = "memory/wiki/cognition"
 
 # Private operational extensions. This surface is excluded from semantic

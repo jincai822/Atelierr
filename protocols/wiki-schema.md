@@ -2,7 +2,7 @@
 
 The structural format for a note that lives under `<paths.wiki>/`. Location is the certification: a note is a wiki entry by virtue of being in `<paths.wiki>/`, not by carrying any tag. Wiki entries are parseable by `scripts/atelier/trust.py` and have claim-level granularity in the trust graph. Notes outside `<paths.wiki>/` are alloy by default (see `epistemic-hygiene.md`).
 
-Design rationale for location-based certification and claim-level trust lives in the architecture review ledger under `$OV/research/`, not here; this file carries only the operative schema. The `#solo-flight` tag lives orthogonally to the schema and marks unstructured pure-human capture, which is location-independent (see `epistemic-hygiene.md`).
+Design rationale for location-based certification and claim-level trust lives in the architecture review ledger under `<paths.meta>/evolution/`, not here; this file carries only the operative schema. The `#solo-flight` tag lives orthogonally to the schema and marks unstructured pure-human capture, which is location-independent (see `epistemic-hygiene.md`).
 
 ## Session-Visible Markers
 
@@ -131,7 +131,7 @@ Every `@anchor` marker claims "this external source existed and supported this c
 |---|---|---|---|
 | `url:` | **Readwise** (by `readwise:` document ID) | `<paths.cache>/web-*.md` (current session only) | WebFetch |
 | `gist:` | **Readwise** (save the gist URL) | `<paths.cache>/web-*.md` | WebFetch |
-| `s2:` / `arxiv:` / `doi:` | `<paths.papers>/` (local PDF + review notes) | — | `sources/cite.py` |
+| `s2:` / `arxiv:` / `doi:` | External source (citation or Readwise record) | `<paths.cache>/paper-*.md` (current-session extraction) | `sources/cite.py` |
 | `isbn:` | (no local evidence expected) | — | Manual verification |
 
 **The `readwise:` field.** Optional on all anchor types, recommended on `url:` and `gist:` anchors. Contains the Readwise document ID (e.g., `01kk0zpka139am1v9jftnae9dw`). When present, the full source content can be retrieved via `readwise reader-get-document-details --document-id <id>` regardless of whether the URL is still live. Readwise snapshots web content at save time and stores it permanently.

@@ -1143,6 +1143,42 @@ def check_codex_agent_adapters(models: dict[str, Any]) -> list[Finding]:
     return findings
 
 
+def _iter_hook_commands(hooks: dict[str, Any]) -> list[tuple[str, str]]:
+    """Return every configured lifecycle command with its event name."""
+    commands: list[tuple[str, str]] = []
+    for event, groups in hooks.items():
+        if not isinstance(event, str) or not isinstance(groups, list):
+            continue
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            handlers = group.get("hooks", [])
+            if not isinstance(handlers, list):
+                continue
+            for handler in handlers:
+                if isinstance(handler, dict) and isinstance(handler.get("command"), str):
+                    commands.append((event, handler["command"]))
+    return commands
+
+
+def _retired_cue_hook_findings(
+    path: Path,
+    commands: list[tuple[str, str]],
+    finding_code: str,
+) -> list[Finding]:
+    """Reject the retired cues lifecycle entry point in either runtime config."""
+    return [
+        Finding(
+            "ERROR",
+            finding_code,
+            rel(path),
+            f"{event} contains retired cues hook command; remove `{command}`",
+        )
+        for event, command in commands
+        if "cues.py" in command
+    ]
+
+
 def check_codex_hooks() -> list[Finding]:
     """Validate the native Codex lifecycle bridge used by Atelier."""
     path = ROOT / ".codex" / "hooks.json"
@@ -1157,27 +1193,14 @@ def check_codex_hooks() -> list[Finding]:
     if not isinstance(hooks, dict):
         return [Finding("ERROR", "codex-hooks-shape", rel(path), "top-level `hooks` must be an object")]
 
+    configured_commands = _iter_hook_commands(hooks)
+
     def commands_for(event: str) -> list[str]:
-        groups = hooks.get(event, [])
-        if not isinstance(groups, list):
-            return []
-        commands: list[str] = []
-        for group in groups:
-            if not isinstance(group, dict):
-                continue
-            handlers = group.get("hooks", [])
-            if not isinstance(handlers, list):
-                continue
-            for handler in handlers:
-                if isinstance(handler, dict) and isinstance(handler.get("command"), str):
-                    commands.append(handler["command"])
-        return commands
+        return [command for hook_event, command in configured_commands if hook_event == event]
 
     findings: list[Finding] = []
     required = (
-        ("SessionStart", ("scripts/atelier/cues.py", "--hook", "--runtime codex")),
         ("UserPromptSubmit", ("scripts/atelier/session_replay.py", "hook --runtime codex")),
-        ("UserPromptSubmit", ("scripts/atelier/cues.py", "--touch-lock")),
         ("UserPromptSubmit", ("scripts/atelier/intent_coverage.py", "intent-hook", "--runtime codex")),
         ("Stop", ("scripts/atelier/session_replay.py", "hook --runtime codex")),
         ("Stop", ("scripts/atelier/shadow.py", "gc")),
@@ -1193,6 +1216,9 @@ def check_codex_hooks() -> list[Finding]:
                     f"{event} must include a command containing {list(needles)}",
                 )
             )
+    findings.extend(
+        _retired_cue_hook_findings(path, configured_commands, "codex-retired-cue-hook")
+    )
     return findings
 
 
@@ -1210,27 +1236,14 @@ def check_claude_hooks() -> list[Finding]:
     if not isinstance(hooks, dict):
         return [Finding("ERROR", "claude-hooks-shape", rel(path), "top-level `hooks` must be an object")]
 
+    configured_commands = _iter_hook_commands(hooks)
+
     def commands_for(event: str) -> list[str]:
-        groups = hooks.get(event, [])
-        if not isinstance(groups, list):
-            return []
-        commands: list[str] = []
-        for group in groups:
-            if not isinstance(group, dict):
-                continue
-            handlers = group.get("hooks", [])
-            if not isinstance(handlers, list):
-                continue
-            for handler in handlers:
-                if isinstance(handler, dict) and isinstance(handler.get("command"), str):
-                    commands.append(handler["command"])
-        return commands
+        return [command for hook_event, command in configured_commands if hook_event == event]
 
     findings: list[Finding] = []
     required = (
-        ("SessionStart", ("scripts/atelier/cues.py", "--hook", "--runtime claude")),
         ("UserPromptSubmit", ("scripts/atelier/session_replay.py", "hook --runtime claude-code")),
-        ("UserPromptSubmit", ("scripts/atelier/cues.py", "--touch-lock")),
         (
             "UserPromptSubmit",
             ("scripts/atelier/intent_coverage.py", "intent-hook", "--runtime claude-code"),
@@ -1250,6 +1263,9 @@ def check_claude_hooks() -> list[Finding]:
                     f"{event} must include a command containing {list(needles)}",
                 )
             )
+    findings.extend(
+        _retired_cue_hook_findings(path, configured_commands, "claude-retired-cue-hook")
+    )
     return findings
 
 
@@ -1666,6 +1682,55 @@ def check_codex_command_skills() -> list[Finding]:
     return findings
 
 
+# These exact occurrences are retained only in frozen compatibility surfaces
+# after the workshop surgery.  The key includes the finding code, file, and
+# unknown token; the value pins its expected count.  A new token or a new
+# occurrence of an old token remains a lint finding, so this cannot become a
+# file-wide warning blanket.
+DORMANT_PATH_DRIFT_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
+    ("paths-registry-drift", "protocols/autoevo.md", "agent-findings"):
+        (1, "frozen autoevo compatibility protocol"),
+    ("paths-placeholder-drift", "protocols/autoevo.md", "agent_findings"):
+        (4, "frozen autoevo compatibility protocol"),
+    ("paths-placeholder-drift", "protocols/autoevo.md", "daily_notes"):
+        (1, "frozen autoevo compatibility protocol"),
+    ("paths-placeholder-drift", "protocols/autoevo.md", "research"):
+        (2, "frozen autoevo compatibility protocol"),
+    ("paths-placeholder-drift", "protocols/autoevo.md", "wip"):
+        (10, "frozen autoevo compatibility protocol"),
+    ("paths-placeholder-drift", "protocols/autoevo.md", "zettelm"):
+        (1, "frozen autoevo compatibility protocol"),
+    ("paths-registry-drift", "scripts/atelier/cues.py", "gtd"):
+        (1, "frozen cue compatibility branch"),
+    ("paths-placeholder-drift", "scripts/atelier/cues.py", "agent_findings"):
+        (1, "frozen cue compatibility branch"),
+    ("paths-placeholder-drift", "scripts/atelier/cues.py", "zettelm"):
+        (1, "frozen cue compatibility branch"),
+    ("paths-placeholder-drift", "scripts/atelier/decay_scan.py", "wip"):
+        (1, "decay scanning is frozen; lifecycle belongs to scripts/memory/decay.py"),
+    ("paths-registry-drift", "scripts/atelier/launchd/README.md", "agent-findings"):
+        (1, "frozen autoevo launchd documentation"),
+    ("paths-placeholder-drift", "scripts/atelier/launchd/README.md", "daily_notes"):
+        (1, "frozen autoevo launchd documentation"),
+    ("paths-placeholder-drift", "scripts/atelier/paper_cache.py", "papers"):
+        (2, "retired paper-tier helper retained for rollback"),
+    ("paths-placeholder-drift", "scripts/atelier/paper_cache.py", "preprints"):
+        (2, "retired paper-tier helper retained for rollback"),
+    ("paths-registry-drift", "scripts/atelier/recurring.py", "gtd"):
+        (1, "retired GTD helper retained for rollback"),
+    ("paths-registry-drift", "scripts/atelier/aggregate_freshness.py", "travel"):
+        (1, "retired domain aggregate helper retained for rollback"),
+    ("paths-registry-drift", "scripts/atelier/people.py", "people"):
+        (2, "retired people-tier helper retained for rollback"),
+    ("paths-registry-drift", "sources/local-papers.md", "papers"):
+        (3, "retired paper-tier source guide retained for rollback"),
+    ("paths-placeholder-drift", "sources/local-papers.md", "papers"):
+        (2, "retired paper-tier source guide retained for rollback"),
+    ("paths-placeholder-drift", "sources/local-papers.md", "preprints"):
+        (2, "retired paper-tier source guide retained for rollback"),
+}
+
+
 def check_path_registry_drift() -> list[Finding]:
     """Flag `$OV/<segment>/` literals in committed `.md` whose `<segment>`
     is not registered in `harness/paths.toml`.
@@ -1685,6 +1750,7 @@ def check_path_registry_drift() -> list[Finding]:
     are per-user and not part of the universal contract.
     """
     findings: list[Finding] = []
+    observed_drift: dict[tuple[str, str, str], int] = {}
     paths_toml = ROOT / "harness" / "paths.toml"
     if not paths_toml.is_file():
         return findings  # registry absent; bootstrap state, skip the check
@@ -1801,6 +1867,11 @@ def check_path_registry_drift() -> list[Finding]:
                 continue
             unknown_placeholders[name] = unknown_placeholders.get(name, 0) + 1
         for seg, count in sorted(unknown_literals.items()):
+            allowlist_key = ("paths-registry-drift", rel(path), seg)
+            observed_drift[allowlist_key] = count
+            allowlisted = DORMANT_PATH_DRIFT_ALLOWLIST.get(allowlist_key)
+            if allowlisted is not None and count == allowlisted[0]:
+                continue
             findings.append(
                 Finding(
                     "WARN",
@@ -1813,6 +1884,11 @@ def check_path_registry_drift() -> list[Finding]:
                 )
             )
         for name, count in sorted(unknown_placeholders.items()):
+            allowlist_key = ("paths-placeholder-drift", rel(path), name)
+            observed_drift[allowlist_key] = count
+            allowlisted = DORMANT_PATH_DRIFT_ALLOWLIST.get(allowlist_key)
+            if allowlisted is not None and count == allowlisted[0]:
+                continue
             findings.append(
                 Finding(
                     "WARN",
@@ -1821,6 +1897,40 @@ def check_path_registry_drift() -> list[Finding]:
                     f"`<paths.{name}>` referenced {count}x but `{name}` is "
                     f"not in harness/paths.toml. Add to the registry, or "
                     f"fix the placeholder.",
+                )
+            )
+    for key, (expected_count, rationale) in sorted(DORMANT_PATH_DRIFT_ALLOWLIST.items()):
+        code, relative_path, token = key
+        path = ROOT / relative_path
+        if not path.is_file():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "dormant-path-drift-allowlist-stale",
+                    relative_path,
+                    f"allowlisted `{code}` file is missing; remove the stale "
+                    f"exception ({rationale})",
+                )
+            )
+        elif key not in observed_drift:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "dormant-path-drift-allowlist-stale",
+                    relative_path,
+                    f"allowlisted `{code}` token `{token}` no longer occurs; "
+                    f"remove the stale exception ({rationale})",
+                )
+            )
+        elif observed_drift[key] != expected_count:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "dormant-path-drift-allowlist-changed",
+                    relative_path,
+                    f"allowlisted `{code}` token `{token}` occurs "
+                    f"{observed_drift[key]}x, expected {expected_count}x; "
+                    f"review the frozen exception ({rationale})",
                 )
             )
     return findings
@@ -1999,6 +2109,161 @@ def _expected_used_by(
             expected.setdefault(stem, set()).add(f"commands.{command_name}")
 
     return {name: sorted(refs) for name, refs in expected.items()}
+
+
+ENTRYPOINT_SOURCE_ALLOWLIST = frozenset(
+    {
+        "protocols/collaboration-matrix.md",
+        "protocols/orchestrator-actions.md",
+        "protocols/orchestrator.md",
+    }
+)
+ENTRYPOINT_FIELDS = ("indirect_callers", "manual_entrypoints")
+MAX_ENTRYPOINTS_PER_AGENT = 4
+
+
+def _validate_agent_entrypoints(
+    registry: dict[str, Any],
+) -> tuple[list[Finding], dict[str, set[str]]]:
+    """Validate explicit evidence for agents without direct registry routes.
+
+    Direct intent/command dispatch remains `used_by`.  The two exceptional
+    fields below are intentionally small and marker-based:
+
+    * `indirect_callers` records an internal dispatch or handoff marker;
+    * `manual_entrypoints` records a user-facing action marker.
+
+    Each entry names one of the three canonical orchestration documents and an
+    exact marker.  The marker and the role must occur on the same line.  A
+    bare role mention in arbitrary prose therefore cannot silence the orphan
+    warning.
+    """
+    findings: list[Finding] = []
+    valid: dict[str, set[str]] = {}
+    role_pattern_cache: dict[str, re.Pattern[str]] = {}
+
+    for agent_name, entry in sorted(registry.items()):
+        if not isinstance(entry, dict):
+            continue
+        role_pattern = role_pattern_cache.setdefault(
+            agent_name,
+            re.compile(
+                r"(?<![A-Za-z0-9_-])"
+                + re.escape(agent_name).replace(r"\-", r"[- ]")
+                + r"(?![A-Za-z0-9_-])",
+                re.IGNORECASE,
+            ),
+        )
+        for field in ENTRYPOINT_FIELDS:
+            raw_entries = entry.get(field, [])
+            if raw_entries is None:
+                raw_entries = []
+            if not isinstance(raw_entries, list):
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        f"agents-{field.replace('_', '-')}-shape",
+                        "harness/agents.toml",
+                        f"agent `{agent_name}` `{field}` must be a list of {{source, marker}} tables",
+                    )
+                )
+                continue
+            if len(raw_entries) > MAX_ENTRYPOINTS_PER_AGENT:
+                findings.append(
+                    Finding(
+                        "ERROR",
+                        "agents-entrypoints-too-many",
+                        "harness/agents.toml",
+                        f"agent `{agent_name}` has {len(raw_entries)} `{field}` entries; maximum is {MAX_ENTRYPOINTS_PER_AGENT}",
+                    )
+                )
+            for item in raw_entries:
+                if not isinstance(item, dict):
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            "agents-entrypoint-invalid",
+                            "harness/agents.toml",
+                            f"agent `{agent_name}` `{field}` entries must be {{source, marker}} tables",
+                        )
+                    )
+                    continue
+                source = item.get("source")
+                marker = item.get("marker")
+                if (
+                    not isinstance(source, str)
+                    or not source.strip()
+                    or not isinstance(marker, str)
+                    or not marker.strip()
+                    or "\n" in marker
+                    or "\r" in marker
+                ):
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            "agents-entrypoint-invalid",
+                            "harness/agents.toml",
+                            f"agent `{agent_name}` `{field}` entries require non-empty single-line source and marker strings",
+                        )
+                    )
+                    continue
+                relative = Path(source)
+                normalized = relative.as_posix()
+                resolved = (ROOT / relative).resolve()
+                invalid_path = (
+                    relative.is_absolute()
+                    or ".." in relative.parts
+                    or normalized.startswith("legacy/")
+                    or normalized not in ENTRYPOINT_SOURCE_ALLOWLIST
+                    or not resolved.is_relative_to(ROOT)
+                    or not resolved.is_file()
+                )
+                if invalid_path:
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            "agents-entrypoint-invalid",
+                            "harness/agents.toml",
+                            f"agent `{agent_name}` `{field}` source must be one of {sorted(ENTRYPOINT_SOURCE_ALLOWLIST)}: `{source}`",
+                        )
+                    )
+                    continue
+                try:
+                    text = resolved.read_text(encoding="utf-8")
+                except OSError as exc:
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            "agents-entrypoint-invalid",
+                            normalized,
+                            f"could not read `{field}` source for `{agent_name}`: {exc}",
+                        )
+                    )
+                    continue
+                matching_lines = [line for line in text.splitlines() if marker in line]
+                if not matching_lines:
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            "agents-entrypoint-unverified",
+                            normalized,
+                            f"`{field}` marker for `{agent_name}` is absent: `{marker}`",
+                        )
+                    )
+                    continue
+                if not any(role_pattern.search(line) for line in matching_lines):
+                    findings.append(
+                        Finding(
+                            "ERROR",
+                            "agents-entrypoint-unverified",
+                            normalized,
+                            f"`{field}` marker for `{agent_name}` does not name that role on the same line: `{marker}`",
+                        )
+                    )
+                    continue
+                valid.setdefault(agent_name, set()).add(f"{field}:{normalized}::{marker}")
+
+    return findings, valid
 
 
 def check_intents_registry(
@@ -2317,7 +2582,8 @@ def check_agent_pattern_and_used_by(
     """Validate `pattern` and `used_by` on every agent in harness/agents.toml.
 
     Three checks: (b) pattern in allowed set, (d) used_by drift relative
-    to walked expectation, (e) orphan (empty used_by) WARN.
+    to walked expectation, (e) orphan (empty used_by) WARN unless bounded
+    entrypoint evidence verifies a retained non-registry role.
     """
     findings: list[Finding] = []
     data, err = _load_toml(ROOT / "harness" / "agents.toml")
@@ -2329,6 +2595,8 @@ def check_agent_pattern_and_used_by(
         return findings
 
     expected = _expected_used_by(intents, commands, registry)
+    entrypoint_findings, verified_entrypoints = _validate_agent_entrypoints(registry)
+    findings.extend(entrypoint_findings)
 
     for name, entry in sorted(registry.items()):
         if not isinstance(entry, dict):
@@ -2386,7 +2654,11 @@ def check_agent_pattern_and_used_by(
                 )
             )
         # (e) orphan
-        if not stored_set and not expected_set:
+        if (
+            not stored_set
+            and not expected_set
+            and not verified_entrypoints.get(name)
+        ):
             findings.append(
                 Finding(
                     "WARN",
@@ -3034,8 +3306,6 @@ def check_prose_budget() -> list[Finding]:
 # raising one requires subtracting elsewhere on the same hot path.
 HOT_PATH_CEILINGS = {
     "protocols/evolution.md": 4096,
-    ".claude/commands/autoevo-nightly.md": 24576,
-    ".claude/agents/forgetter.md": 15360,
     ".claude/agents/curator.md": 20480,
 }
 

@@ -48,7 +48,7 @@ Semantic search leads; lexical grep fails by design for exploration. Run 3-4 div
 
 1. **Semantic search on a recent theme:** `Bash: uv run scripts/atelier/semantic.py query "<recent topic>" --top 10 --context --format json` (conceptual neighbors). If results are thin, reframe and retry.
 2. **Tag exploration:** `Bash: grep -rohE '#[A-Za-z][A-Za-z0-9_-]*' "$OV"/ | sort | uniq -c | sort -rn | head -40` → pick a tag the user hasn't engaged with recently → `Grep(pattern: "#<tag>", path: "$OV/")`.
-3. **Time-shifted search:** `Bash: find "<paths.daily_notes>" "<paths.reflections>" -type f -name "*.md" -newermt "<12 months ago>" ! -newermt "<6 months ago>"` → `Grep` for the current interest inside that set. What were they thinking about this 6-12 months ago?
+3. **Time-shifted search:** `Bash: find "<paths.reflections>" "<paths.memory>" -type f -name "*.md" -newermt "<12 months ago>" ! -newermt "<6 months ago>"` → `Grep` for the current interest inside that set. What were they thinking about this 6-12 months ago?
 4. **Cross-domain search:** `Grep` for a term from one life area in another. E.g., if career-focused recently, grep for "health" or "learning" inside `$OV/`.
 
 ### Step 2: Surface the Surprising

@@ -14,7 +14,7 @@ agents, or harness portability.
 2. Read `protocols/runtime-adapters.md` only when changing or debugging
    cross-runtime behavior.
 3. Invoke known commands through their explicit repo skills (`$hi`, `$weekly`,
-   `$review`, `$lint`, and so on).
+   `$decision`, `$explore`, `$promote`, `$lint`, and so on).
 4. Read the command skill's declared `.claude/commands/<command>.md` source
    directly and execute it in the current thread.
    For `$hi`, use the injected route packet and read only its registry-owned
@@ -44,11 +44,12 @@ agents, or harness portability.
 Claude Code command specs are the current workflow source. In Codex, adapt them:
 
 - Codex CLI slash input is reserved for built-in TUI commands. Use explicit
-  command skills such as `$hi`, `$weekly`, `$review`, and `$lint`. Each skill
+  command skills such as `$hi`, `$weekly`, `$decision`, and `$lint`. Each skill
   reads the matching Claude command specification directly and runs it in the
   active thread. `allow_implicit_invocation: false` prevents command names from
   hijacking ordinary prose. `$reflect` runs `$hi`.
-  Do not launch bot-invoked workflows such as `autoevo-nightly` from shorthand.
+  Frozen bot-invoked workflows such as `autoevo-nightly` have no shorthand or
+  active registry entry; do not launch them.
 - `Read` means read the local file.
 - `Grep` and `Glob` mean use `rg` or `rg --files` with scoped paths.
 - `Bash` means use the local shell.
@@ -61,10 +62,13 @@ Claude Code command specs are the current workflow source. In Codex, adapt them:
   `/name` to Codex `$name`. Do not translate real Codex built-ins such as
   `/hooks` or `/agent`.
 - All vault writes go through the orchestrator (Write/Edit) after explicit user
-  approval. Daily notes (`$OV/daily-notes/`) are user-authored: the system
-  reads them but does not write to them. Sole exception: user-dictated raw
-  content recorded verbatim by the Scribe agent (`daily_note` operation); any
-  other system write targeting a daily note is refused.
+  approval. Reflection records under `<paths.reflections>/` are user-authored:
+  the system reads them but does not write to them. Sole exception:
+  user-dictated raw content recorded verbatim by the Scribe agent
+  (`daily_note` operation); any other system write targeting a reflection is
+  refused. Retired `forgetter`, `decay_scan`, and `autoevo-nightly` workflows
+  must not be launched; memory lifecycle behavior belongs to the application
+  memory module.
 
 ### Atelierr read-only bridge
 
@@ -103,6 +107,10 @@ When editing the harness:
 11. Run `.venv/bin/python scripts/atelier/harness_smoke.py` after helper or registry
     edits when the project environment exists; otherwise use the configured
     dependency runner.
+12. For roles without a direct intent or command route, use only the bounded
+    marker-based `indirect_callers` or `manual_entrypoints` evidence in
+    `harness/agents.toml`; never restore retired `used_by` rows or keyword-only
+    caller claims.
 
 Keep command skills thin: they point to shared Claude command specifications
 and must not copy workflow bodies into the Codex edge.

@@ -8,7 +8,7 @@ the mechanical guard; a principle without one is review-only and is checked at
 | # | Principle | Backstop |
 |---|---|---|
 | 1 | Cost = bytes × load frequency. Know which load path a change rides (every turn, every invocation, nightly, on-demand) before writing prose there. | `prose-budget`, `hot-path-ceiling` lints |
-| 2 | Cut by provenance. Rationale prose, dual-source duplication, and deterministic logic are safe cuts (rationale to the ledger, logic down to scripts). A behavior rule earned by a ledger glitch may be compressed, never deleted. | review-only; ledger under `$OV/research/` |
+| 2 | Cut by provenance. Rationale prose, dual-source duplication, and deterministic logic are safe cuts (rationale to the ledger, logic down to scripts). A behavior rule earned by a ledger glitch may be compressed, never deleted. | review-only; ledger under `<paths.meta>/evolution/` |
 | 3 | Judgment in prompts, determinism in scripts, cross-cutting rules in protocols, one source of truth per fact. Derived surfaces are generated or validated, never hand-kept. | `render_runtime_edges --check`, drift lints, smoke needles |
 | 4 | Subtract before adding. Before any new rule: is it already covered, can an existing rule generalize, what does it displace? | `prose-budget` ratchet; pruning trigger via `session_stats` |
 | 5 | Every fix ships a mechanical guard and a ledger row (glitch / root cause / fix / guard / lesson). A guard is not a guard until it has failed on its target bug. | mutation-test pattern in `tests/test_lint_guards.py` |

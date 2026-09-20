@@ -48,7 +48,7 @@ Failures are ranked by severity. Handle at the lowest level possible.
 - **Source note missing from `$OV/`**: Mark `UNVERIFIED`. Reviewer cannot fetch missing notes. An UNVERIFIED mark is the correct outcome.
 
 ### Challenger
-- **No recent entries in `<paths.daily_notes>/`**: Use the latest reflection file in `<paths.reflections>/` as context instead.
+- **No recent entries in `<paths.reflections>/`**: Use the latest reflection file in `<paths.reflections>/` as context instead.
 - **No contradictions found**: This is fine — not every session has contradictions. Don't force them.
 - **User emotional state unclear**: Default to neutral register.
 
@@ -74,7 +74,7 @@ Failures are ranked by severity. Handle at the lowest level possible.
 
 If a session is interrupted:
 1. Check `<paths.reflections>/` for partial output from today.
-2. Check today's daily note (`<paths.daily_notes>/YYYY/MM/YYYY-MM-DD.md`) for a session write-back the user may have authored. Daily notes are user-authored; the sole system write path is the Scribe `daily_note` operation, which records user-dictated content verbatim (`local-first-architecture.md` § Source of Truth). Either way the content reflects the user's own words; resume from where the user left off.
+2. Check today's reflection (`<paths.reflections>/YYYY-MM-DD.md`) for a session write-back the user may have authored. Reflections are user-authored; the sole system write path is the Scribe `daily_note` operation, which records user-dictated content verbatim (`local-first-architecture.md` § Source of Truth). Either way the content reflects the user's own words; resume from where the user left off.
 3. Resume from the last completed step rather than restarting.
 4. If unclear what was done, ask the user.
 
@@ -84,7 +84,7 @@ If a session is interrupted:
 - Readwise calls: 30 seconds before reporting `/curate` as degraded
 - Web searches: 15 seconds before skip
 - Agent handoffs: No timeout (rely on maxTurns)
-- Local writes (`<paths.reflections>/`, `<paths.wip>/`, `<paths.cache>/`): 5 seconds
+- Local writes (`<paths.reflections>/`, `<paths.memory>/`, `<paths.cache>/`): 5 seconds
 
 ## Escalation Rules
 

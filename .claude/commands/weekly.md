@@ -43,14 +43,14 @@ When to invoke:
 
    `Bash: uv run scripts/atelier/semantic.py query "weekly themes moods accomplishments struggles" --after "<7 days ago, YYYY-MM-DD>" --top 10 --context --format json`
 
-3. Inspect daily-note file presence for the past seven effective dates. Use the
-   bounded capsules first, then read a matching daily-note section or complete
-   short note only when it is needed for a claim. Missing or empty days remain
-   missing evidence. Daily notes are user-authored and read-only.
+3. Inspect reflection-file presence for the past seven effective dates. Use the
+   bounded capsules first, then read a matching reflection section or complete
+   short record only when it is needed for a claim. Missing or empty days remain
+   missing evidence. Reflection records are user-authored and read-only.
 
 4. **Search for recent activity in the vault:**
-   - Build the recency window: `Bash: find "<paths.daily_notes>" "<paths.reflections>" "<paths.gtd>" -type f -name "*.md" -mtime -7 2>/dev/null | sort`
-   - Grep the recency window for progress markers: `Bash: find "<paths.daily_notes>" "<paths.reflections>" "<paths.gtd>" -type f -name "*.md" -mtime -7 -print0 | xargs -0 grep -HnE "progress|进展" 2>/dev/null`. Using `find -print0 | xargs -0` is safe when `find` returns nothing (xargs with no input simply exits); never use `grep $(find ...)`, which silently scans the current directory on empty input.
+   - Build the recency window: `Bash: find "<paths.reflections>" "<paths.memory>" "<paths.inbox>" -type f -name "*.md" -mtime -7 2>/dev/null | sort`
+   - Grep the recency window for progress markers: `Bash: find "<paths.reflections>" "<paths.memory>" "<paths.inbox>" -type f -name "*.md" -mtime -7 -print0 | xargs -0 grep -HnE "progress|进展" 2>/dev/null`. Using `find -print0 | xargs -0` is safe when `find` returns nothing (xargs with no input simply exits); never use `grep $(find ...)`, which silently scans the current directory on empty input.
 
 5. **Search and cite the Atelierr bridge (read-only):**
    - List recent flat-store notes with a bounded, missing-directory-safe command:
@@ -96,40 +96,24 @@ Daily `/hi` may not run every day. Detect missing days from the past 7 by checki
 Bash: for d in $(seq 0 6); do date_str=$(date -v-${d}d +%Y-%m-%d); find "<paths.reflections>" -name "${date_str}-reflection*.md" 2>/dev/null | grep -q . || echo "missing: $date_str"; done
 ```
 
-Check whether daily notes exist for reflection-missing days. Read a note only
+Check whether another reflection record exists for reflection-missing days. Read a record only
 when its capsule or a concrete weekly question requires source evidence, then
 prompt the user with 3 light **week-level** questions (do not force per-day
 reconstruction):
 
-1. **Support pulse (week)**: 这 7 天里, 有哪些有意义的互动 (1:1 / 家人 / 朋友 / 同事) 没记到 daily reflection 里? 谁? 什么类型 (E / I / Inf / A)? 有没有新连接?
+1. **Support pulse (week)**: 这 7 天里, 有哪些有意义的互动 (1:1 / 家人 / 朋友 / 同事) 没记到 reflection 里? 谁? 什么类型 (E / I / Inf / A)? 有没有新连接?
 2. **Dining (week)**: 这 7 天有去新餐厅 / 重访旧餐厅没记到 meal-history tracker 的吗? (餐厅 + **就餐日期 YYYY-MM-DD** + 评分 + **再去? Y/N/Maybe** + 健康 flag + 人数 + 总额 + 必点 + Credit used). Backfill spans multiple days, so the Date column must hold the actual visit date, not the session date. 人均仅在人数和总额都有来源时计算。评分 + 再去 are mandatory per the `/hi` Dining Pulse rule; do not append a row without both.
 3. **Signals**: 这 7 天有哪些值得标记的事 (wins / drains / health observations / 决策 / 突发) 没进入 reflection 流?
 
 Captured items fold into `## Missed-Day Backfill` (Support pulse / Dining / Signals sub-bullets); significant drains or wins may also surface in `## Energy Map`. Dining items additionally append to the meal-history tracker per the `/hi` Dining Pulse rule.
 
-### 3. Health Follow-Up Due
+### 3. Health Signals (User-Provided)
 
-Cross-check health-related cadences against current date. Reminder-only — actual booking lives outside the reflection flow.
-
-Default cadences (read `<paths.health>/metrics.md` for last-drawn dates and `directions.md` #energy for declared but unstarted items):
-
-| Category | Default cadence | Where specifics live (read at runtime) |
-|---|---|---|
-| Lipid panel | Quarterly if any marker out of range; yearly otherwise | `<paths.health>/metrics.md` |
-| Vitamin / mineral panel | 90 days post-supplement-start, then quarterly. Markers below reference range fast-track (next available draw, not deferred) | `<paths.health>/metrics.md` |
-| Body composition (DEXA / scale) | 6-12 months | `<paths.health>/metrics.md` |
-| Endocrine surveillance (thyroid, nodules, etc) | 6-12 months when any finding is flagged | `<paths.health>/metrics.md` |
-| Planned interventions in `profile/directions.md` #energy | Per-intervention cadence (read at runtime) | `profile/directions.md` #energy |
-| Annual physical / PCP | Yearly | runtime decision |
-
-Generic categories only — do not hardcode user-specific lab values, conditions, or thresholds in this command file. The orchestrator reads `<paths.health>/metrics.md` (gitignored, lives only in the local symlinked vault) at runtime to compute actual due-dates and severity. This is critical for privacy: the command file is committed to the repo, but the user's medical specifics never are.
-
-For each item:
-- **Due within 4 weeks** → surface as **Next Week → Start** candidate ("约 [item] 复查")
-- **Overdue (past default cadence)** → surface as **Continue → schedule the appointment**, with honest gap note ("lipid 复查 已经晚 X 天")
-- **Nothing due** → write `(no follow-up due this week)` and move on
-
-This section catches what daily reflection cannot: daily focus is per-day events, not multi-month medical cadences. Long-time-constant indicators get systematically stale unless surfaced here.
+The local mirror has no registered health tier. If the user pastes current
+metrics or appointment cadence, record them as user-provided weekly evidence;
+otherwise mark the fields as `未提供`. Do not read an unregistered health path,
+infer due dates, or hardcode medical specifics. Reminder-only; actual booking
+lives outside the reflection flow.
 
 ### 4. Energy Audit
 Map the week's energy:
@@ -139,7 +123,7 @@ Map the week's energy:
 
 ### 5. Win Recognition
 Identify 3 wins from the week, however small:
-- What went well? (cite specific daily notes)
+- What went well? (cite specific reflection records)
 - What did you complete or make progress on?
 - What did you learn?
 
@@ -182,11 +166,9 @@ Based on the review:
 - **Signals**: <wins / drains / health obs / decisions surfaced retroactively>
 - (omit if user surfaced nothing)
 
-## Health Follow-Up Due
-- **Due ≤4 weeks**: <items + appointment names>
-- **Overdue**: <items + 晚 X 天>
-- **No action**: <items still in cadence>
-- Status of `directions.md` #energy planned-but-unstarted (e.g., allergy shots): <not started / scheduled / launched>
+## Health Signals
+- User-provided metrics or cadences: <details or 未提供>
+- Missing evidence: <fields the user could not provide>
 
 ## Energy Map
 - High: [days + activities]
@@ -235,4 +217,4 @@ After writing the weekly review file, emit a session log:
 
 ## Wrap Up
 
-The weekly review file at `<paths.reflections>/YYYY-MM-DD-weekly.md` is the durable session output. Daily notes are user-authored only; nothing is written back to them. Tell the user the weekly review has been saved and where to find it.
+The weekly review file at `<paths.reflections>/YYYY-MM-DD-weekly.md` is the durable session output. Reflection records are user-authored only; nothing is written back to them. Tell the user the weekly review has been saved and where to find it.

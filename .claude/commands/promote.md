@@ -7,7 +7,11 @@ description: Promote L2 working notes into a schema-compliant L4 wiki entry.
 > `/hi create wiki entry`). See `harness/intents.toml` `[intents.promote]` for the full
 > pattern list. Both paths execute this same procedure.
 
-Two-step workflow to promote existing L2 working notes (daily notes, reflections, agent findings, drafts) into a schema-compliant L4 wiki entry under `<paths.wiki>/`. Inspired by llm_wiki's analyze-then-generate ingest pipeline, adapted for atelier's claim-level trust architecture.
+Two-step workflow to promote existing working notes from registered surfaces
+(`<paths.reflections>`, `<paths.inbox>`, `<paths.memory>`, or another registered
+source) into a schema-compliant L4 wiki entry under `<paths.wiki>/`. Inspired by
+llm_wiki's analyze-then-generate ingest pipeline, adapted for atelier's
+claim-level trust architecture.
 
 **Scope:** one wiki entry per invocation. The user names a topic or set of source notes; the command produces a draft wiki entry with pre-populated `@anchor` markers for user review.
 
@@ -40,7 +44,7 @@ physically nested under the wiki library.
 
 ## Prerequisites
 
-1. Source notes must already exist under `$OV/` (any tier except L4).
+1. Source notes must already exist under a registered source path except `<paths.wiki>/` (the L4 target).
 2. `protocols/wiki-schema.md` defines the target format.
 3. `scripts/atelier/trust.py` validates structural integrity after creation.
 
@@ -48,7 +52,7 @@ physically nested under the wiki library.
 
 The user provides one of:
 - A **topic** (e.g., "promote distributed locking") and the Researcher finds relevant source notes.
-- One or more **file paths** (e.g., `<paths.daily_notes>/2026-04-08.md`, `<paths.agent_findings>/lance-brief.md`).
+- One or more **file paths** (e.g., `<paths.reflections>/2026-04-08.md`, `<paths.inbox>/lance-brief.md`).
 
 ## Process
 
@@ -156,7 +160,7 @@ After successful creation, suggest next steps:
 User: /promote distributed locking patterns
 ```
 
-The command finds notes about distributed locking in daily notes, agent findings, and reading notes. Extracts claims about lock granularity, consensus protocols, lease-based mechanisms. Produces a wiki entry like:
+The command finds distributed-locking notes in reflections, inbox items, and memory. Extracts claims about lock granularity, consensus protocols, and lease-based mechanisms. Produces a wiki entry like:
 
 ```markdown
 # Distributed Locking Patterns
@@ -176,7 +180,7 @@ The command finds notes about distributed locking in daily notes, agent findings
 
 ## Revision Log
 
-- 2026-04-11: Initial draft promoted from [[2026-04-08]] daily note and [[Deep Dive Brief]] agent finding. Candidate @cite edges: [[Related Wiki Entry A]] (shared concept overlap), [[Related Wiki Entry B]] (shared mechanism overlap).
+- 2026-04-11: Initial draft promoted from [[2026-04-08]] reflection and [[Deep Dive Brief]] inbox item. Candidate @cite edges: [[Related Wiki Entry A]] (shared concept overlap), [[Related Wiki Entry B]] (shared mechanism overlap).
 ```
 
 ## Error Handling
