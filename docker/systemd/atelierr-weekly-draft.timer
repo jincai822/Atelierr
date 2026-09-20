@@ -1,0 +1,14 @@
+# Atelierr 周回顾初稿定时器（与 atelierr-weekly-draft.service 配套）
+#
+# 周日 08:47：先于 09:13 的 atelierr-review（表单卡）——人起床后
+# 先读到车间初稿，再答四问；初稿与定稿同名错开（-weekly-draft vs -weekly）。
+
+[Unit]
+Description=Atelierr weekly draft timer (Sunday 08:47)
+
+[Timer]
+OnCalendar=Sun *-*-* 08:47:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
