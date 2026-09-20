@@ -67,7 +67,6 @@ import hashlib
 import json
 import os
 import re
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -78,7 +77,15 @@ from scripts.dispatch.prompt import CLOSE_WORDS, PromptStore
 from scripts.utils.date_utils import local_timezone
 from scripts.utils.state_store import read_json, write_json
 
-from scripts.dispatch.archive import derive_archive_dir
+from scripts.dispatch.archive import (
+    archive_note,
+    atomic_write,
+    confirm_note,
+    derive_archive_dir,
+    locate_note,
+    strip_tag,
+    valid_archive_dir,
+)
 from scripts.dispatch.feishu_cards import (
     completed_notice_card,
     confirmed_with_remark_card,
@@ -1005,24 +1012,8 @@ class FeishuBridge:
 
     @staticmethod
     def _valid_archive_dir(target_dir: str) -> bool:
-        """归档目标目录校验：1-2 级纯相对路径，一级目录非机器专用目录。
-
-        目录来自卡片回调（外部输入）：拒绝绝对路径、``..``、反斜杠、
-        非法字符、三级及以上、wiki/系统/attachments/trash/templates
-        （NOTE_EXCLUDED_DIRS 成员，归档进去等于藏进机器区）。
-        """
-        if not target_dir or "\\" in target_dir or target_dir.startswith("/"):
-            return False
-        parts = target_dir.split("/")
-        # 非法字符按段校验：_ILLEGAL_RE 含 "/"（文件名消毒场景要禁），
-        # 目录路径的段分隔符本身合法——整串校验会把所有二级目录误杀
-        #（2026-09-17 实证：目录选择卡的「推荐」项是 平台/分类 二级路径，
-        # 一点就报"非法目录"）
-        if len(parts) > 2 or any(
-            part in ("", ".", "..") or _ILLEGAL_RE.search(part) for part in parts
-        ):
-            return False
-        return parts[0] not in NOTE_EXCLUDED_DIRS
+        """归档目标目录校验（逻辑移 dispatch/archive.py valid_archive_dir，回调与 CLI 共用）。"""
+        return valid_archive_dir(target_dir)
 
     def _fail_response(
         self, chat_id: Optional[str], filename: str, detail: str
@@ -1488,39 +1479,8 @@ class FeishuBridge:
             print(f"[feishu] reaction fail: {exc}", flush=True)
 
     def _locate_note(self, filename: str) -> Tuple[Optional[Path], Optional[str]]:
-        """校验并按文件名定位笔记：返回 (path, None) 或 (None, 错误详情)。
-
-        校验：value 里的文件名须为纯文件名（无路径分隔、无 ``..``、
-        ``*.md``）——用户手拖归档后位置未知，故用文件名在整个归档树
-        里查找（排除 wiki/attachments/trash 等特殊目录）。恰好一个
-        匹配才操作：0 个返回 "笔记不存在"，多个返回 "歧义"（同名
-        冲突，卡片给不出文件级精确操作，请人到 Obsidian 处理）。
-        确认与归档两个回调共用此定位。
-
-        ``inbox/`` 虚拟前缀豁免（2026-09-16 实证）：书籍卡等
-        confirm_note 带 ``inbox/`` 前缀（供发送侧 Obsidian URI 解析），
-        定位前剥掉按纯文件名处理。
-        """
-        if filename.startswith("inbox/"):
-            filename = filename[len("inbox/"):]
-        if (
-            not filename
-            or "/" in filename
-            or "\\" in filename
-            or ".." in filename
-            or not filename.endswith(".md")
-        ):
-            return None, "非法路径"
-        matches = [
-            path
-            for path in self.tree.iter_all_note_files()
-            if path.name == filename
-        ]
-        if not matches:
-            return None, "笔记不存在"
-        if len(matches) > 1:
-            return None, "歧义"
-        return matches[0], None
+        """按文件名定位笔记（逻辑移 dispatch/archive.py locate_note，回调与 CLI 共用）。"""
+        return locate_note(self.tree, filename)
 
     def _maybe_nominate_judgments(
         self, filename: str, chat_id: Optional[str] = None
@@ -1559,97 +1519,21 @@ class FeishuBridge:
         return self._strip_tag(note_path, CONFIRM_TAG)
 
     def _strip_tag(self, note_path: Path, tag: str) -> bool:
-        """移除单篇笔记 frontmatter tags 里的指定一项（其余一概不动）。
-
-        仅当 tags 含该标签才改写（幂等：没有不改写）；改写只删该
-        标签一项，frontmatter 其余字段与正文经 round-trip 原样保留。
-
-        Returns:
-            bool: 实际改写了返回 True；无标签（noop）返回 False。
-        """
-        text = note_path.read_text(encoding="utf-8")
-        post = frontmatter.loads(text)
-        tags = post.metadata.get("tags")
-        if not isinstance(tags, list) or tag not in tags:
-            return False
-        post.metadata["tags"] = [item for item in tags if item != tag]
-        self._atomic_write(note_path, frontmatter.dumps(post).encode("utf-8"))
-        return True
+        """移除单篇笔记 frontmatter tags 里的指定一项（逻辑移 dispatch/archive.py strip_tag）。"""
+        return strip_tag(note_path, tag)
 
     def _confirm_note(self, filename: str) -> Tuple[bool, str]:
-        """「✅ 确认」核心：定位笔记 + 移除待确认标签。
-
-        Returns:
-            Tuple[bool, str]: (是否成功, 详情串 ok / noop / 歧义 /
-            非法路径 / 笔记不存在)。
-        """
-        note_path, err = self._locate_note(filename)
-        if err:
-            return False, err
-        stripped = self._strip_review_tag(note_path)
-        return True, "ok" if stripped else "noop"
+        """「✅ 确认」核心（逻辑移 dispatch/archive.py confirm_note，回调与 CLI 共用）。"""
+        return confirm_note(self.tree, filename)
 
     def _archive_note(self, filename: str, target_dir: Optional[str] = None) -> Tuple[bool, str]:
-        """「📁 归档」核心（2026-09-07 批准的人工例外之二；09-09 起人点目录）。
+        """「📁 归档」核心（逻辑移 dispatch/archive.py archive_note，回调与 CLI 共用）。
 
-        定位（与确认同）→ 目标目录：显式给定（目录选择卡点定，先经
-        _valid_archive_dir 校验）或机器推导（平台[/分类]，规则见
-        scripts/dispatch/archive.py；**平台推不出时不再兜底移动**——
-        2026-09-12 裁决：退化为仅确认（只删标签、留在收件箱），返回
-        "confirm_only"；「选目录…」卡片的推荐项仍用 媒体/ 兜底，因为
-        那是人显式点目录的场景）→ 已在目标
-        目录则只删标签（幂等，不移动）→ 否则：目标重名检查（绝不
-        覆盖）→ mkdir → rename → sidecar 按 id 即时迁移 path
-        （MemoryTree.relocate_entry，动态状态原样保留，不等 watcher
-        班次）→ 删「待确认」标签。移动成功但删标签失败：log 警告并
-        返回 (True, "tag_fail")（提示手动摘除，绝不回滚）。
-
-        Returns:
-            Tuple[bool, str]: 成功返回 (True, 目标相对目录)、
-                (True, "confirm_only")（推导不出平台，仅确认未移动）或
-                (True, "tag_fail")；失败返回 (False, 错误详情串)。
+        删标签动作仍走桥的 _strip_review_tag（保留既有替换点）。
         """
-        note_path, err = self._locate_note(filename)
-        if err:
-            return False, err
-        if target_dir is None:
-            post = frontmatter.loads(note_path.read_text(encoding="utf-8"))
-            platform, category = derive_archive_dir(post)
-            if platform is None:
-                # 推导不出平台：退化为仅确认（留在收件箱），不兜底乱移
-                self._strip_review_tag(note_path)
-                return True, "confirm_only"
-            target_dir = platform if not category else f"{platform}/{category}"
-        elif not self._valid_archive_dir(target_dir):
-            return False, "非法目录"
-        current_rel = self.tree._rel_key(note_path)
-        if "/" in current_rel and current_rel.rsplit("/", 1)[0] == target_dir:
-            # 已在目标目录：幂等，只删标签不移动
-            self._strip_review_tag(note_path)
-            return True, target_dir
-        # 目标文件名用定位后的实体名（卡片 value 可能带 inbox/ 虚拟前缀，
-        # 直接用 filename 会拼出 平台/分类/inbox/ 嵌套目录——2026-09-17 实证）
-        target = Path(self.tree.notes_dir) / target_dir / note_path.name
-        if target.exists():
-            return False, "目标重名"
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            note_path.rename(target)
-        except OSError as exc:
-            print(f"[feishu] archive note={filename} move fail: {exc}", flush=True)
-            return False, "移动失败"
-        note_id = self.tree._read_note_id(target)
-        if note_id is not None:
-            self.tree.relocate_entry(note_id, self.tree._rel_key(target))
-        try:
-            self._strip_review_tag(target)
-        except Exception as exc:  # noqa: BLE001 - 半截状态提示手动摘除
-            print(
-                f"[feishu] archive note={filename} moved but tag strip fail: {exc}",
-                flush=True,
-            )
-            return True, "tag_fail"
-        return True, target_dir
+        return archive_note(
+            self.tree, filename, target_dir, strip_review_fn=self._strip_review_tag
+        )
 
     @staticmethod
     def _confirmed_card(
@@ -2081,17 +1965,5 @@ class FeishuBridge:
 
     @staticmethod
     def _atomic_write(target: Path, blob: bytes) -> None:
-        """临时文件 + rename 原子落盘（防 Syncthing 抢到半成品）。"""
-        fd, tmp_path = tempfile.mkstemp(
-            dir=str(target.parent), suffix=".tmp"
-        )
-        try:
-            with os.fdopen(fd, "wb") as fh:
-                fh.write(blob)
-            os.replace(tmp_path, target)
-        except OSError:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        """临时文件 + rename 原子落盘（逻辑移 dispatch/archive.py atomic_write）。"""
+        atomic_write(target, blob)
