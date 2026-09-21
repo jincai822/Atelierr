@@ -1743,9 +1743,18 @@ class FeishuBridge:
         评论提取见 dispatch/links.py extract_comment 的时间行豁免。
         机制唯一实现在 scripts/dispatch/diary.py（路径解析/追加/
         迁址兼容都只有那一份）。
+
+        实体反链（2026-09-21 第 9 条①）：追加前对文字做一次实体包裹
+        （wiki/people 标题精确匹配，出生即包、不回改）；失败只记日志，
+        不阻断捕获。
         """
         from scripts.dispatch.diary import append_diary_line
+        from scripts.dispatch.entitylink import load_linkable_titles, wrap_entities
 
+        try:
+            text = wrap_entities(text, load_linkable_titles(self.tree))
+        except Exception as exc:  # noqa: BLE001 - 反链是增强工序，不阻断捕获
+            print(f"[feishu] entity link fail: {exc}", flush=True)
         return append_diary_line(self.tree, text)
 
     def _receive_post(

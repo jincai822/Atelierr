@@ -89,6 +89,25 @@ def test_text_message_appends_to_diary(memory_tree, capsys):
     assert "chat=oc_demo_chat" in capsys.readouterr().out
 
 
+def test_text_message_entity_wrapped(memory_tree):
+    """实体反链（2026-09-21 第 9 条①）：消息里与 wiki/people 笔记标题
+    逐字一致的片段，进日记时已包成 [[标题]]；含 URL 的行不包。"""
+    wiki_dir = memory_tree.notes_dir / "wiki"
+    wiki_dir.mkdir(parents=True, exist_ok=True)
+    (wiki_dir / "叔本华.md").write_text(
+        "---\ntitle: 叔本华\n---\n\n哲学家\n", encoding="utf-8"
+    )
+    bridge = _bridge(memory_tree)
+
+    bridge.handle_event(_event("m-e1", "text", {"text": "今天读叔本华"}))
+    bridge.handle_event(_event("m-e2", "text", {"text": "https://example.com 叔本华"}))
+
+    diary = daily_note_path(memory_tree.notes_dir, _today())
+    body = diary.read_text(encoding="utf-8")
+    assert "今天读[[叔本华]]" in body
+    assert "https://example.com 叔本华" in body  # URL 行不包
+
+
 def test_text_appends_to_existing_diary(memory_tree):
     """当天日记已存在（QuickAdd 速记写在根目录旧位置）：追加进同一本，
     不分裂成两本（2026-09-21 迁址兼容期）。"""

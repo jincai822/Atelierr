@@ -666,6 +666,22 @@ class DispatchCLI:
                 "daily": review_ritual.KIND_DAILY,
             }[kind]
             if action == "open":
+                if kind == "daily":
+                    # 晚间日记 enrichment（2026-09-21 第 9 条②③）：今日三问
+                    # + 错别字批改，随复盘班次同跑；幂等（一天一轮），
+                    # 失败只记日志绝不阻塞复盘主流程
+                    try:
+                        from scripts.dispatch import enrich
+
+                        enrich_report = enrich.run_evening(tree)
+                        if enrich_report["prompts"] or enrich_report["fixes"]:
+                            click.echo(
+                                "日记 enrichment：三问"
+                                f" {'已追加' if enrich_report['prompts'] else '跳过'}，"
+                                f"错别字改 {enrich_report['fixes']} 处"
+                            )
+                    except Exception as exc:  # noqa: BLE001 - enrichment 不阻塞复盘
+                        click.echo(f"日记 enrichment 失败（不影响复盘）：{exc}")
                 report = review_ritual.open_ritual(tree, full_kind)
                 if report["opened"]:
                     click.echo(f"已开启回顾会话并推送表单：{len(report['questions'])} 问")
