@@ -1056,6 +1056,9 @@ class MediaDispatcher:
             f"- 级别建议：{book['level']}——{book['level_reason'] or '机器建议'}"
             "（机器只能建议 L1/L2；L3 定级永远是人工权力）",
             "- 阅读状态：想读（读完手动改 在读/读完）",
+            # 精读入口（2026-09-21 第 12 条：自动管线管"收进来"，车间
+            # $read 管"读进去"——多视角拆解+讨论+读后感存 reflections/）
+            f"- 想精读：会话里说 `$read 《{book['title']}》`（车间阅读流程）",
         ]
         if dup:
             lines += [

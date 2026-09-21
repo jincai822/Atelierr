@@ -340,6 +340,14 @@ class LinkDispatcher:
             # 本条笔记里唯一用户原创，必须沉淀进库，不许只活在通知卡上）
             comment = self._comment_for(url)
             note_markdown = _inject_comment(result.markdown, comment)
+            # 精读入口（2026-09-21 第 12 条）：卡尾一行指到车间 $read——
+            # 自动管线管"收进来"，车间阅读流程管"读进去"
+            note_markdown = (
+                note_markdown.rstrip("\n")
+                + f"\n\n> 📖 想精读这篇：会话里说 `$read {title}`\n"
+                if title
+                else note_markdown
+            )
             try:
                 self.tree.create_note(
                     filename,
