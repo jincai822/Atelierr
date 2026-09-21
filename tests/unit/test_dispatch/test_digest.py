@@ -157,7 +157,9 @@ def test_digest_note_skipped_by_todos_dispatch(memory_tree):
     report = TodoDispatcher(memory_tree).run()
 
     assert report["created"] == []
-    assert report["scanned"] == 0  # 系统/ 里的摘要根本不进记忆扫描域
+    # 摘要本体在 系统/ 不进扫描域；唯一被扫到的是 digest 顺手建的当天
+    # 日记（指路行无勾选框、无行动意图 → 不产出待办）
+    assert report["scanned"] == 1
 
     # 双保险：根层遗留 source=digest 笔记仍被跳过（防摘要内容空转 LLM）
     memory_tree.create_note("legacy-摘要.md", "- [ ] 旧事", source="digest")
@@ -573,3 +575,78 @@ def test_digest_interruption_bill(memory_tree):
     assert "系统推卡 5 张" in report["markdown"]
     assert "深夜 2" in report["markdown"]
     assert "早 1" in report["markdown"]
+
+
+# ----------------------------------------------------------------------
+# 日记指路行（2026-09-21 第 7 条方案 A）
+# ----------------------------------------------------------------------
+
+
+def _pointer_lines(tree, day: str = "2026-09-01"):
+    diary = (
+        tree.notes_dir / "daily-notes" / day[:4] / day[5:7] / f"{day}.md"
+    )
+    if not diary.is_file():
+        return None, []
+    body = diary.read_text(encoding="utf-8")
+    return diary, [ln for ln in body.splitlines() if "📋 今日摘要" in ln]
+
+
+def test_digest_writes_diary_pointer(memory_tree):
+    """摘要创建成功 → 当天日记落一行指路（计数 + [[摘要]] 链接）。
+
+    日记此前不存在：由 digest 顺手创建（sync 口径，与 watcher 归一化
+    的 QuickAdd 日记同源），建于 daily-notes/YYYY/MM/ 新结构。
+    """
+    memory_tree.create_note("a.md", "待确认笔记", source="link", tags=["待确认"])
+
+    report = DigestDispatcher(memory_tree).run(today="2026-09-01")
+
+    assert report["created"] == "系统/今日摘要-2026-09-01.md"
+    diary, pointers = _pointer_lines(memory_tree)
+    assert diary is not None, "摘要创建后当天日记应存在"
+    assert len(pointers) == 1
+    assert re.match(
+        r"^- \d{2}:\d{2} 📋 今日摘要：待确认 1 · 复习 0 · 提炼候选 0 "
+        r"→ \[\[今日摘要-2026-09-01\]\]$",
+        pointers[0],
+    )
+    post = frontmatter.loads(diary.read_text(encoding="utf-8"))
+    assert post["source"] == "sync"  # 顺手建的日记与 watcher 归一化同口径
+
+
+def test_digest_pointer_not_duplicated_on_skip(memory_tree):
+    """当天摘要已存在（跳过）：不重复写指路行。"""
+    dispatcher = DigestDispatcher(memory_tree)
+    dispatcher.run(today="2026-09-01")
+
+    second = dispatcher.run(today="2026-09-01")
+
+    assert second["skipped"] is True
+    _diary, pointers = _pointer_lines(memory_tree)
+    assert len(pointers) == 1
+
+
+def test_digest_dry_run_no_pointer(memory_tree):
+    """dry-run：不建摘要也不写指路行。"""
+    report = DigestDispatcher(memory_tree).run(dry_run=True, today="2026-09-01")
+
+    assert report["created"] is None
+    diary, _pointers = _pointer_lines(memory_tree)
+    assert diary is None
+
+
+def test_digest_pointer_legacy_diary(memory_tree):
+    """根目录旧位置已有当天日记：指路行续写同一本，不另建新结构。"""
+    legacy = memory_tree.create_note(
+        "2026-09-01.md", "- 06:30 早起\n", source="sync"
+    )
+
+    DigestDispatcher(memory_tree).run(today="2026-09-01")
+
+    body = legacy.read_text(encoding="utf-8")
+    assert "- 06:30 早起" in body  # 既有内容不动
+    assert "📋 今日摘要" in body and "[[今日摘要-2026-09-01]]" in body
+    assert not (
+        memory_tree.notes_dir / "daily-notes" / "2026" / "09" / "2026-09-01.md"
+    ).exists()

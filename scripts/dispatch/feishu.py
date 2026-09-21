@@ -74,7 +74,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import frontmatter
 
 from scripts.dispatch.prompt import CLOSE_WORDS, PromptStore
-from scripts.utils.date_utils import local_timezone
 from scripts.utils.state_store import read_json, write_json
 
 from scripts.dispatch.archive import (
@@ -130,7 +129,6 @@ from scripts.memory.core import (
     NOTE_EXCLUDED_DIRS,
     SYSTEM_DIRNAME,
     MemoryTree,
-    daily_note_path,
 )
 
 #: re-export 门脸（__all__ 声明即"有意再导出"，ruff F401 不误报）：
@@ -1738,42 +1736,17 @@ class FeishuBridge:
         """飞书文字追加进当天日记（2026-09-12 用户裁决：碎片治理）。
 
         不再逐条建 feishu-时间戳-哈希.md 碎片（收件箱乱码名堆积、
-        不想点不敢删），统一追加到 memory/ 根目录 ``YYYY-MM-DD.md``
-        ——与 QuickAdd 速记同一个文件，格式同为 ``- HH:MM 内容``
-        列表行（多行消息后续行缩进两格）。**机器追加日记是"笔记创建
-        后绝不改写"红线的用户批准例外，仅此路径**；追加不碰
-        frontmatter（id/created 不变），既有日记 bump last_accessed
-        （新内容算活跃）；日期用本地时区（日记按自然日）。
+        不想点不敢删），统一追加到当天日记——与 QuickAdd 速记同一个
+        文件。**机器追加日记是"笔记创建后绝不改写"红线的用户批准
+        例外**，批准路径仅此两条之一（另一条是 digest 指路行）；
         链接消息照常进日记正文——links 管线扫全库正文照样能抓到，
         评论提取见 dispatch/links.py extract_comment 的时间行豁免。
+        机制唯一实现在 scripts/dispatch/diary.py（路径解析/追加/
+        迁址兼容都只有那一份）。
         """
-        now = datetime.now(local_timezone())
-        diary = daily_note_path(self.tree.notes_dir, now.strftime("%Y-%m-%d"))
-        # 兼容期（2026-09-21 日记迁址）：QuickAdd 速记若仍写根目录旧位置，
-        # 优先续写同一本，不分裂成两本日记
-        legacy = Path(self.tree.notes_dir) / f"{now.strftime('%Y-%m-%d')}.md"
-        if legacy.is_file() and not diary.exists():
-            diary = legacy
-        diary.parent.mkdir(parents=True, exist_ok=True)
-        lines = text.splitlines()
-        entry = f"- {now.strftime('%H:%M')} {lines[0]}"
-        entry += "".join(f"\n  {line}" for line in lines[1:])
-        if not diary.exists():
-            # create_note 只建根/inbox：先建根再迁入 daily-notes/YYYY/MM/
-            #（同进程连贯操作；relocate_entry 随迁 sidecar，2026-09-21
-            # 原教旨日记结构）
-            created = self.tree.create_note(diary.name, f"{entry}\n", source="lark")
-            created.rename(diary)
-            note_id = self.tree._read_note_id(diary)
-            if note_id is not None:
-                self.tree.relocate_entry(note_id, self.tree._rel_key(diary))
-            return diary
-        content = diary.read_text(encoding="utf-8")
-        sep = "" if content.endswith("\n") else "\n"
-        with diary.open("a", encoding="utf-8") as fh:
-            fh.write(f"{sep}{entry}\n")
-        self.tree.on_note_accessed(diary)
-        return diary
+        from scripts.dispatch.diary import append_diary_line
+
+        return append_diary_line(self.tree, text)
 
     def _receive_post(
         self, message_id: str, content: Dict[str, Any], chat_id: Optional[str] = None

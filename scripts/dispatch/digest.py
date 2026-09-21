@@ -37,6 +37,17 @@
 - 推送响应观测（实验 0）只写 ``<state_dir>/response_probe.json``，
   同样仅在真实运行时执行。
 
+日记指路（2026-09-21 第 7 条方案 A 用户拍板）：摘要真正创建成功后，
+往当天日记追加一行指路（``- HH:MM 📋 今日摘要：待确认 N · 复习 N ·
+提炼候选 N → [[今日摘要-…]]``），日记成为一天的总索引；摘要本体
+仍留系统/（机器产物，不进扫描域——摘要里的 wikilink 若进扫描域
+等于机器每天给几十篇笔记的反链/提炼信号刷票）。指路行指向系统/
+下的笔记，不参与反链统计，零污染。跳过/dry-run 不写指路行；指路行
+失败只记日志，不拖累摘要本体。机器追加日记走 dispatch/diary.py
+（红线例外的两条批准路径之一）；digest 顺手创建的日记用 sync 口径
+（与 watcher 归一化的 QuickAdd 日记同源），保证 todos 提取等行为
+与"谁先建日记"无关。
+
 触发：systemd 每日定时器（docker/systemd/atelierr-digest.*）或
 人工 ``dispatch_cli digest``。
 """
@@ -363,6 +374,23 @@ class DigestDispatcher:
             self.resurface.mark_pushed([item["id"] for item in review])
             self.probe.register(review)
             self.probe.check_pending()
+            try:
+                from scripts.dispatch.diary import append_diary_line
+
+                append_diary_line(
+                    self.tree,
+                    f"📋 今日摘要：待确认 {len(pending)} · "
+                    f"复习 {len(review)} · 提炼候选 {len(undistilled)} "
+                    f"→ [[{Path(filename).stem}]]",
+                    day=today,
+                    # 顺手创建的日记用 sync 口径（与 watcher 归一化的
+                    # QuickAdd 日记同源）——todos 提取等行为与"谁先建
+                    # 日记"无关；若用 digest 口径，todos 会整天跳过它，
+                    # 用户后写进日记的行动意图就丢了
+                    source="sync",
+                )
+            except Exception as exc:  # noqa: BLE001 - 指路行失败不拖累摘要本体
+                print(f"[digest] diary pointer fail: {exc}", flush=True)
             created = f"{DIGEST_DIRNAME}/{filename}"
         return {
             "created": created,

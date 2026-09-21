@@ -92,7 +92,8 @@ from scripts.dispatch.links import (
 from scripts.utils.file_utils import write_text_skip_existing
 from scripts.utils.state_store import read_json, write_json
 from scripts.dispatch.sysdir import SYSTEM_DIRNAME, write_machine_note
-from scripts.memory.core import LAYERS, MemoryTree, daily_note_path
+from scripts.dispatch.diary import resolve_diary_path
+from scripts.memory.core import LAYERS, MemoryTree
 from scripts.processors.audio import SUPPORTED_EXTENSIONS as AUDIO_EXTS
 from scripts.processors.audio import AudioProcessor
 from scripts.processors.base import INLINE_BODY_MAX
@@ -655,12 +656,7 @@ class MediaDispatcher:
         人工可见。
         """
         day = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
-        diary = daily_note_path(self.tree.notes_dir, day)
-        if not diary.is_file():
-            # 兼容期（2026-09-21 迁址）：QuickAdd 速记可能仍写根目录旧位置
-            legacy = Path(self.tree.notes_dir) / f"{day}.md"
-            if legacy.is_file():
-                diary = legacy
+        diary = resolve_diary_path(self.tree.notes_dir, day)
         if not diary.is_file():
             return ""
         try:
@@ -704,10 +700,7 @@ class MediaDispatcher:
         """
         try:
             day = datetime.fromtimestamp(attachment.stat().st_mtime).strftime("%Y-%m-%d")
-            diary = daily_note_path(self.tree.notes_dir, day)
-            if not diary.is_file():
-                legacy = Path(self.tree.notes_dir) / f"{day}.md"
-                diary = legacy if legacy.is_file() else diary
+            diary = resolve_diary_path(self.tree.notes_dir, day)
             if not diary.is_file():
                 return
             stem = Path(note_filename).stem
