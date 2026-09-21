@@ -104,31 +104,40 @@ def _load_state(tree):
 
 
 def test_new_clip_gets_card(memory_tree):
-    """新剪藏（带备注）→ 带确认按钮的卡片（含摘要与至多 3 条要点），状态登记。"""
+    """新剪藏（带备注）→ LLM 摘要 + 放权自动归档（category 中图法→领域），
+    纯知会卡（无确认按钮），状态登记。"""
     notify = _Notify()
     _clip(memory_tree, note="对工作有用")
 
     report = _dispatcher(memory_tree, notify).run()
 
     assert report["new"] == 1
-    assert report["cards"] == ["clip-a.md"]
+    # B84-心理学 → B → health（放权：处理完即归档，不等人工确认）
+    assert report["cards"] == ["health/clip-a.md"]
+    assert not (memory_tree.notes_dir / "clip-a.md").exists()
+    archived_note = memory_tree.notes_dir / "health" / "clip-a.md"
+    assert archived_note.is_file()
+    assert "待确认" not in (
+        frontmatter.loads(archived_note.read_text(encoding="utf-8")).get("tags") or []
+    )
     assert len(notify.calls) == 1
     call = notify.calls[0]
-    assert call["title"] == "Atelierr 剪藏待确认"
-    assert call["confirm_note"] == "clip-a.md"
+    assert call["title"] == "Atelierr 剪藏已归档"
+    assert call["confirm_note"] is None  # 纯知会，无按钮
     assert "《文章A》已剪藏入库" in call["message"]
     assert "核心论点摘要。" in call["message"]
     assert "1. 甲一" in call["message"]
     assert "3. 丙三" in call["message"]
     assert "4. 丁四" not in call["message"]  # 卡片至多 3 条要点
-    assert "建议归档" not in call["message"]  # tags 无中图法 → 领域推不出，省略
+    assert "已自动归档：health/" in call["message"]
     # LLM 用网页剪藏提示词（与链接同一管道、同一中图法标准）
     assert _FakeSummarizer.calls[0]["prompt"] == _SUMMARIZE_CLIP_PROMPT
     assert "网页文章" in _FakeSummarizer.calls[0]["prompt"]
     state = _load_state(memory_tree)
     assert len(state) == 1
     entry = next(iter(state.values()))
-    assert entry["path"] == "clip-a.md"
+    assert entry["path"] == "health/clip-a.md"
+    assert entry["archived"] == "health"
     assert entry["url"] == URL_A
     assert entry["summary_status"] == "ok"
 
@@ -199,10 +208,10 @@ def test_duplicate_url_marks_pending_delete(memory_tree):
 
     report = _dispatcher(memory_tree, notify).run()
 
-    assert report["cards"] == ["clip-a.md"]  # 较旧的留下
+    assert report["cards"] == ["health/clip-a.md"]  # 较旧的留下并归档
     assert report["duplicates"] == ["clip-b.md"]  # 较新的标待删
     assert memory_tree.is_pending_delete(memory_tree.notes_dir / "clip-b.md")
-    assert not memory_tree.is_pending_delete(memory_tree.notes_dir / "clip-a.md")
+    assert not memory_tree.is_pending_delete(memory_tree.notes_dir / "health" / "clip-a.md")
     # 重复篇只推信息卡（无确认按钮），且不消耗 LLM
     assert len(notify.calls) == 2
     dup_call = notify.calls[1]
@@ -230,15 +239,14 @@ def test_duplicate_second_run_noop(memory_tree):
 
 
 def test_duplicate_against_previously_confirmed_clip(memory_tree):
-    """旧剪藏已确认（标签摘除）后，同 url 再剪仍判重复（state 播种）。"""
+    """旧剪藏放权归档后（标签已摘、文件在领域目录），同 url 再剪仍判重复
+    （state 播种不受移动影响）。"""
     notify = _Notify()
-    path = _clip(memory_tree, name="clip-a.md")
+    _clip(memory_tree, name="clip-a.md")
     dispatcher = _dispatcher(memory_tree, notify)
     dispatcher.run()
-    # 模拟用户在 Obsidian 确认：摘除「待确认」标签（id 保持不变）
-    post = frontmatter.loads(path.read_text(encoding="utf-8"))
-    post.metadata["tags"] = ["剪藏"]
-    path.write_text(frontmatter.dumps(post), encoding="utf-8")
+    # 放权：无备注剪藏已自动归档进 personal/ 并摘掉「待确认」（= 已确认语义）
+    assert (memory_tree.notes_dir / "personal" / "clip-a.md").is_file()
 
     _clip(memory_tree, name="clip-b.md", created="2026-09-11 10:00:00+08:00")
     report = dispatcher.run()
@@ -249,16 +257,18 @@ def test_duplicate_against_previously_confirmed_clip(memory_tree):
 
 
 def test_summary_failure_still_sends_card(memory_tree):
-    """LLM 失败降级：卡片照发（无摘要节），状态照记，第二轮不重试。"""
+    """LLM 失败降级：归档兜底 personal/（无分类依据），卡片照发
+    （无摘要节），状态照记，第二轮不重试。"""
     _FakeSummarizer.fail = True
     notify = _Notify()
     _clip(memory_tree, note="有用")
     dispatcher = _dispatcher(memory_tree, notify)
     report = dispatcher.run()
 
-    assert report["cards"] == ["clip-a.md"]
+    assert report["cards"] == ["personal/clip-a.md"]
     assert len(notify.calls) == 1
     assert "核心论点摘要。" not in notify.calls[0]["message"]
+    assert "已自动归档：personal/" in notify.calls[0]["message"]
     state = _load_state(memory_tree)
     assert next(iter(state.values()))["summary_status"] == "failed:Boom"
 
@@ -303,7 +313,7 @@ def test_damaged_frontmatter_skipped(memory_tree):
     report = _dispatcher(memory_tree).run()
 
     assert report["skipped"] == 1
-    assert report["cards"] == ["clip-a.md"]
+    assert report["cards"] == ["health/clip-a.md"]  # 放权后归档进领域目录
 
 
 def test_cli_links_also_dispatches_clips(memory_tree, tmp_path, monkeypatch):
@@ -323,7 +333,8 @@ def test_cli_links_also_dispatches_clips(memory_tree, tmp_path, monkeypatch):
 
     assert code == 0
     assert len(notify.calls) == 1
-    assert notify.calls[0]["confirm_note"] == "clip-a.md"
+    assert notify.calls[0]["confirm_note"] is None  # 放权：纯知会无按钮
+    assert "已自动归档" in notify.calls[0]["message"]
 
 
 def test_card_shows_user_note(memory_tree):
@@ -338,7 +349,7 @@ def test_card_shows_user_note(memory_tree):
 
     report = _dispatcher(memory_tree, notify).run()
 
-    assert report["cards"] == ["clip-a.md"]
+    assert report["cards"] == ["health/clip-a.md"]  # 放权：归档进领域目录
     message = notify.calls[0]["message"]
     assert "你的备注：讲 OCR 的那段对工作有用" in message
     # 备注在摘要之前（最显眼）
@@ -346,8 +357,9 @@ def test_card_shows_user_note(memory_tree):
 
 
 def test_card_without_note_no_line(memory_tree):
-    """无备注（留空/旧模板剪藏）：不即时推卡、不调 LLM，入晚间清单队列
-    （2026-09-13 确认卡分级裁决：无评论的攒「今日待确认清单」）。"""
+    """无备注剪藏（2026-09-21 放权）：不调 LLM（成本裁决不动），自动归档
+    进 personal/ 兜底格并摘「待确认」；不推卡不入晚间清单（已归档的
+    晚间 _still_pending 自然滤掉，晨报「昨日新入库」可见）。"""
     notify = _Notify()
     _clip(memory_tree)
 
@@ -355,8 +367,37 @@ def test_card_without_note_no_line(memory_tree):
 
     assert notify.calls == []  # 不即时推
     assert report["cards"] == []
-    assert report["deferred"] == ["clip-a.md"]
-    assert _FakeSummarizer.calls == []  # 推迟=省一次 API（摘要只进卡）
+    assert report["deferred"] == []
+    assert report["archived"] == ["personal/clip-a.md"]
+    assert _FakeSummarizer.calls == []  # 无备注不调 LLM（省一次 API）
+    archived_note = memory_tree.notes_dir / "personal" / "clip-a.md"
+    assert archived_note.is_file()
+    assert "待确认" not in (
+        frontmatter.loads(archived_note.read_text(encoding="utf-8")).get("tags") or []
+    )
+    assert pending_push._load(memory_tree.state_dir) == []  # 不入晚间清单
+
+
+def test_archive_failure_falls_back_to_manual(memory_tree, monkeypatch):
+    """归档失败（放权只放顺利路径）：留原处带「待确认」，确认卡带按钮、
+    无备注的入晚间清单——人工兜底链路完整。"""
+    notify = _Notify()
+    monkeypatch.setattr(
+        clips_module, "archive_note", lambda *a, **_k: (False, "磁盘满了")
+    )
+    _clip(memory_tree, name="clip-a.md", note="有用")
+    _clip(memory_tree, name="clip-b.md", url=URL_B, created="2026-09-11 10:00:00+08:00")
+
+    report = _dispatcher(memory_tree, notify).run()
+
+    assert report["cards"] == ["clip-a.md"]  # 未移动，原路径
+    assert report["deferred"] == ["clip-b.md"]  # 归档失败的回晚间清单
+    assert report.get("archived") is None
+    assert notify.calls[0]["title"] == "Atelierr 剪藏待确认"
+    assert notify.calls[0]["confirm_note"] == "clip-a.md"  # 按钮保留
+    post = frontmatter.loads(
+        (memory_tree.notes_dir / "clip-a.md").read_text(encoding="utf-8")
+    )
+    assert "待确认" in (post.get("tags") or [])  # 标签不动
     queued = pending_push._load(memory_tree.state_dir)
-    assert [item["file"] for item in queued] == ["clip-a.md"]
-    assert queued[0]["kind"] == "clip"
+    assert [item["file"] for item in queued] == ["clip-b.md"]

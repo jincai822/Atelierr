@@ -64,6 +64,18 @@ def _clc_domain(tag: str) -> Optional[str]:
     return None
 
 
+def clc_to_domain(tag: str) -> Optional[str]:
+    """中图法标签（如 B84-心理学）→ 领域目录的公开门脸；推不出返回 None。
+
+    与 derive_archive_dir 的区别：本函数直接吃分类字符串，不经
+    frontmatter——剪藏放权（2026-09-21）的归档依据来自卡片管道的 LLM
+    摘要（category 字段），剪藏笔记本身不改写、不补中图法标签。
+    """
+    if not CCLASS_RE.match(tag or ""):
+        return None
+    return _clc_domain(tag)
+
+
 def derive_archive_dir(post) -> Tuple[Optional[str], Optional[str]]:
     """从一篇笔记的 frontmatter Post 推导归档目录 (领域, None)。
 

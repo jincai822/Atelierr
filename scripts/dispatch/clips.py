@@ -1,15 +1,19 @@
-"""网页剪藏确认卡：新剪藏 → LLM 摘要 → 飞书确认卡；同 url 重复剪藏检测。
+"""网页剪藏卡：新剪藏 → LLM 摘要 → 放权自动归档 → 飞书知会卡；同 url 重复剪藏检测。
 
 定位：Obsidian Web Clipper 经 Syncthing 落地的笔记（source: webclip、
 tags 含「剪藏」「待确认」）原本要等次日晨报才进入视野。本模块挂在
 links 定时班次（每 15 分钟）里扫出新剪藏，复用链接处理器的 LLM 摘要
-管道（processors/link.py 的 ``_summarize``，DeepSeek）生成观点摘要，
-推送带「✅ 确认」按钮的飞书卡片——确认/归档回调与链接笔记完全同路
-（dispatch/feishu.py）。**摘要只进卡片，不落笔记**（机器不改写剪藏
-笔记，卡片是系统外视图；想要摘要进正文请到 Obsidian 人工誊写）。
+管道（processors/link.py 的 ``_summarize``，DeepSeek）生成观点摘要。
+放权（2026-09-21 用户拍板）：剪藏是用户的主动收藏动作，确认门是
+纯摩擦——处理完即自动归档（LLM category 映射领域；无备注/无分类进
+personal/ 兜底格），飞书推送纯知会卡（无按钮）；归档失败才留
+「待确认」走人工确认卡兜底。**摘要只进卡片，不落笔记**（机器不改写
+剪藏笔记，卡片是系统外视图；想要摘要进正文请到 Obsidian 人工誊写）。
 
 纪律（与 dispatch/links.py 同源）：
-- 机器绝不改写/移动剪藏笔记；
+- 机器绝不改写剪藏笔记的正文与 frontmatter 其余字段；唯一例外是
+  放权归档（2026-09-21 用户拍板）：经 archive_note 的批准通道移动
+  文件并摘「待确认」标签（与链接/媒体放权同例）；
 - 幂等：已处理笔记按 frontmatter id 登记
   ``<state_dir>/clip_cards.json``（改名/移动/重启不重复推卡、不重复
   摘要）；推送失败视为已处理（与链接笔记同一语义：丢卡不补，晨报
@@ -35,7 +39,12 @@ from typing import Any, Callable, Dict, List, Optional
 import frontmatter
 
 from scripts.dispatch import pending_push
-from scripts.dispatch.archive import derive_archive_dir
+from scripts.dispatch.archive import (
+    HANDWRITTEN_ARCHIVE_DIR,
+    archive_note,
+    clc_to_domain,
+    derive_archive_dir,
+)
 from scripts.memory.core import LAYERS, MemoryTree
 from scripts.memory.watcher import MemoryWatcher
 from scripts.processors.link import _SUMMARIZE_CLIP_PROMPT, LinkProcessor
@@ -185,38 +194,66 @@ class ClipDispatcher:
         state: Dict[str, Any],
         report: Dict[str, Any],
     ) -> None:
-        """处理一篇新剪藏：重复检测 → （非重复）摘要 + 确认卡。
+        """处理一篇新剪藏：重复检测 →（非重复）摘要 → 放权自动归档 → 通知。
 
-        确认卡分级（2026-09-13 用户裁决）：有备注（剪藏时写的"为什么
-        存"）→ 即时摘要+单推；无备注 → 不调 LLM（省一次 API），入队
-        pending_push 攒晚间清单卡。
+        放权（2026-09-21 用户拍板，链接/媒体放权同例延伸）：剪藏是用户
+        在插件侧的主动收藏动作，确认门是纯摩擦——处理完即自动归档：
+        有备注的用 LLM 摘要的 category（中图法→领域映射）定领域；无
+        备注的不调 LLM（2026-09-13 成本裁决不动），一律进 personal/
+        兜底格。归档失败一律留原处带「待确认」，确认卡/晚间清单照旧
+        人工兜底（放权只放顺利路径）。
         """
         url = clip["url"]
         if url and (url in taken_urls or url in winners):
             self._mark_duplicate(clip, state, report)
             return
         status = "deferred:no-note"
+        summary = None
         if clip["note"]:
             summary, status = self._summarize(clip)
+        archived = self._auto_archive(clip, summary)
+        if clip["note"]:
             self._send(
-                "Atelierr 剪藏待确认",
-                self._card_body(clip, summary),
-                confirm_note=clip["rel"],
+                "Atelierr 剪藏已归档" if archived else "Atelierr 剪藏待确认",
+                self._card_body(clip, summary, archived),
+                confirm_note=None if archived else clip["rel"],
             )
-        else:
+        elif not archived:
+            # 归档失败的才留晚间清单；归档成功的晚间 _still_pending 自然滤掉
             pending_push.enqueue(self.tree.state_dir, clip["rel"], kind="clip")
+        final_rel = f"{archived}/{Path(clip['rel']).name}" if archived else clip["rel"]
         state[clip["id"]] = {
-            "path": clip["rel"],
+            "path": final_rel,
             "url": url,
             "summary_status": status,
+            "archived": archived,
             "notified": datetime.now(timezone.utc).isoformat(),
         }
         if url:
             winners[url] = clip["id"]
         if clip["note"]:
-            report["cards"].append(clip["rel"])
+            report["cards"].append(final_rel)
+        elif archived:
+            report.setdefault("archived", []).append(final_rel)
         else:
             report["deferred"].append(clip["rel"])
+
+    def _auto_archive(self, clip: Dict[str, Any], summary: Optional[Dict]) -> Optional[str]:
+        """放权自动归档：LLM 摘要的 category（中图法）映射领域优先；
+        摘要缺失/分类无效/无备注（不调 LLM）一律进 personal/ 兜底格。
+        任何失败返回 None——笔记留原处带「待确认」走人工兜底。
+        """
+        domain = clc_to_domain(str(summary.get("category") or "")) if summary else None
+        target = domain or HANDWRITTEN_ARCHIVE_DIR
+        try:
+            ok, detail = archive_note(self.tree, clip["rel"], target_dir=target)
+        except Exception as exc:  # noqa: BLE001 - 归档异常留人兜底
+            logger.warning("剪藏自动归档异常 %s: %s", clip["rel"], exc)
+            return None
+        if not ok:
+            logger.warning("剪藏自动归档失败 %s: %s", clip["rel"], detail)
+            return None
+        return target
 
     def _mark_duplicate(
         self, clip: Dict[str, Any], state: Dict[str, Any], report: Dict[str, Any]
@@ -252,10 +289,14 @@ class ClipDispatcher:
         except Exception as exc:  # noqa: BLE001 - 摘要失败不阻塞推卡
             return None, f"failed:{type(exc).__name__}"
 
-    def _card_body(self, clip: Dict[str, Any], summary: Optional[Dict]) -> str:
+    def _card_body(
+        self, clip: Dict[str, Any], summary: Optional[Dict], archived: Optional[str] = None
+    ) -> str:
         """确认卡正文：标题 +（可选）用户备注 +（可选）观点总结与至多 3 条
-        要点 + 建议归档。备注是剪藏时用户随手写的"为什么存"
+        要点 + 归档行。备注是剪藏时用户随手写的"为什么存"
         （2026-09-10 裁决 C1，frontmatter ``备注`` 字段），放在最显眼处。
+        放权后（2026-09-21）：已归档的卡是纯知会（归档位置一行，无按钮）；
+        归档失败的照旧带「建议归档」提示与确认按钮（人工兜底）。
         """
         lines = [f"《{clip['title']}》已剪藏入库"]
         if clip.get("note"):
@@ -270,9 +311,12 @@ class ClipDispatcher:
             if points:
                 lines += ["", "要点："]
                 lines += [f"{i}. {p}" for i, p in enumerate(points, 1)]
-        hint = self._archive_hint(clip)
-        if hint:
-            lines += ["", hint]
+        if archived:
+            lines += ["", f"已自动归档：{archived}/（归错了拖到对的领域即可）"]
+        else:
+            hint = self._archive_hint(clip)
+            if hint:
+                lines += ["", hint]
         return "\n".join(lines)
 
     @staticmethod
