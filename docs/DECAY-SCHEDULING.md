@@ -34,6 +34,26 @@ python -m scripts.cli.memory_cli decay
 
 ---
 
+## 唯一执行者（2026-09-21 衰减归一）
+
+**全系统会写衰减状态的只有 `scripts/memory/decay.py` 一家**（每日
+03:00，只写 sidecar，删除走 pending_delete → review → purge → trash）。
+车间的遗忘路径（`protocols/intent-forget.md` 的 forgetter 顾问、
+`/autoevo-nightly`）与本套的关系：
+
+- **forgetter 是只读顾问**：说明书限定"只建议、绝不删改"；它管到
+  memory/ 时掉头调我们的 `memory_cli decay/review`，只是复述本套的
+  结果，没有第二套衰减逻辑在写状态；
+- **车间自扫的 wip/research 等目录在本 vault 不存在**（
+  `harness/paths.local.toml` 未映射），实测
+  `scripts/atelier/decay_scan.py` 两个波段（low-signal/redundant）
+  对本库零命中（exit 0）；
+- **`/autoevo-nightly` 无触发载体**：macOS launchd 专属，本机无
+  launchd/systemd/cron 入口（vault 无 `_meta/` 运行痕迹）；
+- 车间文件属禁改区，不删除——不调度、不写、扫描目标不存在，留着无害。
+
+---
+
 ## 方案 A: systemd timer（推荐）
 
 Unit 文件随仓库分发在 `docker/systemd/`：
