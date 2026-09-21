@@ -92,7 +92,7 @@ from scripts.dispatch.links import (
 from scripts.utils.file_utils import write_text_skip_existing
 from scripts.utils.state_store import read_json, write_json
 from scripts.dispatch.sysdir import SYSTEM_DIRNAME, write_machine_note
-from scripts.memory.core import LAYERS, MemoryTree
+from scripts.memory.core import LAYERS, MemoryTree, daily_note_path
 from scripts.processors.audio import SUPPORTED_EXTENSIONS as AUDIO_EXTS
 from scripts.processors.audio import AudioProcessor
 from scripts.processors.base import INLINE_BODY_MAX
@@ -561,6 +561,9 @@ class MediaDispatcher:
         domain = auto_archive(self.tree, filename)
         if domain:
             report["archived"][filename] = domain
+        # 日记附件行回链（第 6 条①）：每张图的日记行都指向图集卡
+        for path in paths:
+            self._annotate_diary_attachment(path, filename)
 
     def _batch_note_filename(self, paths: List[Path]) -> str:
         """图集卡文件名：media-<首张日期>-<全部相对路径哈希前6>.md。"""
@@ -652,7 +655,12 @@ class MediaDispatcher:
         人工可见。
         """
         day = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
-        diary = Path(self.tree.notes_dir) / f"{day}.md"
+        diary = daily_note_path(self.tree.notes_dir, day)
+        if not diary.is_file():
+            # 兼容期（2026-09-21 迁址）：QuickAdd 速记可能仍写根目录旧位置
+            legacy = Path(self.tree.notes_dir) / f"{day}.md"
+            if legacy.is_file():
+                diary = legacy
         if not diary.is_file():
             return ""
         try:
@@ -685,6 +693,39 @@ class MediaDispatcher:
             elif diff < before_diff:
                 before_text, before_diff = text, diff
         return after_text or before_text
+
+    def _annotate_diary_attachment(self, attachment: Path, note_filename: str) -> None:
+        """附件产出后在当天日记的附件行尾补 → [[产出卡]]（2026-09-21 第 6 条①）。
+
+        与 links._annotate_source 同例：只追加日记行尾（日记追加有用户
+        批准先例），原子写入并还原 mtime（回链不进 confidence 时钟）；
+        行内已含回链跳过（幂等）。日记按附件 mtime 定日期（到达那天，
+        不是处理这天）；任何失败只记日志，不影响产出主流程。
+        """
+        try:
+            day = datetime.fromtimestamp(attachment.stat().st_mtime).strftime("%Y-%m-%d")
+            diary = daily_note_path(self.tree.notes_dir, day)
+            if not diary.is_file():
+                legacy = Path(self.tree.notes_dir) / f"{day}.md"
+                diary = legacy if legacy.is_file() else diary
+            if not diary.is_file():
+                return
+            stem = Path(note_filename).stem
+            name = attachment.name
+            lines = diary.read_text(encoding="utf-8").splitlines(keepends=True)
+            for i, line in enumerate(lines):
+                if name in line and f"[[{stem}]]" not in line:
+                    lines[i] = line.rstrip("\n") + f" → [[{stem}]]\n"
+                    break
+            else:
+                return
+            stat = diary.stat()
+            tmp = diary.with_name(diary.name + ".tmp")
+            tmp.write_text("".join(lines), encoding="utf-8")
+            os.replace(tmp, diary)
+            os.utime(diary, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        except OSError as exc:
+            logger.warning("日记附件回链写入失败 %s: %s", attachment, exc)
 
     def _process_one(
         self, path: Path, state: Dict[str, Any], report: Dict[str, Any]
@@ -767,6 +808,7 @@ class MediaDispatcher:
                         domain = auto_archive(self.tree, card)
                         if domain:
                             report["archived"][card] = domain
+                        self._annotate_diary_attachment(path, card)
                 return
             suffix = path.suffix.lower()
             kind = "视频" if suffix in _VIDEO_EXTS else _KIND_BY_EXT[suffix]
@@ -826,6 +868,7 @@ class MediaDispatcher:
             domain = auto_archive(self.tree, filename)
             if domain:
                 report["archived"][filename] = domain
+            self._annotate_diary_attachment(path, filename)
             return
         entry["last_error"] = (result.error or "")[:300]
         final = entry["attempts"] >= MAX_ATTEMPTS

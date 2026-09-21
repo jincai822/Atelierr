@@ -20,6 +20,7 @@ import scripts.dispatch.feishu as feishu_module
 import scripts.dispatch.feishu_cards as feishu_cards_module
 import scripts.dispatch.feishu_io as feishu_io_module
 from scripts.dispatch.feishu import FeishuBridge, send_feishu
+from scripts.memory.core import daily_note_path
 from scripts.utils.date_utils import local_timezone
 
 
@@ -76,7 +77,7 @@ def test_text_message_appends_to_diary(memory_tree, capsys):
     event.event.message.chat_id = "oc_demo_chat"
     bridge.handle_event(event)
 
-    notes = list(memory_tree.notes_dir.glob(f"{_today()}.md"))
+    notes = list(daily_note_path(memory_tree.notes_dir, _today()).parent.glob(f"{_today()}.md"))
     assert len(notes) == 1
     text = notes[0].read_text(encoding="utf-8")
     assert "source: lark" in text
@@ -89,7 +90,8 @@ def test_text_message_appends_to_diary(memory_tree, capsys):
 
 
 def test_text_appends_to_existing_diary(memory_tree):
-    """当天日记已存在（QuickAdd 速记写过）：追加列表行，frontmatter 不动。"""
+    """当天日记已存在（QuickAdd 速记写在根目录旧位置）：追加进同一本，
+    不分裂成两本（2026-09-21 迁址兼容期）。"""
     memory_tree.create_note(f"{_today()}.md", "- 09:00 早上速记\n", source="sync")
     bridge = _bridge(memory_tree)
 
@@ -102,12 +104,23 @@ def test_text_appends_to_existing_diary(memory_tree):
     assert not list(memory_tree.notes_dir.glob("feishu-*.md"))
 
 
+def test_text_creates_diary_in_daily_notes_root(memory_tree):
+    """无既有日记时新建：落 daily-notes/YYYY/MM/ 原教旨结构并随迁 sidecar。"""
+    bridge = _bridge(memory_tree)
+    bridge.handle_event(_event("m-d2", "text", {"text": "首行"}))
+
+    diary = daily_note_path(memory_tree.notes_dir, _today())
+    assert diary.is_file()
+    assert "首行" in diary.read_text(encoding="utf-8")
+    assert not (memory_tree.notes_dir / f"{_today()}.md").exists()  # 不在根重复建
+
+
 def test_text_with_url_kept_verbatim(memory_tree):
     """含 URL 的消息原样进日记（links 分发下一轮从正文自动捡起）。"""
     bridge = _bridge(memory_tree)
     bridge.handle_event(_event("m2", "text", {"text": "看这个 https://v.douyin.com/abc/"}))
 
-    notes = list(memory_tree.notes_dir.glob(f"{_today()}.md"))
+    notes = list(daily_note_path(memory_tree.notes_dir, _today()).parent.glob(f"{_today()}.md"))
     assert len(notes) == 1
     assert "https://v.douyin.com/abc/" in notes[0].read_text(encoding="utf-8")
 
@@ -119,7 +132,7 @@ def test_duplicate_message_id_skipped(memory_tree):
     bridge.handle_event(event)
     bridge.handle_event(event)
 
-    notes = list(memory_tree.notes_dir.glob(f"{_today()}.md"))
+    notes = list(daily_note_path(memory_tree.notes_dir, _today()).parent.glob(f"{_today()}.md"))
     assert len(notes) == 1
     assert notes[0].read_text(encoding="utf-8").count("重复投递") == 1
 
@@ -131,7 +144,7 @@ def test_empty_text_ignored(memory_tree):
     bridge.handle_event(_event("m4", "text", {"text": "  "}))
 
     assert not list(memory_tree.notes_dir.glob("feishu-*.md"))
-    assert not list(memory_tree.notes_dir.glob(f"{_today()}.md"))
+    assert not list(daily_note_path(memory_tree.notes_dir, _today()).parent.glob(f"{_today()}.md"))
 
 
 def test_malformed_event_skipped(memory_tree):
@@ -144,7 +157,7 @@ def test_malformed_event_skipped(memory_tree):
     bridge.handle_event(SimpleNamespace(event=None))
 
     assert not list(memory_tree.notes_dir.glob("feishu-*.md"))
-    assert not list(memory_tree.notes_dir.glob(f"{_today()}.md"))
+    assert not list(daily_note_path(memory_tree.notes_dir, _today()).parent.glob(f"{_today()}.md"))
 
 
 def test_image_message_saved_to_attachments(memory_tree, monkeypatch):
@@ -161,6 +174,24 @@ def test_image_message_saved_to_attachments(memory_tree, monkeypatch):
     files = list((memory_tree.attachments_dir / "媒体").glob("feishu-*.png"))
     assert len(files) == 1
     assert files[0].read_bytes() == b"\x89PNG fake"
+
+
+def test_image_message_appends_diary_line(memory_tree, monkeypatch):
+    """附件直通日记（2026-09-21 第 6 条①）：图片到达当天日记记一行。"""
+    client = MagicMock()
+    resp = client.im.v1.message_resource.get.return_value
+    resp.success.return_value = True
+    resp.file = io.BytesIO(b"\x89PNG fake")
+    _fake_lark(monkeypatch, client)
+
+    bridge = _bridge(memory_tree)
+    bridge.handle_event(_event("m-img-d", "image", {"image_key": "img_v3_9"}))
+
+    diary = daily_note_path(memory_tree.notes_dir, _today())
+    assert diary.is_file()
+    content = diary.read_text(encoding="utf-8")
+    assert "📷 [[attachments/媒体/feishu-" in content
+    assert ".png]]" in content
 
 
 def test_file_message_keeps_sanitized_name(memory_tree, monkeypatch):
@@ -1092,7 +1123,7 @@ def test_capture_text_adds_done_reaction(memory_tree, monkeypatch):
     bridge.handle_event(event)
 
     assert reactions == ["m-react-1"]
-    assert len(list(memory_tree.notes_dir.glob(f"{_today()}.md"))) == 1
+    assert len(list(daily_note_path(memory_tree.notes_dir, _today()).parent.glob(f"{_today()}.md"))) == 1
 
 
 def test_capture_resource_adds_done_reaction(memory_tree, monkeypatch):
@@ -1131,7 +1162,7 @@ def test_reaction_api_failure_still_captures(memory_tree, monkeypatch):
 
     bridge.handle_event(_event("m-react-3", "text", {"text": "照进"}))
 
-    assert len(list(memory_tree.notes_dir.glob(f"{_today()}.md"))) == 1
+    assert len(list(daily_note_path(memory_tree.notes_dir, _today()).parent.glob(f"{_today()}.md"))) == 1
     client.im.v1.message_reaction.create.assert_called_once()
 
 
@@ -2059,7 +2090,7 @@ def test_owner_sender_message_accepted(memory_tree):
     )
     bridge.handle_event(event)
 
-    assert len(list(memory_tree.notes_dir.glob(f"{_today()}.md"))) == 1
+    assert len(list(daily_note_path(memory_tree.notes_dir, _today()).parent.glob(f"{_today()}.md"))) == 1
 
 
 def test_foreign_operator_action_ignored(memory_tree):
@@ -2495,7 +2526,7 @@ def test_post_message_text_and_images_captured(memory_tree, monkeypatch):
 
     bridge.handle_event(_event("mp1", "post", content))
 
-    diary = (memory_tree.notes_dir / f"{_today()}.md").read_text(encoding="utf-8")
+    diary = (daily_note_path(memory_tree.notes_dir, _today())).read_text(encoding="utf-8")
     assert "这篇文章不错" in diary
     assert "https://v.douyin.com/abc/" in diary
     assert "1 张配图下载失败" in diary
@@ -2513,7 +2544,7 @@ def test_post_locale_wrapper_pure_images(memory_tree, monkeypatch):
 
     bridge.handle_event(_event("mp2", "post", content))
 
-    assert not list(memory_tree.notes_dir.glob(f"{_today()}.md"))
+    assert not list(daily_note_path(memory_tree.notes_dir, _today()).parent.glob(f"{_today()}.md"))
     assert len(list((memory_tree.attachments_dir / "媒体").glob("feishu-*.png"))) == 1
     assert reactions == ["mp2"]
 
@@ -2548,7 +2579,7 @@ def test_distill_decide_accepts_homophone_alias(memory_tree, monkeypatch):
     # 别名命中即审批，不再被吞进日记
     from datetime import datetime
 
-    diary = memory_tree.notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}.md"
+    diary = daily_note_path(memory_tree.notes_dir, datetime.now().strftime("%Y-%m-%d"))
     assert not diary.exists() or "题 1" not in diary.read_text(encoding="utf-8")
 
 
@@ -2569,7 +2600,7 @@ def test_natural_language_intent_routes_to_search(memory_tree, monkeypatch):
     bridge.handle_event(event)
 
     assert searched == ["叔本华"]
-    diary = memory_tree.notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}.md"
+    diary = daily_note_path(memory_tree.notes_dir, datetime.now().strftime("%Y-%m-%d"))
     assert not diary.exists() or "叔本华的视频" not in diary.read_text(encoding="utf-8")
 
 
@@ -2584,7 +2615,7 @@ def test_natural_language_fallback_still_captures(memory_tree, monkeypatch):
     event.event.message.chat_id = "oc_demo_chat"
     bridge.handle_event(event)
 
-    diary = memory_tree.notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}.md"
+    diary = daily_note_path(memory_tree.notes_dir, datetime.now().strftime("%Y-%m-%d"))
     assert diary.exists()
     assert "今天天气不错" in diary.read_text(encoding="utf-8")
 
@@ -2606,7 +2637,7 @@ def test_natural_language_workshop_gets_guidance(memory_tree, monkeypatch):
     bridge.handle_event(event)
 
     assert feedback and "车间" in feedback[0]
-    diary = memory_tree.notes_dir / f"{datetime.now().strftime('%Y-%m-%d')}.md"
+    diary = daily_note_path(memory_tree.notes_dir, datetime.now().strftime("%Y-%m-%d"))
     assert not diary.exists() or "换工作" not in diary.read_text(encoding="utf-8")
 
 

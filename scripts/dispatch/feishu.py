@@ -126,7 +126,12 @@ from scripts.dispatch.feishu_io import (
     send_feishu_card,
 )
 from scripts.dispatch.media import BOOK_SUBDIR, MEDIA_SUBDIR
-from scripts.memory.core import NOTE_EXCLUDED_DIRS, SYSTEM_DIRNAME, MemoryTree
+from scripts.memory.core import (
+    NOTE_EXCLUDED_DIRS,
+    SYSTEM_DIRNAME,
+    MemoryTree,
+    daily_note_path,
+)
 
 #: re-export 门脸（__all__ 声明即"有意再导出"，ruff F401 不误报）：
 #: 既有调用方与测试打点（from scripts.dispatch.feishu import ...）不变。
@@ -1743,12 +1748,25 @@ class FeishuBridge:
         评论提取见 dispatch/links.py extract_comment 的时间行豁免。
         """
         now = datetime.now(local_timezone())
-        diary = Path(self.tree.notes_dir) / f"{now.strftime('%Y-%m-%d')}.md"
+        diary = daily_note_path(self.tree.notes_dir, now.strftime("%Y-%m-%d"))
+        # 兼容期（2026-09-21 日记迁址）：QuickAdd 速记若仍写根目录旧位置，
+        # 优先续写同一本，不分裂成两本日记
+        legacy = Path(self.tree.notes_dir) / f"{now.strftime('%Y-%m-%d')}.md"
+        if legacy.is_file() and not diary.exists():
+            diary = legacy
+        diary.parent.mkdir(parents=True, exist_ok=True)
         lines = text.splitlines()
         entry = f"- {now.strftime('%H:%M')} {lines[0]}"
         entry += "".join(f"\n  {line}" for line in lines[1:])
         if not diary.exists():
-            self.tree.create_note(diary.name, f"{entry}\n", source="lark")
+            # create_note 只建根/inbox：先建根再迁入 daily-notes/YYYY/MM/
+            #（同进程连贯操作；relocate_entry 随迁 sidecar，2026-09-21
+            # 原教旨日记结构）
+            created = self.tree.create_note(diary.name, f"{entry}\n", source="lark")
+            created.rename(diary)
+            note_id = self.tree._read_note_id(diary)
+            if note_id is not None:
+                self.tree.relocate_entry(note_id, self.tree._rel_key(diary))
             return diary
         content = diary.read_text(encoding="utf-8")
         sep = "" if content.endswith("\n") else "\n"
@@ -1897,7 +1915,30 @@ class FeishuBridge:
         target = attach_dir / filename
         self._atomic_write(target, blob)
         self._add_reaction(message_id)
+        self._append_diary_attachment(target, msg_type)
         return target
+
+    def _append_diary_attachment(self, attachment: Path, msg_type: str) -> None:
+        """附件到达直通当天日记（2026-09-21 原教旨改造第 6 条①）：
+
+        文字/链接早已进日记，图片/视频/语音/PDF 此前在日记里毫无痕迹
+        ——现在到达即记一行 ``- HH:MM 📷 [[attachments/媒体/xxx.png]]``，
+        media 管线产出后在行尾补 → [[产出卡]]（见 media.py
+        _annotate_diary_attachment）。日记行追加失败只记日志，绝不
+        影响附件落盘与回执。
+        """
+        kind = {
+            "image": "📷",
+            "audio": "🎙",
+            "media": "🎬",
+        }.get(msg_type, "📎")
+        if attachment.suffix.lower() == ".pdf":
+            kind = "📕"
+        try:
+            rel = attachment.relative_to(self.tree.attachments_dir.parent).as_posix()
+            self._append_diary(f"{kind} [[{rel}]]")
+        except Exception as exc:  # noqa: BLE001 - 日记行不影响主流程
+            print(f"[feishu] diary attachment line fail: {exc}", flush=True)
 
     def _download_resource(
         self, message_id: str, key: str, msg_type: str

@@ -74,11 +74,33 @@ MACHINE_DECAY_FACTOR: float = 3.0
 DAILY_NOTE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.md$")
 DAILY_NOTE_DIR = "日记"
 
+#: 日记原教旨结构（2026-09-21 改造第 6 条）：daily-notes/YYYY/MM/ 分层
+#: ——车间说明书按此结构找日记（小抄 daily_notes = "memory/daily-notes"）
+DAILY_NOTES_ROOT = "daily-notes"
+
 
 def is_daily_note(note_path: Path) -> bool:
-    """是否日记（时间档案）：文件名是 YYYY-MM-DD.md 或在 日记/ 子目录下。"""
+    """是否日记（时间档案）：文件名是 YYYY-MM-DD.md、位于 日记/ 子目录
+    或 daily-notes/ 目录树下。"""
     path = Path(note_path)
-    return bool(DAILY_NOTE_RE.match(path.name)) or path.parent.name == DAILY_NOTE_DIR
+    return (
+        bool(DAILY_NOTE_RE.match(path.name))
+        or path.parent.name == DAILY_NOTE_DIR
+        or DAILY_NOTES_ROOT in path.parts
+    )
+
+
+def daily_note_path(notes_dir, date_str: str) -> Path:
+    """当天日记的原教旨路径：daily-notes/YYYY/MM/YYYY-MM-DD.md。
+
+    Args:
+        notes_dir: 笔记根目录。
+        date_str: 本地日期（YYYY-MM-DD）。
+    """
+    year, month, _day = date_str.split("-")
+    return (
+        Path(notes_dir) / DAILY_NOTES_ROOT / year / month / f"{date_str}.md"
+    )
 
 
 #: 书籍档案卡目录（2026-09-14 用户裁决 KM 评审 P4）：藏书记录是书架

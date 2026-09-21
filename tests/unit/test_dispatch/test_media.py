@@ -1041,3 +1041,52 @@ def test_comment_falls_back_to_nearest_before(memory_tree, monkeypatch):
 
     note = _created_note(memory_tree)
     assert "> 💬 我的评论：先发的人话" in note.read_text(encoding="utf-8")
+
+
+# ----------------------------------------------------------------------
+# 日记附件行回链（2026-09-21 第 6 条①：产出后在附件行尾补 → [[产出卡]]）
+# ----------------------------------------------------------------------
+
+
+def test_diary_attachment_backlink_appended(memory_tree):
+    """media 产出后，当天日记的附件行尾补 → [[产出卡]]；日记 mtime 不变。"""
+    from scripts.memory.core import daily_note_path
+
+    day = time.strftime("%Y-%m-%d")
+    diary = daily_note_path(memory_tree.notes_dir, day)
+    diary.parent.mkdir(parents=True, exist_ok=True)
+    memory_tree.create_note(f"{day}.md", "- 14:32 📷 [[attachments/媒体/IMG_001.png]]\n", source="lark")
+    created = memory_tree.notes_dir / f"{day}.md"
+    created.rename(diary)
+    note_id = memory_tree._read_note_id(diary)
+    memory_tree.relocate_entry(note_id, memory_tree._rel_key(diary))
+    before_mtime = diary.stat().st_mtime_ns
+
+    _add_attachment(memory_tree, "IMG_001.png")
+    _dispatcher(memory_tree).run()
+
+    content = diary.read_text(encoding="utf-8")
+    assert "📷 [[attachments/媒体/IMG_001.png]] → [[media-" in content
+    assert diary.stat().st_mtime_ns == before_mtime  # 回链不进 confidence 时钟
+
+
+def test_diary_attachment_backlink_idempotent(memory_tree):
+    """回链幂等：行内已含产出卡链接时不重复追加。"""
+    from scripts.memory.core import daily_note_path
+
+    day = time.strftime("%Y-%m-%d")
+    diary = daily_note_path(memory_tree.notes_dir, day)
+    diary.parent.mkdir(parents=True, exist_ok=True)
+    diary.write_text(
+        "- 14:32 📷 [[attachments/媒体/IMG_001.png]] → [[media-20990101-abc123]]\n",
+        encoding="utf-8",
+    )
+
+    _add_attachment(memory_tree, "IMG_001.png")
+    dispatcher = _dispatcher(memory_tree)
+    dispatcher._annotate_diary_attachment(
+        Path(memory_tree.attachments_dir) / "IMG_001.png", "media-20990101-abc123.md"
+    )
+
+    content = diary.read_text(encoding="utf-8")
+    assert content.count("[[media-") == 1  # 没有重复回链

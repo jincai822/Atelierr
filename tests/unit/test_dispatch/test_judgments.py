@@ -17,6 +17,7 @@ from scripts.dispatch.judgments import (
     scan_vault,
 )
 from scripts.dispatch.feishu import FeishuBridge
+from scripts.memory.core import daily_note_path
 
 
 # ---------- 解析 ----------
@@ -199,7 +200,7 @@ def test_feishu_judgment_prefix_registers_and_keeps_diary(
     assert len(files) == 1
     assert "飞书通道的判断" in files[0].read_text(encoding="utf-8")
     today = datetime.now().strftime("%Y-%m-%d")
-    diary = memory_tree.notes_dir / f"{today}.md"
+    diary = daily_note_path(memory_tree.notes_dir, today)
     assert diary.exists()
     assert "判断：飞书通道的判断" in diary.read_text(encoding="utf-8")
     assert feedback and "已收进判断登记处" in feedback[0]
