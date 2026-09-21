@@ -1201,6 +1201,7 @@ class FeishuBridge:
                 "· 提炼候选 — 今日待提炼清单\n"
                 "· 周回顾 — 问答进度/发起指引\n"
                 "· 复盘 — 今日四问（手动发起/恢复每晚推送）\n"
+                "· 决策：话题 — 异步决策向导（框定三问→双框架分析→「存」落盘）\n"
                 "· 同步看板 — 笔记元数据同步进多维表格（手机看板视图）\n"
                 "· 搜 关键词 — 搜笔记（前 5 条带打开按钮）\n"
                 "直接发文字=捕获笔记；发链接=转写；发语音=Whisper；发图=OCR",
@@ -1619,6 +1620,27 @@ class FeishuBridge:
             self._append_diary(text)
             self._send_feedback(chat_id, reply)
             return None
+        # 「决策：」（2026-09-21 第 13 条 sitting 替代形态）：飞书异步决策
+        # 向导——开店挂框定三问（碎片时间作答），「完成」收摊后后台线程
+        # 跑双框架分析推回；「存」落盘 reflections/、「算了」丢弃、「重试」
+        # 重跑。与判断指令同级，先于问答会话/捕获
+        if text.startswith("决策：") or text.startswith("决策:"):
+            from scripts.dispatch import decision_wizard
+
+            topic = text.split("：", 1)[1] if "：" in text else text.split(":", 1)[1]
+            store = PromptStore(Path(self.tree.state_dir))
+            self._append_diary(f"🧭 决策向导：{topic.strip()}")
+            self._send_feedback(chat_id, decision_wizard.open_wizard(store, topic))
+            return None
+        # 「存」「算了」「重试」：有待落盘决策时的指令（无 pending 不截胡，
+        # 照常走后续问答/捕获）
+        if text in ("存", "算了", "重试"):
+            from scripts.dispatch import decision_wizard
+
+            if decision_wizard.handle_pending_command(
+                self.tree, text, lambda t: self._send_feedback(chat_id, t)
+            ):
+                return None
         # 机器提名批量审批（2026-09-16 回路三）：「批 N」收第 N 条待批
         # 候选进登记处（certainty 用提名建议值）、「略 N」拒掉——与菜单
         # 指令同级，先于问答会话；序号与晨报安静小节同源同序
@@ -1682,6 +1704,18 @@ class FeishuBridge:
                             )
                     except Exception as exc:  # noqa: BLE001 - 钩子是附加动作
                         print(f"[feishu] review dump fail: {exc}", flush=True)
+                # 决策向导（kind=decision，2026-09-21 第 13 条）：收摊即后台
+                # 线程跑框架分析推回（LLM 不进事件循环，防守护停摆）
+                elif closed and str(closed.get("kind") or "") == "decision":
+                    try:
+                        from scripts.dispatch import decision_wizard
+
+                        decision_wizard.finish_wizard(
+                            self.tree, closed,
+                            lambda t: self._send_feedback(chat_id, t),
+                        )
+                    except Exception as exc:  # noqa: BLE001 - 钩子是附加动作
+                        print(f"[feishu] decision wizard fail: {exc}", flush=True)
                 self._send_feedback(chat_id, "好的，本次问答已结束 ✅")
             else:
                 count = store.append(text)

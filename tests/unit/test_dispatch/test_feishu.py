@@ -108,6 +108,20 @@ def test_text_message_entity_wrapped(memory_tree):
     assert "https://example.com 叔本华" in body  # URL 行不包
 
 
+def test_decision_prefix_opens_wizard(memory_tree):
+    """「决策：」（2026-09-21 第 13 条 sitting 替代形态）：开 PromptStore
+    decision 会话 + 日记留痕；开店本身不触发 LLM（分析在收摊后）。"""
+    from scripts.dispatch.prompt import PromptStore
+
+    bridge = _bridge(memory_tree)
+    bridge.handle_event(_event("m-d9", "text", {"text": "决策：要不要换工作"}))
+
+    data = PromptStore(Path(memory_tree.state_dir)).load()
+    assert data["kind"] == "decision" and data["topic"] == "要不要换工作"
+    diary = daily_note_path(memory_tree.notes_dir, _today())
+    assert "🧭 决策向导：要不要换工作" in diary.read_text(encoding="utf-8")
+
+
 def test_text_appends_to_existing_diary(memory_tree):
     """当天日记已存在（QuickAdd 速记写在根目录旧位置）：追加进同一本，
     不分裂成两本（2026-09-21 迁址兼容期）。"""
