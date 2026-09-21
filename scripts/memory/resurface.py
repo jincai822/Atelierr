@@ -22,6 +22,13 @@ decay 把 confidence 跌破 delete_threshold 的笔记推向 pending_delete
 少打扰，想不起来的多见面。反馈只写复习调度状态（resurface.json），
 不进 confidence 公式（无状态契约不破）；「想起来了」顺带记一次
 on_note_accessed（访问=使用信号，合法重置闲置时钟）。
+
+校准记账（2026-09-21 脑科学评审落地）：窗口 [0.15, 0.5)、×2/÷2、
+60 天封顶都是先验合理值，未对用户校准。每次反馈/流放追加一条
+JSONL 观测（间隔变化、当时 confidence 与闲置天数）到
+``<state_dir>/resurface_outcomes.jsonl``（append-only，只增不改）——
+攒一个月数据后回答「推送时 confidence 与想起率的关系」，再谈调参；
+写日志失败静默跳过，绝不影响反馈主流程，绝不触碰笔记文件。
 """
 
 from __future__ import annotations
@@ -83,6 +90,7 @@ class ResurfaceManager:
         self.daily_count = int(daily_count)
         self.cooldown_days = int(cooldown_days)
         self.state_path = self.tree.state_dir / "resurface.json"
+        self.outcomes_path = self.tree.state_dir / "resurface_outcomes.jsonl"
 
     @classmethod
     def from_config(
@@ -245,6 +253,7 @@ class ResurfaceManager:
         )
         streak = int(entry.get("streak", 0)) if isinstance(entry, dict) else 0
         fail_streak = int(entry.get("fail_streak", 0)) if isinstance(entry, dict) else 0
+        interval_before = interval
         if remembered:
             interval = min(interval * 2, 60.0)
             streak += 1
@@ -265,6 +274,7 @@ class ResurfaceManager:
             entry_out["exiled"] = True
         state[note_id] = entry_out
         self._save_state(state)
+        self._log_outcome(note_id, remembered, interval_before, entry_out, now)
         return dict(state[note_id])
 
     def exile(self, note_id: str, now: Optional[datetime] = None) -> None:
@@ -282,6 +292,13 @@ class ResurfaceManager:
         entry["pushed"] = now.isoformat(timespec="seconds")
         state[note_id] = entry
         self._save_state(state)
+        self._append_outcome(
+            {
+                "ts": now.isoformat(timespec="seconds"),
+                "event": "exile",
+                "note_id": str(note_id),
+            }
+        )
 
     def _in_cooldown(self, stamp: Any, now: datetime) -> bool:
         """距上次推送不足该篇间隔（缺省 cooldown_days）返回 True；
@@ -305,6 +322,57 @@ class ResurfaceManager:
         if info.get("last_accessed"):
             stamps.append(parse_date(info["last_accessed"]))
         return max((now - max(stamps)).days, 0)
+
+    def _log_outcome(
+        self,
+        note_id: str,
+        remembered: bool,
+        interval_before: float,
+        entry_out: Dict[str, Any],
+        now: datetime,
+    ) -> None:
+        """追加一条复习反馈校准观测（2026-09-21 脑科学评审落地）：
+        间隔变化 + 当时的 confidence/闲置天数（尽力而为，定位不到就
+        缺省）。攒一个月数据用于校准复习窗口与 ×2/÷2 参数；任何失败
+        都不影响反馈主流程。"""
+        record: Dict[str, Any] = {
+            "ts": now.isoformat(timespec="seconds"),
+            "event": "outcome",
+            "note_id": str(note_id),
+            "remembered": bool(remembered),
+            "interval_before": interval_before,
+            "interval_after": entry_out["interval"],
+            "streak": entry_out["streak"],
+            "fail_streak": entry_out["fail_streak"],
+        }
+        if entry_out.get("exiled"):
+            record["exiled"] = True
+        found = self._locate(str(note_id))
+        if found is not None:
+            info, path = found
+            record["confidence"] = info["confidence"]
+            record["idle_days"] = self._idle_days(info, path, now)
+        self._append_outcome(record)
+
+    def _locate(self, note_id: str) -> Optional[Any]:
+        """按 sidecar id（或 stem 兜底）定位笔记 (info, path)；找不到 None。"""
+        for layer in LAYERS:
+            for path in self.tree.list_notes(layer):
+                try:
+                    info = self.tree.note_info(path)
+                except (OSError, ValueError):
+                    continue
+                if str(info.get("id") or path.stem) == note_id:
+                    return info, path
+        return None
+
+    def _append_outcome(self, record: Dict[str, Any]) -> None:
+        """向校准日志追加一行 JSON（append-only）；写失败静默跳过。"""
+        try:
+            with self.outcomes_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
 
     def _load_state(self) -> Dict[str, str]:
         """读取冷却状态；缺失/损坏返回空表（冷却状态丢了最多重推一次）。"""

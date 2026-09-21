@@ -1561,8 +1561,8 @@ def test_send_todo_feishu_card_buttons(monkeypatch):
 
 
 def test_send_resurface_feishu_card_layout(monkeypatch):
-    """复习卡：提示语 + 逐条标题 + 打开/想起来了/没想起来三按钮
-    （2026-09-13 间隔重复升级）；空队列不发。"""
+    """复习卡：提示语 + 逐条标题 + 想起来了(主按钮)/没想起来/核对原文/不再推
+    （先想再看动线：主按钮是自评而不是打开原文，2026-09-21）；空队列不发。"""
     assert feishu_module.send_resurface_feishu([]) is False
     cards = []
     monkeypatch.setattr(
@@ -1585,16 +1585,21 @@ def test_send_resurface_feishu_card_layout(monkeypatch):
         if e["tag"] == "action"
         for a in e["actions"]
     ]
-    assert len(buttons) == 8  # 每条：打开 + 想起来了 + 没想起来 + 🚫不再推（C3）
+    assert len(buttons) == 8  # 每条：想起来了 + 没想起来 + 核对原文 + 🚫不再推
     assert any("不再推" in (b["text"]["content"]) for b in buttons)
-    # 先回忆后展示 + 应用追问（2026-09-18 脑科学 C3）
+    # 先回忆后展示 + 应用追问（2026-09-18 脑科学 C3；2026-09-21 措辞强化）
     intro = card["elements"][0]["text"]["content"]
-    assert "先在心里回想" in intro and "今天有什么用" in intro
+    assert "先默想" in intro and "今天有什么用" in intro
     uri_buttons = [b for b in buttons if "url" in b]
     assert len(uri_buttons) == 2
     assert all(
         b["url"].startswith("obsidian://open?vault=") for b in uri_buttons
     )
+    # 「核对原文」降为普通按钮，主按钮留给自评
+    assert all(b["text"]["content"] == "📖 核对原文" for b in uri_buttons)
+    assert all(b["type"] == "default" for b in uri_buttons)
+    good = [b for b in buttons if b["text"]["content"] == "✅ 想起来了"]
+    assert good and all(b["type"] == "primary" for b in good)
     callbacks = [b for b in buttons if "behaviors" in b]
     assert callbacks[0]["behaviors"][0]["value"]["action"] == "resurface_feedback"
     assert callbacks[0]["behaviors"][0]["value"]["outcome"] == "good"

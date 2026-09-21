@@ -354,3 +354,59 @@ def test_two_consecutive_forgets_auto_exile(memory_tree, make_note):
     manager.record_outcome(id2, remembered=False)
     good = manager.record_outcome(id2, remembered=True)
     assert good.get("fail_streak") == 0
+
+
+def test_record_outcome_writes_calibration_log(memory_tree, make_note):
+    """校准记账（2026-09-21 脑科学评审）：反馈追加 JSONL 观测——间隔
+    变化 + 当时 confidence/闲置天数；只写 state_dir，笔记不被动。"""
+    note = make_note(memory_tree, filename="cal.md", content="内容", idle_days=20)
+    manager = ResurfaceManager(memory_tree)
+    note_id = memory_tree._find_entry_id(note) or note.stem
+
+    manager.mark_pushed([note_id])
+    manager.record_outcome(note_id, remembered=True)
+
+    lines = manager.outcomes_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["event"] == "outcome"
+    assert record["note_id"] == note_id
+    assert record["remembered"] is True
+    assert record["interval_before"] == 3.0
+    assert record["interval_after"] == 6.0
+    assert 0.15 <= record["confidence"] < 0.5
+    assert record["idle_days"] == 20
+    assert manager.outcomes_path.parent == memory_tree.state_dir
+
+
+def test_calibration_log_appends_and_survives_bad_dir(memory_tree):
+    """校准日志 append-only（逐行追加）；写失败静默，反馈主流程不受影响。"""
+    manager = ResurfaceManager(memory_tree)
+    manager.mark_pushed(["n1"])
+    manager.record_outcome("n1", remembered=True)
+    manager.record_outcome("n1", remembered=False)
+
+    lines = manager.outcomes_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    second = json.loads(lines[1])
+    assert second["remembered"] is False
+    assert "confidence" not in second  # n1 不存在：尽力而为，缺省
+
+    manager.outcomes_path = memory_tree.state_dir / "no-such-dir" / "x.jsonl"
+    state = manager.record_outcome("n1", remembered=True)  # 写失败不抛异常
+    assert state["interval"] == 6.0
+
+
+def test_exile_writes_calibration_event(memory_tree, make_note):
+    """流放也记账：event=exile，供一个月后统计水蛭率。"""
+    note = make_note(memory_tree, filename="leech.md", content="内容", idle_days=10)
+    manager = ResurfaceManager(memory_tree)
+    note_id = memory_tree._find_entry_id(note) or note.stem
+
+    manager.exile(note_id)
+
+    record = json.loads(
+        manager.outcomes_path.read_text(encoding="utf-8").splitlines()[0]
+    )
+    assert record["event"] == "exile"
+    assert record["note_id"] == note_id

@@ -215,9 +215,12 @@ def todo_batch_card(items: List[Dict[str, str]]) -> Dict[str, Any]:
 def resurface_card(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     """今日复习卡（纯组装，不发送——回调重建同构卡片也用它）。
 
-    逐条：标题 + 闲置天数 + 「打开」（URI）+「✅ 想起来了」/「❌ 没想起来」
+    逐条：标题 + 闲置天数 +「✅ 想起来了」（主按钮，先自评）/
+    「❌ 没想起来」/「📖 核对原文」（URI，自评后再核对）/「🚫 不再推」
     （callback，value 带 batch——平台回调整卡替换，点掉一条后桥用
     「batch 减去该条」重建本卡，其余条目不消失；与清单卡同规）。
+    按钮动线刻意「想 → 自评 → 核对」：主按钮是自评而不是打开原文
+    （2026-09-21 检索练习强化，脑科学评审：点开≠掌握）。
     """
     elements: List[Dict[str, Any]] = [
         {
@@ -225,9 +228,9 @@ def resurface_card(items: List[Dict[str, Any]]) -> Dict[str, Any]:
             "text": {
                 "tag": "lark_md",
                 "content": (
-                    "先在心里回想内容，再点「打开」核对（先回忆后展示）。"
-                    "看完问自己：这对你今天有什么用？\n"
-                    "✅/❌ 我按反馈调间隔（连错 2 次自动停推）；🚫 这条以后不再推。"
+                    "先默想 10 秒：这条讲了什么？它对你今天有什么用？\n"
+                    "想完先点 ✅/❌ 自评，再点「核对原文」验证（先回忆后展示）；"
+                    "✅/❌ 我按反馈调间隔（连错 2 次自动停推），🚫 这条以后不再推。"
                 ),
             },
         }
@@ -253,14 +256,8 @@ def resurface_card(items: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "actions": [
                     {
                         "tag": "button",
-                        "text": {"tag": "plain_text", "content": "打开"},
-                        "type": "primary",
-                        "url": _console_url(relpath),
-                    },
-                    {
-                        "tag": "button",
                         "text": {"tag": "plain_text", "content": "✅ 想起来了"},
-                        "type": "default",
+                        "type": "primary",
                         "behaviors": [
                             {
                                 "type": "callback",
@@ -288,6 +285,12 @@ def resurface_card(items: List[Dict[str, Any]]) -> Dict[str, Any]:
                                 },
                             }
                         ],
+                    },
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "📖 核对原文"},
+                        "type": "default",
+                        "url": _console_url(relpath),
                     },
                     {
                         "tag": "button",
@@ -321,12 +324,13 @@ def resurface_card(items: List[Dict[str, Any]]) -> Dict[str, Any]:
 def send_resurface_feishu(
     items: List[Dict[str, Any]], chat_id: Optional[str] = None
 ) -> bool:
-    """今日复习卡：只给标题（先想），按钮才打开原文（再看）。
+    """今日复习卡：只给标题（先想），自评后才有「核对原文」（再看）。
 
-    卡片刻意不含笔记内容——「先在心里回想，再点开核对」是间隔重复
-    的关键动作；想不起来的：值得就提炼进压缩层，不值得留给
-    review→purge。反馈按钮（想起来/没想起来）驱动每篇的独立间隔
-    （2026-09-13 间隔重复升级）。
+    卡片刻意不含笔记内容，主按钮是 ✅/❌ 自评而不是打开原文——
+    「先在心里回想，再点开核对」是间隔重复的关键动作（2026-09-21
+    脑科学评审：点开只是再认，自评才是提取练习）；想不起来的：
+    值得就提炼进压缩层，不值得留给 review→purge。反馈按钮
+    （想起来/没想起来）驱动每篇的独立间隔（2026-09-13 间隔重复升级）。
 
     Args:
         items: 复习候选（ResurfaceManager.candidates() 的 dict：

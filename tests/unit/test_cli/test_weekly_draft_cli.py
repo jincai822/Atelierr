@@ -36,6 +36,9 @@ def test_build_prompt_pins_single_writable_file(tmp_path):
     assert "不问人" in prompt
     assert weekly_draft_cli.WEEKLY_SPEC in prompt
     assert "-weekly-draft.md" in prompt
+    # 升华候选固定节（2026-09-21 脑科学评审：治「收而不化」）
+    assert "升华候选" in prompt
+    assert "只提名不执行提炼" in prompt
 
 
 def test_collect_excerpt_skips_frontmatter(tmp_path):
