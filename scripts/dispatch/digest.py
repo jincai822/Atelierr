@@ -26,7 +26,10 @@
   （2026-09-10 用户裁决 D1「都放」；只读聚合，不新增写入面）；
 - 系统自检：各定时器活性——它们全是"跑了就写 state"的模型，
   状态文件 mtime 新鲜 = 班次活着；沉默超阈值 = 定时器疑似停了
-  （systemd 不会主动来告诉你），异常项数同步进推送文案。
+  （systemd 不会主动来告诉你），异常项数同步进推送文案；
+  并挂车间翻译本漂移哨兵（harness/paths.local.toml 映射目录在
+  vault 缺失即点名，2026-09-22 问题 2 裁决——车间 find 空目录静默
+  跳过不报错，漂移是暗坑）。
 
 纪律（与 dispatch 模块同源）：
 - 幂等：文件名 ``系统/今日摘要-YYYY-MM-DD.md``，当天已存在则跳过；
@@ -188,6 +191,50 @@ def _interruption_line(tree: MemoryTree, yesterday: str) -> Optional[str]:
     return "⏱ 昨日打扰账单：" + "｜".join(parts)
 
 
+def _paths_drift_lines(tree, registry: Optional[Path] = None) -> List[str]:
+    """车间翻译本漂移哨兵（2026-09-22 问题 2 裁决）：核对
+    harness/paths.local.toml 里映射的目录在 vault 真实存在——缺失即
+    车间会静默找不到该领域（find 空目录安全跳过，不报错），晨报点名
+    防暗坑。只读该文件（禁区只读不写）；文件不存在（别的机器/未配置）
+    静默跳过。
+
+    Args:
+        tree: MemoryTree 实例。
+        registry: 翻译本路径（测试注入用）；缺省取本仓 harness/ 下。
+
+    Returns:
+        List[str]: 漂移提醒行；无漂移/无翻译本为空列表。
+    """
+    if registry is None:
+        registry = Path(__file__).resolve().parents[2] / "harness" / "paths.local.toml"
+    if not registry.is_file():
+        return []
+    try:
+        text = registry.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    vault_root = Path(tree.notes_dir).parent
+    missing: List[str] = []
+    in_paths = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("["):
+            in_paths = line == "[paths]"
+            continue
+        if not in_paths:
+            continue
+        m = re.match(r'^\w+\s*=\s*"([^"]+)"', line)
+        if m and not (vault_root / m.group(1)).is_dir():
+            missing.append(m.group(1))
+    if not missing:
+        return []
+    return [
+        f"⚠️ 车间翻译本漂移：{len(missing)} 个映射目录在库里不存在"
+        f"（{'、'.join(missing)}）——车间会静默找不到它们，"
+        "请同步 harness/paths.local.toml"
+    ]
+
+
 def _health_lines(state_dir: Path, now: Optional[datetime] = None) -> Tuple[List[str], int]:
     """系统自检行（定时器活性）与异常项数。
 
@@ -295,6 +342,11 @@ class DigestDispatcher:
         undistilled = self._distill_candidates(wiki, today)
         wiki_issues = wiki.validate()
         health, health_stale = _health_lines(Path(self.tree.state_dir))
+        # 翻译本漂移并进自检节（问题 2 哨兵；漂移算一项异常）
+        drift = _paths_drift_lines(self.tree)
+        if drift:
+            health += drift
+            health_stale += 1
         # 捕获统计（裁决 D1）：昨日入口分布一行；周日加本周详细节
         yesterday = (
             datetime.strptime(today, "%Y-%m-%d") - timedelta(days=1)

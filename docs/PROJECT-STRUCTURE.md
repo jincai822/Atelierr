@@ -497,3 +497,23 @@ if __name__ == "__main__":
 ---
 
 **⚡ 用开源工具，1-2周完成，不是 4-6周！**
+
+---
+
+## 🔌 模块接口清单（车间 × 应用层，2026-09-22 起登记）
+
+> 上方 v1.0 正文仍锁定。本节是**活附录**：车间与记忆模块/应用层之间的
+> 全部接口约定登记在此（2026-09-22「组合解五问题」时确立"约定登记
+> 造册"纪律）——将来替换任一模块时按本清单逐条核对，防隐性约定堆积。
+> 全部接口均为**单向、可选、可降级**的软耦合（文件/CLI/配置），
+> 记忆模块对车间零依赖。
+
+| # | 接口 | 方向 | 形式 | 断了一方会怎样 |
+|---|------|------|------|----------------|
+| 1 | `memory_cli`（search/decay 等） | 车间 → 应用层 | CLI（车间 researcher/forgetter 经 `.venv-atelierr/bin/python` 调用；本机软链 → `.venv-atelierr-312`，见 paths.local.toml 注释） | 车间工具调用失败，应用层无感 |
+| 2 | `harness/paths.local.toml` 翻译本 | 车间读 / 应用层核对 | 本机私有配置（gitignored）；哨兵 `digest._paths_drift_lines` 每日核对映射目录存在性 | 车间静默找不到新目录；哨兵次日凌晨点名 |
+| 3 | 精品回路：`wiki/reflections/`、`wiki/cognition/`、`wiki/` | 车间 → vault | 文件（车间唯一允许写的三个目录） | 无车间时只是不再新增 |
+| 4 | 只读桥：memory/、inbox/、日记、profile/ | 车间 ← vault | 文件只读（weekly 口令钉死"唯一允许写入的文件"） | — |
+| 5 | weekly 口令注入前情 | 应用层 → 车间 | `weekly_draft_cli.build_prompt` 文本（最近 reflections/ + profile/ 指引） | 车间上岗无前情，退回"每次都像第一天上班" |
+| 6 | 复习校准数据 `state/resurface_outcomes.jsonl` | 应用层自用 → 周报反哺 | JSONL append-only（一个月后校准复习参数/反哺周报证据） | 校准分析无数据，参数维持先验值 |
+| 7 | 语义搜索双轨 | 各自独立 | 应用层 basic-memory 真语义（03:20 bmindex）；车间 stub 词法（2026-09-21 定案 A；2026-09-22 侦察：无配置口、索引格式不兼容，借道不可行） | 互不干扰，各跑各的 |

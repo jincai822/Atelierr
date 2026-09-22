@@ -39,6 +39,9 @@ def test_build_prompt_pins_single_writable_file(tmp_path):
     # 升华候选固定节（2026-09-21 脑科学评审：治「收而不化」）
     assert "升华候选" in prompt
     assert "只提名不执行提炼" in prompt
+    # 传承做厚（2026-09-22 问题 3 裁决）：上岗先续前情
+    assert "先续前情再动笔" in prompt
+    assert "reflections/" in prompt
 
 
 def test_collect_excerpt_skips_frontmatter(tmp_path):

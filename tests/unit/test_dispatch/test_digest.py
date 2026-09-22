@@ -410,13 +410,52 @@ def test_age_text_boundaries():
     assert _age_text(48 * 3600) == "2 天前"
 
 
-def test_digest_markdown_has_health_section(memory_tree):
+def test_digest_markdown_has_health_section(memory_tree, monkeypatch):
     """摘要 Markdown 含系统自检节；counts 带 health_stale。"""
+    # 翻译本哨兵在本仓会读到真实 paths.local.toml（临时库无映射目录
+    # 会误报漂移）——本用例聚焦定时器活性，关掉哨兵
+    monkeypatch.setattr(
+        "scripts.dispatch.digest._paths_drift_lines", lambda tree: []
+    )
     report = DigestDispatcher(memory_tree).run(today="2026-09-10")
 
     assert "## 🩺 系统自检" in report["markdown"]
     assert "health_stale" in report["counts"]
     assert report["counts"]["health_stale"] == 5  # 临时库全是缺文件
+
+
+def test_paths_drift_sentinel(memory_tree, tmp_path, monkeypatch):
+    """翻译本哨兵（问题 2）：映射目录缺失 → 晨报点名；齐全/无翻译本 → 安静。"""
+    from scripts.dispatch.digest import _paths_drift_lines
+
+    registry = tmp_path / "paths.local.toml"
+    registry.write_text(
+        '[paths]\ndaily_notes = "memory/daily-notes"\nhealth = "memory/health"\n',
+        encoding="utf-8",
+    )
+    # 两个都缺 → 点名
+    lines = _paths_drift_lines(memory_tree, registry)
+    assert lines and "2 个映射目录" in lines[0] and "memory/health" in lines[0]
+    # 补齐一个 → 只点剩下的
+    (memory_tree.notes_dir / "daily-notes").mkdir(parents=True)
+    lines = _paths_drift_lines(memory_tree, registry)
+    assert lines and "1 个映射目录" in lines[0]
+    # 全齐 → 安静
+    (memory_tree.notes_dir / "health").mkdir()
+    assert _paths_drift_lines(memory_tree, registry) == []
+    # 无翻译本（别的机器）→ 静默跳过
+    assert _paths_drift_lines(memory_tree, tmp_path / "不存在.toml") == []
+
+    # 漂移进晨报自检节且计入异常数
+    (memory_tree.notes_dir / "health").rmdir()
+    (memory_tree.notes_dir / "daily-notes").rmdir()
+    monkeypatch.setattr(
+        "scripts.dispatch.digest._paths_drift_lines",
+        lambda tree: _paths_drift_lines(tree, registry),
+    )
+    report = DigestDispatcher(memory_tree).run(today="2026-09-10")
+    assert "翻译本漂移" in report["markdown"]
+    assert report["counts"]["health_stale"] == 6  # 5 项活性缺失 + 1 项漂移
 
 
 def test_digest_stale_pending_section(memory_tree):
