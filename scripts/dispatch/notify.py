@@ -87,8 +87,12 @@ def send_ntfy(
 
 
 def send_dispatch_notice(
-    title: str, message: str, confirm_note: Optional[str] = None,
-    pin: bool = False, pin_state: Optional[Path] = None,
+    title: str,
+    message: str,
+    confirm_note: Optional[str] = None,
+    pin: bool = False,
+    pin_state: Optional[Path] = None,
+    rearchive: Optional[Dict[str, str]] = None,
 ) -> Dict[str, bool]:
     """双通道推送：ntfy + 飞书卡片，各自独立失败隔离（不抛异常）。
 
@@ -101,6 +105,9 @@ def send_dispatch_notice(
             「✅ 确认」callback 按钮，ntfy 通道不受影响；None 不加按钮。
         pin: 飞书卡片发送成功后置顶（晨报用；ntfy 无此概念）。
         pin_state: 置顶登记表路径（存上一条 message_id，发送前先摘下）。
+        rearchive: 放权自动归档笔记的反悔门（2026-09-22 裁决 B）：
+            {"note": 回调文件名, "rel": 带领域目录的相对路径}；飞书卡片加
+            「📁 重新归档」按钮且「打开」直达笔记本身；None 不加。
 
     Returns:
         Dict[str, bool]: {"ntfy": ..., "feishu": ...} 各通道结果。
@@ -110,6 +117,8 @@ def send_dispatch_notice(
     feishu_kwargs: Dict[str, Any] = {"pin": pin, "pin_state": pin_state}
     if confirm_note:
         feishu_kwargs["confirm_note"] = confirm_note
+    if rearchive:
+        feishu_kwargs["rearchive"] = rearchive
     return {
         "ntfy": send_ntfy(title, message),
         "feishu": send_feishu(title, message, **feishu_kwargs),

@@ -2341,6 +2341,29 @@ def test_confirm_card_has_discard_button(memory_tree):
     }
 
 
+def test_notice_card_rearchive_button():
+    """放权反悔门（2026-09-22 裁决 B）：rearchive 给定时纯通知卡带
+    「📁 重新归档」按钮（archive_pick 回调），「打开」直达已归档笔记；
+    不给时无反悔按钮（回归）。"""
+    from scripts.dispatch.feishu_io import _confirm_action_card
+
+    card = _confirm_action_card(
+        "已归档", "正文", None,
+        rearchive={"note": "x.md", "rel": "career/x.md"},
+    )
+    actions = _actions_of(card)
+    labels = [a["text"]["content"] for a in actions]
+    assert "📁 重新归档" in labels
+    pick = next(a for a in actions if a["text"]["content"] == "📁 重新归档")
+    assert pick["behaviors"][0]["value"] == {"action": "archive_pick", "note": "x.md"}
+    # 「打开」直达笔记本身（带领域目录），不是控制台门面
+    assert "career/x" in actions[0]["url"]
+
+    plain = _confirm_action_card("t", "m", None)
+    labels2 = [a["text"]["content"] for a in _actions_of(plain)]
+    assert "📁 重新归档" not in labels2
+
+
 def test_note_remark_appends_line(memory_tree):
     """确认完成卡「💾 记下」：顺手一句追加到笔记末尾（原子写）。"""
     bridge = _bridge(memory_tree)

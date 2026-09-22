@@ -155,6 +155,7 @@ def send_feishu(
     pin: bool = False,
     pin_state: Optional[Path] = None,
     respect_quiet: bool = True,
+    rearchive: Optional[Dict[str, str]] = None,
 ) -> bool:
     """发一条飞书卡片推送；未配置或失败返回 False（绝不抛异常）。
 
@@ -163,6 +164,8 @@ def send_feishu(
     「✅ 确认」（confirm_note：只删「待确认」标签）与「📁 归档…」
     （archive_pick：先弹目录选择卡，点定后 archive_note 归档移动 +
     删标签，见 FeishuBridge.handle_card_action）；
+    ``rearchive`` 给定时（放权自动归档的纯通知卡）：「打开」直达已归档
+    笔记，并加「📁 重新归档」反悔按钮（2026-09-22 裁决 B）；
     卡片发送失败时降级为纯文本消息再试一次。
     ``pin=True`` 时发送成功把卡片置顶（晨报盘面第一眼可见），并先摘下
     ``pin_state`` 登记表里的上一条（每日替换不堆积）；置顶失败只 log，
@@ -197,7 +200,7 @@ def send_feishu(
             .app_secret(app_secret)
             .build()
         )
-        card = _confirm_action_card(title, message, confirm_note)
+        card = _confirm_action_card(title, message, confirm_note, rearchive)
         message_id = _send(client, target, "interactive", json.dumps(card))
         if message_id is not None:
             if pin and message_id:
@@ -212,7 +215,10 @@ def send_feishu(
 
 
 def _confirm_action_card(
-    title: str, message: str, confirm_note: Optional[str]
+    title: str,
+    message: str,
+    confirm_note: Optional[str],
+    rearchive: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """确认卡 JSON：打开（URI）+ 确认/归档三按钮（callback）。
 
@@ -222,6 +228,12 @@ def _confirm_action_card(
     「📁 选目录…」弹目录选择卡（想换去处时用，取消还原本卡）；
     「仅确认」留在收件箱（根目录）显式选择。滞留根目录由晨报
     「滞留提醒」兜底点名。
+
+    放权反悔门（2026-09-22 用户裁决 B）：``rearchive`` 给定时（放权
+    自动归档的纯通知卡），「打开」直达已归档笔记本身，并加
+    「📁 重新归档」按钮（弹目录选择卡改归档——自动归错时有顺手
+    反悔的门，不按零摩擦）。rearchive = {"note": 回调用文件名,
+    "rel": 带领域目录的相对路径（打开按钮定位用）}。
     """
     actions = [
         {
@@ -231,9 +243,26 @@ def _confirm_action_card(
                 "content": "在 Obsidian 中打开",
             },
             "type": "primary",
-            "url": _console_url(confirm_note),
+            "url": _console_url(rearchive["rel"] if rearchive else confirm_note),
         }
     ]
+    if rearchive:
+        actions.append(
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": "📁 重新归档"},
+                "type": "default",
+                "behaviors": [
+                    {
+                        "type": "callback",
+                        "value": {
+                            "action": ARCHIVE_PICK_ACTION,
+                            "note": rearchive["note"],
+                        },
+                    }
+                ],
+            }
+        )
     if confirm_note:
         actions.append(
             {

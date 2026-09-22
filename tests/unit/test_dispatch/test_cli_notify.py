@@ -157,6 +157,29 @@ def test_review_daily_sends_resurface_card(cli, memory_tree, monkeypatch, pushes
     assert cards[0][0]["relpath"] == "old.md"
 
 
+def test_archived_notice_carries_rearchive(cli, memory_tree, monkeypatch):
+    """放权已归档通知带反悔门（2026-09-22 裁决 B）：rearchive 参数
+    传到双通道推送（飞书侧据此加「📁 重新归档」按钮、打开直达笔记）。"""
+    notices = []
+    monkeypatch.setattr(
+        cli_module,
+        "send_dispatch_notice",
+        lambda title, msg, **kw: notices.append(kw) or {"feishu": True},
+    )
+    monkeypatch.setattr(cli_module, "_feishu_ready", lambda: True)
+    cli_module._notify_created_notes(
+        "Atelierr 链接已归档",
+        "新笔记",
+        ["小红书-x.md"],
+        notes_dir=memory_tree.notes_dir,
+        archived={"小红书-x.md": "career"},
+    )
+    assert notices and notices[0]["rearchive"] == {
+        "note": "小红书-x.md",
+        "rel": "career/小红书-x.md",
+    }
+
+
 def _backdate_created(tree, filename: str, day: str) -> None:
     """把测试笔记 frontmatter 的 created 改为指定日期（YYYY-MM-DD）。"""
     path = tree.notes_dir / filename

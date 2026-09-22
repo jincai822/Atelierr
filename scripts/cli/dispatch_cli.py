@@ -198,7 +198,17 @@ def _notify_created_notes(
             body = f"{message}：{Path(filename).name}\n已自动归档到 {domain}/"
             if comment:
                 body = f"{body}\n你的评论：{comment}"
-            _send_and_log(f"已归档 {filename}", title, body)
+            # 反悔门（2026-09-22 裁决 B）：纯通知卡带「📁 重新归档」按钮，
+            # 「打开」直达已归档笔记——自动归错领域时顺手能改
+            _send_and_log(
+                f"已归档 {filename}",
+                title,
+                body,
+                rearchive={
+                    "note": Path(filename).name,
+                    "rel": f"{domain}/{Path(filename).name}",
+                },
+            )
             continue
         if defer_queue is not None and not comment:
             pending_push.enqueue(defer_queue, filename)
