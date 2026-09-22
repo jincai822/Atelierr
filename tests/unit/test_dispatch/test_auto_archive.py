@@ -32,29 +32,29 @@ def test_clc_domain_prefix_fallback():
 
 
 def test_clc_domain_philosophy_split_and_digit_fallback():
-    """2026-09-22 方案 C：B 拆 philosophy；B84 心理学特例留 health，
+    """2026-09-22 方案 C：B 拆 哲学/；B84 心理学特例留 health，
     数字前缀逐级回退（B849→B84→B）。"""
     assert _clc_domain("B84-心理学") == "health"
     assert _clc_domain("B849-应用心理学") == "health"  # 数字回退命中 B84 特例
-    assert _clc_domain("B82-伦理·价值观") == "philosophy"
-    assert _clc_domain("B516-德国哲学") == "philosophy"
-    assert _clc_domain("B-哲学") == "philosophy"
+    assert _clc_domain("B82-伦理·价值观") == "哲学"
+    assert _clc_domain("B516-德国哲学") == "哲学"
+    assert _clc_domain("B-哲学") == "哲学"
 
 
 def test_clc_domain_full_letter_coverage():
-    """2026-09-22 方案 C：中图法全字母覆盖，各有主题格子。"""
-    assert _clc_domain("A8-邓小平理论") == "theory"
-    assert _clc_domain("C93-管理·领导") == "society"
-    assert _clc_domain("D9-法律") == "politics"
-    assert _clc_domain("E0-军事理论") == "military"
-    assert _clc_domain("H3-外语学习") == "language"
-    assert _clc_domain("N49-科普") == "science"
-    assert _clc_domain("O1-数学") == "math"
-    assert _clc_domain("P1-天文学") == "earth"
-    assert _clc_domain("Q-生物·进化") == "biology"
-    assert _clc_domain("S-种植·宠物") == "agriculture"
-    assert _clc_domain("V4-航天") == "aerospace"
-    assert _clc_domain("X-环境·安全") == "environment"
+    """2026-09-22 方案 C：中图法全字母覆盖，各有主题格子（纯中文名）。"""
+    assert _clc_domain("A8-邓小平理论") == "理论"
+    assert _clc_domain("C93-管理·领导") == "社科"
+    assert _clc_domain("D9-法律") == "政法"
+    assert _clc_domain("E0-军事理论") == "军事"
+    assert _clc_domain("H3-外语学习") == "语言"
+    assert _clc_domain("N49-科普") == "科学"
+    assert _clc_domain("O1-数学") == "数理"
+    assert _clc_domain("P1-天文学") == "天文"
+    assert _clc_domain("Q-生物·进化") == "生物"
+    assert _clc_domain("S-种植·宠物") == "农业"
+    assert _clc_domain("V4-航天") == "航天"
+    assert _clc_domain("X-环境·安全") == "环境"
 
 
 def test_derive_archive_dir_domain_rules():
@@ -95,15 +95,15 @@ def test_auto_archive_fallback_personal(memory_tree):
 
 
 def test_auto_archive_philosophy(memory_tree):
-    """方案 C：B 类（B84 除外）→ philosophy/，目录按需创建。"""
+    """方案 C：B 类（B84 除外）→ 哲学/，目录按需创建。"""
     memory_tree.create_note(
         "xhs-why.md",
         "---\nsource: link\ntags: [待确认, 小红书, B82-伦理·价值观]\n---\n正文\n",
         inbox=True,
     )
     domain = auto_archive(memory_tree, "xhs-why.md")
-    assert domain == "philosophy"
-    moved = memory_tree.notes_dir / "philosophy" / "xhs-why.md"
+    assert domain == "哲学"
+    moved = memory_tree.notes_dir / "哲学" / "xhs-why.md"
     assert moved.is_file()
     assert "待确认" not in moved.read_text(encoding="utf-8")
 
