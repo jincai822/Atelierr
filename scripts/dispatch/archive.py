@@ -3,9 +3,13 @@
 规则（2026-09-21 原教旨改造第 4 条，用户拍板并放权）：
 - 一级目录 = **领域**：取 frontmatter tags 里第一个中图法标签
   （``^[A-Z]{1,3}\\d*-``，如 B84-心理学），按 CLC_TO_DOMAIN 映射成
-  领域目录（health/work/career/finance/personal/...）；字母前缀
-  逐级回退（TN→T；TP 命中 career 优先于 T→work）；推导不出 →
-  默认 personal/（兜底，同裁决：分不出的一律有固定格子）；
+  领域目录（health/work/career/finance/personal/...）；前缀逐级
+  回退——先缩数字（B849→B84 命中 health 特例），再缩字母（TN→T；
+  TP 命中 career 优先于 T→work）；推导不出 → 默认 personal/
+  （兜底，同裁决：分不出的一律有固定格子）；
+- 2026-09-22 方案 C（用户拍板）：中图法全字母覆盖——B 拆出
+  philosophy/（B84 心理学例外留 health），A/C/D/E/H/N/O/P/Q/S/V/X
+  各有主题格子，目录按需创建，不再挤进 personal；
 - 平台（抖音/小红书/书籍）与中图法分类号**降级为标签**，不再做
   文件夹——找东西按主题（领域）找，不按来源找；
 - 二级目录取消（中图法只做映射依据，不再做文件夹）。
@@ -34,10 +38,14 @@ CCLASS_RE = re.compile(r"^[A-Z]{1,3}\d*-")
 #: dispatch/feishu.py 的 CONFIRM_TAG 同值）
 REVIEW_TAG = "待确认"
 
-#: 中图法字母前缀 → 领域目录（2026-09-21 用户拍板）。
-#: 匹配时前缀逐级回退：TN→T、TP 直接命中（优先于 T）。
+#: 中图法字母前缀 → 领域目录。
+#: 2026-09-21 用户拍板的既有领域（career/work/health/finance/personal）
+#: 沿用；2026-09-22 方案 C（用户拍板）：全字母覆盖，B 拆 philosophy
+#: （B84 心理学特例留 health），其余字母各有主题格子，目录按需创建。
+#: 匹配时前缀逐级回退：先缩数字（B849→B84），再缩字母（TN→T）。
 CLC_TO_DOMAIN = {
-    "B": "health",   # 哲学/心理学 → 稳定内核
+    "B84": "health",  # 心理学 → 稳定内核（B 下唯一特例，数字回退命中）
+    "B": "philosophy",  # 哲学·宗教（2026-09-22 从 health 拆出）
     "R": "health",   # 医药卫生
     "TP": "career",  # 计算机/AI → 搞懂 Agent
     "G": "career",   # 教育/自我提升
@@ -46,6 +54,18 @@ CLC_TO_DOMAIN = {
     "F": "finance",  # 经济
     "I": "personal", "J": "personal", "K": "personal",  # 文艺史
     "Z": "personal",  # 综合
+    "A": "theory",       # 马列毛邓理论
+    "C": "society",      # 社会科学
+    "D": "politics",     # 政治·法律
+    "E": "military",     # 军事
+    "H": "language",     # 语言·文字
+    "N": "science",      # 自然科学
+    "O": "math",         # 数理科学·化学
+    "P": "earth",        # 天文·地球科学
+    "Q": "biology",      # 生物科学
+    "S": "agriculture",  # 农业科学
+    "V": "aerospace",    # 航空·航天
+    "X": "environment",  # 环境·安全
 }
 
 #: 领域推不出时的默认一级目录（手写/无来源/无中图法标签的固定格子，
@@ -54,11 +74,20 @@ HANDWRITTEN_ARCHIVE_DIR = "personal"
 
 
 def _clc_domain(tag: str) -> Optional[str]:
-    """中图法标签 → 领域：字母前缀逐级回退查 CLC_TO_DOMAIN。"""
-    m = re.match(r"^([A-Z]+)", tag)
-    prefix = m.group(1) if m else ""
-    for i in range(len(prefix), 0, -1):
-        domain = CLC_TO_DOMAIN.get(prefix[:i])
+    """中图法标签 → 领域：前缀逐级回退查 CLC_TO_DOMAIN。
+
+    回退顺序：先连字母带数字逐级缩数字（B849→B84→B8→B，让
+    B84→health 特例能命中，2026-09-22 方案 C），再缩字母
+    （TP→T；TN→T）。
+    """
+    m = re.match(r"^([A-Z]+)(\d*)", tag)
+    if not m:
+        return None
+    letters, digits = m.group(1), m.group(2)
+    candidates = [letters + digits[:i] for i in range(len(digits), -1, -1)]
+    candidates += [letters[:j] for j in range(len(letters) - 1, 0, -1)]
+    for cand in candidates:
+        domain = CLC_TO_DOMAIN.get(cand)
         if domain:
             return domain
     return None
