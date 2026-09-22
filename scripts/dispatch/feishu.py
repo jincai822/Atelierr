@@ -1646,11 +1646,17 @@ class FeishuBridge:
         # 指令同级，先于问答会话；序号与晨报安静小节同源同序
         from scripts.dispatch.judgments import decide_by_index
 
-        decides = re.findall(r"(批|略)\s*(\d{1,2})", text)
-        if decides and re.fullmatch(r"(?:[批略]\s*\d{1,2}[，,、\s]*)*", text):
+        decides = [
+            (verb, num)
+            for verb, nums in re.findall(r"(批|略)((?:[\s，,、]*\d{1,2})+)", text)
+            for num in re.findall(r"\d{1,2}", nums)
+        ]
+        if decides and re.fullmatch(r"(?:[批略](?:[\s，,、]*\d{1,2})+[\s，,、]*)*", text):
             # 支持一条消息批多条（「批 1 2」「批1批2」「批 1、略 2」）：
-            # 同序号去重（后者为准），按序号从大到小依次裁决防位移——
-            # 2026-09-17 实测：批掉 1 号后原 2 号变 1 号，「批 2」扑空报错
+            # 动词后连写的多个序号同属该动词（2026-09-22 实测「提 1 3 4、
+            # 弃 2」连写格式被旧正则漏过、吞进意图层）。同序号去重（后者
+            # 为准），按序号从大到小依次裁决防位移——2026-09-17 实测：
+            # 批掉 1 号后原 2 号变 1 号，「批 2」扑空报错
             replies = []
             todo: Dict[int, bool] = {}
             for verdict, num in decides:
@@ -1664,10 +1670,15 @@ class FeishuBridge:
                 replies.append(reply)
             self._send_feedback(chat_id, "\n".join(replies))
             return None
-        distills = re.findall(r"(提|题|弃)\s*(\d{1,2})", text)
-        if distills and re.fullmatch(r"(?:[提题弃]\s*\d{1,2}[，,、\s]*)*", text):
+        distills = [
+            (verb, num)
+            for verb, nums in re.findall(r"(提|题|弃)((?:[\s，,、]*\d{1,2})+)", text)
+            for num in re.findall(r"\d{1,2}", nums)
+        ]
+        if distills and re.fullmatch(r"(?:[提题弃](?:[\s，,、]*\d{1,2})+[\s，,、]*)*", text):
             # 提炼草稿审批（2026-09-18 深加工链路）：「提 N」落压缩层、
-            # 「弃 N」跳过；与判断「批/略」同款多序号、倒序防位移。
+            # 「弃 N」跳过；与判断「批/略」同款多序号（含连写「提 1 3 4、
+            # 弃 2」，2026-09-22 实测补）、倒序防位移。
             # 「题」作「提」的同音别名（2026-09-18 实测：用户发「题 1」
             # 被吞进日记、审批丢失——输入法同音字是常态不是手误）
             from scripts.dispatch import distill as distill_module

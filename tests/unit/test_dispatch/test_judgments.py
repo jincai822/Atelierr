@@ -501,6 +501,29 @@ def test_feishu_decide_multi_index_one_message(memory_tree, monkeypatch):
     assert len(list(cog_dir.rglob("*.md"))) == 2
 
 
+def test_feishu_decide_grouped_numbers(memory_tree, monkeypatch):
+    """「批 1 2」连写格式（2026-09-22 实测「提 1 3 4、弃 2」被旧正则
+    漏过、吞进意图层）：动词后连写多个序号同属该动词，两条一起批。"""
+    from scripts.dispatch.judgments import nominate_from_note
+
+    note = _note_with_viewpoints(memory_tree)
+    nominated = nominate_from_note(memory_tree, note)
+    assert len(nominated) == 2
+    bridge = FeishuBridge(memory_tree, app_id="cli_x", app_secret="secret")
+    feedback = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat_id, text: feedback.append(text)
+    )
+    event = _event("md2g", "text", {"text": "批 1 2"})
+    event.event.message.chat_id = "oc_demo"
+
+    bridge.handle_event(event)
+
+    assert feedback and feedback[0].count("已收进判断登记处") == 2
+    cog_dir = memory_tree.notes_dir.parent / "memory" / "wiki" / "cognition"
+    assert len(list(cog_dir.rglob("*.md"))) == 2
+
+
 def test_feishu_decide_mixed_verdicts(memory_tree, monkeypatch):
     """「批 1、略 2」混合裁决：1 号收进登记处，2 号拒掉。"""
     from scripts.dispatch.judgments import nominate_from_note

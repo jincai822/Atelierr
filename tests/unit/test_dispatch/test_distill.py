@@ -314,6 +314,32 @@ def test_feishu_ti_command_creates_card(memory_tree, llm_ok, monkeypatch):
     assert list((memory_tree.notes_dir / "distilled").glob("内核稳定*.md"))
 
 
+def test_feishu_ti_command_grouped_numbers(memory_tree, llm_ok, monkeypatch):
+    """飞书发「提 1 2」连写格式（2026-09-22 实测「提 1 3 4、弃 2」被
+    旧正则漏过、吞进意图层）：动词后连写序号同属该动词，一起落卡。"""
+    from scripts.dispatch.feishu import FeishuBridge
+    from tests.unit.test_dispatch.test_judgments import _event
+
+    _settled_note(memory_tree, filename="a.md")
+    _settled_note(memory_tree, filename="b.md")
+    run(memory_tree, today="2026-09-18")
+    run(memory_tree, today="2026-09-19")  # 次日配额恢复，起草第 2 张
+    assert len(pending_drafts(memory_tree)) == 2
+
+    bridge = FeishuBridge(memory_tree, app_id="cli_x", app_secret="secret")
+    feedback = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat_id, text: feedback.append(text)
+    )
+    event = _event("md-ti2", "text", {"text": "提 1 2"})
+    event.event.message.chat_id = "oc_demo"
+
+    bridge.handle_event(event)
+
+    assert feedback and feedback[0].count("已收进压缩层") == 2
+    assert not pending_drafts(memory_tree)
+
+
 def test_digest_shows_draft_count_line(memory_tree, llm_ok):
     """晨报提炼候选节带草稿计数行（无草稿不出现）。"""
     from scripts.dispatch.digest import DigestDispatcher
