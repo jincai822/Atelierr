@@ -683,6 +683,23 @@ class DispatchCLI:
                     except Exception as exc:  # noqa: BLE001 - enrichment 不阻塞复盘
                         click.echo(f"日记 enrichment 失败（不影响复盘）：{exc}")
                 report = review_ritual.open_ritual(tree, full_kind)
+                if kind == "daily":
+                    # 复习卡并进晚间场（2026-09-22 脑科学裁决：睡前复习搭
+                    # 睡眠巩固快车；晨报只预告不推送）。冷却与响应观测在
+                    # 这里登记；一天多跑幂等（已推的在冷却期，candidates
+                    # 自然为空）。三问暂停不拦复习——暂停防的是问答疲劳，
+                    # 复习回路断了笔记就真死了
+                    try:
+                        resurface = self._build_resurface(tree)
+                        items = resurface.candidates()
+                        if items and send_resurface_feishu(items):
+                            resurface.mark_pushed([item["id"] for item in items])
+                            from scripts.dispatch.response_probe import ResponseProbe
+
+                            ResponseProbe(tree).register(items)
+                            click.echo(f"  复习卡已随晚间场推送：{len(items)} 条")
+                    except Exception as exc:  # noqa: BLE001 - 复习卡不阻塞复盘
+                        click.echo(f"复习卡推送失败（不影响三问）：{exc}")
                 if report["opened"]:
                     click.echo(f"已开启回顾会话并推送表单：{len(report['questions'])} 问")
                     # 月度脉冲随附费曼讲稿（2026-09-19 建议②：能讲明白才是
@@ -813,8 +830,9 @@ class DispatchCLI:
                     report["counts"],
                     pin_state=Path(tree.state_dir) / "feishu_pins.json",
                 )
-                # 今日复习卡：只给标题（先想），按钮才打开原文（再看）
-                send_resurface_feishu(report["review"])
+                # 复习卡不进晨报（2026-09-22 脑科学裁决：睡前复习搭睡眠
+                # 巩固快车）——晨报只预告标题，卡片 21:30 随每日四问一起推
+                # （见 review_command 的 daily 分支），冷却/观测也在那登记
                 # 判断复盘卡（2026-09-19 backlog⑤ 生命周期闭环：登记→复盘
                 # →销账）：到期判断逐条发三按钮卡，冷却 30 天防打扰
                 from scripts.dispatch.judgments import due_for_review, mark_review_prompted

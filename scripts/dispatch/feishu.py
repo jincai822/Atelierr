@@ -67,6 +67,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -952,10 +953,20 @@ class FeishuBridge:
             if outcome == "exile":
                 manager.exile(note_id)
                 state = {"interval": 0.0, "exiled": True}
+            elif outcome == "good":
+                # 默写一句（2026-09-22 脑科学裁决：生成 > 再认——写出来才
+                # 算真想起来）：✅ 不再直接结案，先请用户默写一句（回「过」
+                # 跳过，10 分钟有效），写完才记间隔。卡片保持不动，收口
+                # 在文本回执里完成（_finish_recall）
+                self._set_pending_recall(filename, batch or [])
+                self._send_feedback(
+                    chat_id,
+                    f"✍️ 先默写一句：「{Path(filename).stem}」讲了什么？\n"
+                    "（10 分钟内回复有效；想不起来就回「过」，或改点 ❌）",
+                )
+                return {"toast": {"type": "info", "content": "先默写一句，写完才记间隔"}}
             else:
-                state = manager.record_outcome(note_id, remembered=(outcome == "good"))
-                if outcome == "good" and note_path.exists():
-                    self.tree.on_note_accessed(note_path)
+                state = manager.record_outcome(note_id, remembered=False)
         except Exception as exc:  # noqa: BLE001 - 回调失败只 toast，不中断守护
             print(f"[feishu] resurface feedback note={filename} fail: {exc}", flush=True)
             self._send_feedback(chat_id, f"⚠️ 处理失败，请稍后重试：{filename}")
@@ -994,6 +1005,84 @@ class FeishuBridge:
             },
         }
 
+
+    # 默写一句（2026-09-22 脑科学裁决：生成 > 再认）：点 ✅ 不直接结案，
+    # 先请用户默写一句；10 分钟有效，回「过」跳过。状态只写
+    # <state_dir>/pending_recall.json，独立于 PromptStore——晚间场复习卡
+    # 与每日四问同到，问答会话可能正开着，两个通道互不干扰
+    _RECALL_TTL_SECONDS = 600
+
+    def _recall_state_path(self) -> Path:
+        return Path(self.tree.state_dir) / "pending_recall.json"
+
+    def _set_pending_recall(self, note: str, batch: List[str]) -> None:
+        write_json(
+            self._recall_state_path(),
+            {
+                "note": note,
+                "batch": list(batch),
+                "asked_at": time.time(),
+            },
+        )
+
+    def _pending_recall(self) -> Optional[Dict[str, Any]]:
+        """读取待收口默写；超 10 分钟/损坏视为没有（过期不候）。"""
+        data = read_json(self._recall_state_path(), None)
+        if not isinstance(data, dict) or not data.get("note"):
+            return None
+        try:
+            asked = float(data.get("asked_at") or 0)
+        except (TypeError, ValueError):
+            return None
+        if time.time() - asked > self._RECALL_TTL_SECONDS:
+            return None
+        return data
+
+    def _clear_pending_recall(self) -> None:
+        try:
+            self._recall_state_path().unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def _finish_recall(
+        self,
+        chat_id: Optional[str],
+        pending: Dict[str, Any],
+        sentence: Optional[str],
+    ) -> None:
+        """默写收口：记间隔（good，默写原文进校准日志）+ 记访问 + 默写
+        留痕进今天日记；剩余复习条目新发一张卡（文本场景不能整卡替换，
+        新发一条是平台规约内的等价物）。"""
+        from scripts.memory.resurface import ResurfaceManager
+
+        note = str(pending.get("note") or "")
+        batch = [str(item) for item in (pending.get("batch") or [])]
+        try:
+            note_path = self.tree._abs(note)
+            note_id = self.tree._find_entry_id(note_path) or Path(note).stem
+            manager = ResurfaceManager(self.tree)
+            state = manager.record_outcome(note_id, remembered=True, recall=sentence)
+            if note_path.exists():
+                self.tree.on_note_accessed(note_path)
+            if sentence:
+                self._append_diary(f"🔁 默写[[{Path(note).stem}]]：{sentence}")
+        except Exception as exc:  # noqa: BLE001 - 收口失败文字告知，不中断守护
+            print(f"[feishu] recall finish note={note} fail: {exc}", flush=True)
+            self._send_feedback(chat_id, f"⚠️ 处理失败，请稍后重试：{note}")
+            return
+        kept = "；你的默写已存进今天日记" if sentence else "（这次先不默写）"
+        self._send_feedback(
+            chat_id, f"✅ 记下了，它 {state['interval']:.0f} 天后再来见你{kept}"
+        )
+        remaining = [item for item in batch if item != note]
+        if remaining:
+            items = [
+                {"relpath": rel, "title": Path(rel).stem, "idle_days": "?"}
+                for rel in remaining
+            ]
+            send_feishu_card(
+                resurface_card(items), chat_id=chat_id, respect_quiet=False
+            )
 
     @staticmethod
     def _valid_archive_dir(target_dir: str) -> bool:
@@ -1697,6 +1786,15 @@ class FeishuBridge:
                     reply = "⚠️ 审批失败，请稍后重试"
                 replies.append(reply)
             self._send_feedback(chat_id, "\n".join(replies))
+            return None
+        # 复习默写收口（2026-09-22 脑科学裁决）：有待收口的默写时，本条
+        # 文本就是那句话（或「过」跳过）——先于问答会话处理：晚间场复习卡
+        # 与每日四问同到，默写是更即时的意图；10 分钟有效，过期不候
+        recall_pending = self._pending_recall()
+        if recall_pending is not None:
+            self._clear_pending_recall()
+            sentence = None if text.strip() in ("过", "跳过") else text.strip()
+            self._finish_recall(chat_id, recall_pending, sentence)
             return None
         store = PromptStore(Path(self.tree.state_dir))
         if store.is_open():

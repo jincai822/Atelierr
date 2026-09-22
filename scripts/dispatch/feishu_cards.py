@@ -353,6 +353,9 @@ def confirmed_with_remark_card(
     2026-09-13 环节三评审毛病 2（用户批准）：确认时刻是意义建构窗口——
     表单可空（不填零成本），填了经 NOTE_REMARK_ACTION 回调由
     FeishuBridge._handle_note_remark 追加进笔记末尾。
+    2026-09-22 脑科学裁决：问句从「记收获」改为「想起什么」——精细加工
+    （把新笔记挂到旧笔记/目标上）是最强编码手段；提到的旧笔记名会被
+    实体反链自动连上。
 
     Args:
         filename: 笔记文件名（回调定位用）。
@@ -386,11 +389,11 @@ def confirmed_with_remark_card(
                             "width": "default",
                             "label": {
                                 "tag": "plain_text",
-                                "content": "顺手记一句收获？（可空）",
+                                "content": "它让你想起什么？（可空）",
                             },
                             "placeholder": {
                                 "tag": "plain_text",
-                                "content": "此刻的想法，不填零成本",
+                                "content": "和哪条旧笔记/哪个目标有关？提到名字会自动连上",
                             },
                         },
                         {

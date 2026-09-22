@@ -289,13 +289,23 @@ def test_old_stamp_format_still_works(memory_tree):
 
 
 def test_resurface_feedback_bridge(memory_tree, make_note, monkeypatch):
-    """桥回调：点「想起来了」→ 间隔翻倍 + 记访问；批次重建剩余卡。"""
+    """桥回调：点「想起来了」→ 先问默写（生成 > 再认，2026-09-22）；
+    默写文本到达才记间隔 + 记访问 + 日记留痕 + 剩余条目新发卡。"""
     from types import SimpleNamespace
+    from tests.unit.test_dispatch.test_judgments import _event
     from scripts.dispatch.feishu import FeishuBridge
 
     note = make_note(memory_tree, filename="old.md", content="内容", idle_days=20)
     bridge = FeishuBridge(memory_tree, app_id="x", app_secret="y")
-    monkeypatch.setattr(bridge, "_send_feedback", lambda chat_id, text: None)
+    feedback = []
+    monkeypatch.setattr(
+        bridge, "_send_feedback", lambda chat_id, text: feedback.append(text)
+    )
+    sent_cards = []
+    monkeypatch.setattr(
+        "scripts.dispatch.feishu.send_feishu_card",
+        lambda card, **kw: sent_cards.append(card) or True,
+    )
 
     event = SimpleNamespace(
         event=SimpleNamespace(
@@ -313,12 +323,90 @@ def test_resurface_feedback_bridge(memory_tree, make_note, monkeypatch):
     )
     resp = bridge.handle_card_action(event)
 
-    assert resp["toast"]["type"] == "success"
-    # 批次重建：剩余 other.md 的复习卡
-    card = resp["card"]["data"]
-    assert "1" in card["header"]["title"]["content"]
-    # 访问时钟已重置
+    # ✅ 不直接结案：提示默写，卡片不动，间隔与访问都未记
+    assert resp["toast"]["type"] == "info"
+    assert "默写" in feedback[-1]
+    assert memory_tree._entry(note)["last_accessed"] is None
+    assert not (memory_tree.state_dir / "resurface.json").exists()
+
+    # 默写文本到达 → 收口
+    text_event = _event("md-rc", "text", {"text": "讲的是内核稳定"})
+    text_event.event.message.chat_id = "oc_demo"
+    bridge.handle_event(text_event)
+
+    # 间隔翻倍（3 → 6）、访问时钟重置
+    state = json.loads(
+        (memory_tree.state_dir / "resurface.json").read_text(encoding="utf-8")
+    )
+    entry = next(iter(state.values()))
+    assert entry["interval"] == 6.0
     assert memory_tree._entry(note)["last_accessed"] is not None
+    # 校准日志带默写原文
+    outcome = json.loads(
+        (memory_tree.state_dir / "resurface_outcomes.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()[0]
+    )
+    assert outcome["recall"] == "讲的是内核稳定"
+    # 日记留痕
+    diary = next((memory_tree.notes_dir / "daily-notes").rglob("*.md"))
+    assert "🔁 默写[[old]]：讲的是内核稳定" in diary.read_text(encoding="utf-8")
+    # 剩余 other.md 新发一张复习卡
+    assert sent_cards and "1" in sent_cards[0]["header"]["title"]["content"]
+
+
+def test_recall_skip_word_records_without_sentence(memory_tree, make_note, monkeypatch):
+    """回「过」跳过默写：间隔照记、不写日记、校准日志无 recall 字段。"""
+    from tests.unit.test_dispatch.test_judgments import _event
+    from scripts.dispatch.feishu import FeishuBridge
+
+    make_note(memory_tree, filename="old.md", content="内容", idle_days=20)
+    bridge = FeishuBridge(memory_tree, app_id="x", app_secret="y")
+    monkeypatch.setattr(bridge, "_send_feedback", lambda chat_id, text: None)
+    bridge._set_pending_recall("old.md", ["old.md"])
+
+    text_event = _event("md-skip", "text", {"text": "过"})
+    text_event.event.message.chat_id = "oc_demo"
+    bridge.handle_event(text_event)
+
+    state = json.loads(
+        (memory_tree.state_dir / "resurface.json").read_text(encoding="utf-8")
+    )
+    assert next(iter(state.values()))["interval"] == 6.0
+    outcome = json.loads(
+        (memory_tree.state_dir / "resurface_outcomes.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()[0]
+    )
+    assert "recall" not in outcome
+    diaries = list((memory_tree.notes_dir / "daily-notes").rglob("*.md"))
+    assert not diaries or "🔁 默写" not in diaries[0].read_text(encoding="utf-8")
+    # 状态已清：下一条文本按普通捕获走
+    assert not bridge._recall_state_path().exists()
+
+
+def test_recall_expired_falls_through_to_diary(memory_tree, make_note, monkeypatch):
+    """默写 10 分钟过期：文本不被吞，按普通捕获进当天日记。"""
+    from tests.unit.test_dispatch.test_judgments import _event
+    from scripts.dispatch.feishu import FeishuBridge
+    from scripts.utils.state_store import write_json
+
+    bridge = FeishuBridge(memory_tree, app_id="x", app_secret="y")
+    monkeypatch.setattr(bridge, "_send_feedback", lambda chat_id, text: None)
+    monkeypatch.setattr(bridge, "_add_reaction", lambda mid: None)
+    write_json(
+        bridge._recall_state_path(),
+        {"note": "old.md", "batch": ["old.md"], "asked_at": time.time() - 700},
+    )
+
+    text_event = _event("md-exp", "text", {"text": "随便一句闲话"})
+    text_event.event.message.chat_id = "oc_demo"
+    bridge.handle_event(text_event)
+
+    assert not (memory_tree.state_dir / "resurface.json").exists()
+    diary = next((memory_tree.notes_dir / "daily-notes").rglob("*.md"))
+    body = diary.read_text(encoding="utf-8")
+    assert "随便一句闲话" in body and "🔁 默写" not in body
 
 
 def test_exile_skips_candidates(memory_tree, make_note):

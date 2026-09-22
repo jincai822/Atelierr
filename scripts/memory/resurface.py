@@ -227,7 +227,12 @@ class ResurfaceManager:
         self._save_state(state)
 
     def record_outcome(
-        self, note_id: str, remembered: bool, now: Optional[datetime] = None
+        self,
+        note_id: str,
+        remembered: bool,
+        now: Optional[datetime] = None,
+        *,
+        recall: Optional[str] = None,
     ) -> Dict[str, Any]:
         """记录复习反馈（简化 SM-2）：想起来 → 间隔 ×2（封顶 60 天）且记一次
         访问（合法重置闲置时钟）；没想起来 → 间隔 ÷2（下限 1 天）。
@@ -239,6 +244,8 @@ class ResurfaceManager:
             note_id: 笔记 id（sidecar 键）。
             remembered: True=想起来了；False=没想起来。
             now: 反馈时刻（测试用）。
+            recall: 用户的默写原文（2026-09-22「默写一句」提取练习）；
+                只进校准日志（截 200 字），不进调度状态。
 
         Returns:
             Dict[str, Any]: {"interval", "streak", "pushed"}。
@@ -274,7 +281,7 @@ class ResurfaceManager:
             entry_out["exiled"] = True
         state[note_id] = entry_out
         self._save_state(state)
-        self._log_outcome(note_id, remembered, interval_before, entry_out, now)
+        self._log_outcome(note_id, remembered, interval_before, entry_out, now, recall)
         return dict(state[note_id])
 
     def exile(self, note_id: str, now: Optional[datetime] = None) -> None:
@@ -330,11 +337,12 @@ class ResurfaceManager:
         interval_before: float,
         entry_out: Dict[str, Any],
         now: datetime,
+        recall: Optional[str] = None,
     ) -> None:
         """追加一条复习反馈校准观测（2026-09-21 脑科学评审落地）：
         间隔变化 + 当时的 confidence/闲置天数（尽力而为，定位不到就
-        缺省）。攒一个月数据用于校准复习窗口与 ×2/÷2 参数；任何失败
-        都不影响反馈主流程。"""
+        缺省）+ 默写原文（有的话，截 200 字）。攒一个月数据用于校准
+        复习窗口与 ×2/÷2 参数；任何失败都不影响反馈主流程。"""
         record: Dict[str, Any] = {
             "ts": now.isoformat(timespec="seconds"),
             "event": "outcome",
@@ -345,6 +353,8 @@ class ResurfaceManager:
             "streak": entry_out["streak"],
             "fail_streak": entry_out["fail_streak"],
         }
+        if recall:
+            record["recall"] = recall[:200]
         if entry_out.get("exiled"):
             record["exiled"] = True
         found = self._locate(str(note_id))

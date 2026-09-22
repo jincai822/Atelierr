@@ -129,8 +129,9 @@ class _FakeResurface:
         pass
 
 
-def test_digest_sends_resurface_card(cli, memory_tree, monkeypatch, pushes):
-    """摘要后有复习候选 → 追加发今日复习卡（只给标题，按钮打开原文）。"""
+def test_review_daily_sends_resurface_card(cli, memory_tree, monkeypatch, pushes):
+    """复习卡不进晨报、并进 21:30 晚间场（2026-09-22 脑科学裁决：睡前
+    复习搭睡眠巩固）：digest 只预告；review open --kind daily 才推卡。"""
     monkeypatch.setattr(
         cli_module.ResurfaceManager,
         "from_config",
@@ -144,7 +145,13 @@ def test_digest_sends_resurface_card(cli, memory_tree, monkeypatch, pushes):
     )
 
     assert cli.main(["digest"]) == 0
+    assert cards == []  # 晨报只预告，不推复习卡
 
+    monkeypatch.setattr(
+        "scripts.dispatch.review_ritual.send_feishu_card",
+        lambda card, **kw: True,
+    )
+    assert cli.main(["review", "open", "--kind", "daily"]) == 0
     assert len(cards) == 1
     assert cards[0][0]["title"] == "旧笔记"
     assert cards[0][0]["relpath"] == "old.md"

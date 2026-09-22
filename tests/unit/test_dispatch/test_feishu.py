@@ -2352,6 +2352,8 @@ def test_confirmed_with_remark_card_shape():
     assert form["tag"] == "form"
     field = form["elements"][0]
     assert field["tag"] == "input" and field["required"] is False
+    # 精细加工引导（2026-09-22 脑科学裁决）：问「想起什么」而非「记收获」
+    assert "想起什么" in field["label"]["content"]
     submit = form["elements"][1]
     assert submit["behaviors"][0]["value"] == {
         "action": "note_remark",

@@ -16,8 +16,9 @@
   Dataview 桥接——sidecar 数据它看不见；并附 wiki 体检（validate
   出的缺字段/缺互链条目）；
 - 待办进行中：当前带"待办"标签的笔记；
-- 今日复习：遗忘临界区内的笔记（ResurfaceManager，decay 的反面；
-  检索式推送——只列标题，提示"先回忆再点开"，点开看一眼即重置时钟，
+- 今日复习：遗忘临界区内的笔记预告（ResurfaceManager，decay 的反面；
+  只列标题——复习卡 21:30 随晚间四问一起推送（2026-09-22 脑科学裁决：
+  睡前复习搭睡眠巩固快车），检索式交互「先默想→自评→核对原文」，
   确认无价值的留给 review→purge，值得留存的提炼进压缩层）；
 - 昨日新入库：frontmatter created 日期为昨天的笔记（附入口分布一行，
   捕获统计见 scripts/dispatch/stats.py）；
@@ -32,10 +33,10 @@
 - 摘要笔记 ``source="digest"``，todos 分发跳过它（防把摘要里的
   待办文本再喂给 LLM 空转）；
 - 只读全部笔记的 frontmatter/正文，绝不改写；
-- 复习推送冷却时钟只写 ``<state_dir>/resurface.json``，且仅在摘要
-  笔记真正创建成功后记录（dry-run/跳过不烧冷却）；
-- 推送响应观测（实验 0）只写 ``<state_dir>/response_probe.json``，
-  同样仅在真实运行时执行。
+- 复习推送冷却时钟（``<state_dir>/resurface.json``）与响应观测
+  （``<state_dir>/response_probe.json``）改由晚间复习场登记
+  （2026-09-22：复习卡 21:30 推送时才烧冷却，晨报只预告不推送）；
+  晨报只负责观测结案（check_pending，每日一轮）。
 
 日记指路（2026-09-21 第 7 条方案 A 用户拍板）：摘要真正创建成功后，
 往当天日记追加一行指路（``- HH:MM 📋 今日摘要：待确认 N · 复习 N ·
@@ -371,8 +372,6 @@ class DigestDispatcher:
                 Path(self.tree.notes_dir), filename, markdown,
                 source="digest", tags=["摘要"],
             )
-            self.resurface.mark_pushed([item["id"] for item in review])
-            self.probe.register(review)
             self.probe.check_pending()
             try:
                 from scripts.dispatch.diary import append_diary_line
@@ -610,7 +609,8 @@ class DigestDispatcher:
         sections += [f"## 🔁 今日复习（{len(review)}）", ""]
         if review:
             sections += [
-                "> 检索练习：看着标题先想「它讲了什么」，再点开核对；",
+                "> 复习卡 21:30 随晚间四问一起到（睡前复习，搭睡眠巩固快车）：",
+                "> 先默想 10 秒「它讲了什么」，再自评、核对原文；",
                 "> 想不起来的，值得就提炼进压缩层，不值得就留给 review→purge。",
                 "",
             ]

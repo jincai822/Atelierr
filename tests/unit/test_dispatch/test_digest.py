@@ -87,7 +87,9 @@ def test_digest_empty_vault(memory_tree):
 
 
 def test_digest_includes_resurface_section(memory_tree, make_note):
-    """遗忘临界区笔记进"今日复习"节；摘要创建成功后写入冷却状态。"""
+    """遗忘临界区笔记进"今日复习"预告节；推送登记移到晚间场
+    （2026-09-22 脑科学裁决：晨报只预告，复习卡 21:30 随四问推送，
+    冷却/观测在晚间场登记）。"""
     make_note(memory_tree, "old.md", "旧笔记", idle_days=20)
     make_note(memory_tree, "fresh.md", "新笔记")
 
@@ -99,16 +101,14 @@ def test_digest_includes_resurface_section(memory_tree, make_note):
     ).content
     assert "## 🔁 今日复习（1）" in body
     assert "[[old]]" in body
-    assert "先想" in body  # 检索式提示：先回忆再点开
-    state = json.loads(
-        (memory_tree.state_dir / "resurface.json").read_text(encoding="utf-8")
-    )
-    assert len(state) == 1
-
-    # 冷却生效：次日（若摘要不存在）同一条不再推送
+    assert "先默想" in body  # 检索式提示：先回忆再自评核对
+    # 晨报只预告：不烧冷却、不建响应观测
+    assert not (memory_tree.state_dir / "resurface.json").exists()
+    assert not (memory_tree.state_dir / "response_probe.json").exists()
+    # 晚间场还没推：候选仍在队列里等 21:30
     from scripts.memory.resurface import ResurfaceManager
 
-    assert ResurfaceManager(memory_tree).candidates() == []
+    assert len(ResurfaceManager(memory_tree).candidates()) == 1
 
 
 def test_digest_dry_run_does_not_burn_cooldown(memory_tree, make_note):
@@ -122,11 +122,13 @@ def test_digest_dry_run_does_not_burn_cooldown(memory_tree, make_note):
     assert not (memory_tree.state_dir / "response_probe.json").exists()
 
 
-def test_digest_registers_and_resolves_probe(memory_tree, make_note):
-    """推送复习笔记后建立响应观测；用户编辑后次日结案为响应。"""
-    path = make_note(memory_tree, "old.md", "旧笔记", idle_days=20)
+def test_digest_resolves_probe_after_evening_register(memory_tree, make_note):
+    """响应观测改由晚间复习场登记（2026-09-22），晨报只做结案：
+    推送后用户当天加工了笔记 → 次日晨报结案为响应。"""
+    from scripts.dispatch.response_probe import ResponseProbe
 
-    DigestDispatcher(memory_tree).run(today="2026-09-01")
+    path = make_note(memory_tree, "old.md", "旧笔记", idle_days=20)
+    ResponseProbe(memory_tree).register([{"id": "old", "filename": "old.md"}])
     state = json.loads(
         (memory_tree.state_dir / "response_probe.json").read_text(
             encoding="utf-8"
