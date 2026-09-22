@@ -1613,6 +1613,42 @@ def test_send_resurface_feishu_card_layout(monkeypatch):
     assert "闲置 20 天" in texts
 
 
+def test_links_triggered_on_url_text(memory_tree, monkeypatch):
+    """含链接的文本进日记后触发后台 links 轮（2026-09-22 随到随办）；
+    无链接不触发。"""
+    from tests.unit.test_dispatch.test_judgments import _event
+
+    bridge = FeishuBridge(memory_tree, app_id="x", app_secret="y")
+    monkeypatch.setattr(bridge, "_send_feedback", lambda *a: None)
+    monkeypatch.setattr(bridge, "_add_reaction", lambda mid: None)
+    fired = []
+    monkeypatch.setattr(bridge, "_trigger_links_now", lambda: fired.append(1))
+
+    ev = _event("md-url", "text", {"text": "看看 https://v.douyin.com/abc/ 这个"})
+    ev.event.message.chat_id = "oc_demo"
+    bridge.handle_event(ev)
+    assert fired == [1]
+
+    ev2 = _event("md-nourl", "text", {"text": "没链接的一句闲话"})
+    ev2.event.message.chat_id = "oc_demo"
+    bridge.handle_event(ev2)
+    assert fired == [1]  # 不再触发
+
+
+def test_trigger_links_now_runs_cli_round(memory_tree, monkeypatch):
+    """后台线程真的经 DispatchCLI 跑一轮 links（同一入口同一把锁）。"""
+    bridge = FeishuBridge(memory_tree, app_id="x", app_secret="y")
+    calls = []
+    monkeypatch.setattr(
+        "scripts.cli.dispatch_cli.DispatchCLI.main",
+        lambda self, args=None, **kw: calls.append(args) or 0,
+    )
+    thread = bridge._trigger_links_now()
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+    assert calls == [["links"]]
+
+
 # ----------------------------------------------------------------------
 # 语音消息捕获（按住说话 → .ogg 进 attachments/，media 分发走 Whisper）
 # ----------------------------------------------------------------------

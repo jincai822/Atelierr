@@ -1084,6 +1084,32 @@ class FeishuBridge:
                 resurface_card(items), chat_id=chat_id, respect_quiet=False
             )
 
+    def _trigger_links_now(self):
+        """链接随到随办（2026-09-22 系统级优化②）：后台线程立刻跑一轮
+        links 分发（与 15 分钟定时器同一 CLI 入口、同一把 dispatch 锁——
+        撞车自动跳过，幂等不重复处理）。LLM 调用放后台线程，不进
+        websocket 事件循环（防守护停摆，与决策向导同规）。
+
+        Returns:
+            threading.Thread: 后台线程对象（测试 join 用）。
+        """
+        import threading
+
+        def _round() -> None:
+            try:
+                from scripts.cli.dispatch_cli import DispatchCLI
+
+                code = DispatchCLI().main(["links"])
+                print(f"[feishu] links on-demand exit={code}", flush=True)
+            except Exception as exc:  # noqa: BLE001 - 后台轮失败只记日志
+                print(f"[feishu] links on-demand fail: {exc}", flush=True)
+
+        thread = threading.Thread(
+            target=_round, daemon=True, name="links-on-demand"
+        )
+        thread.start()
+        return thread
+
     @staticmethod
     def _valid_archive_dir(target_dir: str) -> bool:
         """归档目标目录校验（逻辑移 dispatch/archive.py valid_archive_dir，回调与 CLI 共用）。"""
@@ -1873,6 +1899,10 @@ class FeishuBridge:
             self._send_feedback(chat_id, "⚠️ 捕获失败，请稍后重发")
             return None
         self._add_reaction(message_id)
+        if "http" in text:
+            # 链接随到随办（2026-09-22 系统级优化②）：后台线程立刻跑一轮
+            # links 分发，不再干等 15 分钟班车；定时器留作兜底
+            self._trigger_links_now()
         return note
 
     def _append_diary(self, text: str) -> Optional[Path]:

@@ -150,3 +150,30 @@ def test_dry_run_prints_prompt_without_side_effects(tmp_path, sent):
     assert result.exit_code == 0
     assert "唯一允许写入" in result.output
     assert sent == []
+
+
+def test_build_prompt_includes_kit(tmp_path):
+    """口令含素材包指引（2026-09-22 系统级优化①）；无素材包不含该行。"""
+    draft = tmp_path / "memory" / "wiki" / "reflections" / "2026-09-27-weekly-draft.md"
+    kit = tmp_path / "state" / "weekly-kit-2026-09-27.md"
+    prompt = build_prompt(draft, tmp_path, kit)
+    assert str(kit) in prompt
+    assert "素材包" in prompt
+    assert "素材包" not in build_prompt(draft, tmp_path)
+
+
+def test_build_weekly_kit(memory_tree):
+    """素材包五节齐全（捕获统计/新入库/待办/最近反思/默写记录），落 state/。"""
+    from scripts.cli.weekly_draft_cli import build_weekly_kit
+
+    memory_tree.create_note("本周新笔记.md", "内容", source="test")
+    kit = build_weekly_kit(memory_tree, "2026-09-27")
+
+    assert kit.parent == memory_tree.state_dir
+    body = kit.read_text(encoding="utf-8")
+    assert "## 捕获统计" in body
+    assert "## 新入库清单" in body
+    assert "本周新笔记" in body
+    assert "## 待办进行中" in body
+    assert "## 最近反思" in body
+    assert "## 本周默写记录" in body

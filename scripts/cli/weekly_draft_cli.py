@@ -41,22 +41,33 @@ WEEKLY_SPEC = "/srv/workspaces/Atelierr/.claude/commands/weekly.md"
 PATHS_REGISTRY = "/srv/workspaces/Atelierr/harness/paths.toml"
 
 
-def build_prompt(draft_path: Path, vault_root: Path) -> str:
+def build_prompt(
+    draft_path: Path, vault_root: Path, kit_path: Optional[Path] = None
+) -> str:
     """构造车间口令：流程唯一事实源是 weekly.md，口令只做边界约束。
 
     Args:
         draft_path: 初稿落盘绝对路径（唯一允许写入的文件）。
         vault_root: vault 根（$OV），口令里交给 pi 查各 tier。
+        kit_path: 本周素材包路径（2026-09-22 系统级优化①：应用层预聚合，
+            车间读一个文件拿全本周数据——省 token、素材固定、质量稳）；
+            None 时口令不含素材包行（预聚合失败不阻塞班次）。
     """
+    kit_line = (
+        f"本周素材包已预生成在 {kit_path}（捕获统计/新入库清单/待办/"
+        f"默写记录/最近反思都在里面），先读它拿全本周数据；"
+        if kit_path is not None
+        else ""
+    )
     return f"""你是 Atelierr 的车间管家，现在自动执行车间口令 $weekly（周日初稿班次）。
 
 步骤：
 1. 读 {WEEKLY_SPEC}，严格按其中的 Weekly Review 流程收集素材并综合成文。
    路径注册表在 {PATHS_REGISTRY}，$OV 指 {vault_root}。
 2. 先续前情再动笔（2026-09-22 问题 3 裁决：车间无跨会话记忆，传承
-   全靠文件）：读 memory/wiki/reflections/ 里最近一次周回顾初稿/定稿
-   与最新几条反思（存在才读）——上周「下周建议」的跟进情况要写进
-   本周概览；profile/ 画像（存在才读）把握长期目标。
+   全靠文件）：{kit_line}再读 memory/wiki/reflections/ 里最近一次周回顾
+   初稿/定稿与最新几条反思（存在才读）——上周「下周建议」的跟进情况
+   要写进本周概览；profile/ 画像（存在才读）把握长期目标。
 3. 只读收集：memory/、inbox/、memory/wiki/cognition/、profile/
    （存在才读），绝不改写任何既有文件。
 4. 把周回顾初稿写入 {draft_path}（这是唯一允许写入的文件，已存在则覆盖；
@@ -116,6 +127,98 @@ def collect_excerpt(draft_path: Path, max_chars: int = 300) -> str:
     return excerpt[:max_chars]
 
 
+def build_weekly_kit(tree: MemoryTree, today: str) -> Path:
+    """预聚合本周素材包（2026-09-22 系统级优化①）：把车间周回顾需要的
+    本周数据写成 ``state/weekly-kit-<today>.md``——车间读一个文件拿全
+    本周数据，不用现场翻库（省 token、素材固定、周报质量稳）。
+
+    内容五节：捕获统计（含信息食谱）/ 新入库清单 / 待办进行中 /
+    最近反思 / 本周默写记录（提取练习留痕）。全部只读聚合；落 state/
+    （机器工作区，不是笔记，不进扫描域）。
+
+    Args:
+        tree: MemoryTree 实例。
+        today: 本地日期（YYYY-MM-DD）。
+
+    Returns:
+        Path: 素材包路径。
+    """
+    import json
+    from datetime import timedelta
+
+    import frontmatter
+
+    from scripts.dispatch.stats import capture_stats, diet_line, render_weekly_stats
+
+    cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+    lines: list = [f"# 本周素材包（{today}）", ""]
+    lines += ["## 捕获统计", ""]
+    lines += render_weekly_stats(capture_stats(tree, days=7))
+    lines.append(diet_line(tree, days=7, today=today))
+
+    lines += ["", "## 新入库清单", ""]
+    skip_dirs = {"系统", "templates", "distilled", "wiki", "daily-notes"}
+    new_notes: list = []
+    for path in tree.iter_all_note_files():
+        rel = path.relative_to(tree.notes_dir)
+        if any(part in skip_dirs for part in rel.parts[:-1]):
+            continue
+        try:
+            post = frontmatter.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if str(post.get("source") or "") in ("digest", "system"):
+            continue
+        if {str(t) for t in (post.get("tags") or [])} & {"待办", "待确认"}:
+            continue
+        created = str(post.get("created") or "")[:10]
+        if created >= cutoff:
+            new_notes.append((created, str(post.get("title") or path.stem)))
+    new_notes.sort(reverse=True)
+    lines += [f"- [[{title}]]（{stamp}）" for stamp, title in new_notes] or ["- 无"]
+
+    lines += ["", "## 待办进行中", ""]
+    todos: list = []
+    for path in tree.iter_all_note_files():
+        try:
+            post = frontmatter.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if "待办" in {str(t) for t in (post.get("tags") or [])}:
+            todos.append(str(post.get("title") or path.stem))
+    lines += [f"- [[{title}]]" for title in sorted(todos)] or ["- 无"]
+
+    lines += ["", "## 最近反思", ""]
+    refl_dir = Path(tree.notes_dir) / "wiki" / "reflections"
+    refl = sorted(refl_dir.glob("*.md"), reverse=True)[:3] if refl_dir.is_dir() else []
+    lines += [f"- [[{p.stem}]]" for p in refl] or ["- 无"]
+
+    lines += ["", "## 本周默写记录", ""]
+    recalls: list = []
+    outcomes = Path(tree.state_dir) / "resurface_outcomes.jsonl"
+    if outcomes.is_file():
+        try:
+            for raw in outcomes.read_text(encoding="utf-8").splitlines():
+                try:
+                    record = json.loads(raw)
+                except ValueError:
+                    continue
+                if not record.get("recall"):
+                    continue
+                if str(record.get("ts") or "")[:10] >= cutoff:
+                    recalls.append(
+                        f"- {str(record['ts'])[:10]} {record.get('note_id')}"
+                        f"：{record['recall']}"
+                    )
+        except OSError:
+            pass
+    lines += recalls or ["- 无"]
+
+    kit = Path(tree.state_dir) / f"weekly-kit-{today}.md"
+    kit.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return kit
+
+
 def _notify(title: str, message: str) -> None:
     """双通道推送（失败隔离，绝不影响主流程退出码）。"""
     try:
@@ -144,7 +247,12 @@ def main(config_path: Optional[str], dry_run: bool) -> None:
     vault_root = Path(tree.notes_dir).parent
     today = datetime.now().strftime("%Y-%m-%d")
     draft = Path(tree.notes_dir) / "wiki" / "reflections" / f"{today}-weekly-draft.md"
-    prompt = build_prompt(draft, vault_root)
+    kit: Optional[Path] = None
+    try:
+        kit = build_weekly_kit(tree, today)
+    except Exception as exc:  # noqa: BLE001 - 素材包失败不阻塞班次（车间现场读）
+        print(f"[weekly-draft] kit fail（继续无素材包跑）: {exc}", flush=True)
+    prompt = build_prompt(draft, vault_root, kit)
     if dry_run:
         print(f"draft: {draft}\n--- prompt ---\n{prompt}")
         return
