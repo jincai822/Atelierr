@@ -80,6 +80,7 @@ from scripts.memory.decay import DecayManager
 from scripts.memory.resurface import ResurfaceManager
 from scripts.memory.watcher import MemoryWatcher
 from scripts.wiki.manager import WikiManager
+from scripts.wiki.curation import sync_wiki_log
 
 MIN_PUSH_COUNT = 2  # 推送达到此次数仍未提炼，进"提炼候选"节
 DISTILL_MIN_AGE_DAYS = 3  # 已确认笔记创建满此天数即可提炼（沉一沉再动笔）
@@ -341,6 +342,13 @@ class DigestDispatcher:
         wiki = WikiManager(self.tree)
         undistilled = self._distill_candidates(wiki, today)
         wiki_issues = wiki.validate()
+        # wiki 变更日志同步（OKF log.md，幂等；失败不阻塞班次。
+        # 2026-09-23 方案 B 用户拍板；dry_run 不写任何状态）
+        if not dry_run:
+            try:
+                sync_wiki_log(wiki.wiki_dir, Path(self.tree.state_dir) / "wiki_log.json")
+            except Exception as exc:  # noqa: BLE001 - 日志失败不影响摘要
+                print(f"[digest] wiki log sync fail: {exc}", flush=True)
         health, health_stale = _health_lines(Path(self.tree.state_dir))
         # 翻译本漂移并进自检节（问题 2 哨兵；漂移算一项异常）
         drift = _paths_drift_lines(self.tree)

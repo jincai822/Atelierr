@@ -137,3 +137,34 @@ def test_list_stale_cards(memory_tree):
     found = curation.list_stale_cards(wiki, "2026-09-18")
     stems = [stem for stem, _title, _date in found]
     assert stems == ["到期卡", "到期主题页"]  # 按到期日升序
+
+
+def test_sync_wiki_log_baseline_then_creation(memory_tree):
+    """wiki 变更日志（2026-09-23 方案 B）：首次静默建档不补记存量；
+    新条目记 Creation；重复运行幂等；index/log 机器文件不登记。"""
+    import json
+
+    wiki = _wiki(memory_tree)
+    state = memory_tree.state_dir / "wiki_log.json"
+    (wiki / "既有卡.md").write_text("---\ntitle: 既有卡\n---\n正文\n", encoding="utf-8")
+    (wiki / "index.md").write_text("# nav\n", encoding="utf-8")
+
+    # 首次运行：静默建档——存量不补记，log.md 只有头部
+    assert curation.sync_wiki_log(wiki, state) == []
+    log = (wiki / "log.md").read_text(encoding="utf-8")
+    assert "Knowledge Update Log" in log
+    assert "既有卡" not in log
+
+    # 新条目：记一条 Creation（标题取 frontmatter title）
+    (wiki / "新卡.md").write_text("---\ntitle: 新卡标题\n---\n正文\n", encoding="utf-8")
+    assert curation.sync_wiki_log(wiki, state) == ["新卡.md"]
+    log = (wiki / "log.md").read_text(encoding="utf-8")
+    assert "新增 [新卡标题](新卡.md)" in log
+
+    # 幂等：再跑不重复记；机器文件不进 known 清单
+    assert curation.sync_wiki_log(wiki, state) == []
+    log = (wiki / "log.md").read_text(encoding="utf-8")
+    assert log.count("新卡.md") == 1
+    known = json.loads(state.read_text(encoding="utf-8"))["known"]
+    assert "新卡.md" in known and "既有卡.md" in known
+    assert "index.md" not in known and "log.md" not in known

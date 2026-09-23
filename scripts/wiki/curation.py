@@ -29,6 +29,8 @@ import frontmatter
 import httpx
 import yaml
 
+from scripts.utils.state_store import read_json, write_json
+
 #: LLM 默认接入点（与 dispatch.distill 同规格；配置节 wiki.curation.llm）
 _LLM_DEFAULT_BASE_URL = "https://api.deepseek.com"
 _LLM_DEFAULT_MODEL = "deepseek-v4-flash"
@@ -158,6 +160,45 @@ def append_log(wiki_dir: Path, filename: str, title: str) -> None:
         else:
             text = f"{header}\n## {today}\n\n{entry}\n\n" + text
     path.write_text(text, encoding="utf-8")
+
+
+def sync_wiki_log(wiki_dir: Path, state_path: Path) -> List[str]:
+    """wiki/ 顶层条目 → log.md 变更日志（幂等）。
+
+    OKF「LLM 维护」面的 wiki 侧接线（2026-09-23 方案 B 用户拍板）：
+    扫 wiki/ 顶层 *.md（排除 index.md/log.md 机器约定文件与隐藏项），
+    与 state 里的已知清单比对——首次运行静默建档（存量不补记；历史
+    Creation 由人工按真实日期落笔，机器不伪造），之后每个新条目经
+    append_log 记一条 Creation（标题取 frontmatter title，缺省 stem）。
+    只记 Creation：知识层只增不改，条目退役是人工事件，不靠日志追。
+
+    Returns:
+        List[str]: 本次新登记的文件名（首次运行恒为 []）。
+    """
+    wiki_dir = Path(wiki_dir)
+    state_path = Path(state_path)
+    machine_files = {"index.md", "log.md"}
+    current: List[str] = []
+    if wiki_dir.is_dir():
+        current = sorted(
+            path.name
+            for path in wiki_dir.glob("*.md")
+            if path.name not in machine_files and not path.name.startswith(".")
+        )
+    data = read_json(state_path, default=None)
+    known = set(data.get("known") or []) if isinstance(data, dict) else set()
+    new_files = [] if not state_path.exists() else [n for n in current if n not in known]
+    for name in new_files:
+        try:
+            post = frontmatter.loads((wiki_dir / name).read_text(encoding="utf-8"))
+            title = str(post.metadata.get("title") or "").strip() or Path(name).stem
+        except Exception:  # noqa: BLE001 - 损坏 frontmatter 用 stem 兜底
+            title = Path(name).stem
+        append_log(wiki_dir, name, title)
+    if wiki_dir.is_dir() and not (wiki_dir / "log.md").exists():
+        (wiki_dir / "log.md").write_text("# Knowledge Update Log\n", encoding="utf-8")
+    write_json(state_path, {"known": sorted(known | set(current))}, indent=1)
+    return new_files
 
 
 def _derive_topic(tags: List[str], topic_hint: str = "") -> str:
