@@ -98,6 +98,7 @@ def test_store_command_writes_reflection(memory_tree, _fake_llm):
     assert len(files) == 1
     body = files[0].read_text(encoding="utf-8")
     assert "source: decision" in body
+    assert "type: Decision" in body  # OKF 最小字段（2026-09-23）
     assert "# Decision Journal" in body
     assert "## Options Considered" in body and "A 和 B" in body
     assert "Review Date" in body  # 90 天复盘

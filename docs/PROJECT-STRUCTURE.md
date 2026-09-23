@@ -517,3 +517,5 @@ if __name__ == "__main__":
 | 5 | weekly 口令注入前情 | 应用层 → 车间 | `weekly_draft_cli.build_prompt` 文本（最近 reflections/ + profile/ 指引） | 车间上岗无前情，退回"每次都像第一天上班" |
 | 6 | 复习校准数据 `state/resurface_outcomes.jsonl` | 应用层自用 → 周报反哺 | JSONL append-only（一个月后校准复习参数/反哺周报证据） | 校准分析无数据，参数维持先验值 |
 | 7 | 语义搜索双轨 | 各自独立 | 应用层 basic-memory 真语义（03:20 bmindex）；车间 stub 词法（2026-09-21 定案 A；2026-09-22 侦察：无配置口、索引格式不兼容，借道不可行） | 互不干扰，各跑各的 |
+| 8 | OKF `type` 词表（v0.2 唯一强制字段） | 双向约定 | 取值固定五类：`Concept`（wiki 条目）、`Excerpt`（压缩层摘录卡）、`Reflection`（反思成品：每日/周/月回顾）、`Decision`（决策日志）、`note`（BM 默认存量）。新写入方必须带 type；存量不追改（知识层只增不改） | 缺 type = 不符合 OKF 最小约束，Agent 渐进披露失效 |
+

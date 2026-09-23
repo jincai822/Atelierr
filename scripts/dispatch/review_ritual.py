@@ -589,6 +589,7 @@ def write_answers(tree, data: Dict[str, Any]) -> Optional[Path]:
         "---",
         f"created: {datetime.now().astimezone().isoformat(timespec='seconds')}",
         "source: reflection",
+        "type: Reflection",
         f"tags: [回顾, {label}]",
         f"title: '{today} {label}（原始回答）'",
         "---",

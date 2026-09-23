@@ -83,6 +83,7 @@ def test_write_answers_mechanical_dump(memory_tree):
     assert "答一" in text
     post = frontmatter.loads(text)
     assert post.metadata["source"] == "reflection"
+    assert post.metadata["type"] == "Reflection"  # OKF 最小字段（2026-09-23）
     # 幂等：同名不再写
     assert review_ritual.write_answers(memory_tree, data) is None
 

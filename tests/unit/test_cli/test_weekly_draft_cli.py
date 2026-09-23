@@ -41,6 +41,7 @@ def test_build_prompt_pins_single_writable_file(tmp_path):
     assert "只提名不执行提炼" in prompt
     # 传承做厚（2026-09-22 问题 3 裁决）：上岗先续前情
     assert "先续前情再动笔" in prompt
+    assert "type: Reflection" in prompt  # OKF 最小字段（2026-09-23）
     assert "reflections/" in prompt
 
 

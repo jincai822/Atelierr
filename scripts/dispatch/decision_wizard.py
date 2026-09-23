@@ -324,6 +324,7 @@ def store_decision(tree, pending: Dict[str, Any]) -> Path:
     body = f"""---
 created: '{today.isoformat()}'
 source: decision
+type: Decision
 tags:
 - 决策
 title: 决策日志 {day}：{topic}
