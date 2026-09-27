@@ -281,7 +281,16 @@ def handle_pending_command(tree, text: str, send: Callable[[str], None]) -> bool
             return True
         pending["stage"] = "stored"
         _save_pending(tree, pending)
-        send(f"✅ 已落盘 {path.name}（reflections/，{pending.get('review_date')} 复盘）")
+        nominated = _nominate_to_cognition(tree, pending, path)
+        suffix = (
+            "；已提名进判断候选，回「批 N」收进登记处，到复盘日自动提醒"
+            if nominated
+            else ""
+        )
+        send(
+            f"✅ 已落盘 {path.name}（reflections/，"
+            f"{pending.get('review_date')} 复盘）{suffix}"
+        )
         return True
     if text == "算了":
         pending["stage"] = "discarded"
@@ -301,6 +310,46 @@ def handle_pending_command(tree, text: str, send: Callable[[str], None]) -> bool
         ).start()
         return True
     return False
+
+
+def _nominate_to_cognition(tree, pending: Dict[str, Any], path: Path) -> bool:
+    """落盘成功后顺手把决策提名进判断登记处（v1.2 §9 回路三最小接通）。
+
+    **只提名绝不批准**——候选进晨报「🧭判断候选」安静小节，用户回
+    「批 N」才登记（批 N 这个动作即拍板，条目直接 active 并写入
+    90 天复盘闹钟，到期复盘卡自动提醒）。提名失败只 log，绝不打断
+    落盘主流程（与 feishu._maybe_nominate_judgments 同纪律）。
+    """
+    try:
+        from scripts.dispatch.judgments import _manager
+
+        topic = str(pending.get("topic") or "（未命名决策）")
+        result = pending.get("result") or {}
+        verdict_label = {
+            "proceed": "倾向行动",
+            "defer": "倾向暂缓",
+            "reject": "倾向否决",
+        }.get(str(result.get("verdict") or ""), "无明确倾向")
+        review_date = str(pending.get("review_date") or "")
+        review_day = datetime.strptime(review_date, "%Y-%m-%d")
+        review_at = review_day.replace(hour=9, minute=0, tzinfo=local_timezone()).isoformat()
+        frameworks = " × ".join(str(f) for f in (result.get("frameworks") or []))
+        rationale = (
+            f"飞书决策向导产物（wiki/reflections/{path.name}）；"
+            f"框架 {frameworks or '（未命名）'}；{result.get('verdict_reason') or ''}。"
+            "批准即接受该决策并启动复盘闹钟。"
+        )
+        _manager(tree).nominate_decision(
+            title=f"决策：{topic}"[:80],
+            statement=f"{topic}（{verdict_label}）",
+            rationale=rationale,
+            review_at=review_at,
+            origin_note=f"wiki/reflections/{path.name}",
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 - 提名失败不影响落盘
+        print(f"[decision] cognition nominate fail: {exc}", flush=True)
+        return False
 
 
 def store_decision(tree, pending: Dict[str, Any]) -> Path:

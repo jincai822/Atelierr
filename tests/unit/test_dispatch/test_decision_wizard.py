@@ -182,3 +182,69 @@ def test_stale_analyzing_treated_as_failed(memory_tree, monkeypatch):
 
     assert consumed is True
     assert decision_wizard.load_pending(memory_tree)["stage"] == "done"
+
+
+def test_store_command_nominates_cognition_proposal(memory_tree, _fake_llm):
+    """「存」落盘后顺手提名 decision 候选（v1.2 §9：只提名不批准）。
+
+    回「批 1」进登记处：条目 active、带 90 天复盘闹钟；闹钟到期进
+    due_for_review，没到闹钟保持安静。
+    """
+    store = PromptStore(Path(memory_tree.state_dir))
+    decision_wizard.finish_wizard(memory_tree, _closed_session(store), lambda t: None)
+    sent = []
+
+    decision_wizard.handle_pending_command(memory_tree, "存", sent.append)
+
+    from scripts.dispatch.judgments import _manager, decide_by_index, due_for_review
+
+    manager = _manager(memory_tree)
+    pending = manager.list_promotion_proposals()
+    assert len(pending) == 1
+    prop = pending[0]
+    assert prop.entry_type == "decision"
+    assert "要不要换工作" in prop.statement
+    assert "倾向暂缓" in prop.statement
+    assert any("批 N" in text for text in sent)
+
+    ok, _reply = decide_by_index(memory_tree, 1, True)
+    assert ok is True
+    entries = manager.list_entries()
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry.status == "active"
+    assert entry.origin["kind"] == "manual"
+    assert entry.review_at is not None
+
+    alarm = datetime.fromisoformat(entry.review_at)
+    before = alarm - timedelta(days=1)
+    after = alarm + timedelta(days=1)
+    assert due_for_review(memory_tree, now=before) == []
+    due = due_for_review(memory_tree, now=after)
+    assert [item["entry_id"] for item in due] == [entry.id]
+
+
+def test_store_command_survives_nominate_failure(memory_tree, _fake_llm, monkeypatch):
+    """提名失败只 log：落盘与「已落盘」推送不受影响（同确认链路纪律）。"""
+    store = PromptStore(Path(memory_tree.state_dir))
+    decision_wizard.finish_wizard(memory_tree, _closed_session(store), lambda t: None)
+
+    import scripts.dispatch.judgments as judgments_module
+
+    def _boom(tree):
+        raise RuntimeError("cognition down")
+
+    monkeypatch.setattr(judgments_module, "_manager", _boom)
+    sent = []
+    consumed = decision_wizard.handle_pending_command(memory_tree, "存", sent.append)
+
+    assert consumed is True
+    assert decision_wizard.load_pending(memory_tree)["stage"] == "stored"
+    files = list(
+        (Path(memory_tree.notes_dir) / "wiki" / "reflections").glob(
+            "*-decision-要不要换工作.md"
+        )
+    )
+    assert len(files) == 1  # 落盘成功
+    assert any("已落盘" in text for text in sent)
+    assert not any("批 N" in text for text in sent)  # 提名失败则不带后缀

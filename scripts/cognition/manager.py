@@ -1050,10 +1050,16 @@ class CognitionManager:
         history_action: str,
         approval: ApprovalRecord,
         supersedes: Optional[str] = None,
+        review_at: Optional[str] = None,
     ) -> WritePlan:
         """create/approve/supersede 共用的创建计划（只计算不写盘）。"""
         if approval is None:
             raise CognitionError("语义变更必须携带显式 ApprovalRecord")
+        if review_at is not None:
+            # 与 _parse_entry 同款约束：review_at 仅 decision 可携带
+            if entry_type != "decision":
+                raise CognitionError("review_at 仅 decision 类型可用")
+            review_at = _aware_iso(review_at, "review_at")
         certainty_value = self._validate_type_status_certainty(
             entry_type, status, certainty
         )
@@ -1087,6 +1093,8 @@ class CognitionManager:
             meta["certainty"] = certainty_value
             meta["certainty_updated_at"] = now
             meta["certainty_source"] = approval.source
+        if review_at is not None:
+            meta["review_at"] = review_at
         history_line = (
             f"- {now} | r1 | {history_action} | ∅ → {status}"
             + (
@@ -1329,6 +1337,53 @@ class CognitionManager:
             proposals[proposal.id] = self._proposal_to_dict(proposal)
         return proposal
 
+    def nominate_decision(
+        self,
+        *,
+        title: str,
+        statement: str,
+        rationale: str,
+        review_at: str,
+        origin_note: str,
+    ) -> PromotionProposal:
+        """提名一条 decision（来源不是 memory——决策向导等手工产物）。
+
+        与 nominate_memory 同为「只提名不批准」（v1.2 §9 回路三最小接通，
+        红线不破）：proposal 挂 ``origin_kind=manual`` 与 ``review_at``；
+        批准时建 origin.kind=manual 的条目、写入复盘闹钟。certainty
+        恒为 None（decision 允许无量化把握），批 N 即用户拍板接受。
+        """
+        review_at = _aware_iso(review_at, "review_at")
+        title = _require_str(title, "title")
+        statement = _require_str(statement, "statement")
+        origin_note = _require_str(origin_note, "origin_note")
+        warnings: List[str] = []
+        normalized = re.sub(r"\s+", "", statement).lower()
+        for entry in self.list_entries(include_inactive=True):
+            if re.sub(r"\s+", "", entry.statement).lower() == normalized:
+                warnings.append(
+                    f"疑似重复 statement：{entry.id}（{entry.path.name}）；"
+                    "是否继续由用户决定"
+                )
+        proposal = PromotionProposal(
+            id=f"prop_{generate_id()}",
+            memory_id="",
+            memory_path=origin_note,
+            entry_type="decision",
+            title=title,
+            statement=statement,
+            rationale=rationale,
+            proposed_status="active",
+            proposed_certainty=None,
+            warnings=warnings,
+        )
+        data = self._proposal_to_dict(proposal)
+        data["origin_kind"] = "manual"
+        data["review_at"] = review_at
+        with self._proposals_transaction() as proposals:
+            proposals[proposal.id] = data
+        return proposal
+
     def list_promotion_proposals(
         self, *, status: str = "pending"
     ) -> List[PromotionProposal]:
@@ -1389,24 +1444,43 @@ class CognitionManager:
         data = self._require_proposal(proposal_id, "promotion")
         if approval is None:
             raise CognitionError("语义变更必须携带显式 ApprovalRecord")
-        memory_id = str(data["memory_id"])
-        # 批准前重新核验来源仍存在（回收站/消失则拒绝）
-        source_path, _ = self._find_memory(memory_id)
-        evidence = (
-            EvidenceRef(
-                kind="memory",
-                relation="supports",
-                id=memory_id,
-                path=str(data["memory_path"]),
-                note="升级来源记忆",
-            ),
-        )
-        origin = {
-            "kind": "memory",
-            "memory_id": memory_id,
-            "memory_path": str(data["memory_path"]),
-            "promoted_at": _now_iso(),
-        }
+        if data.get("origin_kind") == "manual":
+            # 手工来源（决策向导等）：无 memory 可核验，证据与 origin 用
+            # manual kind（schema 允许；memory_path 只作可读路径快照）
+            origin_note = str(data["memory_path"])
+            evidence = (
+                EvidenceRef(
+                    kind="manual",
+                    relation="supports",
+                    note=f"决策来源：{origin_note}",
+                ),
+            )
+            origin = {
+                "kind": "manual",
+                "note": origin_note,
+                "promoted_at": _now_iso(),
+            }
+            history_action = f"promote（手工来源 {origin_note}）"
+        else:
+            memory_id = str(data["memory_id"])
+            # 批准前重新核验来源仍存在（回收站/消失则拒绝）
+            source_path, _ = self._find_memory(memory_id)
+            evidence = (
+                EvidenceRef(
+                    kind="memory",
+                    relation="supports",
+                    id=memory_id,
+                    path=str(data["memory_path"]),
+                    note="升级来源记忆",
+                ),
+            )
+            origin = {
+                "kind": "memory",
+                "memory_id": memory_id,
+                "memory_path": str(data["memory_path"]),
+                "promoted_at": _now_iso(),
+            }
+            history_action = f"promote（来源 {source_path.name}）"
         plan = self._plan_create(
             entry_type=str(data["entry_type"]),
             title=str(data["title"]),
@@ -1417,8 +1491,11 @@ class CognitionManager:
             evidence=evidence,
             origin=origin,
             rationale=str(data.get("rationale") or ""),
-            history_action=f"promote（来源 {source_path.name}）",
+            history_action=history_action,
             approval=approval,
+            review_at=(
+                str(data["review_at"]) if data.get("review_at") else None
+            ),
         )
 
         def commit() -> CognitionEntry:

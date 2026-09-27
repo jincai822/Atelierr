@@ -731,3 +731,81 @@ def test_proposals_transaction_keeps_concurrent_writes(manager):
     assert {p.statement for p in pending} == {
         "并发提名 a", "并发提名 b", "并发提名 c", "并发提名 d"
     }
+
+
+def test_nominate_decision_manual_origin_roundtrip(manager):
+    """v1.2 §9 回路三最小接通：手工来源（决策向导）决策 提名→批准。
+
+    origin.kind=manual、review_at 闹钟写入并随条目回读、certainty 缺省、
+    正文带 decision 两节；批 N 即用户拍板（active）。
+    """
+    prop = manager.nominate_decision(
+        title="决策：要不要换工作",
+        statement="要不要换工作（倾向暂缓）",
+        rationale="飞书决策向导产物",
+        review_at="2026-12-26T09:00:00+08:00",
+        origin_note="wiki/reflections/2026-09-27-decision-x.md",
+    )
+    assert prop.entry_type == "decision"
+    assert prop.proposed_status == "active"
+    assert prop.proposed_certainty is None
+    pending = manager.list_promotion_proposals()
+    assert [p.id for p in pending] == [prop.id]
+
+    entry = manager.approve_promotion(
+        prop.id, status="active", certainty=None, approval=APPROVAL
+    )
+    assert entry.entry_type == "decision"
+    assert entry.status == "active"
+    assert entry.certainty is None
+    assert entry.origin["kind"] == "manual"
+    assert entry.origin["note"] == "wiki/reflections/2026-09-27-decision-x.md"
+    assert "memory_id" not in entry.origin
+    assert entry.review_at == "2026-12-26T09:00:00+08:00"
+    assert entry.evidence[0].kind == "manual"
+    body = entry.path.read_text(encoding="utf-8")
+    assert "review_at" in body
+    assert "## 复盘记录" in body
+    assert "## 备选方案与否决理由" in body
+    # 批准只销 proposal，不重提
+    assert manager.list_promotion_proposals() == []
+
+
+def test_nominate_decision_validates_review_at(manager):
+    """review_at 必须是带时区 ISO 8601；裸日期/垃圾串拒绝提名。"""
+    with pytest.raises(CognitionError):
+        manager.nominate_decision(
+            title="t",
+            statement="s",
+            rationale="r",
+            review_at="not-a-date",
+            origin_note="wiki/reflections/x.md",
+        )
+    with pytest.raises(CognitionError):
+        manager.nominate_decision(
+            title="t",
+            statement="s",
+            rationale="r",
+            review_at="2026-12-26",  # 裸日期无时区
+            origin_note="wiki/reflections/x.md",
+        )
+    assert manager.list_promotion_proposals() == []
+
+
+def test_plan_create_rejects_review_at_for_belief(manager):
+    """_plan_create 与解析校验同规：review_at 仅 decision 可携带。"""
+    with pytest.raises(CognitionError, match="review_at"):
+        manager._plan_create(
+            entry_type="belief",
+            title="t",
+            statement="s",
+            status="active",
+            certainty=0.7,
+            tags=(),
+            evidence=(),
+            origin={"kind": "manual", "note": "n"},
+            rationale="r",
+            history_action="create",
+            approval=APPROVAL,
+            review_at="2026-12-26T09:00:00+08:00",
+        )
