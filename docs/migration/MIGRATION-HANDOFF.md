@@ -95,6 +95,10 @@
 
 ## 6. 已知挂单（迁移时点 backlog）
 
+- 性能硬指标 `tests/performance/test_load.py::test_concurrent_search_throughput`
+  （并发搜索 ≥80 req/s）：迁移前源机高负载实测 70 挂线，用未改动基线复测
+  同挂（证明非代码退化）。用户拍板（2026-09-27）：阈值不改，到 Mac mini
+  空闲环境复验；若仍挂再议软目标。
 - 方案 C（机器全文差异化衰减）：观察期一个月，暂不实施。
 - Whisper 真实模型转写验证： backlog，MVP 用 mock 通过。
 - 手机 dashboard 显示问题：用户拍板暂时关闭。
