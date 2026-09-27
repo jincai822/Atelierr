@@ -1,0 +1,22 @@
+# Atelierr 周回顾初稿服务（oneshot，与 atelierr-weekly-draft.timer 配套）
+#
+# 第二刀（2026-09-20 用户拍板）：周日 08:47 先于 09:13 表单卡，
+# 车间司机（pi 非交互）按 .claude/commands/weekly.md 自动综合成文，
+# 落 memory/wiki/reflections/<today>-weekly-draft.md 并推飞书。
+# PATH 必须含 ~/.local/bin：pi 与 uv 都在那里。
+
+[Unit]
+Description=Atelierr weekly draft via workshop $weekly (Sunday)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/workspaces/Atelierr
+Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+Environment=PATH=/home/cj1024/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=-%h/.config/atelierr/env
+ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr-312/bin/python -m scripts.cli.weekly_draft_cli
+StandardOutput=append:%h/atelierr-data/state/logs/weekly-draft.log
+StandardError=append:%h/atelierr-data/state/logs/weekly-draft.log

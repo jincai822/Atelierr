@@ -1,0 +1,15 @@
+# Atelierr Basic Memory 语义索引刷新定时器（与 atelierr-bmindex.service 配套）
+#
+# 2026-09-18 用户裁决：Basic Memory 作共享语义检索层（只读为主；
+# 衰减/复习/三层结构仍由 Atelierr 自研记忆模块负责）。每天 03:20
+# （decay 之后）重建语义索引，保持新笔记可被语义搜索命中。
+
+[Unit]
+Description=Atelierr basic-memory semantic index refresh timer (daily 03:20)
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

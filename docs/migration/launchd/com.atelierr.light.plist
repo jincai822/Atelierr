@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.atelierr.light</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-lc</string>
+        <string>__REPO__/.venv-atelierr-312/bin/python -m scripts.cli.dispatch_cli todos &amp;&amp; __REPO__/.venv-atelierr-312/bin/python -m scripts.cli.dispatch_cli highlights &amp;&amp; __REPO__/.venv-atelierr-312/bin/python -m scripts.cli.dispatch_cli judgments &amp;&amp; __REPO__/.venv-atelierr-312/bin/python -m scripts.cli.dispatch_cli distill</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>ATELIERR_CONFIG</key><string>__REPO__/config/memory.yaml</string>
+        <key>HTTPS_PROXY</key><string>http://127.0.0.1:7897</string>
+        <key>HTTP_PROXY</key><string>http://127.0.0.1:7897</string>
+    </dict>
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+    <key>StandardOutPath</key>
+    <string>__HOME__/atelierr-data/state/logs/launchd-light.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/atelierr-data/state/logs/launchd-light.log</string>
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Minute</key><integer>3</integer></dict>
+        <dict><key>Minute</key><integer>18</integer></dict>
+        <dict><key>Minute</key><integer>33</integer></dict>
+        <dict><key>Minute</key><integer>48</integer></dict>
+    </array>
+</dict>
+</plist>

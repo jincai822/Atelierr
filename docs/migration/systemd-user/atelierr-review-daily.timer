@@ -1,0 +1,17 @@
+# Atelierr 每日三问定时器（与 atelierr-review-daily.service 配套）
+#
+# 推送式复盘（2026-09-18 用户批准）：每天 21:30 把「今日三问」推成
+# 飞书表单卡——状态脉搏 + 内耗留痕 + 值得记的；答案在表单提交
+# （或回「完成」）时机械落盘 memory/wiki/reflections/<日期>-reflection.md
+# （零自动 LLM，综合成文在你下次会话/周回顾）。连续 3 天没答自动暂停，
+# 飞书回「复盘」随时恢复。
+
+[Unit]
+Description=Atelierr daily reflection ritual timer (21:30)
+
+[Timer]
+OnCalendar=*-*-* 21:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

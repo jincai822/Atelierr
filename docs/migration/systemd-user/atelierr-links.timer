@@ -1,0 +1,19 @@
+# Atelierr 链接自动分发定时器（与 atelierr-links.service 配套）
+#
+# 用户级安装:
+#   systemctl --user enable --now atelierr-links.timer
+# 查看下次触发时间:
+#   systemctl --user list-timers atelierr-links.timer
+#
+# OnCalendar=*:7/15: 每小时的 :07/:22/:37/:52 触发（避开整点/半点）
+# Persistent=true: 错过的触发（关机/睡眠）在下次启动后立即补跑
+
+[Unit]
+Description=Atelierr link dispatch timer (every 15 min)
+
+[Timer]
+OnCalendar=*:7/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

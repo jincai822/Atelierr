@@ -1,0 +1,14 @@
+# Atelierr 月回顾轻脉冲定时器（与 atelierr-review-monthly.service 配套）
+#
+# 每月 1 日 09:21 回顾上月（cron 无法直接表达"月末"，月初回顾上月
+# 语义等价且更稳定）。
+
+[Unit]
+Description=Atelierr monthly review pulse timer (1st 09:21)
+
+[Timer]
+OnCalendar=*-*-01 09:21:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

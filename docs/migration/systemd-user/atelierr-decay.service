@@ -1,0 +1,43 @@
+# Atelierr 每日衰减服务（oneshot）
+#
+# 每日流程：先 sync（登记手机/网页新来的裸笔记）再 decay（衰减分层）。
+# sync 行首的 "-" 表示失败不阻塞后续 decay。
+#
+# 用户级 systemd unit（安装说明见 docs/DECAY-SCHEDULING.md）:
+#   mkdir -p ~/.config/systemd/user
+#   cp docker/systemd/atelierr-decay.service docker/systemd/atelierr-decay.timer \
+#     ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now atelierr-decay.timer
+#
+# 日志: ~/atelierr-data/state/logs/decay.log（stdout/stderr 追加，
+#       ExecStartPre 保证 logs 目录存在）
+# 报告: <state_dir>/reports/decay-YYYY-MM-DD.md（由 decay 自身写入）
+# 前置: config/memory.yaml 必须存在（gitignored，先 cp config/memory.yaml.example
+#       config/memory.yaml 并确认 memory.root / memory.state_dir）
+
+[Unit]
+Description=Atelierr memory decay (daily 03:00)
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/workspaces/Atelierr
+Environment=ATELIERR_CONFIG=/srv/workspaces/Atelierr/config/memory.yaml
+# 月度 purge 提醒等通知的推送凭证经此环境文件注入（与其他服务一致；
+# "-" 前缀表示文件缺失也不影响启动）
+EnvironmentFile=-%h/.config/atelierr/env
+ExecStartPre=/bin/mkdir -p %h/atelierr-data/state/logs
+ExecStart=-/srv/workspaces/Atelierr/.venv-atelierr-312/bin/python -m scripts.cli.memory_cli sync
+ExecStart=/srv/workspaces/Atelierr/.venv-atelierr-312/bin/python -m scripts.cli.memory_cli decay
+# 每日 git 快照（版本历史）：数据目录整体 commit；无变更时 commit 失败由
+# || true 吞掉，快照失败绝不阻塞 decay。排除规则见 %h/atelierr-data/.gitignore
+#（state/ sessions/ exports/ 不入库）；.git 经 .stignore 排除不同步手机。
+ExecStartPost=/bin/bash -c '/usr/bin/git -C %h/atelierr-data add -A && /usr/bin/git -C %h/atelierr-data commit -q -m "snapshot $(date +\%%F)" || true'
+# 异地备份（2026-09-17 用户裁决）：快照后推送 GitHub 私有仓
+# jincai822/atelierr-data。代理只挂在 git 命令上（unit 全局不设
+# http_proxy——decay 本身要直连 DeepSeek，不能依赖梯子）；行首 "-" 表示
+# 推送失败不标 unit 失败（网络/梯子抖动是常态，次日快照会带上前量）。
+ExecStartPost=-/usr/bin/git -C %h/atelierr-data -c http.proxy=http://127.0.0.1:7897 push -q origin master
+StandardOutput=append:%h/atelierr-data/state/logs/decay.log
+StandardError=append:%h/atelierr-data/state/logs/decay.log
