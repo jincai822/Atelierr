@@ -13,6 +13,7 @@ Whisper 共享辅助函数（``_load_model`` / ``_extract_transcript`` /
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -23,8 +24,9 @@ import torch
 
 from scripts.processors.base import BaseProcessor, ProcessResult
 
-#: ffmpeg 可执行文件（可经配置 ffmpeg_path 覆盖）
-FFMPEG_PATH = "/usr/bin/ffmpeg"
+#: ffmpeg 可执行文件（可经配置 ffmpeg_path 覆盖；缺省取 PATH，
+#: macOS brew 装在 /opt/homebrew/bin，Linux 常在 /usr/bin）
+FFMPEG_PATH = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
 
 #: 支持的扩展名（大小写不敏感）
 SUPPORTED_EXTENSIONS: Tuple[str, ...] = (
