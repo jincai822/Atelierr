@@ -19,9 +19,9 @@
     <key>WorkingDirectory</key>
     <string>__REPO__</string>
     <key>StandardOutPath</key>
-    <string>__HOME__/atelierr-data/state/logs/launchd-digest.log</string>
+    <string>__VAULT__/state/logs/launchd-digest.log</string>
     <key>StandardErrorPath</key>
-    <string>__HOME__/atelierr-data/state/logs/launchd-digest.log</string>
+    <string>__VAULT__/state/logs/launchd-digest.log</string>
     <key>StartCalendarInterval</key>
     <dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>53</integer></dict>
 </dict>
