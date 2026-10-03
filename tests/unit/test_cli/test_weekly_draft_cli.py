@@ -178,3 +178,42 @@ def test_build_weekly_kit(memory_tree):
     assert "## 待办进行中" in body
     assert "## 最近反思" in body
     assert "## 本周默写记录" in body
+
+
+def test_paths_repo_relative_no_linux_hardcode():
+    """回归：车间路径常量一律由仓库位置推导,不得再硬编码机器绝对路径。
+
+    真实事故:/srv/workspaces/Atelierr 三处硬编码使 Mac 班次必败
+    (kit fail + pi cwd 不存在)。
+    """
+    repo_root = Path(weekly_draft_cli.__file__).resolve().parents[2]
+    for value in (
+        weekly_draft_cli.WEEKLY_SPEC,
+        weekly_draft_cli.PATHS_REGISTRY,
+        weekly_draft_cli.PI_BIN_DEFAULT,
+    ):
+        assert "/srv/" not in value
+        assert value.startswith(str(repo_root))
+    # 推导目标必须真实存在(说明书/注册表/适配器随仓库分发)
+    assert Path(weekly_draft_cli.WEEKLY_SPEC).is_file()
+    assert Path(weekly_draft_cli.PATHS_REGISTRY).is_file()
+    assert Path(weekly_draft_cli.PI_BIN_DEFAULT).is_file()
+
+
+def test_build_weekly_kit_skips_inbox_staging(memory_tree):
+    """回归:inbox 中转站笔记(双根扫描契约)不再让素材包构建崩溃。"""
+    from scripts.cli.weekly_draft_cli import build_weekly_kit
+
+    inbox_note = memory_tree.inbox_dir / "todo-staging.md"
+    inbox_note.write_text(
+        "---\ncreated: '2026-09-26T09:00:00+08:00'\ntitle: todo-staging\n---\n\n内容。\n",
+        encoding="utf-8",
+    )
+    memory_tree.create_note("本周新笔记.md", "内容", source="test")
+
+    kit = build_weekly_kit(memory_tree, "2026-09-27")
+
+    body = kit.read_text(encoding="utf-8")
+    assert "## 新入库清单" in body
+    assert "本周新笔记" in body
+    assert "todo-staging" not in body  # 中转站素材未入库,不进清单

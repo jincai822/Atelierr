@@ -27,18 +27,22 @@ import click
 from scripts.cli.memory_cli import DEFAULT_ROOT, DEFAULT_STATE_DIR, resolve_config_path
 from scripts.memory.core import MemoryTree
 
-#: pi CLI 绝对路径（systemd user service 默认 PATH 不含 ~/.local/bin）；
+#: 仓库根（由本文件位置推导：scripts/cli/weekly_draft_cli.py → 上两级），
+#: 同一份代码在 Mac/Linux 均按实际 clone 位置运行，不再硬编码机器路径
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: 车间执行器（pi 兼容适配器，随仓库分发）；
 #: 环境变量 ATELIERR_PI_BIN 可覆盖（测试注入假 pi 用）
-PI_BIN_DEFAULT = "/home/cj1024/.local/bin/pi"
+PI_BIN_DEFAULT = str(_REPO_ROOT / "scripts" / "cli" / "pi_shim")
 
 #: pi 非交互超时（秒）：读 7 天素材 + 综合成文，给足余量
 PI_TIMEOUT = 1200
 
 #: 车间说明书（$weekly 流程的唯一事实源）
-WEEKLY_SPEC = "/srv/workspaces/Atelierr/.claude/commands/weekly.md"
+WEEKLY_SPEC = str(_REPO_ROOT / ".claude" / "commands" / "weekly.md")
 
 #: 路径注册表（口令里交给 pi 查 $OV 各 tier）
-PATHS_REGISTRY = "/srv/workspaces/Atelierr/harness/paths.toml"
+PATHS_REGISTRY = str(_REPO_ROOT / "harness" / "paths.toml")
 
 
 def build_prompt(
@@ -98,7 +102,7 @@ def run_workshop(
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd="/srv/workspaces/Atelierr",
+            cwd=str(_REPO_ROOT),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, f"pi 调用失败: {exc}"
@@ -162,7 +166,10 @@ def build_weekly_kit(tree: MemoryTree, today: str) -> Path:
     skip_dirs = {"系统", "templates", "distilled", "wiki", "daily-notes"}
     new_notes: list = []
     for path in tree.iter_all_note_files():
-        rel = path.relative_to(tree.notes_dir)
+        try:
+            rel = path.relative_to(tree.notes_dir)
+        except ValueError:
+            continue  # inbox/ 中转站素材未入库（双根扫描契约），不进清单
         if any(part in skip_dirs for part in rel.parts[:-1]):
             continue
         try:

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# pi 兼容适配器：Atelierr weekly-draft 的车间非交互执行器。
+#
+# 原 pi（@earendil-works/pi-coding-agent，npm）随 pi-web 退役；
+# 本机正式 agent 运行时为 Kimi Code CLI（已安装已登录，零新增依赖）。
+# 参数映射：pi -p --no-session "<prompt>"  →  kimi -p "<prompt>"
+# （-p 两义巧合同名：均为非交互单 prompt 模式；--no-session 直接丢弃；
+#   kimi -p 自身即完全非交互、自动批准常规写入——与 --auto 互斥不可加）
+set -euo pipefail
+
+# launchd 环境 PATH 极简(bash -lc 不读 zsh 的 homebrew 配置),
+# 且 kimi 是 node 脚本(#!/usr/bin/env node)——补 homebrew 前缀保两道解析
+export PATH="/opt/homebrew/bin:$PATH"
+
+KIMI_BIN="$(command -v kimi || echo /opt/homebrew/bin/kimi)"
+
+args=()
+for a in "$@"; do
+  [[ "$a" == "--no-session" ]] && continue
+  args+=("$a")
+done
+
+exec "$KIMI_BIN" "${args[@]}"
