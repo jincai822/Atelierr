@@ -243,11 +243,17 @@ def run(
         f"{stem}{datetime.now(timezone.utc).isoformat()}".encode("utf-8")
     ).hexdigest()[:8]
     post = frontmatter.loads(note_text)
+    try:
+        source_path = str(note_path.relative_to(tree.notes_dir))
+    except ValueError:
+        # inbox/ 中转站笔记合法入索引（core.MemoryTree._abs 的契约），
+        # 溯源路径退化为库根相对（digest.py 已用 notes_dir.parent 作库根）
+        source_path = str(note_path.relative_to(Path(tree.notes_dir).parent))
     draft.update(
         {
             "id": draft_id,
             "source_stem": stem,
-            "source_path": str(note_path.relative_to(tree.notes_dir)),
+            "source_path": source_path,
             "source_title": str(post.get("title") or stem),
             "source_id": str(post.get("id") or ""),
             "source_tags": [str(t) for t in (post.get("tags") or [])],

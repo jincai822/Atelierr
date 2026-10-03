@@ -137,6 +137,34 @@ def test_run_drafts_top_candidate(memory_tree, llm_ok):
     assert "提 1" in llm_ok[0]
 
 
+def test_run_drafts_inbox_note_vault_relative_source_path(memory_tree, llm_ok):
+    """回归：inbox 中转站笔记合法候选时,起草不得因 relative_to 崩溃。
+
+    真实事故:todo-20260920-8440fc.md 经 sidecar 索引登记(契约允许,
+    core.MemoryTree._abs 的 inbox/ 虚拟前缀),distill 起草到
+    source_path 时 ValueError。期望:source_path 退化为库根相对路径。
+    """
+    inbox_note = memory_tree.inbox_dir / "todo-inbox.md"
+    inbox_note.write_text(
+        "---\n"
+        "created: '2026-09-10T09:00:00+08:00'\n"
+        "id: 01TESTINBOXTODO0000000000AA\n"
+        "title: todo-inbox\n"
+        "source: link\n"
+        "tags: []\n"
+        "---\n\n这是内容。内核稳定来自对事实的尊重。\n",
+        encoding="utf-8",
+    )
+    memory_tree._ensure_registered(inbox_note)
+
+    report = run(memory_tree, today="2026-09-18")
+
+    assert report["drafted"] == "todo-inbox"
+    drafts = pending_drafts(memory_tree)
+    assert len(drafts) == 1
+    assert drafts[0]["source_path"] == "inbox/todo-inbox.md"
+
+
 def test_run_quota_one_per_day(memory_tree, llm_ok):
     """每天最多 1 张草稿：同日第二次运行直接配额跳过。"""
     _settled_note(memory_tree)
